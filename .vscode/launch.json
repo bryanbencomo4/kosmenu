@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter (ABR LX3)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "A76XUT5423002846",
+      "toolArgs": [
+        "--dart-define=SUPABASE_ANON_KEY=${env:SUPABASE_ANON_KEY}"
+      ],
+      "env": {
+        "JAVA_HOME": "C:/Program Files/Android/Android Studio/jbr",
+        "ANDROID_SDK_ROOT": "${env:LOCALAPPDATA}/Android/Sdk",
+        "ANDROID_HOME": "${env:LOCALAPPDATA}/Android/Sdk",
+        "PATH": "C:/Program Files/Android/Android Studio/jbr/bin;${env:LOCALAPPDATA}/Android/Sdk/platform-tools;${env:LOCALAPPDATA}/Android/Sdk/cmdline-tools/latest/bin;${env:PATH}"
+      }
+    }
+  ]
+}
