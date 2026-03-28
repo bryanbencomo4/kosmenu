@@ -21,26 +21,50 @@ class ProductListScreen extends StatefulWidget {
 }
 
 class _ProductListScreenState extends State<ProductListScreen> {
+  static const _pageSize = 12;
+
   bool _loading = true;
   bool _isSavingOrder = false;
+  bool _isLoadingMore = false;
+  bool _hasMoreProducts = true;
   List<ProductModel> _products = <ProductModel>[];
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
-    _loadProducts();
+    _loadProducts(reset: true);
   }
 
-  Future<void> _loadProducts() async {
-    setState(() => _loading = true);
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProducts({bool reset = false}) async {
+    if (!reset && (!_hasMoreProducts || _isLoadingMore)) return;
+
+    if (reset) {
+      setState(() {
+        _loading = true;
+        _hasMoreProducts = true;
+      });
+    } else {
+      setState(() => _isLoadingMore = true);
+    }
+
     try {
+      final offset = reset ? 0 : _products.length;
       final rows = await Supabase.instance.client
           .from('productos')
           .select()
           .eq('comercio_id', SupabaseConfig.currentComercioId)
           .eq('categoria_id', widget.category.id)
           .order('orden', ascending: true)
-          .order('nombre', ascending: true);
+          .order('nombre', ascending: true)
+          .range(offset, offset + _pageSize - 1);
 
       final products = (rows as List<dynamic>)
           .map(
@@ -51,14 +75,22 @@ class _ProductListScreenState extends State<ProductListScreen> {
           .toList();
 
       if (!mounted) return;
-      setState(() => _products = products);
+      setState(() {
+        _products = reset ? products : [..._products, ...products];
+        _hasMoreProducts = products.length == _pageSize;
+      });
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error cargando productos: $error')),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _isLoadingMore = false;
+        });
+      }
     }
   }
 
@@ -74,7 +106,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     );
 
     if (didSave == true) {
-      await _loadProducts();
+      await _loadProducts(reset: true);
     }
   }
 
@@ -144,7 +176,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
           .from('productos')
           .delete()
           .eq('id', product.id);
-      await _loadProducts();
+        await _loadProducts(reset: true);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -212,6 +244,17 @@ class _ProductListScreenState extends State<ProductListScreen> {
     }
   }
 
+  List<ProductModel> get _filteredProducts {
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) return _products;
+    return _products.where((product) {
+      final price = product.precio.toStringAsFixed(2);
+      return product.nombre.toLowerCase().contains(query) ||
+          product.descripcion.toLowerCase().contains(query) ||
+          price.contains(query);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -219,7 +262,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF17120E),
         foregroundColor: Colors.white,
-        title: Text(widget.category.nombre),
+        title: Text(
+          widget.category.nombre,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
             onPressed: _loading ? null : () => _openProductForm(),
@@ -237,11 +284,16 @@ class _ProductListScreenState extends State<ProductListScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : LayoutBuilder(
+          : RefreshIndicator(
+              onRefresh: () => _loadProducts(reset: true),
+              color: const Color(0xFFFFB04A),
+              child: LayoutBuilder(
               builder: (context, constraints) {
                 final isWide = constraints.maxWidth >= 760;
                 final horizontalPadding = isWide ? 28.0 : 14.0;
                 final maxWidth = isWide ? 980.0 : 680.0;
+                final filteredProducts = _filteredProducts;
+                final hasSearch = _searchQuery.trim().isNotEmpty;
 
                 return Center(
                   child: ConstrainedBox(
@@ -296,45 +348,162 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                 ],
                               ),
                             ),
+                            Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                horizontalPadding,
+                                2,
+                                horizontalPadding,
+                                8,
+                              ),
+                              child: _ElegantSearchBar(
+                                controller: _searchController,
+                                hintText: 'Buscar producto por nombre, descripcion o precio...',
+                                onChanged: (value) {
+                                  if (!mounted) return;
+                                  setState(() => _searchQuery = value);
+                                },
+                                onClear: () {
+                                  _searchController.clear();
+                                  if (!mounted) return;
+                                  setState(() => _searchQuery = '');
+                                },
+                              ),
+                            ),
                             Expanded(
-                              child: _products.isEmpty
-                                  ? const Center(
-                                      child: Text(
-                                        'No hay productos en esta categoría',
-                                        style: TextStyle(color: Colors.white70),
-                                      ),
-                                    )
-                                  : ReorderableListView.builder(
+                              child: filteredProducts.isEmpty
+                                  ? ListView(
+                                      physics:
+                                          const AlwaysScrollableScrollPhysics(),
                                       padding: EdgeInsets.fromLTRB(
                                         horizontalPadding,
-                                        8,
+                                        60,
                                         horizontalPadding,
-                                        96,
+                                        126,
                                       ),
-                                      itemCount: _products.length,
-                                      onReorder: _onReorder,
-                                      buildDefaultDragHandles: false,
-                                      itemBuilder: (context, index) {
-                                        final product = _products[index];
-                                        return _ProductCard(
-                                          key: ValueKey(product.id),
-                                          product: product,
-                                          onEdit: () =>
-                                              _openProductForm(product: product),
-                                          onDelete: () => _deleteProduct(product),
-                                          onToggleVisible: (value) =>
-                                              _toggleVisibility(product, value),
-                                          dragHandle: ReorderableDragStartListener(
-                                            index: index,
-                                            child: const Icon(
-                                              Icons.drag_indicator,
-                                              color: Color(0xFFD5B78A),
+                                      children: const [
+                                        Center(
+                                          child: Text(
+                                            'No se encontraron productos',
+                                            style: TextStyle(
+                                              color: Colors.white70,
                                             ),
                                           ),
-                                        );
+                                        ),
+                                      ],
+                                    )
+                                  : NotificationListener<ScrollNotification>(
+                                      onNotification: (notification) {
+                                        if (notification.metrics.pixels >=
+                                            notification.metrics.maxScrollExtent -
+                                                180) {
+                                          _loadProducts();
+                                        }
+                                        return false;
                                       },
+                                      child: hasSearch
+                                          ? ListView.builder(
+                                              physics:
+                                                  const AlwaysScrollableScrollPhysics(),
+                                              padding: EdgeInsets.fromLTRB(
+                                                horizontalPadding,
+                                                8,
+                                                horizontalPadding,
+                                                126,
+                                              ),
+                                              itemCount: filteredProducts.length,
+                                              itemBuilder: (context, index) {
+                                                final product =
+                                                    filteredProducts[index];
+                                                return _ProductCard(
+                                                  key: ValueKey(product.id),
+                                                  product: product,
+                                                  onEdit: () => _openProductForm(
+                                                    product: product,
+                                                  ),
+                                                  onDelete: () =>
+                                                      _deleteProduct(product),
+                                                  onToggleVisible: (value) =>
+                                                      _toggleVisibility(
+                                                    product,
+                                                    value,
+                                                  ),
+                                                  dragHandle: const Icon(
+                                                    Icons.drag_indicator,
+                                                    color: Color(0xFFD5B78A),
+                                                  ),
+                                                );
+                                              },
+                                            )
+                                          : ReorderableListView.builder(
+                                              padding: EdgeInsets.fromLTRB(
+                                                horizontalPadding,
+                                                8,
+                                                horizontalPadding,
+                                                126,
+                                              ),
+                                              itemCount: filteredProducts.length,
+                                              onReorder: _onReorder,
+                                              buildDefaultDragHandles: false,
+                                              itemBuilder: (context, index) {
+                                                final product =
+                                                    filteredProducts[index];
+                                                return TweenAnimationBuilder<
+                                                    double>(
+                                                  key: ValueKey(product.id),
+                                                  tween: Tween(
+                                                    begin: 0,
+                                                    end: 1,
+                                                  ),
+                                                  duration: Duration(
+                                                    milliseconds:
+                                                        260 + (index * 18),
+                                                  ),
+                                                  curve: Curves.easeOut,
+                                                  builder:
+                                                      (context, value, child) {
+                                                    return Opacity(
+                                                      opacity: value,
+                                                      child: Transform.translate(
+                                                        offset: Offset(
+                                                          0,
+                                                          (1 - value) * 10,
+                                                        ),
+                                                        child: child,
+                                                      ),
+                                                    );
+                                                  },
+                                                  child: _ProductCard(
+                                                    product: product,
+                                                    onEdit: () =>
+                                                        _openProductForm(
+                                                      product: product,
+                                                    ),
+                                                    onDelete: () =>
+                                                        _deleteProduct(product),
+                                                    onToggleVisible: (value) =>
+                                                        _toggleVisibility(
+                                                      product,
+                                                      value,
+                                                    ),
+                                                    dragHandle:
+                                                        ReorderableDragStartListener(
+                                                      index: index,
+                                                      child: const Icon(
+                                                        Icons.drag_indicator,
+                                                        color: Color(0xFFD5B78A),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
                                     ),
                             ),
+                            if (_isLoadingMore)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 10),
+                                child: CircularProgressIndicator(),
+                              ),
                           ],
                         ),
                         if (_isSavingOrder)
@@ -361,6 +530,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 );
               },
             ),
+          ),
     );
   }
 }
@@ -397,7 +567,10 @@ class _ProductCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _ProductThumb(imageUrl: product.imagenUrl),
+              _ProductThumb(
+                imageUrl: product.imagenUrl,
+                heroTag: 'hero-product-image-${product.id}',
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -405,6 +578,8 @@ class _ProductCard extends StatelessWidget {
                   children: [
                     Text(
                       product.nombre,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.manrope(
                         color: const Color(0xFFFFEACC),
                         fontWeight: FontWeight.w800,
@@ -445,42 +620,70 @@ class _ProductCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0F0D0B),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 430;
+
+              if (!compact) {
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Text(
-                      'Visible en web',
-                      style: TextStyle(color: Color(0xFFE6D7C4)),
+                    _ProductVisibilityBadge(
+                      isVisible: product.disponible,
+                      onToggleVisible: onToggleVisible,
                     ),
-                    Switch.adaptive(
-                      value: product.disponible,
-                      onChanged: onToggleVisible,
+                    OutlinedButton.icon(
+                      onPressed: onEdit,
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Editar'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: onDelete,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Eliminar'),
                     ),
                   ],
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Editar'),
-              ),
-              OutlinedButton.icon(
-                onPressed: onDelete,
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Eliminar'),
-              ),
-            ],
+                );
+              }
+
+              return Column(
+                children: [
+                  _ProductVisibilityBadge(
+                    isVisible: product.disponible,
+                    onToggleVisible: onToggleVisible,
+                    fullWidth: true,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: onEdit,
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text(
+                            'Editar',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: onDelete,
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text(
+                            'Eliminar',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -488,15 +691,116 @@ class _ProductCard extends StatelessWidget {
   }
 }
 
+class _ProductVisibilityBadge extends StatelessWidget {
+  const _ProductVisibilityBadge({
+    required this.isVisible,
+    required this.onToggleVisible,
+    this.fullWidth = false,
+  });
+
+  final bool isVisible;
+  final ValueChanged<bool> onToggleVisible;
+  final bool fullWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = const Text(
+      'Visible en web',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(color: Color(0xFFE6D7C4)),
+    );
+
+    return Container(
+      width: fullWidth ? double.infinity : null,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F0D0B),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: fullWidth ? MainAxisSize.max : MainAxisSize.min,
+        children: [
+          if (fullWidth) Expanded(child: label) else label,
+          Switch.adaptive(
+            value: isVisible,
+            onChanged: onToggleVisible,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ElegantSearchBar extends StatelessWidget {
+  const _ElegantSearchBar({
+    required this.controller,
+    required this.hintText,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  final TextEditingController controller;
+  final String hintText;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF21160F), Color(0xFF17120E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: const Color(0x33FFD49A)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: [
+          const Icon(Icons.search_rounded, color: Color(0xFFFFC977), size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              onChanged: onChanged,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: hintText,
+                hintStyle: const TextStyle(color: Color(0x80E6C9A8)),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          if (controller.text.trim().isNotEmpty)
+            IconButton(
+              onPressed: onClear,
+              icon: const Icon(Icons.close_rounded, color: Colors.white70),
+              tooltip: 'Limpiar búsqueda',
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ProductThumb extends StatelessWidget {
-  const _ProductThumb({required this.imageUrl});
+  const _ProductThumb({
+    required this.imageUrl,
+    this.heroTag,
+  });
 
   final String? imageUrl;
+  final String? heroTag;
 
   @override
   Widget build(BuildContext context) {
     final hasImage = imageUrl != null && imageUrl!.trim().isNotEmpty;
-    return ClipRRect(
+    final thumb = ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: hasImage
           ? Image.network(
@@ -511,6 +815,15 @@ class _ProductThumb extends StatelessWidget {
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               child: const Icon(Icons.fastfood_outlined),
             ),
+    );
+
+    if (heroTag == null || heroTag!.isEmpty) {
+      return thumb;
+    }
+
+    return Hero(
+      tag: heroTag!,
+      child: thumb,
     );
   }
 }
