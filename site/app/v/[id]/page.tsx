@@ -5,24 +5,25 @@ import { notFound } from 'next/navigation';
 type CategoriaRow = {
   id: string;
   nombre: string;
-  orden: number | null;
+  orden?: number | null;
 };
 
 type ProductoRow = {
   id: string;
   categoria_id: string;
   nombre: string;
-  descripcion: string | null;
-  precio: number | null;
-  imagen_url: string | null;
-  disponible: boolean | null;
+  descripcion?: string | null;
+  precio?: number | null;
+  imagen_url?: string | null;
+  disponible?: boolean | null;
 };
 
 type ComercioRow = {
   id: string;
-  nombre: string | null;
-  whatsapp: string | null;
-  telefono: string | null;
+  nombre?: string | null;
+  whatsapp?: string | null;
+  telefono?: string | null;
+  celular?: string | null;
 };
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -77,20 +78,19 @@ export default async function PublicMenuPage({
   const [comercioResult, categoriasResult, productosResult] = await Promise.all([
     supabase
       .from('comercios')
-      .select('id,nombre,whatsapp,telefono')
+      .select('*')
       .eq('id', comercioId)
       .maybeSingle<ComercioRow>(),
     supabase
       .from('categorias')
-      .select('id,nombre,orden')
+      .select('*')
       .eq('comercio_id', comercioId)
       .order('orden', { ascending: true })
       .returns<CategoriaRow[]>(),
     supabase
       .from('productos')
-      .select('id,categoria_id,nombre,descripcion,precio,imagen_url,disponible')
+      .select('*')
       .eq('comercio_id', comercioId)
-      .eq('disponible', true)
       .order('nombre', { ascending: true })
       .returns<ProductoRow[]>(),
   ]);
@@ -105,7 +105,13 @@ export default async function PublicMenuPage({
   }
 
   const categorias = categoriasResult.data ?? [];
-  const productos = productosResult.data ?? [];
+  const productos = (productosResult.data ?? []).filter((producto) => {
+    // If `disponible` exists, enforce it. If not, do not break the page.
+    if (typeof producto.disponible === 'boolean') {
+      return producto.disponible;
+    }
+    return true;
+  });
 
   const categoriasConProductos = categorias
     .map((categoria) => ({
@@ -114,7 +120,9 @@ export default async function PublicMenuPage({
     }))
     .filter((categoria) => categoria.productos.length > 0);
 
-  const phone = normalizePhone(comercio.whatsapp ?? comercio.telefono);
+  const phone = normalizePhone(
+    comercio.whatsapp ?? comercio.telefono ?? comercio.celular,
+  );
   const comercioNombre = (comercio.nombre ?? 'Kosmenu').trim();
   const whatsappText = encodeURIComponent(
     `Hola ${comercioNombre}, quiero ordenar del menu.`,
