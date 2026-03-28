@@ -5,6 +5,9 @@ class ProductModel {
   final String nombre;
   final double precio;
   final String descripcion;
+  final int orden;
+  final bool disponible;
+  final String? imagenUrl;
   final bool? creadoPorIa;
   final double? confianzaIa;
 
@@ -15,12 +18,16 @@ class ProductModel {
     required this.nombre,
     required this.precio,
     required this.descripcion,
+    this.orden = 0,
+    this.disponible = true,
+    this.imagenUrl,
     this.creadoPorIa,
     this.confianzaIa,
   });
 
   factory ProductModel.fromMap(Map<String, dynamic> map) {
     final precioValue = map['precio'];
+    final ordenValue = map['orden'];
     final confianzaValue = map['confianza_ia'];
 
     return ProductModel(
@@ -32,6 +39,10 @@ class ProductModel {
           ? precioValue.toDouble()
           : double.tryParse('${map['precio']}') ?? 0,
       descripcion: map['descripcion']?.toString() ?? '',
+        orden: ordenValue is int ? ordenValue : int.tryParse('$ordenValue') ?? 0,
+        disponible:
+          map['disponible'] is bool ? map['disponible'] as bool : true,
+        imagenUrl: map['imagen_url']?.toString(),
       creadoPorIa: map['creado_por_ia'] as bool?,
       confianzaIa: confianzaValue is num
           ? confianzaValue.toDouble()
@@ -47,6 +58,9 @@ class ProductModel {
       'nombre': nombre,
       'precio': precio,
       'descripcion': descripcion,
+      'orden': orden,
+      'disponible': disponible,
+      'imagen_url': imagenUrl,
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,
     };

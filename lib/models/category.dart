@@ -3,6 +3,7 @@ class CategoryModel {
   final String comercioId;
   final String nombre;
   final int orden;
+  final bool activo;
   final String? icono;
   final bool? creadoPorIa;
   final double? confianzaIa;
@@ -12,6 +13,7 @@ class CategoryModel {
     required this.comercioId,
     required this.nombre,
     required this.orden,
+    this.activo = true,
     this.icono,
     this.creadoPorIa,
     this.confianzaIa,
@@ -26,6 +28,7 @@ class CategoryModel {
       comercioId: map['comercio_id']?.toString() ?? '',
       nombre: map['nombre']?.toString() ?? '',
       orden: ordenValue is int ? ordenValue : int.tryParse('$ordenValue') ?? 0,
+      activo: map['activo'] is bool ? map['activo'] as bool : true,
       icono: map['icono']?.toString(),
       creadoPorIa: map['creado_por_ia'] as bool?,
       confianzaIa: confianzaValue is num
@@ -40,6 +43,7 @@ class CategoryModel {
       'comercio_id': comercioId,
       'nombre': nombre,
       'orden': orden,
+      'activo': activo,
       'icono': icono,
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,

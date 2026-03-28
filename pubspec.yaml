@@ -41,6 +41,7 @@ dependencies:
   path_provider: ^2.1.5
   image_picker: ^1.1.2
   url_launcher: ^6.3.2
+  flutter_image_compress: ^2.4.0
 
 dev_dependencies:
   flutter_test:
