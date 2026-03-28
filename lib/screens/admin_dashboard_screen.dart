@@ -8,8 +8,33 @@ import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class AdminDashboardScreen extends StatelessWidget {
+class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
+
+  @override
+  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+}
+
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  late Future<_DashboardData> _dashboardFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _dashboardFuture = _fetchDashboardData();
+  }
+
+  Future<void> _openMagicOnboarding() async {
+    final didSaveMenu = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const MagicOnboardingScreen()),
+    );
+
+    if (didSaveMenu == true && mounted) {
+      setState(() {
+        _dashboardFuture = _fetchDashboardData();
+      });
+    }
+  }
 
   Future<_DashboardData> _fetchDashboardData() async {
     if (!SupabaseConfig.hasCurrentComercioId) {
@@ -69,15 +94,11 @@ class AdminDashboardScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Centro de Control')),
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color(0xFFFF6B00),
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const MagicOnboardingScreen()),
-          );
-        },
+        onPressed: _openMagicOnboarding,
         child: const Icon(Icons.camera_alt),
       ),
       body: FutureBuilder<_DashboardData>(
-        future: _fetchDashboardData(),
+        future: _dashboardFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -194,14 +215,7 @@ class AdminDashboardScreen extends StatelessWidget {
                               icon: Icons.camera_alt,
                               title: 'Magic Onboarding',
                               subtitle: 'Sube foto del menú físico',
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        const MagicOnboardingScreen(),
-                                  ),
-                                );
-                              },
+                              onTap: _openMagicOnboarding,
                             ),
                           ),
                           const SizedBox(width: 12),
