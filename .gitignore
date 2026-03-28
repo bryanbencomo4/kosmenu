@@ -53,6 +53,9 @@ app.*.map.json
 /site/.vercel/
 /site/out/
 
+# Supabase local temp files
+/supabase/.temp/
+
 # Environment files
 .env
 .env.*
