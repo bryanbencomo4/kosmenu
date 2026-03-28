@@ -286,6 +286,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   bool _isMutating = false;
   List<CategoryModel> _categories = <CategoryModel>[];
 
+  String get _currentCatalogoId => widget.catalog.id.trim();
+
   @override
   void initState() {
     super.initState();
@@ -294,13 +296,21 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
   Future<void> _loadCategories() async {
     if (!mounted) return;
+    if (_currentCatalogoId.isEmpty) {
+      setState(() {
+        _categories = <CategoryModel>[];
+        _loading = false;
+      });
+      return;
+    }
+
     setState(() => _loading = true);
     try {
       final rows = await Supabase.instance.client
           .from('categorias')
           .select()
           .eq('comercio_id', SupabaseConfig.currentComercioId)
-          .eq('catalogo_id', widget.catalog.id)
+          .eq('catalogo_id', _currentCatalogoId)
           .order('orden', ascending: true)
           .order('nombre', ascending: true);
 
@@ -366,6 +376,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     if (_isMutating) return;
     final name = await _showNameDialog(title: 'Nueva Categoría');
     if (!mounted || name == null || name.isEmpty) return;
+    if (_currentCatalogoId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Catálogo inválido. No se puede crear categoría.')),
+      );
+      return;
+    }
 
     setState(() => _isMutating = true);
     try {
@@ -375,7 +391,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
       await Supabase.instance.client.from('categorias').insert({
         'comercio_id': SupabaseConfig.currentComercioId,
-        'catalogo_id': widget.catalog.id,
+        'catalogo_id': _currentCatalogoId,
         'nombre': name,
         'orden': maxOrder,
         'activo': true,
@@ -408,7 +424,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           .from('categorias')
           .update({'nombre': name})
           .eq('comercio_id', SupabaseConfig.currentComercioId)
-          .eq('catalogo_id', widget.catalog.id)
+          .eq('catalogo_id', _currentCatalogoId)
           .eq('id', category.id);
 
       await _loadCategories();
@@ -450,7 +466,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           .from('categorias')
           .update({'activo': value})
           .eq('comercio_id', SupabaseConfig.currentComercioId)
-          .eq('catalogo_id', widget.catalog.id)
+          .eq('catalogo_id', _currentCatalogoId)
           .eq('id', category.id);
     } catch (error) {
       if (!mounted) return;
@@ -486,19 +502,30 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
     if (!mounted || confirm != true) return;
 
+    final previous = List<CategoryModel>.from(_categories);
     setState(() => _isMutating = true);
+    setState(() {
+      _categories = _categories.where((item) => item.id != category.id).toList();
+    });
+
     try {
-      await Supabase.instance.client
+      final deletedRows = await Supabase.instance.client
           .from('categorias')
           .delete()
           .eq('comercio_id', SupabaseConfig.currentComercioId)
-          .eq('catalogo_id', widget.catalog.id)
+          .eq('catalogo_id', _currentCatalogoId)
           .eq('id', category.id)
           .select('id');
 
-      await _loadCategories();
+      final deletedCount = (deletedRows as List<dynamic>).length;
+      if (deletedCount == 0) {
+        throw Exception(
+          'No se pudo confirmar el borrado en la base de datos.',
+        );
+      }
     } catch (error) {
       if (!mounted) return;
+      setState(() => _categories = previous);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo eliminar categoría: $error')),
       );
