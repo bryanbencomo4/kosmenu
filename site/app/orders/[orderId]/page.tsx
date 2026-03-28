@@ -53,6 +53,8 @@ export default function OrderDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<PedidoRow | null>(null);
   const [comercio, setComercio] = useState<ComercioRow | null>(null);
+  const [isCompleting, setIsCompleting] = useState(false);
+  const [completeFeedback, setCompleteFeedback] = useState<string | null>(null);
 
   const derivedComercioId = useMemo(() => extractComercioId(orderId), [orderId]);
 
@@ -144,6 +146,50 @@ export default function OrderDetailsPage() {
   const total = order?.detalles?.total ?? order?.total ?? 0;
   const comercioNombre = (comercio?.nombre ?? 'Kosmenu').trim();
 
+  async function markOrderAsCompleted() {
+    if (!supabaseUrl || !supabaseAnonKey || !orderId || isCompleting) return;
+
+    setIsCompleting(true);
+    setCompleteFeedback(null);
+
+    // Optimistic UI first.
+    setOrder((prev) => (prev ? { ...prev, estado: 'completado' } : prev));
+
+    try {
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: { persistSession: false },
+      });
+
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('pedidos')
+        .update({ estado: 'completado' })
+        .contains('detalles', { order_id: orderId })
+        .select('*')
+        .limit(1);
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      if (Array.isArray(updatedRows) && updatedRows.length > 0) {
+        setOrder((prev) => ({
+          ...(prev ?? {}),
+          ...updatedRows[0],
+          estado: 'completado',
+        }));
+      }
+
+      setCompleteFeedback('Pedido marcado como completado.');
+    } catch (err) {
+      // Rollback optimistic state if update fails.
+      setOrder((prev) => (prev ? { ...prev, estado: 'pendiente' } : prev));
+      const message = err instanceof Error ? err.message : 'No se pudo actualizar el pedido';
+      setCompleteFeedback(`Error: ${message}`);
+    } finally {
+      setIsCompleting(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#0F0D0B] text-[#F9F3EB]">
@@ -196,6 +242,27 @@ export default function OrderDetailsPage() {
           <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Estado</p>
           <p className="mt-1 text-lg font-extrabold text-[#FFE8C6]">{order.estado ?? 'pendiente'}</p>
         </div>
+
+        <button
+          type="button"
+          onClick={() => void markOrderAsCompleted()}
+          disabled={isCompleting || order.estado === 'completado'}
+          className={`mt-4 w-full rounded-full px-5 py-3 text-sm font-bold transition ${
+            isCompleting || order.estado === 'completado'
+              ? 'cursor-not-allowed bg-[#5A4A38] text-[#C3B299]'
+              : 'bg-[#1AB15E] text-white hover:bg-[#159650]'
+          }`}
+        >
+          {isCompleting
+            ? 'Actualizando...'
+            : order.estado === 'completado'
+              ? 'Pedido completado'
+              : 'Marcar como Completado'}
+        </button>
+
+        {completeFeedback ? (
+          <p className="mt-3 text-xs text-[#D8C6AE]">{completeFeedback}</p>
+        ) : null}
 
         <div className="mt-6 space-y-3">
           {items.map((item, index) => (

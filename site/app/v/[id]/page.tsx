@@ -29,10 +29,25 @@ type ComercioRow = {
   celular?: string | null;
 };
 
+type MetodoPagoRow = {
+  id: string;
+  nombre?: string | null;
+  tipo?: string | null;
+  banco?: string | null;
+  titular?: string | null;
+  cedula?: string | null;
+  telefono?: string | null;
+  numero?: string | null;
+  alias?: string | null;
+  descripcion?: string | null;
+  detalles?: string | null;
+};
+
 type MenuData = {
   comercio: ComercioRow;
   categorias: CategoriaRow[];
   productos: ProductoRow[];
+  metodosPago: MetodoPagoRow[];
 };
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -81,6 +96,10 @@ export default function PublicMenuPage() {
   const [menuData, setMenuData] = useState<MenuData | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,7 +125,8 @@ export default function PublicMenuPage() {
           auth: { persistSession: false },
         });
 
-        const [comercioResult, categoriasResult, productosResult] = await Promise.all([
+        const [comercioResult, categoriasResult, productosResult, metodosPagoResult] =
+          await Promise.all([
           supabase
             .from('comercios')
             .select('*')
@@ -124,11 +144,17 @@ export default function PublicMenuPage() {
             .eq('comercio_id', comercioId)
             .order('nombre', { ascending: true })
             .returns<ProductoRow[]>(),
+          supabase
+            .from('metodos_pago')
+            .select('*')
+            .eq('comercio_id', comercioId)
+            .returns<MetodoPagoRow[]>(),
         ]);
 
         if (comercioResult.error) throw new Error(comercioResult.error.message);
         if (categoriasResult.error) throw new Error(categoriasResult.error.message);
         if (productosResult.error) throw new Error(productosResult.error.message);
+        if (metodosPagoResult.error) throw new Error(metodosPagoResult.error.message);
 
         const comercio = comercioResult.data;
         if (!comercio) {
@@ -147,6 +173,7 @@ export default function PublicMenuPage() {
             comercio,
             categorias: categoriasResult.data ?? [],
             productos,
+            metodosPago: metodosPagoResult.data ?? [],
           });
         }
       } catch (err) {
@@ -212,6 +239,46 @@ export default function PublicMenuPage() {
     menuData?.comercio.whatsapp ?? menuData?.comercio.telefono ?? menuData?.comercio.celular,
   );
 
+  useEffect(() => {
+    if (!menuData) return;
+    if (selectedPaymentMethodId) return;
+
+    if (menuData.metodosPago.length > 0) {
+      setSelectedPaymentMethodId(menuData.metodosPago[0].id);
+    }
+  }, [menuData, selectedPaymentMethodId]);
+
+  function paymentMethodLabel(method: MetodoPagoRow) {
+    return (
+      method.nombre?.trim() ||
+      method.tipo?.trim() ||
+      method.banco?.trim() ||
+      'Metodo de pago'
+    );
+  }
+
+  function paymentMethodDetails(method: MetodoPagoRow) {
+    const details: string[] = [];
+    if (method.banco) details.push(`Banco: ${method.banco}`);
+    if (method.titular) details.push(`Titular: ${method.titular}`);
+    if (method.cedula) details.push(`Cedula: ${method.cedula}`);
+    if (method.telefono) details.push(`Telefono: ${method.telefono}`);
+    if (method.numero) details.push(`Numero: ${method.numero}`);
+    if (method.alias) details.push(`Alias: ${method.alias}`);
+    if (method.descripcion) details.push(`${method.descripcion}`);
+    if (method.detalles) details.push(`${method.detalles}`);
+
+    return details;
+  }
+
+  function selectedPaymentMethod() {
+    if (!menuData) return null;
+    return (
+      menuData.metodosPago.find((method) => method.id === selectedPaymentMethodId) ??
+      null
+    );
+  }
+
   function incrementProduct(productId: string) {
     setCart((prev) => ({
       ...prev,
@@ -235,7 +302,10 @@ export default function PublicMenuPage() {
     });
   }
 
-  async function persistOrderOptional(orderId: string) {
+  async function persistOrderOptional(
+    orderId: string,
+    paymentMethod: MetodoPagoRow | null,
+  ) {
     if (!supabaseUrl || !supabaseAnonKey) return;
 
     try {
@@ -245,6 +315,13 @@ export default function PublicMenuPage() {
 
       const detalles = {
         order_id: orderId,
+        metodo_pago: paymentMethod
+          ? {
+              id: paymentMethod.id,
+              nombre: paymentMethodLabel(paymentMethod),
+              datos: paymentMethodDetails(paymentMethod),
+            }
+          : null,
         items: cartItems.map((item) => ({
           product_id: item.product.id,
           nombre: item.product.nombre,
@@ -273,17 +350,26 @@ export default function PublicMenuPage() {
   async function confirmOrder() {
     if (!whatsappNumber || cartItems.length === 0 || isSubmittingOrder) return;
 
+    const selectedMethod = selectedPaymentMethod();
+
     setIsSubmittingOrder(true);
     try {
       const orderId = orderIdFrom(comercioId);
-      await persistOrderOptional(orderId);
+      await persistOrderOptional(orderId, selectedMethod);
 
       const orderUrl = `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`;
-      const message = `¡Hola! Quiero hacer un pedido. Puedes ver los detalles aqui: ${orderUrl}`;
+      const paymentLabel = selectedMethod
+        ? paymentMethodLabel(selectedMethod)
+        : 'No especificado';
+      const message =
+        `¡Hola! Quiero hacer un pedido.\n` +
+        `Metodo de pago: ${paymentLabel}.\n` +
+        `Puedes ver los detalles aqui: ${orderUrl}`;
       const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
 
       window.open(waUrl, '_blank', 'noopener,noreferrer');
       setCart({});
+      setIsConfirmOpen(false);
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -446,7 +532,7 @@ export default function PublicMenuPage() {
 
             <button
               type="button"
-              onClick={() => void confirmOrder()}
+              onClick={() => setIsConfirmOpen(true)}
               disabled={!whatsappNumber || isSubmittingOrder}
               className={`rounded-full px-5 py-3 text-sm font-extrabold transition ${
                 !whatsappNumber || isSubmittingOrder
@@ -455,6 +541,92 @@ export default function PublicMenuPage() {
               }`}
             >
               {isSubmittingOrder ? 'Procesando...' : 'Confirmar Pedido'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {isConfirmOpen ? (
+        <div className="fixed inset-0 z-[60] flex items-end bg-black/55 backdrop-blur-sm sm:items-center sm:justify-center">
+          <div className="w-full rounded-t-3xl border border-[#D7A74D]/25 bg-[#16110C] p-5 shadow-2xl sm:max-w-xl sm:rounded-3xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-serif text-2xl font-bold text-[#FFEACC]">
+                Confirmar pedido
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsConfirmOpen(false)}
+                className="rounded-full bg-[#2D2015] px-3 py-1 text-xs font-bold text-[#F5D39A]"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <p className="mt-2 text-sm text-[#D8C6AE]">
+              Selecciona como deseas pagar para incluirlo en el mensaje al restaurante.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              {menuData?.metodosPago?.length ? (
+                menuData.metodosPago.map((method) => {
+                  const isSelected = selectedPaymentMethodId === method.id;
+                  const details = paymentMethodDetails(method);
+
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setSelectedPaymentMethodId(method.id)}
+                      className={`w-full rounded-2xl border p-3 text-left transition ${
+                        isSelected
+                          ? 'border-[#1AB15E] bg-[#112417]'
+                          : 'border-[#6B4A2A] bg-[#1F160F] hover:border-[#D7A74D]/40'
+                      }`}
+                    >
+                      <p className="text-sm font-extrabold text-[#FFE8C6]">
+                        {paymentMethodLabel(method)}
+                      </p>
+                      {details.length > 0 ? (
+                        <div className="mt-2 space-y-1">
+                          {details.map((detail, index) => (
+                            <p key={`${method.id}-detail-${index}`} className="text-xs text-[#D0B697]">
+                              {detail}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-[#B89A77]">
+                          Sin datos adicionales configurados.
+                        </p>
+                      )}
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="rounded-2xl border border-[#6B4A2A] bg-[#1F160F] p-3">
+                  <p className="text-sm text-[#D8C6AE]">
+                    Este comercio no tiene metodos de pago configurados. El pedido se enviara sin metodo seleccionado.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 flex items-center justify-between rounded-2xl border border-[#D7A74D]/20 bg-[#130F0A] px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Total</p>
+              <p className="text-xl font-black text-[#FFE5BC]">{formatCop(cartTotal)}</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void confirmOrder()}
+              disabled={isSubmittingOrder}
+              className={`mt-4 w-full rounded-full px-5 py-3 text-sm font-extrabold transition ${
+                isSubmittingOrder
+                  ? 'cursor-not-allowed bg-[#5A4A38] text-[#C3B299]'
+                  : 'bg-[#1AB15E] text-white hover:bg-[#159650]'
+              }`}
+            >
+              {isSubmittingOrder ? 'Procesando...' : 'Enviar por WhatsApp'}
             </button>
           </div>
         </div>
