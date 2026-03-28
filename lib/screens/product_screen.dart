@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
@@ -42,13 +43,15 @@ class _ProductListScreenState extends State<ProductListScreen> {
           .order('nombre', ascending: true);
 
       final products = (rows as List<dynamic>)
-          .map((row) => ProductModel.fromMap(Map<String, dynamic>.from(row as Map)))
+          .map(
+            (row) => ProductModel.fromMap(
+              Map<String, dynamic>.from(row as Map),
+            ),
+          )
           .toList();
 
       if (!mounted) return;
-      setState(() {
-        _products = products;
-      });
+      setState(() => _products = products);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -118,6 +121,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A140E),
         title: const Text('Eliminar producto'),
         content: Text('¿Seguro que deseas eliminar "${product.nombre}"?'),
         actions: [
@@ -136,7 +140,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
     if (confirmed != true) return;
 
     try {
-      await Supabase.instance.client.from('productos').delete().eq('id', product.id);
+      await Supabase.instance.client
+          .from('productos')
+          .delete()
+          .eq('id', product.id);
       await _loadProducts();
     } catch (error) {
       if (!mounted) return;
@@ -208,7 +215,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF0F0D0B),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF17120E),
+        foregroundColor: Colors.white,
         title: Text(widget.category.nombre),
         actions: [
           IconButton(
@@ -220,109 +230,287 @@ class _ProductListScreenState extends State<ProductListScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _loading ? null : () => _openProductForm(),
+        backgroundColor: const Color(0xFF1AB15E),
+        foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
         label: const Text('Nuevo Producto'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _products.isEmpty
-              ? const Center(child: Text('No hay productos en este catálogo'))
-              : Stack(
-                  children: [
-                    ReorderableListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      itemCount: _products.length,
-                      onReorder: _onReorder,
-                      buildDefaultDragHandles: false,
-                      itemBuilder: (context, index) {
-                        final product = _products[index];
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 760;
+                final horizontalPadding = isWide ? 28.0 : 14.0;
+                final maxWidth = isWide ? 980.0 : 680.0;
 
-                        return Card(
-                          key: ValueKey(product.id),
-                          margin: const EdgeInsets.symmetric(vertical: 6),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.all(12),
-                            leading: product.imagenUrl != null &&
-                                    product.imagenUrl!.trim().isNotEmpty
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(
-                                      product.imagenUrl!,
-                                      width: 56,
-                                      height: 56,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  )
-                                : Container(
-                                    width: 56,
-                                    height: 56,
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .surfaceContainerHighest,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: const Icon(Icons.fastfood_outlined),
-                                  ),
-                            title: Text(
-                              product.nombre,
-                              style: const TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (product.descripcion.trim().isNotEmpty)
-                                  Text(product.descripcion),
-                                const SizedBox(height: 6),
-                                Text('\$${product.precio.toStringAsFixed(2)}'),
-                                Row(
-                                  children: [
-                                    const Text('Ocultar'),
-                                    Switch.adaptive(
-                                      value: product.disponible,
-                                      onChanged: (value) =>
-                                          _toggleVisibility(product, value),
-                                    ),
-                                  ],
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: maxWidth),
+                    child: Stack(
+                      children: [
+                        Column(
+                          children: [
+                            Container(
+                              margin: EdgeInsets.fromLTRB(
+                                horizontalPadding,
+                                14,
+                                horizontalPadding,
+                                8,
+                              ),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(18),
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF2B1C11), Color(0xFF1B140E)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
                                 ),
-                              ],
-                            ),
-                            trailing: SizedBox(
-                              width: 116,
+                                border: Border.all(
+                                  color: const Color(0x33D7A74D),
+                                ),
+                              ),
                               child: Row(
                                 children: [
-                                  IconButton(
-                                    onPressed: () => _openProductForm(product: product),
-                                    icon: const Icon(Icons.edit_outlined),
-                                    tooltip: 'Editar',
+                                  Container(
+                                    width: 42,
+                                    height: 42,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0x221AB15E),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(
+                                      Icons.inventory_2_outlined,
+                                      color: Color(0xFF54E697),
+                                    ),
                                   ),
-                                  IconButton(
-                                    onPressed: () => _deleteProduct(product),
-                                    icon: const Icon(Icons.delete_outline),
-                                    tooltip: 'Eliminar',
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Arrastra para cambiar orden, oculta productos de temporada o edítalos rápido.',
+                                      style: GoogleFonts.manrope(
+                                        color: const Color(0xFFE4C8A5),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
                                   ),
-                                  ReorderableDragStartListener(
-                                    index: index,
-                                    child: const Icon(Icons.drag_handle),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: _products.isEmpty
+                                  ? const Center(
+                                      child: Text(
+                                        'No hay productos en este catálogo',
+                                        style: TextStyle(color: Colors.white70),
+                                      ),
+                                    )
+                                  : ReorderableListView.builder(
+                                      padding: EdgeInsets.fromLTRB(
+                                        horizontalPadding,
+                                        8,
+                                        horizontalPadding,
+                                        96,
+                                      ),
+                                      itemCount: _products.length,
+                                      onReorder: _onReorder,
+                                      buildDefaultDragHandles: false,
+                                      itemBuilder: (context, index) {
+                                        final product = _products[index];
+                                        return _ProductCard(
+                                          key: ValueKey(product.id),
+                                          product: product,
+                                          onEdit: () =>
+                                              _openProductForm(product: product),
+                                          onDelete: () => _deleteProduct(product),
+                                          onToggleVisible: (value) =>
+                                              _toggleVisibility(product, value),
+                                          dragHandle: ReorderableDragStartListener(
+                                            index: index,
+                                            child: const Icon(
+                                              Icons.drag_indicator,
+                                              color: Color(0xFFD5B78A),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                            ),
+                          ],
+                        ),
+                        if (_isSavingOrder)
+                          Positioned.fill(
+                            child: Container(
+                              color: Colors.black.withValues(alpha: 0.12),
+                              alignment: Alignment.center,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  CircularProgressIndicator(),
+                                  SizedBox(height: 10),
+                                  Text(
+                                    'Guardando nuevo orden...',
+                                    style: TextStyle(color: Colors.white),
                                   ),
                                 ],
                               ),
                             ),
                           ),
-                        );
-                      },
+                      ],
                     ),
-                    if (_isSavingOrder)
-                      Positioned.fill(
-                        child: Container(
-                          color: Colors.black.withValues(alpha: 0.08),
-                          child: const Center(
-                            child: CircularProgressIndicator(),
-                          ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _ProductCard extends StatelessWidget {
+  const _ProductCard({
+    super.key,
+    required this.product,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onToggleVisible,
+    required this.dragHandle,
+  });
+
+  final ProductModel product;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final ValueChanged<bool> onToggleVisible;
+  final Widget dragHandle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: const Color(0xFF17120E),
+        border: Border.all(color: const Color(0x2AD7A74D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _ProductThumb(imageUrl: product.imagenUrl),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      product.nombre,
+                      style: GoogleFonts.manrope(
+                        color: const Color(0xFFFFEACC),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (product.descripcion.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        product.descripcion,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Color(0xFFD3BEA0)),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0x2227C46B),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '\$${product.precio.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Color(0xFF4BE18D),
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
+                    ),
                   ],
                 ),
+              ),
+              dragHandle,
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F0D0B),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Visible en web',
+                      style: TextStyle(color: Color(0xFFE6D7C4)),
+                    ),
+                    Switch.adaptive(
+                      value: product.disponible,
+                      onChanged: onToggleVisible,
+                    ),
+                  ],
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Editar'),
+              ),
+              OutlinedButton.icon(
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Eliminar'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProductThumb extends StatelessWidget {
+  const _ProductThumb({required this.imageUrl});
+
+  final String? imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImage = imageUrl != null && imageUrl!.trim().isNotEmpty;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: hasImage
+          ? Image.network(
+              imageUrl!,
+              width: 72,
+              height: 72,
+              fit: BoxFit.cover,
+            )
+          : Container(
+              width: 72,
+              height: 72,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: const Icon(Icons.fastfood_outlined),
+            ),
     );
   }
 }

@@ -184,125 +184,285 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     final previewImage = _pickedImage?.path;
 
     return Scaffold(
+      backgroundColor: const Color(0xFF0F0D0B),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF17120E),
+        foregroundColor: Colors.white,
         title: Text(widget.isEditing ? 'Editar Producto' : 'Nuevo Producto'),
       ),
       body: Stack(
         children: [
-          Form(
-            key: _formKey,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedCategoryId,
-                  items: widget.categories
-                      .map(
-                        (category) => DropdownMenuItem<String>(
-                          value: category.id,
-                          child: Text(category.nombre),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _isSaving
-                      ? null
-                      : (value) => setState(() => _selectedCategoryId = value),
-                  decoration: const InputDecoration(labelText: 'Catálogo'),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _nameController,
-                  enabled: !_isSaving,
-                  decoration: const InputDecoration(labelText: 'Nombre'),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Ingresa un nombre';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  enabled: !_isSaving,
-                  decoration: const InputDecoration(labelText: 'Descripción'),
-                  minLines: 2,
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _priceController,
-                  enabled: !_isSaving,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 880;
+              final horizontalPadding = isWide ? 28.0 : 14.0;
+              final maxWidth = isWide ? 980.0 : 660.0;
+
+              final imagePanel = _ImagePanel(
+                previewImagePath: previewImage,
+                imageUrl: _imageUrl,
+                isSaving: _isSaving,
+                isUploadingImage: _isUploadingImage,
+                onPickImage: _pickImageFromGallery,
+              );
+
+              final formPanel = _FormPanel(
+                formKey: _formKey,
+                categories: widget.categories,
+                selectedCategoryId: _selectedCategoryId,
+                isSaving: _isSaving,
+                nameController: _nameController,
+                descriptionController: _descriptionController,
+                priceController: _priceController,
+                isEditing: widget.isEditing,
+                onCategoryChanged: (value) =>
+                    setState(() => _selectedCategoryId = value),
+                onSave: _save,
+              );
+
+              return Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxWidth),
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPadding,
+                      14,
+                      horizontalPadding,
+                      26,
+                    ),
+                    child: isWide
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 10, child: imagePanel),
+                              const SizedBox(width: 14),
+                              Expanded(flex: 14, child: formPanel),
+                            ],
+                          )
+                        : Column(
+                            children: [
+                              imagePanel,
+                              const SizedBox(height: 14),
+                              formPanel,
+                            ],
+                          ),
                   ),
-                  decoration: const InputDecoration(labelText: 'Precio'),
-                  validator: (value) {
-                    final parsed =
-                        double.tryParse((value ?? '').trim().replaceAll(',', '.'));
-                    if (parsed == null || parsed < 0) {
-                      return 'Precio inválido';
-                    }
-                    return null;
-                  },
                 ),
-                const SizedBox(height: 16),
-                if (previewImage != null)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(
-                      File(previewImage),
-                      fit: BoxFit.cover,
-                      height: 170,
-                    ),
-                  )
-                else if (_imageUrl != null && _imageUrl!.trim().isNotEmpty)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      _imageUrl!,
-                      fit: BoxFit.cover,
-                      height: 170,
-                    ),
-                  )
-                else
-                  Container(
-                    height: 140,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text('Sin foto seleccionada'),
-                  ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: _isSaving ? null : _pickImageFromGallery,
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('Seleccionar foto de galería'),
-                ),
-                const SizedBox(height: 20),
-                FilledButton.icon(
-                  onPressed: _isSaving ? null : _save,
-                  icon: const Icon(Icons.save_outlined),
-                  label: Text(widget.isEditing ? 'Guardar Cambios' : 'Crear Producto'),
-                ),
-                if (_isUploadingImage) ...[
-                  const SizedBox(height: 14),
-                  const Center(child: CircularProgressIndicator()),
-                  const SizedBox(height: 8),
-                  const Center(child: Text('Subiendo y optimizando imagen...')),
-                ],
-              ],
-            ),
+              );
+            },
           ),
-          if (_isSaving && !_isUploadingImage)
+          if (_isSaving)
             Container(
-              color: Colors.black.withValues(alpha: 0.15),
+              color: Colors.black.withValues(alpha: 0.18),
               alignment: Alignment.center,
-              child: const CircularProgressIndicator(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 10),
+                  Text(
+                    _isUploadingImage
+                        ? 'Subiendo y optimizando imagen...'
+                        : 'Guardando producto...',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ],
+              ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _ImagePanel extends StatelessWidget {
+  const _ImagePanel({
+    required this.previewImagePath,
+    required this.imageUrl,
+    required this.isSaving,
+    required this.isUploadingImage,
+    required this.onPickImage,
+  });
+
+  final String? previewImagePath;
+  final String? imageUrl;
+  final bool isSaving;
+  final bool isUploadingImage;
+  final VoidCallback onPickImage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF17120E),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x2AD7A74D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Foto del producto',
+            style: TextStyle(
+              color: Colors.amber.shade100,
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (previewImagePath != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.file(
+                File(previewImagePath!),
+                fit: BoxFit.cover,
+                height: 230,
+                width: double.infinity,
+              ),
+            )
+          else if (imageUrl != null && imageUrl!.trim().isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                imageUrl!,
+                fit: BoxFit.cover,
+                height: 230,
+                width: double.infinity,
+              ),
+            )
+          else
+            Container(
+              height: 200,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: const Color(0xFF251B13),
+              ),
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.photo_camera_back_outlined, color: Colors.white54),
+                  SizedBox(height: 8),
+                  Text('Sin foto seleccionada', style: TextStyle(color: Colors.white70)),
+                ],
+              ),
+            ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: isSaving ? null : onPickImage,
+            icon: const Icon(Icons.photo_library_outlined),
+            label: const Text('Seleccionar foto de galería'),
+          ),
+          if (isUploadingImage) ...[
+            const SizedBox(height: 10),
+            const LinearProgressIndicator(),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FormPanel extends StatelessWidget {
+  const _FormPanel({
+    required this.formKey,
+    required this.categories,
+    required this.selectedCategoryId,
+    required this.isSaving,
+    required this.nameController,
+    required this.descriptionController,
+    required this.priceController,
+    required this.isEditing,
+    required this.onCategoryChanged,
+    required this.onSave,
+  });
+
+  final GlobalKey<FormState> formKey;
+  final List<CategoryModel> categories;
+  final String? selectedCategoryId;
+  final bool isSaving;
+  final TextEditingController nameController;
+  final TextEditingController descriptionController;
+  final TextEditingController priceController;
+  final bool isEditing;
+  final ValueChanged<String?> onCategoryChanged;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF17120E),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x2AD7A74D)),
+      ),
+      child: Form(
+        key: formKey,
+        child: Column(
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: selectedCategoryId,
+              items: categories
+                  .map(
+                    (category) => DropdownMenuItem<String>(
+                      value: category.id,
+                      child: Text(category.nombre),
+                    ),
+                  )
+                  .toList(),
+              onChanged: isSaving ? null : onCategoryChanged,
+              decoration: const InputDecoration(labelText: 'Catálogo'),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: nameController,
+              enabled: !isSaving,
+              decoration: const InputDecoration(labelText: 'Nombre'),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Ingresa un nombre';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: descriptionController,
+              enabled: !isSaving,
+              decoration: const InputDecoration(labelText: 'Descripción'),
+              minLines: 2,
+              maxLines: 4,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: priceController,
+              enabled: !isSaving,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Precio'),
+              validator: (value) {
+                final parsed =
+                    double.tryParse((value ?? '').trim().replaceAll(',', '.'));
+                if (parsed == null || parsed < 0) {
+                  return 'Precio inválido';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: isSaving ? null : onSave,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(
+                  isEditing ? 'Guardar Cambios' : 'Crear Producto',
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

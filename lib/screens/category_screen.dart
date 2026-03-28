@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
@@ -33,7 +34,11 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
           .order('nombre', ascending: true);
 
       final categories = (rows as List<dynamic>)
-          .map((row) => CategoryModel.fromMap(Map<String, dynamic>.from(row as Map)))
+          .map(
+            (row) => CategoryModel.fromMap(
+              Map<String, dynamic>.from(row as Map),
+            ),
+          )
           .toList();
 
       if (!mounted) return;
@@ -57,11 +62,19 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(title),
+        backgroundColor: const Color(0xFF1A140E),
+        title: Text(
+          title,
+          style: GoogleFonts.manrope(
+            color: const Color(0xFFFFEACC),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
         content: TextField(
           controller: controller,
           autofocus: true,
           textCapitalization: TextCapitalization.words,
+          style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
             labelText: 'Nombre del catálogo',
           ),
@@ -170,6 +183,7 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
     final confirmDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A140E),
         title: const Text('Eliminar catálogo'),
         content: Text(
           '¿Seguro que deseas eliminar "${catalog.nombre}"? Esta acción no se puede deshacer.',
@@ -223,8 +237,11 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF0F0D0B),
       appBar: AppBar(
-        title: const Text('Catálogos'),
+        backgroundColor: const Color(0xFF17120E),
+        foregroundColor: Colors.white,
+        title: const Text('Gestión de Catálogos'),
         actions: [
           IconButton(
             onPressed: _loading ? null : _createCatalog,
@@ -235,85 +252,220 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _loading ? null : _createCatalog,
+        backgroundColor: const Color(0xFF1AB15E),
+        foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
         label: const Text('Nuevo Catálogo'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _catalogs.isEmpty
-              ? const Center(child: Text('No hay catálogos disponibles'))
-              : ListView.builder(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  itemCount: _catalogs.length,
-                  itemBuilder: (context, index) {
-                    final catalog = _catalogs[index];
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 760;
+                final horizontalPadding = isWide ? 28.0 : 14.0;
+                final maxWidth = isWide ? 900.0 : 620.0;
 
-                    return Card(
-                      elevation: 2,
-                      margin: const EdgeInsets.symmetric(vertical: 6),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () => _openCatalogProducts(catalog),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: maxWidth),
+                    child: Column(
+                      children: [
+                        Container(
+                          margin: EdgeInsets.fromLTRB(
+                            horizontalPadding,
+                            14,
+                            horizontalPadding,
+                            8,
+                          ),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(18),
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF2B1C11), Color(0xFF1B140E)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            border: Border.all(color: const Color(0x33D7A74D)),
                           ),
                           child: Row(
                             children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      catalog.nombre,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      catalog.activo
-                                          ? 'Activo'
-                                          : 'Oculto (no visible para clientes)',
-                                      style: TextStyle(
-                                        color: catalog.activo
-                                            ? const Color(0xFF1E9D57)
-                                            : Colors.orange.shade700,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
+                              Container(
+                                width: 42,
+                                height: 42,
+                                decoration: BoxDecoration(
+                                  color: const Color(0x22D7A74D),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(
+                                  Icons.dashboard_customize_rounded,
+                                  color: Color(0xFFEACB93),
                                 ),
                               ),
-                              Switch.adaptive(
-                                value: catalog.activo,
-                                onChanged: (value) =>
-                                    _toggleCatalogActive(catalog, value),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Crea, edita y oculta catálogos. Toca una tarjeta para gestionar sus productos.',
+                                  style: GoogleFonts.manrope(
+                                    color: const Color(0xFFE4C8A5),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
-                              IconButton(
-                                onPressed: () => _editCatalog(catalog),
-                                icon: const Icon(Icons.edit_outlined),
-                                tooltip: 'Editar Nombre',
-                              ),
-                              IconButton(
-                                onPressed: () => _deleteCatalog(catalog),
-                                icon: const Icon(Icons.delete_outline),
-                                tooltip: 'Eliminar',
-                              ),
-                              const Icon(Icons.chevron_right),
                             ],
                           ),
                         ),
+                        Expanded(
+                          child: _catalogs.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                    'No hay catálogos disponibles',
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                )
+                              : ListView.builder(
+                                  padding: EdgeInsets.fromLTRB(
+                                    horizontalPadding,
+                                    8,
+                                    horizontalPadding,
+                                    86,
+                                  ),
+                                  itemCount: _catalogs.length,
+                                  itemBuilder: (context, index) {
+                                    final catalog = _catalogs[index];
+                                    return _CatalogCard(
+                                      catalog: catalog,
+                                      onOpen: () => _openCatalogProducts(catalog),
+                                      onToggleActive: (value) =>
+                                          _toggleCatalogActive(catalog, value),
+                                      onEdit: () => _editCatalog(catalog),
+                                      onDelete: () => _deleteCatalog(catalog),
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _CatalogCard extends StatelessWidget {
+  const _CatalogCard({
+    required this.catalog,
+    required this.onOpen,
+    required this.onToggleActive,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final CategoryModel catalog;
+  final VoidCallback onOpen;
+  final ValueChanged<bool> onToggleActive;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: const Color(0xFF17120E),
+        border: Border.all(color: const Color(0x2AD7A74D)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onOpen,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      catalog.nombre,
+                      style: GoogleFonts.manrope(
+                        color: const Color(0xFFFFEACC),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 17,
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0x2227C46B),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      catalog.activo ? 'Activo' : 'Oculto',
+                      style: TextStyle(
+                        color: catalog.activo
+                            ? const Color(0xFF46E18A)
+                            : const Color(0xFFEFA355),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F0D0B),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Visible en web',
+                          style: TextStyle(color: Color(0xFFE6D7C4)),
+                        ),
+                        Switch.adaptive(
+                          value: catalog.activo,
+                          onChanged: onToggleActive,
+                        ),
+                      ],
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Editar'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Eliminar'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: onOpen,
+                    icon: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+                    label: const Text('Abrir Productos'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
