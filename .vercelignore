@@ -1,0 +1,9 @@
+*
+!site
+!site/**
+!.vercel/
+
+site/node_modules/
+site/.next/
+site/.vercel/
+site/.env.local
