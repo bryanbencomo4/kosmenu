@@ -379,8 +379,6 @@ export default function PublicMenuPage() {
       await persistOrderOptional(orderId, normalizedClientEmail, selectedMethod);
 
       const orderUrl = `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`;
-      const emailFallbackUrl =
-        `https://www.google.com/search?q=${encodeURIComponent(orderUrl)}`;
       const paymentLabel = selectedMethod
         ? paymentMethodLabel(selectedMethod)
         : 'No especificado';
@@ -402,7 +400,7 @@ export default function PublicMenuPage() {
             clientEmail: normalizedClientEmail,
             comercioNombre,
             orderId,
-            orderTrackingUrl: emailFallbackUrl,
+            orderTrackingUrl: orderUrl,
           }),
         });
       } catch (sendEmailError) {

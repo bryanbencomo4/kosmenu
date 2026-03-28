@@ -1,6 +1,7 @@
 class CategoryModel {
   final String id;
   final String comercioId;
+  final String catalogoId;
   final String nombre;
   final int orden;
   final bool activo;
@@ -11,6 +12,7 @@ class CategoryModel {
   const CategoryModel({
     required this.id,
     required this.comercioId,
+    required this.catalogoId,
     required this.nombre,
     required this.orden,
     this.activo = true,
@@ -26,6 +28,7 @@ class CategoryModel {
     return CategoryModel(
       id: map['id']?.toString() ?? '',
       comercioId: map['comercio_id']?.toString() ?? '',
+      catalogoId: map['catalogo_id']?.toString() ?? '',
       nombre: map['nombre']?.toString() ?? '',
       orden: ordenValue is int ? ordenValue : int.tryParse('$ordenValue') ?? 0,
       activo: map['activo'] is bool ? map['activo'] as bool : true,
@@ -41,6 +44,7 @@ class CategoryModel {
     return {
       'id': id,
       'comercio_id': comercioId,
+      'catalogo_id': catalogoId,
       'nombre': nombre,
       'orden': orden,
       'activo': activo,
