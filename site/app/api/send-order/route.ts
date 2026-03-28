@@ -4,6 +4,7 @@ import { sendOrderEmail } from '../_lib/send-order-email';
 type SendOrderPayload = {
   clientEmail?: string;
   comercioNombre?: string;
+  comercioName?: string;
   orderId?: string;
   orderTrackingUrl?: string;
 };
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
     const result = await sendOrderEmail({
       clientEmail: body.clientEmail ?? '',
       comercioNombre: body.comercioNombre ?? 'Kosmenu',
+      comercioName: body.comercioName,
       orderId: body.orderId ?? '',
       orderTrackingUrl: body.orderTrackingUrl,
     });

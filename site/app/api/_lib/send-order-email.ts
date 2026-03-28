@@ -3,6 +3,7 @@ import { Resend } from 'resend';
 export type SendOrderEmailInput = {
   clientEmail: string;
   comercioNombre: string;
+  comercioName?: string;
   orderId: string;
   orderTrackingUrl?: string;
 };
@@ -15,7 +16,8 @@ export function canSendOrderEmail() {
 
 export async function sendOrderEmail(input: SendOrderEmailInput) {
   const clientEmail = (input.clientEmail ?? '').trim().toLowerCase();
-  const comercioNombre = (input.comercioNombre ?? 'Kosmenu').trim() || 'Kosmenu';
+  const comercioNombre =
+    (input.comercioName ?? input.comercioNombre ?? 'Kosmenu').trim() || 'Kosmenu';
   const orderId = (input.orderId ?? '').trim();
 
   if (!clientEmail || !emailRegex.test(clientEmail)) {
@@ -35,10 +37,7 @@ export async function sendOrderEmail(input: SendOrderEmailInput) {
   const resend = new Resend(resendApiKey);
 
   const trackingLink = finalTrackingLink(orderId);
-  const subject = `Pedido recibido en ${comercioNombre}`;
-  const text =
-    `Tu pedido en ${comercioNombre} está en proceso. ` +
-    `Síguelo aquí: ${trackingLink}`;
+  const subject = `🍔 ¡Pedido Confirmado en ${comercioNombre}!`;
   const html = `
 <!doctype html>
 <html lang="es">
@@ -82,7 +81,6 @@ export async function sendOrderEmail(input: SendOrderEmailInput) {
     from: fromEmail,
     to: clientEmail,
     subject,
-    text,
     html,
   });
 
@@ -90,5 +88,5 @@ export async function sendOrderEmail(input: SendOrderEmailInput) {
 }
 
 function finalTrackingLink(orderId: string) {
-  return `https://kosmenu.vercel.app/orders/${encodeURIComponent(orderId)}`;
+  return `https://kosmenu.vercel.app/orders/${orderId}`;
 }
