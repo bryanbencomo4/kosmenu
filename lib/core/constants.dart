@@ -9,3 +9,18 @@ class SupabaseConfig {
 
   static bool get hasCurrentComercioId => currentComercioId.trim().isNotEmpty;
 }
+
+class AppLinks {
+  const AppLinks._();
+
+  // Keep base URL without trailing slash to avoid //v/... routes.
+  static const String productionUrl = 'https://kosmenu.vercel.app';
+
+  static String publicMenuByComercio(String comercioId) {
+    final base = productionUrl.endsWith('/')
+        ? productionUrl.substring(0, productionUrl.length - 1)
+        : productionUrl;
+    final encodedId = Uri.encodeComponent(comercioId.trim());
+    return '$base/v/$encodedId';
+  }
+}

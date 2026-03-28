@@ -16,10 +16,12 @@ Future<void> main() async {
 }
 
 Future<void> _initializeSupabase() {
-  print('Supabase URL: ${SupabaseConfig.url}');
-  print(
-    'Supabase key prefix: ${SupabaseConfig.anonKey.isNotEmpty ? SupabaseConfig.anonKey.substring(0, 3) : 'EMPTY'}',
-  );
+  if (kDebugMode) {
+    debugPrint('Supabase URL: ${SupabaseConfig.url}');
+    debugPrint(
+      'Supabase key prefix: ${SupabaseConfig.anonKey.isNotEmpty ? SupabaseConfig.anonKey.substring(0, 3) : 'EMPTY'}',
+    );
+  }
 
   final parsedUrl = Uri.tryParse(SupabaseConfig.url);
   if (parsedUrl == null || !parsedUrl.hasAuthority) {

@@ -46,3 +46,14 @@ app.*.map.json
 
 # FVM Version Cache
 .fvm/
+
+# Next.js (site/)
+/site/node_modules/
+/site/.next/
+/site/.vercel/
+/site/out/
+
+# Environment files
+.env
+.env.*
+*.env

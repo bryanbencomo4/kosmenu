@@ -695,7 +695,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       ),
                       icon: const Icon(Icons.shopping_bag_outlined),
                       label: Text(
-                        'Ver Pedido (${cartItemCount} - ${_formatUsd(cartTotalUsd)})',
+                        'Ver Pedido ($cartItemCount - ${_formatUsd(cartTotalUsd)})',
                         style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
                       ),
                     ),

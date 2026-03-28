@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -22,7 +23,7 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
   final GlobalKey _qrKey = GlobalKey();
   bool _isProcessing = false;
 
-  String get _menuUrl => 'https://kosmenu.app/v/${widget.comercio.id}';
+  String get _menuUrl => AppLinks.publicMenuByComercio(widget.comercio.id);
 
   Future<File> _saveQrImage() async {
     final boundary =
@@ -46,6 +47,7 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
   Future<void> _shareQr() async {
     setState(() => _isProcessing = true);
     try {
+      debugPrint('URL GENERADA: $_menuUrl');
       final file = await _saveQrImage();
       await SharePlus.instance.share(
         ShareParams(

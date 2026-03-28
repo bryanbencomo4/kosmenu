@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -6,8 +7,10 @@ import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
-import 'package:kosmenu_app/screens/qr_generator_screen.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -19,6 +22,8 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   late Future<_DashboardData> _dashboardFuture;
   late Stream<List<PedidoModel>> _recentOrdersStream;
+
+  bool get _hasWebUrlConfigured => AppLinks.productionUrl.trim().isNotEmpty;
 
   @override
   void initState() {
@@ -38,6 +43,117 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _recentOrdersStream = _buildRecentOrdersStream();
       });
     }
+  }
+
+  Future<void> _refreshDashboard() async {
+    if (!mounted) return;
+    setState(() {
+      _dashboardFuture = _fetchDashboardData();
+      _recentOrdersStream = _buildRecentOrdersStream();
+    });
+  }
+
+  Future<void> _openPublicMenu() async {
+    if (!SupabaseConfig.hasCurrentComercioId) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay comercio configurado para abrir el menú.'),
+        ),
+      );
+      return;
+    }
+
+    final url = AppLinks.publicMenuByComercio(SupabaseConfig.currentComercioId);
+    debugPrint('Abriendo Menú Público: $url');
+
+    final uri = Uri.parse(url);
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo abrir el menú público: $url')),
+      );
+    }
+  }
+
+  Future<void> _copyPublicMenuUrl() async {
+    if (!SupabaseConfig.hasCurrentComercioId) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay comercio configurado para copiar la URL.'),
+        ),
+      );
+      return;
+    }
+
+    final url = AppLinks.publicMenuByComercio(SupabaseConfig.currentComercioId);
+    debugPrint('Copiando Menú Público: $url');
+
+    await Clipboard.setData(ClipboardData(text: url));
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('URL del menú copiada al portapapeles.')),
+    );
+  }
+
+  Future<void> _sharePublicMenu() async {
+    if (!SupabaseConfig.hasCurrentComercioId) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay comercio configurado para compartir el menú.'),
+        ),
+      );
+      return;
+    }
+
+    final url = AppLinks.publicMenuByComercio(SupabaseConfig.currentComercioId);
+    await SharePlus.instance.share(
+      ShareParams(
+        text: 'Mira nuestro menú digital: $url',
+        subject: 'Menú digital Kosmenu',
+      ),
+    );
+  }
+
+  void _showQRCode(BuildContext context) {
+    if (!SupabaseConfig.hasCurrentComercioId) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay comercio configurado para generar el QR.'),
+        ),
+      );
+      return;
+    }
+
+    final finalUrl = AppLinks.publicMenuByComercio(
+      SupabaseConfig.currentComercioId,
+    );
+    debugPrint('URL GENERADA: $finalUrl');
+
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Tu Menú Digital'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Escanea para ver el menú:'),
+            const SizedBox(height: 20),
+            QrImageView(data: finalUrl, version: QrVersions.auto, size: 200.0),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 
   Stream<List<PedidoModel>> _buildRecentOrdersStream() {
@@ -95,8 +211,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Centro de Control')),
+      backgroundColor: const Color(0xFF0F0D0B),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF17120E),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('Centro de Control'),
+        actions: [
+          IconButton(
+            onPressed: _copyPublicMenuUrl,
+            icon: const Icon(Icons.copy_all_outlined),
+            tooltip: 'Copiar URL pública',
+          ),
+          IconButton(
+            onPressed: _openPublicMenu,
+            icon: const Icon(Icons.open_in_browser),
+            tooltip: 'Abrir menú público',
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color(0xFFFF6B00),
         onPressed: _openMagicOnboarding,
@@ -106,28 +242,133 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         future: _dashboardFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      colorScheme.secondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Cargando estadísticas...',
+                    style: GoogleFonts.poppins(color: Colors.white70),
+                  ),
+                ],
+              ),
+            );
           }
 
           if (snapshot.hasError) {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Text('Error cargando dashboard: ${snapshot.error}'),
+                child: Text(
+                  'Error cargando dashboard: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.white),
+                ),
               ),
             );
           }
 
           final data = snapshot.data;
           if (data == null) {
-            return const Center(child: Text('No se pudo cargar el dashboard'));
+            return const Center(
+              child: Text(
+                'No se pudo cargar el dashboard',
+                style: TextStyle(color: Colors.white),
+              ),
+            );
           }
+
+          final webBadgeText = _hasWebUrlConfigured ? 'En Línea' : 'Sin URL';
+          final webBadgeColor = _hasWebUrlConfigured
+              ? const Color(0xFF1AB15E)
+              : const Color(0xFFE67E22);
 
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              GridView.count(
+                crossAxisCount: 3,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  _StatCard(
+                    title: 'Productos',
+                    value: '${data.productCount}',
+                    icon: Icons.restaurant_menu,
+                  ),
+                  _StatCard(
+                    title: 'Categorías',
+                    value: '${data.categoryCount}',
+                    icon: Icons.grid_view_rounded,
+                  ),
+                  _StatCard(
+                    title: 'Estado Web',
+                    value: webBadgeText,
+                    icon: Icons.public,
+                    valueColor: webBadgeColor,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Card(
+                elevation: 2,
+                color: const Color(0xFF17120E),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Acciones rápidas',
+                        style: GoogleFonts.poppins(
+                          color: const Color(0xFFFFE2BF),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _QuickPillAction(
+                              icon: Icons.share_outlined,
+                              label: 'Compartir Menú',
+                              onTap: _sharePublicMenu,
+                            ),
+                            const SizedBox(width: 10),
+                            _QuickPillAction(
+                              icon: Icons.open_in_browser,
+                              label: 'Ver Web',
+                              onTap: _openPublicMenu,
+                            ),
+                            const SizedBox(width: 10),
+                            _QuickPillAction(
+                              icon: Icons.refresh,
+                              label: 'Refrescar',
+                              onTap: _refreshDashboard,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
               Card(
                 elevation: 3,
+                color: const Color(0xFF17120E),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(24),
                 ),
@@ -139,7 +380,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Text(
                         'Kosmenu Vendor',
                         style: GoogleFonts.poppins(
-                          color: const Color(0xFFFF6B00),
+                          color: const Color(0xFFFFB04A),
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -147,6 +388,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Text(
                         data.comercio.nombre,
                         style: GoogleFonts.poppins(
+                          color: Colors.white,
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
                         ),
@@ -154,7 +396,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       const SizedBox(height: 10),
                       Text(
                         '${data.categoryCount} Categorías, ${data.productCount} Productos',
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(color: const Color(0xFFE6C9A8)),
                       ),
                       const SizedBox(height: 20),
                       FilledButton.icon(
@@ -163,14 +406,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  QrGeneratorScreen(comercio: data.comercio),
-                            ),
-                          );
-                        },
+                        onPressed: () => _showQRCode(context),
                         icon: const Icon(Icons.qr_code_2),
                         label: Text(
                           'Generar QR de mi Menú',
@@ -181,6 +417,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ),
                       const SizedBox(height: 12),
                       OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFFFC977),
+                          side: const BorderSide(color: Color(0xFF7E5930)),
+                        ),
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
@@ -197,6 +437,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
               const SizedBox(height: 16),
               Card(
+                color: const Color(0xFF17120E),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
@@ -208,6 +449,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Text(
                         'Accesos rápidos',
                         style: GoogleFonts.poppins(
+                          color: const Color(0xFFFFE2BF),
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                         ),
@@ -229,15 +471,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               icon: Icons.qr_code,
                               title: 'Mi QR',
                               subtitle: 'Compártelo con clientes',
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => QrGeneratorScreen(
-                                      comercio: data.comercio,
-                                    ),
-                                  ),
-                                );
-                              },
+                              onTap: () => _showQRCode(context),
                             ),
                           ),
                         ],
@@ -250,6 +484,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               Text(
                 'Pedidos Recientes',
                 style: GoogleFonts.poppins(
+                  color: const Color(0xFFFFE2BF),
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                 ),
@@ -262,6 +497,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ConnectionState.waiting &&
                       !ordersSnapshot.hasData) {
                     return const Card(
+                      color: Color(0xFF17120E),
                       child: Padding(
                         padding: EdgeInsets.all(16),
                         child: Center(child: CircularProgressIndicator()),
@@ -271,10 +507,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                   if (ordersSnapshot.hasError) {
                     return Card(
+                      color: const Color(0xFF17120E),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Text(
                           'Error cargando pedidos: ${ordersSnapshot.error}',
+                          style: const TextStyle(color: Colors.white),
                         ),
                       ),
                     );
@@ -285,9 +523,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                   if (recentOrders.isEmpty) {
                     return const Card(
+                      color: Color(0xFF17120E),
                       child: Padding(
                         padding: EdgeInsets.all(16),
-                        child: Text('No hay pedidos recientes'),
+                        child: Text(
+                          'No hay pedidos recientes',
+                          style: TextStyle(color: Colors.white),
+                        ),
                       ),
                     );
                   }
@@ -296,14 +538,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     children: recentOrders
                         .map(
                           (pedido) => Card(
+                            color: const Color(0xFF17120E),
                             child: ListTile(
                               title: Text(
                                 'Pedido ${pedido.id.substring(0, pedido.id.length < 8 ? pedido.id.length : 8)}',
+                                style: const TextStyle(color: Colors.white),
                               ),
                               subtitle: Text(
                                 pedido.createdAt != null
                                     ? 'Fecha: ${pedido.createdAt}'
                                     : 'Fecha no disponible',
+                                style: const TextStyle(color: Colors.white70),
                               ),
                               trailing: Text(
                                 pedido.total != null
@@ -380,6 +625,85 @@ class _QuickActionTile extends StatelessWidget {
             Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    this.valueColor,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      color: const Color(0xFF17120E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: const Color(0xFFFFB04A), size: 20),
+            const Spacer(),
+            Text(
+              value,
+              style: GoogleFonts.poppins(
+                color: valueColor ?? Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              title,
+              style: GoogleFonts.poppins(
+                color: const Color(0xFFE6C9A8),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickPillAction extends StatelessWidget {
+  const _QuickPillAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+      style: FilledButton.styleFrom(
+        backgroundColor: const Color(0xFF2A1C12),
+        foregroundColor: const Color(0xFFFFD49A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       ),
     );
   }
