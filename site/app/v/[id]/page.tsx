@@ -64,6 +64,8 @@ const defaultProductImage =
       '</svg>',
   );
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function formatCop(value: number | null | undefined) {
   const safeValue = typeof value === 'number' && Number.isFinite(value) ? value : 0;
   return new Intl.NumberFormat('es-CO', {
@@ -97,6 +99,7 @@ export default function PublicMenuPage() {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [clientEmail, setClientEmail] = useState('');
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<
     string | null
   >(null);
@@ -235,6 +238,8 @@ export default function PublicMenuPage() {
   );
 
   const comercioNombre = (menuData?.comercio.nombre ?? 'Kosmenu').trim();
+  const normalizedClientEmail = clientEmail.trim().toLowerCase();
+  const isClientEmailValid = emailRegex.test(normalizedClientEmail);
   const whatsappNumber = normalizePhone(
     menuData?.comercio.whatsapp ?? menuData?.comercio.telefono ?? menuData?.comercio.celular,
   );
@@ -304,6 +309,7 @@ export default function PublicMenuPage() {
 
   async function persistOrderOptional(
     orderId: string,
+    email: string,
     paymentMethod: MetodoPagoRow | null,
   ) {
     if (!supabaseUrl || !supabaseAnonKey) return;
@@ -315,6 +321,7 @@ export default function PublicMenuPage() {
 
       const detalles = {
         order_id: orderId,
+        cliente_email: email,
         metodo_pago: paymentMethod
           ? {
               id: paymentMethod.id,
@@ -331,13 +338,27 @@ export default function PublicMenuPage() {
         total: cartTotal,
       };
 
-      // Optional persistence: if schema differs, it should not block WhatsApp flow.
-      const { error: insertError } = await supabase.from('pedidos').insert({
+      const payload = {
         comercio_id: comercioId,
         estado: 'pendiente',
         total: cartTotal,
         detalles,
-      });
+        cliente_email: email,
+      };
+
+      // Optional persistence: if schema differs, it should not block WhatsApp flow.
+      let { error: insertError } = await supabase.from('pedidos').insert(payload);
+
+      if (insertError?.message?.toLowerCase().includes('cliente_email')) {
+        const fallbackPayload = {
+          comercio_id: comercioId,
+          estado: 'pendiente',
+          total: cartTotal,
+          detalles,
+        };
+        const fallbackResult = await supabase.from('pedidos').insert(fallbackPayload);
+        insertError = fallbackResult.error;
+      }
 
       if (insertError) {
         console.warn('No se pudo guardar pedido en Supabase (opcional):', insertError.message);
@@ -348,28 +369,49 @@ export default function PublicMenuPage() {
   }
 
   async function confirmOrder() {
-    if (!whatsappNumber || cartItems.length === 0 || isSubmittingOrder) return;
+    if (!whatsappNumber || cartItems.length === 0 || isSubmittingOrder || !isClientEmailValid) return;
 
     const selectedMethod = selectedPaymentMethod();
 
     setIsSubmittingOrder(true);
     try {
       const orderId = orderIdFrom(comercioId);
-      await persistOrderOptional(orderId, selectedMethod);
+      await persistOrderOptional(orderId, normalizedClientEmail, selectedMethod);
 
       const orderUrl = `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`;
+      const emailFallbackUrl =
+        `https://www.google.com/search?q=${encodeURIComponent(orderUrl)}`;
       const paymentLabel = selectedMethod
         ? paymentMethodLabel(selectedMethod)
         : 'No especificado';
       const message =
         `¡Hola! Quiero hacer un pedido.\n` +
         `Metodo de pago: ${paymentLabel}.\n` +
+        `Correo del cliente: ${normalizedClientEmail}.\n` +
         `Adjunto el comprobante de pago en este chat.\n` +
         `Puedes ver los detalles aqui: ${orderUrl}`;
       const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
 
+      try {
+        await fetch('/api/send-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            clientEmail: normalizedClientEmail,
+            comercioNombre,
+            orderId,
+            orderTrackingUrl: emailFallbackUrl,
+          }),
+        });
+      } catch (sendEmailError) {
+        console.warn('No se pudo enviar email de respaldo:', sendEmailError);
+      }
+
       window.open(waUrl, '_blank', 'noopener,noreferrer');
       setCart({});
+      setClientEmail('');
       setIsConfirmOpen(false);
     } finally {
       setIsSubmittingOrder(false);
@@ -620,12 +662,36 @@ export default function PublicMenuPage() {
               <p className="text-xl font-black text-[#FFE5BC]">{formatCop(cartTotal)}</p>
             </div>
 
+            <div className="mt-4">
+              <label htmlFor="client-email" className="mb-2 block text-sm font-semibold text-[#F5D39A]">
+                Tu Correo Electrónico
+              </label>
+              <input
+                id="client-email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="tucorreo@ejemplo.com"
+                value={clientEmail}
+                onChange={(event) => setClientEmail(event.target.value)}
+                className="h-12 w-full rounded-xl border border-[#6B4A2A] bg-[#1F160F] px-4 text-base text-[#FFF3DE] outline-none transition placeholder:text-[#9D8266] focus:border-[#1AB15E] focus:ring-2 focus:ring-[#1AB15E]/25"
+              />
+              <p className="mt-2 text-xs text-[#CFAF85]">
+                Te enviaremos el enlace de seguimiento a este correo por si pierdes esta pestaña.
+              </p>
+              {clientEmail.trim().length > 0 && !isClientEmailValid ? (
+                <p className="mt-2 text-xs font-semibold text-[#F58C7E]">
+                  Ingresa un correo valido para continuar.
+                </p>
+              ) : null}
+            </div>
+
             <button
               type="button"
               onClick={() => void confirmOrder()}
-              disabled={isSubmittingOrder}
+              disabled={isSubmittingOrder || !isClientEmailValid}
               className={`mt-4 w-full rounded-full px-5 py-3 text-sm font-extrabold transition ${
-                isSubmittingOrder
+                isSubmittingOrder || !isClientEmailValid
                   ? 'cursor-not-allowed bg-[#5A4A38] text-[#C3B299]'
                   : 'bg-[#1AB15E] text-white hover:bg-[#159650]'
               }`}

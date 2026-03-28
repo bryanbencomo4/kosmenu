@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
+import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/public_menu_view.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -44,6 +45,23 @@ Future<void> _initializeSupabase() {
 class KosmenuApp extends StatelessWidget {
   const KosmenuApp({super.key});
 
+  String _resolveInitialRoute() {
+    if (kIsWeb) {
+      return Uri.base.path.isEmpty ? '/' : Uri.base.path;
+    }
+
+    final defaultRouteName = WidgetsBinding
+        .instance
+        .platformDispatcher
+        .defaultRouteName;
+
+    if (defaultRouteName.isEmpty || defaultRouteName == '/') {
+      return '/';
+    }
+
+    return defaultRouteName;
+  }
+
   Route<dynamic> _onGenerateRoute(RouteSettings settings) {
     final routeName = settings.name ?? '/';
     final uri = Uri.parse(routeName.isEmpty ? '/' : routeName);
@@ -53,6 +71,14 @@ class KosmenuApp extends StatelessWidget {
       return MaterialPageRoute(
         settings: settings,
         builder: (_) => PublicMenuView(comercioId: comercioId),
+      );
+    }
+
+    if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'orders') {
+      final orderId = uri.pathSegments[1];
+      return MaterialPageRoute(
+        settings: settings,
+        builder: (_) => OrderDetailScreen(orderId: orderId),
       );
     }
 
@@ -76,9 +102,7 @@ class KosmenuApp extends StatelessWidget {
     return MaterialApp(
       title: 'Kosmenu',
       debugShowCheckedModeBanner: false,
-      initialRoute: kIsWeb
-          ? (Uri.base.path.isEmpty ? '/' : Uri.base.path)
-          : '/',
+      initialRoute: _resolveInitialRoute(),
       onGenerateRoute: _onGenerateRoute,
       theme: baseTheme.copyWith(
         textTheme: GoogleFonts.poppinsTextTheme(baseTheme.textTheme),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +9,7 @@ import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
+import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -22,6 +25,9 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   late Future<_DashboardData> _dashboardFuture;
   late Stream<List<PedidoModel>> _recentOrdersStream;
+  StreamSubscription<List<PedidoModel>>? _recentOrdersSubscription;
+  Set<String> _seenOrderIds = <String>{};
+  bool _didPrimeOrderAlert = false;
 
   bool get _hasWebUrlConfigured => AppLinks.productionUrl.trim().isNotEmpty;
 
@@ -30,6 +36,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     super.initState();
     _dashboardFuture = _fetchDashboardData();
     _recentOrdersStream = _buildRecentOrdersStream();
+    _subscribeToRecentOrders();
+  }
+
+  @override
+  void dispose() {
+    _recentOrdersSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _openMagicOnboarding() async {
@@ -42,6 +55,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _dashboardFuture = _fetchDashboardData();
         _recentOrdersStream = _buildRecentOrdersStream();
       });
+      _subscribeToRecentOrders();
     }
   }
 
@@ -51,6 +65,65 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       _dashboardFuture = _fetchDashboardData();
       _recentOrdersStream = _buildRecentOrdersStream();
     });
+    _subscribeToRecentOrders();
+  }
+
+  void _subscribeToRecentOrders() {
+    _recentOrdersSubscription?.cancel();
+    _seenOrderIds = <String>{};
+    _didPrimeOrderAlert = false;
+
+    _recentOrdersSubscription = _recentOrdersStream.listen((orders) {
+      final currentIds = orders.map((order) => order.id).toSet();
+
+      if (!_didPrimeOrderAlert) {
+        _seenOrderIds = currentIds;
+        _didPrimeOrderAlert = true;
+        return;
+      }
+
+      final newOrders = orders
+          .where((order) => !_seenOrderIds.contains(order.id))
+          .toList();
+
+      _seenOrderIds = currentIds;
+
+      if (newOrders.isEmpty || !mounted) return;
+
+      SystemSound.play(SystemSoundType.alert);
+      final latestOrder = newOrders.first;
+      final orderLabel = latestOrder.orderId ?? latestOrder.id;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Nuevo pedido recibido: $orderLabel'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    });
+  }
+
+  Future<void> _openOrderDetail(PedidoModel pedido) async {
+    final orderId = pedido.orderId;
+    if (orderId == null || orderId.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Este pedido no tiene ORDER_ID disponible.')),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OrderDetailScreen(orderId: orderId),
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _dashboardFuture = _fetchDashboardData();
+      _recentOrdersStream = _buildRecentOrdersStream();
+    });
+    _subscribeToRecentOrders();
   }
 
   Future<void> _openPublicMenu() async {
@@ -540,16 +613,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           (pedido) => Card(
                             color: const Color(0xFF17120E),
                             child: ListTile(
+                              onTap: pedido.orderId != null
+                                  ? () => _openOrderDetail(pedido)
+                                  : null,
                               title: Text(
-                                'Pedido ${pedido.id.substring(0, pedido.id.length < 8 ? pedido.id.length : 8)}',
+                                'Pedido ${(pedido.orderId ?? pedido.id).substring(0, (pedido.orderId ?? pedido.id).length < 16 ? (pedido.orderId ?? pedido.id).length : 16)}',
                                 style: const TextStyle(color: Colors.white),
                               ),
                               subtitle: Text(
-                                pedido.createdAt != null
-                                    ? 'Fecha: ${pedido.createdAt}'
-                                    : 'Fecha no disponible',
+                                pedido.clienteEmail != null &&
+                                        pedido.clienteEmail!.trim().isNotEmpty
+                                    ? '${pedido.clienteEmail}\n${pedido.metodoPago ?? 'Método sin definir'}'
+                                    : (pedido.createdAt != null
+                                          ? 'Fecha: ${pedido.createdAt}'
+                                          : 'Fecha no disponible'),
                                 style: const TextStyle(color: Colors.white70),
                               ),
+                              isThreeLine: pedido.clienteEmail != null &&
+                                  pedido.clienteEmail!.trim().isNotEmpty,
                               trailing: Text(
                                 pedido.total != null
                                     ? '\$${pedido.total!.toStringAsFixed(2)}'
