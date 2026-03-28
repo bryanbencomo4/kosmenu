@@ -364,6 +364,7 @@ export default function PublicMenuPage() {
       const message =
         `¡Hola! Quiero hacer un pedido.\n` +
         `Metodo de pago: ${paymentLabel}.\n` +
+        `Adjunto el comprobante de pago en este chat.\n` +
         `Puedes ver los detalles aqui: ${orderUrl}`;
       const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
 
@@ -564,6 +565,9 @@ export default function PublicMenuPage() {
 
             <p className="mt-2 text-sm text-[#D8C6AE]">
               Selecciona como deseas pagar para incluirlo en el mensaje al restaurante.
+            </p>
+            <p className="mt-1 text-xs text-[#CFAF85]">
+              Importante: al enviar el pedido por WhatsApp, adjunta el comprobante de pago.
             </p>
 
             <div className="mt-4 space-y-3">
