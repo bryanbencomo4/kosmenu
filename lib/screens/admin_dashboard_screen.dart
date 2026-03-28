@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
@@ -17,11 +18,13 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   late Future<_DashboardData> _dashboardFuture;
+  late Stream<List<PedidoModel>> _recentOrdersStream;
 
   @override
   void initState() {
     super.initState();
     _dashboardFuture = _fetchDashboardData();
+    _recentOrdersStream = _buildRecentOrdersStream();
   }
 
   Future<void> _openMagicOnboarding() async {
@@ -32,8 +35,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (didSaveMenu == true && mounted) {
       setState(() {
         _dashboardFuture = _fetchDashboardData();
+        _recentOrdersStream = _buildRecentOrdersStream();
       });
     }
+  }
+
+  Stream<List<PedidoModel>> _buildRecentOrdersStream() {
+    return Supabase.instance.client
+        .from('pedidos')
+        .stream(primaryKey: ['id'])
+        .eq('comercio_id', SupabaseConfig.currentComercioId)
+        .order('created_at', ascending: false)
+        .limit(5)
+        .map(
+          (rows) => rows
+              .map((row) => PedidoModel.fromMap(Map<String, dynamic>.from(row)))
+              .toList(),
+        );
   }
 
   Future<_DashboardData> _fetchDashboardData() async {
@@ -58,18 +76,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .from('productos')
         .select('id')
         .eq('comercio_id', SupabaseConfig.currentComercioId);
-    final pedidosFuture = client
-        .from('pedidos')
-        .select()
-        .eq('comercio_id', SupabaseConfig.currentComercioId)
-        .order('created_at', ascending: false)
-        .limit(5);
-
     final results = await Future.wait<dynamic>([
       comercioFuture,
       categoriasFuture,
       productosFuture,
-      pedidosFuture,
     ]);
 
     return _DashboardData(
@@ -80,11 +90,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       ),
       categoryCount: (results[1] as List<dynamic>).length,
       productCount: (results[2] as List<dynamic>).length,
-      recentOrders: (results[3] as List<dynamic>)
-          .map(
-            (row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)),
-          )
-          .toList(),
     );
   }
 
@@ -250,37 +255,72 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              if (data.recentOrders.isEmpty)
-                const Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('No hay pedidos recientes'),
-                  ),
-                )
-              else
-                ...data.recentOrders.map(
-                  (pedido) => Card(
-                    child: ListTile(
-                      title: Text(
-                        'Pedido ${pedido.id.substring(0, pedido.id.length < 8 ? pedido.id.length : 8)}',
+              StreamBuilder<List<PedidoModel>>(
+                stream: _recentOrdersStream,
+                builder: (context, ordersSnapshot) {
+                  if (ordersSnapshot.connectionState ==
+                          ConnectionState.waiting &&
+                      !ordersSnapshot.hasData) {
+                    return const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Center(child: CircularProgressIndicator()),
                       ),
-                      subtitle: Text(
-                        pedido.createdAt != null
-                            ? 'Fecha: ${pedido.createdAt}'
-                            : 'Fecha no disponible',
-                      ),
-                      trailing: Text(
-                        pedido.total != null
-                            ? '\$${pedido.total!.toStringAsFixed(2)}'
-                            : pedido.estado ?? 'Pendiente',
-                        style: const TextStyle(
-                          color: Color(0xFFFF6B00),
-                          fontWeight: FontWeight.w700,
+                    );
+                  }
+
+                  if (ordersSnapshot.hasError) {
+                    return Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'Error cargando pedidos: ${ordersSnapshot.error}',
                         ),
                       ),
-                    ),
-                  ),
-                ),
+                    );
+                  }
+
+                  final recentOrders =
+                      ordersSnapshot.data ?? const <PedidoModel>[];
+
+                  if (recentOrders.isEmpty) {
+                    return const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('No hay pedidos recientes'),
+                      ),
+                    );
+                  }
+
+                  return Column(
+                    children: recentOrders
+                        .map(
+                          (pedido) => Card(
+                            child: ListTile(
+                              title: Text(
+                                'Pedido ${pedido.id.substring(0, pedido.id.length < 8 ? pedido.id.length : 8)}',
+                              ),
+                              subtitle: Text(
+                                pedido.createdAt != null
+                                    ? 'Fecha: ${pedido.createdAt}'
+                                    : 'Fecha no disponible',
+                              ),
+                              trailing: Text(
+                                pedido.total != null
+                                    ? '\$${pedido.total!.toStringAsFixed(2)}'
+                                    : pedido.estado ?? 'Pendiente',
+                                style: const TextStyle(
+                                  color: Color(0xFFFF6B00),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
+              ),
             ],
           );
         },
@@ -293,13 +333,11 @@ class _DashboardData {
   final ComercioModel comercio;
   final int categoryCount;
   final int productCount;
-  final List<PedidoModel> recentOrders;
 
   const _DashboardData({
     required this.comercio,
     required this.categoryCount,
     required this.productCount,
-    required this.recentOrders,
   });
 }
 
