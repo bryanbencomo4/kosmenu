@@ -15,12 +15,17 @@ class CatalogModel {
 
   factory CatalogModel.fromMap(Map<String, dynamic> map) {
     final ordenValue = map['orden'];
+    final parsedOrden = ordenValue is num
+        ? ordenValue.toInt()
+        : int.tryParse('$ordenValue') ??
+            double.tryParse('$ordenValue')?.toInt() ??
+            0;
 
     return CatalogModel(
       id: map['id']?.toString() ?? '',
       comercioId: map['comercio_id']?.toString() ?? '',
       nombre: map['nombre']?.toString() ?? '',
-      orden: ordenValue is int ? ordenValue : int.tryParse('$ordenValue') ?? 0,
+      orden: parsedOrden,
       activo: map['activo'] is bool ? map['activo'] as bool : true,
     );
   }

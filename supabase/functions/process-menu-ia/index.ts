@@ -17,6 +17,11 @@ type ParsedMenu = {
   categorias: Category[];
 };
 
+type CatalogRecord = {
+  id: string;
+  nombre: string;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -27,6 +32,7 @@ const SYSTEM_PROMPT =
   'Analiza la imagen del menu y responde SOLO JSON valido con la forma exacta: ' +
   '{"categorias":[{"nombre":"Nombre de Categoria","productos":[{"nombre":"Plato","descripcion":"Detalles","precio":10.99}]}]}. ' +
   'No agregues texto fuera del JSON. Si un precio no esta visible, usa 0.0.';
+const DEFAULT_CATALOG_NAME = 'Menú Principal';
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -80,6 +86,8 @@ Deno.serve(async (req: Request) => {
       auth: { persistSession: false },
     });
 
+    const catalog = await ensureCatalogForComercio(supabase, comercioId);
+
     let createdCategories = 0;
     let createdProducts = 0;
 
@@ -90,6 +98,7 @@ Deno.serve(async (req: Request) => {
         .from('categorias')
         .insert({
           comercio_id: comercioId,
+          catalogo_id: catalog.id,
           nombre: (category.nombre || 'Categoria').trim(),
           orden: i,
           creado_por_ia: true,
@@ -128,6 +137,8 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         ok: true,
         comercio_id: comercioId,
+        catalog_id: catalog.id,
+        catalog_name: catalog.nombre,
         created_categories: createdCategories,
         created_products: createdProducts,
         parsed_menu: aiMenu,
@@ -250,6 +261,53 @@ async function extractMenuWithOpenAI(imageUrl: string, openAiKey: string): Promi
   }));
 
   return parsed;
+}
+
+async function ensureCatalogForComercio(
+  supabase: ReturnType<typeof createClient>,
+  comercioId: string,
+): Promise<CatalogRecord> {
+  const { data: existingCatalog, error: existingCatalogError } = await supabase
+    .from('catalogos')
+    .select('id, nombre')
+    .eq('comercio_id', comercioId)
+    .order('orden', { ascending: true })
+    .order('nombre', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingCatalogError) {
+    throw new Error(`Error loading catalogo: ${existingCatalogError.message}`);
+  }
+
+  if (existingCatalog?.id) {
+    return {
+      id: existingCatalog.id as string,
+      nombre: (existingCatalog.nombre || DEFAULT_CATALOG_NAME).toString(),
+    };
+  }
+
+  const { data: createdCatalog, error: createdCatalogError } = await supabase
+    .from('catalogos')
+    .insert({
+      comercio_id: comercioId,
+      nombre: DEFAULT_CATALOG_NAME,
+      orden: 0,
+      activo: true,
+    })
+    .select('id, nombre')
+    .single();
+
+  if (createdCatalogError || !createdCatalog?.id) {
+    throw new Error(
+      `Error creating catalogo: ${createdCatalogError?.message || 'missing catalog id'}`,
+    );
+  }
+
+  return {
+    id: createdCatalog.id as string,
+    nombre: (createdCatalog.nombre || DEFAULT_CATALOG_NAME).toString(),
+  };
 }
 
 function normalizePrice(value: unknown): number {

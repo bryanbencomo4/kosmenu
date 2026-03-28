@@ -118,7 +118,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
     if (_selectedCategoryId == null || _selectedCategoryId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona un catálogo válido.')),
+        const SnackBar(content: Text('Selecciona una categoría válida.')),
       );
       return;
     }
@@ -201,6 +201,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               final imagePanel = _ImagePanel(
                 previewImagePath: previewImage,
                 imageUrl: _imageUrl,
+                heroTag: widget.product != null
+                    ? 'hero-product-image-${widget.product!.id}'
+                    : null,
                 isSaving: _isSaving,
                 isUploadingImage: _isUploadingImage,
                 onPickImage: _pickImageFromGallery,
@@ -279,6 +282,7 @@ class _ImagePanel extends StatelessWidget {
   const _ImagePanel({
     required this.previewImagePath,
     required this.imageUrl,
+    required this.heroTag,
     required this.isSaving,
     required this.isUploadingImage,
     required this.onPickImage,
@@ -286,9 +290,15 @@ class _ImagePanel extends StatelessWidget {
 
   final String? previewImagePath;
   final String? imageUrl;
+  final String? heroTag;
   final bool isSaving;
   final bool isUploadingImage;
   final VoidCallback onPickImage;
+
+  Widget _wrapHero(Widget child) {
+    if (heroTag == null || heroTag!.isEmpty) return child;
+    return Hero(tag: heroTag!, child: child);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -312,23 +322,27 @@ class _ImagePanel extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           if (previewImagePath != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.file(
-                File(previewImagePath!),
-                fit: BoxFit.cover,
-                height: 230,
-                width: double.infinity,
+            _wrapHero(
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.file(
+                  File(previewImagePath!),
+                  fit: BoxFit.cover,
+                  height: 230,
+                  width: double.infinity,
+                ),
               ),
             )
           else if (imageUrl != null && imageUrl!.trim().isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                imageUrl!,
-                fit: BoxFit.cover,
-                height: 230,
-                width: double.infinity,
+            _wrapHero(
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  imageUrl!,
+                  fit: BoxFit.cover,
+                  height: 230,
+                  width: double.infinity,
+                ),
               ),
             )
           else
@@ -409,11 +423,16 @@ class _FormPanel extends StatelessWidget {
           children: [
             DropdownButtonFormField<String>(
               initialValue: effectiveCategoryId,
+              isExpanded: true,
               items: categories
                   .map(
                     (category) => DropdownMenuItem<String>(
                       value: category.id,
-                      child: Text(category.nombre),
+                      child: Text(
+                        category.nombre,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),

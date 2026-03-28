@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -35,14 +37,34 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
 
   Future<void> _loadCatalogs() async {
     if (!mounted) return;
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    print('DEBUG: Buscando catálogos para comercio: $comercioId');
+
+    if (comercioId.isEmpty) {
+      setState(() {
+        _catalogs = <CatalogModel>[];
+        _loading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay comercio_id configurado para cargar catálogos.'),
+        ),
+      );
+      return;
+    }
+
     setState(() => _loading = true);
     try {
       final rows = await Supabase.instance.client
           .from('catalogos')
           .select()
-          .eq('comercio_id', SupabaseConfig.currentComercioId)
+          .eq('comercio_id', comercioId)
           .order('orden', ascending: true)
           .order('nombre', ascending: true);
+
+      print('DEBUG: response.status: success');
+      print('DEBUG: response.data: $rows');
+      print('DEBUG: Resultado de Supabase: $rows');
 
       final catalogs = (rows as List<dynamic>)
           .map((row) => CatalogModel.fromMap(Map<String, dynamic>.from(row as Map)))
@@ -51,6 +73,8 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
       if (!mounted) return;
       setState(() => _catalogs = catalogs);
     } catch (error) {
+      print('DEBUG: response.status: error');
+      print('DEBUG: response.data: null');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudieron cargar catálogos: $error')),

@@ -17,6 +17,14 @@ type ParsedMenu = {
   categorias: Category[];
 };
 
+type CatalogRecord = {
+  id: string;
+  nombre: string;
+  orden: number;
+  activo: boolean;
+  created: boolean;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -28,6 +36,7 @@ const PROMPT =
   '{"categorias": [{"nombre": "...", "productos": [{"nombre": "...", "descripcion": "...", "precio": 0.0}]}]}';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_CATALOG_NAME = 'Menú Principal';
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -42,6 +51,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const imageUrl: string | undefined = body.image_url ?? body.imageUrl;
     const comercioId: string | undefined = body.comercio_id ?? body.comercioId;
+    const requestedCatalogName = normalizeCatalogName(body.catalog_name ?? body.nombre_catalogo);
 
     if (!imageUrl || !comercioId) {
       return jsonResponse(
@@ -70,6 +80,12 @@ Deno.serve(async (req: Request) => {
       auth: { persistSession: false },
     });
 
+    const catalog = await ensureCatalogForComercio(
+      supabase,
+      comercioId,
+      requestedCatalogName,
+    );
+
     let createdCategories = 0;
     let createdProducts = 0;
 
@@ -80,6 +96,7 @@ Deno.serve(async (req: Request) => {
         .from('categorias')
         .insert({
           comercio_id: comercioId,
+          catalogo_id: catalog.id,
           nombre: (category.nombre || 'Categoria').trim(),
           orden: i,
           creado_por_ia: true,
@@ -119,6 +136,11 @@ Deno.serve(async (req: Request) => {
       {
         ok: true,
         comercio_id: comercioId,
+        catalog_id: catalog.id,
+        catalog_name: catalog.nombre,
+        catalog_order: catalog.orden,
+        catalog_active: catalog.activo,
+        catalog_created: catalog.created,
         created_categories: createdCategories,
         created_products: createdProducts,
         parsed_menu: parsedMenu,
@@ -202,6 +224,95 @@ async function extractMenuWithGemini(imageUrl: string, apiKey: string): Promise<
   }));
 
   return parsed;
+}
+
+async function ensureCatalogForComercio(
+  supabase: ReturnType<typeof createClient>,
+  comercioId: string,
+  requestedName?: string,
+): Promise<CatalogRecord> {
+  const catalogName = normalizeCatalogName(requestedName);
+  const { data: existingCatalog, error: existingCatalogError } = await supabase
+    .from('catalogos')
+    .select('id, nombre, orden, activo')
+    .eq('comercio_id', comercioId)
+    .eq('nombre', catalogName)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingCatalogError) {
+    throw new Error(`Error loading catalogo: ${existingCatalogError.message}`);
+  }
+
+  if (existingCatalog?.id) {
+    return {
+      id: existingCatalog.id as string,
+      nombre: (existingCatalog.nombre || catalogName).toString(),
+      orden: parseOrderValue(existingCatalog.orden),
+      activo: existingCatalog.activo !== false,
+      created: false,
+    };
+  }
+
+  const { data: orderRows, error: orderError } = await supabase
+    .from('catalogos')
+    .select('orden')
+    .eq('comercio_id', comercioId);
+
+  if (orderError) {
+    throw new Error(`Error loading catalogos order: ${orderError.message}`);
+  }
+
+  let nextOrder = 0;
+  for (const row of orderRows || []) {
+    const parsed = parseOrderValue((row as { orden?: unknown }).orden);
+    if (parsed >= nextOrder) {
+      nextOrder = parsed + 1;
+    }
+  }
+
+  const { data: createdCatalog, error: createdCatalogError } = await supabase
+    .from('catalogos')
+    .insert({
+      comercio_id: comercioId,
+      nombre: catalogName,
+      orden: nextOrder,
+      activo: true,
+    })
+    .select('id, nombre, orden, activo')
+    .single();
+
+  if (createdCatalogError || !createdCatalog?.id) {
+    throw new Error(
+      `Error creating catalogo: ${createdCatalogError?.message || 'missing catalog id'}`,
+    );
+  }
+
+  return {
+    id: createdCatalog.id as string,
+    nombre: (createdCatalog.nombre || catalogName).toString(),
+    orden: parseOrderValue(createdCatalog.orden),
+    activo: createdCatalog.activo !== false,
+    created: true,
+  };
+}
+
+function normalizeCatalogName(value: unknown): string {
+  const raw = value?.toString().trim();
+  return raw != null && raw.length > 0 ? raw : DEFAULT_CATALOG_NAME;
+}
+
+function parseOrderValue(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim().replaceAll(',', '.'));
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+  }
+
+  return 0;
 }
 
 function parseMenuJson(rawText: string): ParsedMenu {

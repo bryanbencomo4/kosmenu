@@ -171,14 +171,28 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
     if (confirmed != true) return;
 
+    final previous = List<ProductModel>.from(_products);
+    if (!mounted) return;
+    setState(() {
+      _products = _products.where((item) => item.id != product.id).toList();
+    });
+
     try {
-      await Supabase.instance.client
+      final deletedRows = await Supabase.instance.client
           .from('productos')
           .delete()
-          .eq('id', product.id);
-        await _loadProducts(reset: true);
+          .eq('id', product.id)
+          .select('id');
+
+      final deletedCount = (deletedRows as List<dynamic>).length;
+      if (deletedCount == 0) {
+        throw Exception(
+          'No se pudo confirmar el borrado en la base de datos.',
+        );
+      }
     } catch (error) {
       if (!mounted) return;
+      setState(() => _products = previous);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo eliminar producto: $error')),
       );

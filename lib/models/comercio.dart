@@ -2,6 +2,7 @@ class ComercioModel {
   final String id;
   final String nombre;
   final String? whatsapp;
+  final bool enLinea;
   final bool? creadoPorIa;
   final double? confianzaIa;
 
@@ -9,6 +10,7 @@ class ComercioModel {
     required this.id,
     required this.nombre,
     this.whatsapp,
+    this.enLinea = true,
     this.creadoPorIa,
     this.confianzaIa,
   });
@@ -20,6 +22,7 @@ class ComercioModel {
       id: map['id']?.toString() ?? '',
       nombre: map['nombre']?.toString() ?? 'Comercio',
       whatsapp: map['whatsapp']?.toString(),
+        enLinea: map['en_linea'] is bool ? map['en_linea'] as bool : true,
       creadoPorIa: map['creado_por_ia'] as bool?,
       confianzaIa: confianzaValue is num
           ? confianzaValue.toDouble()
@@ -32,6 +35,7 @@ class ComercioModel {
       'id': id,
       'nombre': nombre,
       'whatsapp': whatsapp,
+      'en_linea': enLinea,
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,
     };
