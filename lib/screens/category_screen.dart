@@ -14,6 +14,7 @@ class CatalogListScreen extends StatefulWidget {
 
 class _CatalogListScreenState extends State<CatalogListScreen> {
   bool _loading = true;
+  bool _supportsActivoColumn = true;
   List<CategoryModel> _catalogs = <CategoryModel>[];
 
   @override
@@ -76,7 +77,7 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
           textCapitalization: TextCapitalization.words,
           style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
-            labelText: 'Nombre del catálogo',
+            labelText: 'Nombre de la categoría',
           ),
         ),
         actions: [
@@ -97,7 +98,7 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
   }
 
   Future<void> _createCatalog() async {
-    final name = await _showCatalogNameDialog(title: 'Nuevo Catálogo');
+    final name = await _showCatalogNameDialog(title: 'Nueva Categoría');
     if (name == null || name.isEmpty) return;
 
     try {
@@ -105,25 +106,40 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
           ? 0
           : _catalogs.map((c) => c.orden).reduce((a, b) => a > b ? a : b) + 1;
 
-      await Supabase.instance.client.from('categorias').insert({
+      final payload = <String, dynamic>{
         'comercio_id': SupabaseConfig.currentComercioId,
         'nombre': name,
         'orden': maxOrder,
-        'activo': true,
-      });
+      };
+
+      if (_supportsActivoColumn) {
+        payload['activo'] = true;
+      }
+
+      try {
+        await Supabase.instance.client.from('categorias').insert(payload);
+      } on PostgrestException catch (error) {
+        if (_isMissingActivoColumnError(error) && _supportsActivoColumn) {
+          _supportsActivoColumn = false;
+          payload.remove('activo');
+          await Supabase.instance.client.from('categorias').insert(payload);
+        } else {
+          rethrow;
+        }
+      }
 
       await _loadCatalogs();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo crear catálogo: $error')),
+        SnackBar(content: Text('No se pudo crear categoría: $error')),
       );
     }
   }
 
   Future<void> _editCatalog(CategoryModel catalog) async {
     final name = await _showCatalogNameDialog(
-      title: 'Editar Catálogo',
+      title: 'Editar Categoría',
       initialValue: catalog.nombre,
     );
     if (name == null || name.isEmpty) return;
@@ -138,12 +154,24 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo editar catálogo: $error')),
+        SnackBar(content: Text('No se pudo editar categoría: $error')),
       );
     }
   }
 
   Future<void> _toggleCatalogActive(CategoryModel catalog, bool value) async {
+    if (!_supportsActivoColumn) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'La visibilidad por categoría no está habilitada en esta base.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final previous = List<CategoryModel>.from(_catalogs);
 
     setState(() {
@@ -170,6 +198,23 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
           .from('categorias')
           .update({'activo': value})
           .eq('id', catalog.id);
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      if (_isMissingActivoColumnError(error)) {
+        setState(() {
+          _catalogs = previous;
+          _supportsActivoColumn = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Tu tabla categorias no tiene la columna activo. Se desactivó ese control.',
+            ),
+          ),
+        );
+        return;
+      }
+      rethrow;
     } catch (error) {
       if (!mounted) return;
       setState(() => _catalogs = previous);
@@ -184,7 +229,7 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A140E),
-        title: const Text('Eliminar catálogo'),
+        title: const Text('Eliminar categoría'),
         content: Text(
           '¿Seguro que deseas eliminar "${catalog.nombre}"? Esta acción no se puede deshacer.',
         ),
@@ -216,9 +261,15 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo eliminar catálogo: $error')),
+        SnackBar(content: Text('No se pudo eliminar categoría: $error')),
       );
     }
+  }
+
+  bool _isMissingActivoColumnError(PostgrestException error) {
+    final code = (error.code ?? '').toUpperCase();
+    final message = error.message.toLowerCase();
+    return code == 'PGRST204' && message.contains('activo');
   }
 
   Future<void> _openCatalogProducts(CategoryModel category) async {
@@ -241,12 +292,12 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF17120E),
         foregroundColor: Colors.white,
-        title: const Text('Gestión de Catálogos'),
+        title: const Text('Gestión de Categorías'),
         actions: [
           IconButton(
             onPressed: _loading ? null : _createCatalog,
             icon: const Icon(Icons.add),
-            tooltip: 'Crear catálogo',
+            tooltip: 'Crear categoría',
           ),
         ],
       ),
@@ -255,7 +306,7 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
         backgroundColor: const Color(0xFF1AB15E),
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
-        label: const Text('Nuevo Catálogo'),
+        label: const Text('Nueva Categoría'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -304,7 +355,7 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
-                                  'Crea, edita y oculta catálogos. Toca una tarjeta para gestionar sus productos.',
+                                  'Crea y edita categorías. Toca una tarjeta para gestionar sus productos.',
                                   style: GoogleFonts.manrope(
                                     color: const Color(0xFFE4C8A5),
                                     fontWeight: FontWeight.w600,
@@ -318,7 +369,7 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
                           child: _catalogs.isEmpty
                               ? const Center(
                                   child: Text(
-                                    'No hay catálogos disponibles',
+                                    'No hay categorías disponibles',
                                     style: TextStyle(color: Colors.white70),
                                   ),
                                 )
@@ -334,6 +385,8 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
                                     final catalog = _catalogs[index];
                                     return _CatalogCard(
                                       catalog: catalog,
+                                      supportsActivoColumn:
+                                          _supportsActivoColumn,
                                       onOpen: () => _openCatalogProducts(catalog),
                                       onToggleActive: (value) =>
                                           _toggleCatalogActive(catalog, value),
@@ -356,6 +409,7 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
 class _CatalogCard extends StatelessWidget {
   const _CatalogCard({
     required this.catalog,
+    required this.supportsActivoColumn,
     required this.onOpen,
     required this.onToggleActive,
     required this.onEdit,
@@ -363,6 +417,7 @@ class _CatalogCard extends StatelessWidget {
   });
 
   final CategoryModel catalog;
+  final bool supportsActivoColumn;
   final VoidCallback onOpen;
   final ValueChanged<bool> onToggleActive;
   final VoidCallback onEdit;
@@ -399,7 +454,9 @@ class _CatalogCard extends StatelessWidget {
                   ),
                   Container(
                     decoration: BoxDecoration(
-                      color: const Color(0x2227C46B),
+                      color: supportsActivoColumn
+                          ? const Color(0x2227C46B)
+                          : const Color(0x22EFA355),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     padding: const EdgeInsets.symmetric(
@@ -407,10 +464,14 @@ class _CatalogCard extends StatelessWidget {
                       vertical: 6,
                     ),
                     child: Text(
-                      catalog.activo ? 'Activo' : 'Oculto',
+                      supportsActivoColumn
+                          ? (catalog.activo ? 'Activo' : 'Oculto')
+                          : 'Sin visibilidad',
                       style: TextStyle(
-                        color: catalog.activo
-                            ? const Color(0xFF46E18A)
+                        color: supportsActivoColumn
+                            ? (catalog.activo
+                                ? const Color(0xFF46E18A)
+                                : const Color(0xFFEFA355))
                             : const Color(0xFFEFA355),
                         fontWeight: FontWeight.w700,
                         fontSize: 12,
@@ -438,10 +499,20 @@ class _CatalogCard extends StatelessWidget {
                           'Visible en web',
                           style: TextStyle(color: Color(0xFFE6D7C4)),
                         ),
-                        Switch.adaptive(
-                          value: catalog.activo,
-                          onChanged: onToggleActive,
-                        ),
+                        if (supportsActivoColumn)
+                          Switch.adaptive(
+                            value: catalog.activo,
+                            onChanged: onToggleActive,
+                          )
+                        else
+                          const Padding(
+                            padding: EdgeInsets.only(left: 10),
+                            child: Icon(
+                              Icons.remove_circle_outline,
+                              color: Color(0xFFEFA355),
+                              size: 20,
+                            ),
+                          ),
                       ],
                     ),
                   ),

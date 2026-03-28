@@ -300,7 +300,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                               child: _products.isEmpty
                                   ? const Center(
                                       child: Text(
-                                        'No hay productos en este catálogo',
+                                        'No hay productos en esta categoría',
                                         style: TextStyle(color: Colors.white70),
                                       ),
                                     )

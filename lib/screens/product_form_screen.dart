@@ -391,6 +391,11 @@ class _FormPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final categoryIds = categories.map((category) => category.id).toSet();
+    final effectiveCategoryId = categoryIds.contains(selectedCategoryId)
+        ? selectedCategoryId
+        : null;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -403,7 +408,7 @@ class _FormPanel extends StatelessWidget {
         child: Column(
           children: [
             DropdownButtonFormField<String>(
-              initialValue: selectedCategoryId,
+              initialValue: effectiveCategoryId,
               items: categories
                   .map(
                     (category) => DropdownMenuItem<String>(
@@ -413,7 +418,7 @@ class _FormPanel extends StatelessWidget {
                   )
                   .toList(),
               onChanged: isSaving ? null : onCategoryChanged,
-              decoration: const InputDecoration(labelText: 'Catálogo'),
+              decoration: const InputDecoration(labelText: 'Categoría'),
             ),
             const SizedBox(height: 12),
             TextFormField(
