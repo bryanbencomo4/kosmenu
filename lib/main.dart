@@ -119,7 +119,11 @@ class _KosmenuAppState extends State<KosmenuApp> {
     }
 
     if (replaceStack) {
-      navigator.pushNamedAndRemoveUntil(routeName, (route) => false, arguments: uri.toString());
+      navigator.pushNamedAndRemoveUntil(
+        routeName,
+        (route) => route.isFirst,
+        arguments: uri.toString(),
+      );
       return;
     }
 

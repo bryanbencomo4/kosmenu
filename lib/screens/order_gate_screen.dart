@@ -19,6 +19,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
   final OrderGateHandler _handler = const OrderGateHandler();
 
   bool _loading = true;
+  String _title = 'Abriendo pedido';
   String _message = 'Validando acceso al pedido...';
   Uri? _fallbackUri;
   bool _showAccountMismatchNotice = false;
@@ -39,17 +40,15 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
       }
 
       if (decision.target == OrderGateTarget.app) {
-        Navigator.of(context).pushNamedAndRemoveUntil(
+        Navigator.of(context).pushReplacementNamed(
           '/orders/view/${Uri.encodeComponent(decision.orderId)}',
-          (route) => false,
         );
         return;
       }
 
       if (decision.target == OrderGateTarget.publicApp) {
-        Navigator.of(context).pushNamedAndRemoveUntil(
+        Navigator.of(context).pushReplacementNamed(
           '/orders/public/${Uri.encodeComponent(decision.orderId)}',
-          (route) => false,
         );
         return;
       }
@@ -59,7 +58,8 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
           _loading = false;
           _fallbackUri = decision.fallbackUri;
           _showAccountMismatchNotice = true;
-          _message = 'Este pedido no pertenece a la cuenta que tienes abierta.';
+          _title = 'Esta cuenta no puede gestionar este pedido';
+          _message = 'Abriste un pedido que pertenece a otro negocio. Si solo quieres consultarlo, puedes entrar como cliente y verificar el correo del pedido.';
         });
         return;
       }
@@ -70,6 +70,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
 
       setState(() {
         _loading = false;
+        _title = 'Abrir pedido en navegador';
         _fallbackUri = decision.fallbackUri;
         _showAccountMismatchNotice = false;
         _message = fallbackMessage;
@@ -83,6 +84,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
 
       setState(() {
         _loading = false;
+        _title = 'No pudimos abrir el pedido en la app';
         _fallbackUri = Uri.tryParse(
           'https://kosmenu.vercel.app/orders/${Uri.encodeComponent(widget.orderId)}?view=web',
         );
@@ -115,6 +117,12 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
     await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
   }
 
+  void _openPublicOrderView() {
+    Navigator.of(context).pushReplacementNamed(
+      '/orders/public/${Uri.encodeComponent(widget.orderId)}',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -142,7 +150,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
                   const SizedBox(height: 18),
                 ],
                 Text(
-                  'Acceso inteligente a pedidos',
+                  _title,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.manrope(
                     color: Colors.white,
@@ -163,7 +171,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
                 if (_showAccountMismatchNotice) ...[
                   const SizedBox(height: 18),
                   Text(
-                    'Cierra sesión e ingresa con la cuenta correcta si necesitas gestionar este pedido.',
+                    'Si necesitas administrarlo, cierra sesión e ingresa con la cuenta del vendedor correcto.',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.poppins(
                       color: const Color(0xFFBFA88B),
@@ -175,13 +183,17 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
                 if (!_loading && _fallbackUri != null) ...[
                   const SizedBox(height: 18),
                   FilledButton(
-                    onPressed: _openFallbackManually,
+                    onPressed: _showAccountMismatchNotice
+                        ? _openPublicOrderView
+                        : _openFallbackManually,
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFFF6B00),
                       foregroundColor: Colors.white,
                     ),
                     child: Text(
-                      _showAccountMismatchNotice ? 'Ver como cliente' : 'Abrir en navegador',
+                      _showAccountMismatchNotice
+                          ? 'Ver pedido como cliente'
+                          : 'Abrir en navegador',
                     ),
                   ),
                 ],
