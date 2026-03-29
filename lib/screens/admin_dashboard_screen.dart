@@ -11,7 +11,7 @@ import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/profile_screen.dart';
-import 'package:qr_flutter/qr_flutter.dart';
+import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -50,7 +50,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final List<_NewsItem> _newsItems = const [
     _NewsItem(
       title: 'Nuevos pedidos en tiempo real',
-      description: 'Activa notificaciones para responder mas rapido y vender mas.',
+      description:
+          'Activa notificaciones para responder mas rapido y vender mas.',
       icon: Icons.notifications_active_rounded,
       accent: Color(0xFFFFB04A),
     ),
@@ -62,7 +63,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     ),
     _NewsItem(
       title: 'Actualiza tus categorias',
-      description: 'Un menu ordenado aumenta conversion y reduce dudas del cliente.',
+      description:
+          'Un menu ordenado aumenta conversion y reduce dudas del cliente.',
       icon: Icons.auto_awesome_rounded,
       accent: Color(0xFF8BB3FF),
     ),
@@ -157,7 +159,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   : const Color(0x1A5AD8A6),
             ),
             child: Icon(
-              result.isNewCatalog ? Icons.fiber_new_rounded : Icons.flash_on_rounded,
+              result.isNewCatalog
+                  ? Icons.fiber_new_rounded
+                  : Icons.flash_on_rounded,
               color: result.isNewCatalog
                   ? const Color(0xFFFFB04A)
                   : const Color(0xFF5AD8A6),
@@ -169,7 +173,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  result.isNewCatalog ? 'Nuevo catálogo creado' : 'Catálogo actualizado',
+                  result.isNewCatalog
+                      ? 'Nuevo catálogo creado'
+                      : 'Catálogo actualizado',
                   style: GoogleFonts.poppins(
                     color: const Color(0xFFFFE2BF),
                     fontSize: 12,
@@ -267,7 +273,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.notifications_active, color: Color(0xFFFFB04A)),
+                    const Icon(
+                      Icons.notifications_active,
+                      color: Color(0xFFFFB04A),
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'Notificaciones',
@@ -292,19 +301,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     child: ListView.separated(
                       shrinkWrap: true,
                       itemCount: items.length,
-                      separatorBuilder: (_, index) => const Divider(
-                        color: Color(0x33FFFFFF),
-                        height: 1,
-                      ),
+                      separatorBuilder: (_, index) =>
+                          const Divider(color: Color(0x33FFFFFF), height: 1),
                       itemBuilder: (context, index) {
                         final item = items[index];
-                        final rawStatus =
-                            (item['estado']?.toString() ?? '').toLowerCase();
+                        final rawStatus = (item['estado']?.toString() ?? '')
+                            .toLowerCase();
                         final done = rawStatus.contains('complet');
                         final label = done ? 'Completado' : 'Pendiente';
-                        final color =
-                            done ? const Color(0xFF1AB15E) : const Color(0xFFFFB04A);
-                        final orderText = item['order_id']?.toString() ??
+                        final color = done
+                            ? const Color(0xFF1AB15E)
+                            : const Color(0xFFFFB04A);
+                        final orderText =
+                            item['order_id']?.toString() ??
                             item['id']?.toString() ??
                             'Pedido';
 
@@ -323,10 +332,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: Colors.white),
                           ),
-                          subtitle: Text(
-                            label,
-                            style: TextStyle(color: color),
-                          ),
+                          subtitle: Text(label, style: TextStyle(color: color)),
                         );
                       },
                     ),
@@ -341,7 +347,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Future<void> _editBusinessInfo(ComercioModel comercio) async {
     final nameController = TextEditingController(text: comercio.nombre);
-    final whatsappController = TextEditingController(text: comercio.whatsapp ?? '');
+    final whatsappController = TextEditingController(
+      text: comercio.whatsapp ?? '',
+    );
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -354,7 +362,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             TextField(
               controller: nameController,
               style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(labelText: 'Nombre del negocio'),
+              decoration: const InputDecoration(
+                labelText: 'Nombre del negocio',
+              ),
             ),
             const SizedBox(height: 10),
             TextField(
@@ -444,7 +454,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       if (!mounted) return;
       setState(() => _businessOnline = previous);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo actualizar estado en linea: $error')),
+        SnackBar(
+          content: Text('No se pudo actualizar estado en linea: $error'),
+        ),
       );
     } finally {
       if (mounted) {
@@ -492,15 +504,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (orderId == null || orderId.trim().isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Este pedido no tiene ORDER_ID disponible.')),
+        const SnackBar(
+          content: Text('Este pedido no tiene ORDER_ID disponible.'),
+        ),
       );
       return;
     }
 
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => OrderDetailScreen(orderId: orderId),
-      ),
+      MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)),
     );
 
     if (!mounted) return;
@@ -577,8 +589,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  void _showQRCode(BuildContext context) {
+  Future<void> _openQrGenerator() async {
     if (!SupabaseConfig.hasCurrentComercioId) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No hay comercio configurado para generar el QR.'),
@@ -587,29 +600,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
-    final finalUrl = AppLinks.publicMenuByComercio(
-      SupabaseConfig.currentComercioId,
-    );
-    debugPrint('URL GENERADA: $finalUrl');
+    final row = await Supabase.instance.client
+        .from('comercios')
+        .select()
+        .eq('id', SupabaseConfig.currentComercioId)
+        .limit(1)
+        .maybeSingle();
 
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Tu Menú Digital'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Escanea para ver el menú:'),
-            const SizedBox(height: 20),
-            QrImageView(data: finalUrl, version: QrVersions.auto, size: 200.0),
-          ],
+    if (!mounted) {
+      return;
+    }
+
+    final comercio = ComercioModel.fromMap(
+      Map<String, dynamic>.from((row as Map?) ?? const <String, dynamic>{}),
+    );
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => QrGeneratorScreen(
+          comercio: comercio,
+          comercioUrl: AppLinks.publicMenuByComercio(comercio.id),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cerrar'),
-          ),
-        ],
       ),
     );
   }
@@ -701,7 +712,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         await _openMagicOnboarding();
         break;
       case _NavbarMenuAction.qr:
-        _showQRCode(context);
+        await _openQrGenerator();
         break;
       case _NavbarMenuAction.refresh:
         await _refreshDashboard();
@@ -710,18 +721,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _openProfile() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ProfileScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
     if (!mounted) return;
     await _refreshDashboard();
   }
 
   Future<_DashboardData> _fetchDashboardData() async {
     if (!SupabaseConfig.hasCurrentComercioId) {
-      throw StateError(
-        'No hay un comercio activo asociado a esta sesion.',
-      );
+      throw StateError('No hay un comercio activo asociado a esta sesion.');
     }
 
     final client = Supabase.instance.client;
@@ -819,10 +828,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
               PopupMenuItem(
                 value: _NavbarMenuAction.qr,
-                child: _NavbarMenuItemRow(
-                  icon: Icons.qr_code,
-                  label: 'Ver QR',
-                ),
+                child: _NavbarMenuItemRow(icon: Icons.qr_code, label: 'Ver QR'),
               ),
               PopupMenuItem(
                 value: _NavbarMenuAction.refresh,
@@ -845,555 +851,570 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         child: FutureBuilder<_DashboardData>(
           future: _dashboardFuture,
           builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      colorScheme.secondary,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Cargando estadísticas...',
-                    style: GoogleFonts.poppins(color: Colors.white70),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  'Error cargando dashboard: ${snapshot.error}',
-                  style: const TextStyle(color: Colors.white),
-                ),
-              ),
-            );
-          }
-
-          final data = snapshot.data;
-          if (data == null) {
-            return const Center(
-              child: Text(
-                'No se pudo cargar el dashboard',
-                style: TextStyle(color: Colors.white),
-              ),
-            );
-          }
-
-          final webBadgeText = _hasWebUrlConfigured ? 'En Línea' : 'Sin URL';
-          final webBadgeColor = _hasWebUrlConfigured
-              ? const Color(0xFF1AB15E)
-              : const Color(0xFFE67E22);
-
-          if (!_didInitBusinessOnline) {
-            _businessOnline = data.comercio.enLinea;
-            _didInitBusinessOnline = true;
-          }
-
-          return RefreshIndicator(
-            onRefresh: _refreshDashboard,
-            color: const Color(0xFFFFB04A),
-            child: ListView(
-              controller: _dashboardScrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.fromLTRB(16, 16, 16, listBottomPadding),
-              children: [
-              _buildNewCatalogHighlight(),
-              _StaggeredReveal(
-                order: 1,
-                child: GridView.count(
-                  crossAxisCount: 3,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Hero(
-                      tag: 'hero-stat-productos',
-                      child: _StatCard(
-                        title: 'Productos',
-                        value: '${data.productCount}',
-                        icon: Icons.restaurant_menu,
+                    CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        colorScheme.secondary,
                       ),
                     ),
-                    _StatCard(
-                      title: 'Categorías',
-                      value: '${data.categoryCount}',
-                      icon: Icons.grid_view_rounded,
-                    ),
-                    _StatCard(
-                      title: 'Estado Web',
-                      value: webBadgeText,
-                      icon: Icons.public,
-                      valueColor: webBadgeColor,
+                    const SizedBox(height: 12),
+                    Text(
+                      'Cargando estadísticas...',
+                      style: GoogleFonts.poppins(color: Colors.white70),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 14),
-              _StaggeredReveal(
-                order: 2,
-                child: Card(
-                elevation: 3,
-                color: const Color(0x0017120E),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF2A1C12), Color(0xFF15100C)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    border: Border.all(color: const Color(0x55B07432)),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x33000000),
-                        blurRadius: 16,
-                        offset: Offset(0, 8),
-                      ),
-                    ],
+              );
+            }
+
+            if (snapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'Error cargando dashboard: ${snapshot.error}',
+                    style: const TextStyle(color: Colors.white),
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+              );
+            }
+
+            final data = snapshot.data;
+            if (data == null) {
+              return const Center(
+                child: Text(
+                  'No se pudo cargar el dashboard',
+                  style: TextStyle(color: Colors.white),
+                ),
+              );
+            }
+
+            final webBadgeText = _hasWebUrlConfigured ? 'En Línea' : 'Sin URL';
+            final webBadgeColor = _hasWebUrlConfigured
+                ? const Color(0xFF1AB15E)
+                : const Color(0xFFE67E22);
+
+            if (!_didInitBusinessOnline) {
+              _businessOnline = data.comercio.enLinea;
+              _didInitBusinessOnline = true;
+            }
+
+            return RefreshIndicator(
+              onRefresh: _refreshDashboard,
+              color: const Color(0xFFFFB04A),
+              child: ListView(
+                controller: _dashboardScrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.fromLTRB(16, 16, 16, listBottomPadding),
+                children: [
+                  _buildNewCatalogHighlight(),
+                  _StaggeredReveal(
+                    order: 1,
+                    child: GridView.count(
+                      crossAxisCount: 3,
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 10,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0x22FFB04A),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: const Color(0x44FFB04A)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.space_dashboard_rounded,
-                                size: 16,
-                                color: Color(0xFFFFC977),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Panel principal',
-                                style: GoogleFonts.poppins(
-                                  color: const Color(0xFFFFD49A),
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
+                        Hero(
+                          tag: 'hero-stat-productos',
+                          child: _StatCard(
+                            title: 'Productos',
+                            value: '${data.productCount}',
+                            icon: Icons.restaurant_menu,
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          data.comercio.nombre,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            height: 1.1,
-                          ),
+                        _StatCard(
+                          title: 'Categorías',
+                          value: '${data.categoryCount}',
+                          icon: Icons.grid_view_rounded,
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'Gestiona tu menú y tus pedidos desde un solo lugar.',
-                          style: GoogleFonts.poppins(
-                            color: const Color(0xFFE7CCAA),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final compact = constraints.maxWidth < 450;
-
-                            final manageButton = FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFFFF6B00),
-                                foregroundColor: Colors.white,
-                                minimumSize: const Size.fromHeight(52),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 14,
-                                ),
-                                textStyle: GoogleFonts.poppins(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 15,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => const CategoryListScreen(),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.inventory_2_outlined),
-                              label: const Text(
-                                'Administrar Menú',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            );
-
-                            final qrButton = OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFFFFC977),
-                                side: const BorderSide(
-                                  color: Color(0xFF7E5930),
-                                ),
-                                minimumSize: const Size.fromHeight(48),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                textStyle: GoogleFonts.poppins(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              onPressed: () => _showQRCode(context),
-                              icon: const Icon(Icons.qr_code_2),
-                              label: const Text(
-                                'Generar QR menú',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            );
-
-                            if (compact) {
-                              return Column(
-                                children: [
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: manageButton,
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Hero(
-                                    tag: 'hero-generate-qr-action',
-                                    child: SizedBox(
-                                      width: double.infinity,
-                                      child: qrButton,
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-
-                            return Row(
-                              children: [
-                                Expanded(child: manageButton),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Hero(
-                                    tag: 'hero-generate-qr-action',
-                                    child: qrButton,
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
+                        _StatCard(
+                          title: 'Estado Web',
+                          value: webBadgeText,
+                          icon: Icons.public,
+                          valueColor: webBadgeColor,
                         ),
                       ],
                     ),
                   ),
-                ),
-              )),
-              const SizedBox(height: 14),
-              _StaggeredReveal(
-                order: 3,
-                child: Card(
-                color: const Color(0xFF17120E),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Atajos y noticias',
-                        style: GoogleFonts.poppins(
-                          color: const Color(0xFFFFE2BF),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
+                  const SizedBox(height: 14),
+                  _StaggeredReveal(
+                    order: 2,
+                    child: Card(
+                      elevation: 3,
+                      color: const Color(0x0017120E),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24),
                       ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 140,
-                        child: PageView.builder(
-                          controller: _newsPageController,
-                          itemCount: _newsItems.length,
-                          onPageChanged: (index) {
-                            if (!mounted) return;
-                            setState(() => _activeNewsIndex = index);
-                          },
-                          itemBuilder: (context, index) {
-                            final item = _newsItems[index];
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: _NewsCard(item: item),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: List.generate(_newsItems.length, (index) {
-                          final active = index == _activeNewsIndex;
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 220),
-                            width: active ? 18 : 8,
-                            height: 8,
-                            margin: const EdgeInsets.only(right: 6),
-                            decoration: BoxDecoration(
-                              color: active
-                                  ? const Color(0xFFFFB04A)
-                                  : const Color(0x44FFFFFF),
-                              borderRadius: BorderRadius.circular(999),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24),
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF2A1C12), Color(0xFF15100C)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          border: Border.all(color: const Color(0x55B07432)),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x33000000),
+                              blurRadius: 16,
+                              offset: Offset(0, 8),
                             ),
-                          );
-                        }),
-                      ),
-                    ],
-                  ),
-                ),
-              )),
-              const SizedBox(height: 14),
-              _StaggeredReveal(
-                order: 4,
-                child: Card(
-                color: const Color(0xFF17120E),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Configuracion del negocio',
-                        style: GoogleFonts.poppins(
-                          color: const Color(0xFFFFE2BF),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(
-                          Icons.store_mall_directory_rounded,
-                          color: Color(0xFFFFB04A),
-                        ),
-                        title: Text(
-                          data.comercio.nombre,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                        subtitle: Text(
-                          data.comercio.whatsapp?.trim().isNotEmpty == true
-                              ? 'WhatsApp: ${data.comercio.whatsapp}'
-                              : 'Sin WhatsApp configurado',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                        trailing: TextButton.icon(
-                          onPressed: () => _editBusinessInfo(data.comercio),
-                          icon: const Icon(Icons.edit_outlined, size: 16),
-                          label: const Text('Editar'),
-                        ),
-                      ),
-                      const Divider(color: Color(0x33FFFFFF)),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text(
-                          'Negocio en linea',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                        subtitle: Text(
-                          _businessOnline
-                              ? 'Los clientes pueden realizar pedidos.'
-                              : 'Tu menu sigue visible, pero fuera de servicio.',
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                        value: _businessOnline,
-                        onChanged: _isUpdatingBusiness
-                            ? null
-                            : (value) => _updateBusinessOnline(value),
-                      ),
-                    ],
-                  ),
-                ),
-              )),
-              const SizedBox(height: 16),
-              _StaggeredReveal(
-                order: 5,
-                child: Text(
-                  'Pedidos',
-                  style: GoogleFonts.poppins(
-                    color: const Color(0xFFFFE2BF),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              _ElegantSearchBar(
-                controller: _ordersSearchController,
-                hintText: 'Buscar pedidos por ID, correo, estado o metodo...',
-                onChanged: (value) {
-                  if (!mounted) return;
-                  setState(() {
-                    _ordersSearchQuery = value;
-                    _visibleOrdersCount = 10;
-                  });
-                },
-                onClear: () {
-                  _ordersSearchController.clear();
-                  if (!mounted) return;
-                  setState(() {
-                    _ordersSearchQuery = '';
-                    _visibleOrdersCount = 10;
-                  });
-                },
-              ),
-              const SizedBox(height: 10),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: _OrderFilter.values.map((filter) {
-                    final selected = _orderFilter == filter;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        selected: selected,
-                        onSelected: (_) {
-                          if (!mounted) return;
-                          setState(() {
-                            _orderFilter = filter;
-                            _visibleOrdersCount = 10;
-                          });
-                        },
-                        label: Text(_orderFilterLabel(filter)),
-                        avatar: Icon(
-                          _orderFilterIcon(filter),
-                          size: 16,
-                          color: selected
-                              ? const Color(0xFF1A1209)
-                              : const Color(0xFFFFD49A),
-                        ),
-                        labelStyle: GoogleFonts.poppins(
-                          color: selected
-                              ? const Color(0xFF1A1209)
-                              : const Color(0xFFFFD49A),
-                          fontWeight: FontWeight.w600,
-                        ),
-                        selectedColor: const Color(0xFFFFB04A),
-                        backgroundColor: const Color(0xFF2A1C12),
-                        side: BorderSide(
-                          color: selected
-                              ? const Color(0xFFFFB04A)
-                              : const Color(0xFF5A4028),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        showCheckmark: false,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              StreamBuilder<List<PedidoModel>>(
-                stream: _recentOrdersStream,
-                builder: (context, ordersSnapshot) {
-                  if (ordersSnapshot.connectionState ==
-                          ConnectionState.waiting &&
-                      !ordersSnapshot.hasData) {
-                    return const Card(
-                      color: Color(0xFF17120E),
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                    );
-                  }
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0x22FFB04A),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: const Color(0x44FFB04A),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.space_dashboard_rounded,
+                                      size: 16,
+                                      color: Color(0xFFFFC977),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Panel principal',
+                                      style: GoogleFonts.poppins(
+                                        color: const Color(0xFFFFD49A),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                data.comercio.nombre,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.1,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Gestiona tu menú y tus pedidos desde un solo lugar.',
+                                style: GoogleFonts.poppins(
+                                  color: const Color(0xFFE7CCAA),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final compact = constraints.maxWidth < 450;
 
-                  if (ordersSnapshot.hasError) {
-                    return Card(
+                                  final manageButton = FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFFFF6B00),
+                                      foregroundColor: Colors.white,
+                                      minimumSize: const Size.fromHeight(52),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 14,
+                                      ),
+                                      textStyle: GoogleFonts.poppins(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const CategoryListScreen(),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.inventory_2_outlined,
+                                    ),
+                                    label: const Text(
+                                      'Administrar Menú',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  );
+
+                                  final qrButton = OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFFFC977),
+                                      side: const BorderSide(
+                                        color: Color(0xFF7E5930),
+                                      ),
+                                      minimumSize: const Size.fromHeight(48),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 12,
+                                      ),
+                                      textStyle: GoogleFonts.poppins(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
+                                    onPressed: _openQrGenerator,
+                                    icon: const Icon(Icons.qr_code_2),
+                                    label: const Text(
+                                      'Generar QR menú',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  );
+
+                                  if (compact) {
+                                    return Column(
+                                      children: [
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: manageButton,
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Hero(
+                                          tag: 'hero-generate-qr-action',
+                                          child: SizedBox(
+                                            width: double.infinity,
+                                            child: qrButton,
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  }
+
+                                  return Row(
+                                    children: [
+                                      Expanded(child: manageButton),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Hero(
+                                          tag: 'hero-generate-qr-action',
+                                          child: qrButton,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _StaggeredReveal(
+                    order: 3,
+                    child: Card(
                       color: const Color(0xFF17120E),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
-                        child: Text(
-                          'Error cargando pedidos: ${ordersSnapshot.error}',
-                          style: const TextStyle(color: Colors.white),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Atajos y noticias',
+                              style: GoogleFonts.poppins(
+                                color: const Color(0xFFFFE2BF),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              height: 140,
+                              child: PageView.builder(
+                                controller: _newsPageController,
+                                itemCount: _newsItems.length,
+                                onPageChanged: (index) {
+                                  if (!mounted) return;
+                                  setState(() => _activeNewsIndex = index);
+                                },
+                                itemBuilder: (context, index) {
+                                  final item = _newsItems[index];
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: _NewsCard(item: item),
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: List.generate(_newsItems.length, (
+                                index,
+                              ) {
+                                final active = index == _activeNewsIndex;
+                                return AnimatedContainer(
+                                  duration: const Duration(milliseconds: 220),
+                                  width: active ? 18 : 8,
+                                  height: 8,
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: active
+                                        ? const Color(0xFFFFB04A)
+                                        : const Color(0x44FFFFFF),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                );
+                              }),
+                            ),
+                          ],
                         ),
                       ),
-                    );
-                  }
-
-                  final orders = ordersSnapshot.data ?? const <PedidoModel>[];
-                  final filteredOrders = orders
-                      .where(_matchesOrderFilter)
-                      .where(_matchesOrderSearch)
-                      .toList();
-                  final visibleCount = _visibleOrdersCount < filteredOrders.length
-                      ? _visibleOrdersCount
-                      : filteredOrders.length;
-                  final visibleOrders = filteredOrders.take(visibleCount).toList();
-
-                  if (filteredOrders.isEmpty) {
-                    return const Card(
-                      color: Color(0xFF17120E),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _StaggeredReveal(
+                    order: 4,
+                    child: Card(
+                      color: const Color(0xFF17120E),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
                       child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text(
-                          'No hay pedidos para este filtro',
-                          style: TextStyle(color: Colors.white),
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Configuracion del negocio',
+                              style: GoogleFonts.poppins(
+                                color: const Color(0xFFFFE2BF),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(
+                                Icons.store_mall_directory_rounded,
+                                color: Color(0xFFFFB04A),
+                              ),
+                              title: Text(
+                                data.comercio.nombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              subtitle: Text(
+                                data.comercio.whatsapp?.trim().isNotEmpty ==
+                                        true
+                                    ? 'WhatsApp: ${data.comercio.whatsapp}'
+                                    : 'Sin WhatsApp configurado',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              trailing: TextButton.icon(
+                                onPressed: () =>
+                                    _editBusinessInfo(data.comercio),
+                                icon: const Icon(Icons.edit_outlined, size: 16),
+                                label: const Text('Editar'),
+                              ),
+                            ),
+                            const Divider(color: Color(0x33FFFFFF)),
+                            SwitchListTile.adaptive(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text(
+                                'Negocio en linea',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                              subtitle: Text(
+                                _businessOnline
+                                    ? 'Los clientes pueden realizar pedidos.'
+                                    : 'Tu menu sigue visible, pero fuera de servicio.',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              value: _businessOnline,
+                              onChanged: _isUpdatingBusiness
+                                  ? null
+                                  : (value) => _updateBusinessOnline(value),
+                            ),
+                          ],
                         ),
                       ),
-                    );
-                  }
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _StaggeredReveal(
+                    order: 5,
+                    child: Text(
+                      'Pedidos',
+                      style: GoogleFonts.poppins(
+                        color: const Color(0xFFFFE2BF),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _ElegantSearchBar(
+                    controller: _ordersSearchController,
+                    hintText:
+                        'Buscar pedidos por ID, correo, estado o metodo...',
+                    onChanged: (value) {
+                      if (!mounted) return;
+                      setState(() {
+                        _ordersSearchQuery = value;
+                        _visibleOrdersCount = 10;
+                      });
+                    },
+                    onClear: () {
+                      _ordersSearchController.clear();
+                      if (!mounted) return;
+                      setState(() {
+                        _ordersSearchQuery = '';
+                        _visibleOrdersCount = 10;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _OrderFilter.values.map((filter) {
+                        final selected = _orderFilter == filter;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            selected: selected,
+                            onSelected: (_) {
+                              if (!mounted) return;
+                              setState(() {
+                                _orderFilter = filter;
+                                _visibleOrdersCount = 10;
+                              });
+                            },
+                            label: Text(_orderFilterLabel(filter)),
+                            avatar: Icon(
+                              _orderFilterIcon(filter),
+                              size: 16,
+                              color: selected
+                                  ? const Color(0xFF1A1209)
+                                  : const Color(0xFFFFD49A),
+                            ),
+                            labelStyle: GoogleFonts.poppins(
+                              color: selected
+                                  ? const Color(0xFF1A1209)
+                                  : const Color(0xFFFFD49A),
+                              fontWeight: FontWeight.w600,
+                            ),
+                            selectedColor: const Color(0xFFFFB04A),
+                            backgroundColor: const Color(0xFF2A1C12),
+                            side: BorderSide(
+                              color: selected
+                                  ? const Color(0xFFFFB04A)
+                                  : const Color(0xFF5A4028),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            showCheckmark: false,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  StreamBuilder<List<PedidoModel>>(
+                    stream: _recentOrdersStream,
+                    builder: (context, ordersSnapshot) {
+                      if (ordersSnapshot.connectionState ==
+                              ConnectionState.waiting &&
+                          !ordersSnapshot.hasData) {
+                        return const Card(
+                          color: Color(0xFF17120E),
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Center(child: CircularProgressIndicator()),
+                          ),
+                        );
+                      }
 
-                  return Column(
-                    children: [
-                      ...visibleOrders
-                        .map(
-                          (pedido) {
+                      if (ordersSnapshot.hasError) {
+                        return Card(
+                          color: const Color(0xFF17120E),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              'Error cargando pedidos: ${ordersSnapshot.error}',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        );
+                      }
+
+                      final orders =
+                          ordersSnapshot.data ?? const <PedidoModel>[];
+                      final filteredOrders = orders
+                          .where(_matchesOrderFilter)
+                          .where(_matchesOrderSearch)
+                          .toList();
+                      final visibleCount =
+                          _visibleOrdersCount < filteredOrders.length
+                          ? _visibleOrdersCount
+                          : filteredOrders.length;
+                      final visibleOrders = filteredOrders
+                          .take(visibleCount)
+                          .toList();
+
+                      if (filteredOrders.isEmpty) {
+                        return const Card(
+                          color: Color(0xFF17120E),
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Text(
+                              'No hay pedidos para este filtro',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        );
+                      }
+
+                      return Column(
+                        children: [
+                          ...visibleOrders.map((pedido) {
                             final status = _getOrderStatus(pedido);
                             final statusColor = status == _OrderStatus.completed
                                 ? const Color(0xFF1AB15E)
@@ -1456,8 +1477,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                         vertical: 4,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: statusColor.withValues(alpha: 0.16),
-                                        borderRadius: BorderRadius.circular(999),
+                                        color: statusColor.withValues(
+                                          alpha: 0.16,
+                                        ),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
                                       ),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
@@ -1500,24 +1525,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 ),
                               ),
                             );
-                          },
-                        ),
-                      if (visibleCount < filteredOrders.length)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Center(
-                            child: Text(
-                              'Desliza para cargar mas pedidos...',
-                              style: TextStyle(color: Colors.white70),
+                          }),
+                          if (visibleCount < filteredOrders.length)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Center(
+                                child: Text(
+                                  'Desliza para cargar mas pedidos...',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                    ],
-                  );
-                },
+                        ],
+                      );
+                    },
+                  ),
+                ],
               ),
-            ],
-          ));
+            );
           },
         ),
       ),
@@ -1532,10 +1557,7 @@ enum _OrderStatus { pending, completed }
 enum _NavbarMenuAction { share, openWeb, copyLink, magicMenu, qr, refresh }
 
 class _StaggeredReveal extends StatelessWidget {
-  const _StaggeredReveal({
-    required this.order,
-    required this.child,
-  });
+  const _StaggeredReveal({required this.order, required this.child});
 
   final int order;
   final Widget child;
@@ -1696,10 +1718,7 @@ class _StatCard extends StatelessWidget {
 }
 
 class _NavbarMenuItemRow extends StatelessWidget {
-  const _NavbarMenuItemRow({
-    required this.icon,
-    required this.label,
-  });
+  const _NavbarMenuItemRow({required this.icon, required this.label});
 
   final IconData icon;
   final String label;

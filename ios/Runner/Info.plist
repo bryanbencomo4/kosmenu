@@ -40,6 +40,10 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Kosmenu necesita acceso para guardar el QR de tu negocio en la galería.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Kosmenu necesita acceso a tus fotos para exportar y compartir tu material QR.</string>
 	<key>FlutterDeepLinkingEnabled</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

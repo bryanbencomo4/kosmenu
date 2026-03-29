@@ -60,7 +60,6 @@ class KosmenuApp extends StatefulWidget {
 class _KosmenuAppState extends State<KosmenuApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final deep_links.AppLinks _appLinks = deep_links.AppLinks();
-  final OrderGateHandler _orderGateHandler = const OrderGateHandler();
 
   StreamSubscription<Uri>? _appLinkSubscription;
 
@@ -147,7 +146,8 @@ class _KosmenuAppState extends State<KosmenuApp> {
     }
 
     if (uri.pathSegments.length == 2 &&
-        (uri.pathSegments.first == 'orders' || uri.pathSegments.first == 'order')) {
+        (uri.pathSegments.first == 'orders' ||
+            uri.pathSegments.first == 'order')) {
       final orderId = uri.pathSegments[1];
       return MaterialPageRoute(
         settings: settings,
@@ -171,10 +171,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
       final orderId = uri.pathSegments[2];
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => OrderDetailScreen(
-          orderId: orderId,
-          readOnlyView: true,
-        ),
+        builder: (_) => OrderDetailScreen(orderId: orderId, readOnlyView: true),
       );
     }
 

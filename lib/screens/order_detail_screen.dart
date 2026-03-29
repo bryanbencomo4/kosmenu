@@ -64,7 +64,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
     final pedidosRows = await query
         .order('created_at', ascending: false)
-      .limit(200);
+        .limit(200);
 
     PedidoModel? foundPedido;
     for (final row in pedidosRows as List<dynamic>) {
@@ -96,7 +96,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       pedido: foundPedido,
       comercioNombre: comercioNombre,
       history: _buildOrderHistory(
-        pedidosRows as List<dynamic>,
+        pedidosRows,
         currentOrderId: widget.orderId,
         email: foundPedido.clienteEmail,
       ),
@@ -114,8 +114,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
 
     return rows
-        .map((row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)))
-        .where((pedido) => _normalizeEmail(pedido.clienteEmail) == normalizedEmail)
+        .map(
+          (row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)),
+        )
+        .where(
+          (pedido) => _normalizeEmail(pedido.clienteEmail) == normalizedEmail,
+        )
         .where((pedido) => (pedido.orderId ?? '').trim().isNotEmpty)
         .where((pedido) => (pedido.orderId ?? '').trim() != currentOrderId)
         .take(8)
@@ -170,9 +174,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_trustKey(data.pedido.comercioId, normalizedEmail));
+    final raw = prefs.getString(
+      _trustKey(data.pedido.comercioId, normalizedEmail),
+    );
     final expiresAt = int.tryParse(raw ?? '');
-    final isValid = expiresAt != null && expiresAt > DateTime.now().millisecondsSinceEpoch;
+    final isValid =
+        expiresAt != null && expiresAt > DateTime.now().millisecondsSinceEpoch;
 
     if (!isValid && raw != null) {
       await prefs.remove(_trustKey(data.pedido.comercioId, normalizedEmail));
@@ -210,7 +217,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         _trustKey(data.pedido.comercioId, expectedEmail),
-        (DateTime.now().millisecondsSinceEpoch + _rememberDeviceTtl.inMilliseconds).toString(),
+        (DateTime.now().millisecondsSinceEpoch +
+                _rememberDeviceTtl.inMilliseconds)
+            .toString(),
       );
     }
 
@@ -312,7 +321,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
   String _formatAmount(double value) {
     final isWhole = value == value.roundToDouble();
-    return isWhole ? '\$${value.toStringAsFixed(0)}' : '\$${value.toStringAsFixed(2)}';
+    return isWhole
+        ? '\$${value.toStringAsFixed(0)}'
+        : '\$${value.toStringAsFixed(2)}';
   }
 
   String _statusLabel(String? estado) {
@@ -349,7 +360,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F0D0B),
         foregroundColor: const Color(0xFFF9F3EB),
-        title: Text(widget.readOnlyView ? 'Estado de tu pedido' : 'Detalle de pedido'),
+        title: Text(
+          widget.readOnlyView ? 'Estado de tu pedido' : 'Detalle de pedido',
+        ),
       ),
       body: Stack(
         children: [
@@ -397,7 +410,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               final paymentMethod = pedido.metodoPago?.trim();
               final isReadOnly = widget.readOnlyView;
 
-              if (isReadOnly && !_emailVerified && !_checkingTrustedDevice && !_trustRestoreRequested) {
+              if (isReadOnly &&
+                  !_emailVerified &&
+                  !_checkingTrustedDevice &&
+                  !_trustRestoreRequested) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   _restoreTrustedAccess(data);
                 });
@@ -461,7 +477,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                             style: GoogleFonts.manrope(color: Colors.white),
                             decoration: InputDecoration(
                               labelText: 'Correo del cliente',
-                              labelStyle: GoogleFonts.manrope(color: const Color(0xFFCFAF85)),
+                              labelStyle: GoogleFonts.manrope(
+                                color: const Color(0xFFCFAF85),
+                              ),
                               filled: true,
                               fillColor: const Color(0xFF120D08),
                               border: OutlineInputBorder(
@@ -556,7 +574,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                               color: _statusColor(pedido.estado),
                               icon: Icons.flag_rounded,
                             ),
-                            if (paymentMethod != null && paymentMethod.isNotEmpty)
+                            if (paymentMethod != null &&
+                                paymentMethod.isNotEmpty)
                               _BadgeChip(
                                 label: paymentMethod,
                                 color: const Color(0xFF1AB15E),
@@ -597,7 +616,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          if (customerEmail != null && customerEmail.isNotEmpty) ...[
+                          if (customerEmail != null &&
+                              customerEmail.isNotEmpty) ...[
                             const SizedBox(height: 12),
                             Row(
                               children: [
@@ -768,17 +788,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                             ...data.history.map(
                               (historyItem) => Container(
                                 margin: const EdgeInsets.only(bottom: 10),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
+                                ),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFF21170F),
                                   borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: const Color(0x22D7A74D)),
+                                  border: Border.all(
+                                    color: const Color(0x22D7A74D),
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             historyItem.orderId,
@@ -818,7 +844,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     SizedBox(
                       height: 56,
                       child: ElevatedButton.icon(
-                        onPressed: _isCompleting || pedido.estado == 'completado'
+                        onPressed:
+                            _isCompleting || pedido.estado == 'completado'
                             ? null
                             : _markAsCompleted,
                         icon: _isCompleting
