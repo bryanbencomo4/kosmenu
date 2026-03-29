@@ -230,9 +230,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen> {
     if (!SupabaseConfig.hasCurrentComercioId) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Configura SupabaseConfig.currentComercioId para usar Magic Onboarding.',
-          ),
+              content: Text('No hay un comercio activo para usar Magic Onboarding.'),
         ),
       );
       return;
@@ -265,6 +263,12 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen> {
       });
       _startProcessingHints();
 
+      // Keep this request detached from the current user session JWT.
+      final functionHeaders = {
+        'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+        'apikey': SupabaseConfig.anonKey,
+      };
+
       final response = await supabase.functions.invoke(
         'process-menu-gemini',
         body: {
@@ -272,6 +276,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen> {
           'comercio_id': currentComercioId,
           'catalog_name': catalogName,
         },
+        headers: functionHeaders,
       );
 
       final responseData = _responseMap(response.data);

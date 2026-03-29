@@ -10,6 +10,7 @@ import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
+import 'package:kosmenu_app/screens/profile_screen.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -708,10 +709,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
+  Future<void> _openProfile() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ProfileScreen()),
+    );
+    if (!mounted) return;
+    await _refreshDashboard();
+  }
+
   Future<_DashboardData> _fetchDashboardData() async {
     if (!SupabaseConfig.hasCurrentComercioId) {
       throw StateError(
-        'Configura SupabaseConfig.currentComercioId para cargar datos privados del local.',
+        'No hay un comercio activo asociado a esta sesion.',
       );
     }
 
@@ -761,6 +770,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         elevation: 0,
         title: const Text('Panel de Control'),
         actions: [
+          IconButton(
+            tooltip: 'Perfil',
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: _openProfile,
+          ),
           IconButton(
             tooltip: 'Notificaciones',
             icon: const Icon(Icons.notifications_none_rounded),

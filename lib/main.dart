@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
-import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
+import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/public_menu_view.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -39,6 +39,9 @@ Future<void> _initializeSupabase() {
   return Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.pkce,
+    ),
   );
 }
 
@@ -84,7 +87,7 @@ class KosmenuApp extends StatelessWidget {
 
     return MaterialPageRoute(
       settings: settings,
-      builder: (_) => const AdminDashboardScreen(),
+      builder: (_) => const AuthGate(),
     );
   }
 

@@ -50,7 +50,9 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const imageUrl: string | undefined = body.image_url ?? body.imageUrl;
-    const comercioId: string | undefined = body.comercio_id ?? body.comercioId;
+    const comercioIdInput: unknown = body.comercio_id ?? body.comercioId;
+    const comercioId =
+      typeof comercioIdInput === 'string' ? comercioIdInput.trim() : '';
     const requestedCatalogName = normalizeCatalogName(body.catalog_name ?? body.nombre_catalogo);
 
     if (!imageUrl || !comercioId) {
@@ -76,9 +78,13 @@ Deno.serve(async (req: Request) => {
 
     const parsedMenu = await extractMenuWithGemini(imageUrl, geminiApiKey);
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      {
+        auth: { persistSession: false },
+      },
+    );
 
     const catalog = await ensureCatalogForComercio(
       supabase,
@@ -106,6 +112,13 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (categoryError) {
+        console.error('Error inserting categoria', {
+          comercio_id: comercioId,
+          catalogo_id: catalog.id,
+          category_index: i,
+          category_name: (category.nombre || 'Categoria').trim(),
+          supabase_error: toSupabaseErrorLog(categoryError),
+        });
         throw new Error(`Error inserting categoria: ${categoryError.message}`);
       }
 
@@ -125,6 +138,13 @@ Deno.serve(async (req: Request) => {
       if (productRows.length > 0) {
         const { error: productsError } = await supabase.from('productos').insert(productRows);
         if (productsError) {
+          console.error('Error inserting productos', {
+            comercio_id: comercioId,
+            categoria_id: categoriaId,
+            productos_count: productRows.length,
+            first_producto: productRows[0],
+            supabase_error: toSupabaseErrorLog(productsError),
+          });
           throw new Error(`Error inserting productos: ${productsError.message}`);
         }
 
@@ -376,4 +396,18 @@ function jsonResponse(body: unknown, status: number): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+function toSupabaseErrorLog(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== 'object') {
+    return { raw_error: error };
+  }
+
+  const supabaseError = error as Record<string, unknown>;
+  return {
+    message: supabaseError.message ?? null,
+    code: supabaseError.code ?? null,
+    details: supabaseError.details ?? null,
+    hint: supabaseError.hint ?? null,
+  };
 }

@@ -49,7 +49,9 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const imageUrl: string | undefined = body.image_url ?? body.imageUrl;
-    const comercioId: string | undefined = body.comercio_id ?? body.comercioId;
+    const comercioIdInput: unknown = body.comercio_id ?? body.comercioId;
+    const comercioId =
+      typeof comercioIdInput === 'string' ? comercioIdInput.trim() : '';
 
     if (!imageUrl || !comercioId) {
       return new Response(
@@ -82,9 +84,13 @@ Deno.serve(async (req: Request) => {
 
     const aiMenu = await extractMenuWithOpenAI(imageUrl, openAiKey);
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      {
+        auth: { persistSession: false },
+      },
+    );
 
     const catalog = await ensureCatalogForComercio(supabase, comercioId);
 
@@ -108,6 +114,13 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (categoryError) {
+        console.error('Error inserting categoria', {
+          comercio_id: comercioId,
+          catalogo_id: catalog.id,
+          category_index: i,
+          category_name: (category.nombre || 'Categoria').trim(),
+          supabase_error: toSupabaseErrorLog(categoryError),
+        });
         throw new Error(`Error inserting categoria: ${categoryError.message}`);
       }
 
@@ -127,6 +140,13 @@ Deno.serve(async (req: Request) => {
       if (rows.length > 0) {
         const { error: productError } = await supabase.from('productos').insert(rows);
         if (productError) {
+          console.error('Error inserting productos', {
+            comercio_id: comercioId,
+            categoria_id: categoriaId,
+            productos_count: rows.length,
+            first_producto: rows[0],
+            supabase_error: toSupabaseErrorLog(productError),
+          });
           throw new Error(`Error inserting productos: ${productError.message}`);
         }
         createdProducts += rows.length;
@@ -318,4 +338,18 @@ function normalizePrice(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+function toSupabaseErrorLog(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== 'object') {
+    return { raw_error: error };
+  }
+
+  const supabaseError = error as Record<string, unknown>;
+  return {
+    message: supabaseError.message ?? null,
+    code: supabaseError.code ?? null,
+    details: supabaseError.details ?? null,
+    hint: supabaseError.hint ?? null,
+  };
 }
