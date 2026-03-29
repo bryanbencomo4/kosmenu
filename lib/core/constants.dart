@@ -32,4 +32,13 @@ class AppLinks {
     final encodedId = Uri.encodeComponent(comercioId.trim());
     return '$base/v/$encodedId';
   }
+
+  static String orderDetailsById(String orderId, {bool forceWebView = false}) {
+    final base = productionUrl.endsWith('/')
+        ? productionUrl.substring(0, productionUrl.length - 1)
+        : productionUrl;
+    final encodedId = Uri.encodeComponent(orderId.trim());
+    final suffix = forceWebView ? '?view=web' : '';
+    return '$base/orders/$encodedId$suffix';
+  }
 }

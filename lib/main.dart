@@ -1,10 +1,15 @@
+import 'dart:async';
+
+import 'package:app_links/app_links.dart' as deep_links;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
+import 'package:kosmenu_app/screens/order_gate_screen.dart';
 import 'package:kosmenu_app/screens/public_menu_view.dart';
+import 'package:kosmenu_app/services/order_gate_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> main() async {
@@ -45,24 +50,84 @@ Future<void> _initializeSupabase() {
   );
 }
 
-class KosmenuApp extends StatelessWidget {
+class KosmenuApp extends StatefulWidget {
   const KosmenuApp({super.key});
+
+  @override
+  State<KosmenuApp> createState() => _KosmenuAppState();
+}
+
+class _KosmenuAppState extends State<KosmenuApp> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final deep_links.AppLinks _appLinks = deep_links.AppLinks();
+  final OrderGateHandler _orderGateHandler = const OrderGateHandler();
+
+  StreamSubscription<Uri>? _appLinkSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!kIsWeb) {
+      _bindIncomingOrderLinks();
+    }
+  }
+
+  @override
+  void dispose() {
+    _appLinkSubscription?.cancel();
+    super.dispose();
+  }
 
   String _resolveInitialRoute() {
     if (kIsWeb) {
       return Uri.base.path.isEmpty ? '/' : Uri.base.path;
     }
 
-    final defaultRouteName = WidgetsBinding
-        .instance
-        .platformDispatcher
-        .defaultRouteName;
+    return '/';
+  }
 
-    if (defaultRouteName.isEmpty || defaultRouteName == '/') {
-      return '/';
+  Future<void> _bindIncomingOrderLinks() async {
+    try {
+      final initialUri = await _appLinks.getInitialLink();
+      if (initialUri != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _openOrderLink(initialUri, replaceStack: true);
+        });
+      }
+    } catch (error) {
+      debugPrint('Order deep link init error: $error');
     }
 
-    return defaultRouteName;
+    _appLinkSubscription = _appLinks.uriLinkStream.listen(
+      (uri) => _openOrderLink(uri),
+      onError: (error) {
+        debugPrint('Order deep link stream error: $error');
+      },
+    );
+  }
+
+  void _openOrderLink(Uri uri, {bool replaceStack = false}) {
+    final orderId = OrderGateHandler.extractOrderId(uri);
+    if (orderId == null || orderId.isEmpty) {
+      return;
+    }
+
+    final routeName = '/orders/${Uri.encodeComponent(orderId)}';
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) {
+      return;
+    }
+
+    if (replaceStack) {
+      navigator.pushNamedAndRemoveUntil(routeName, (route) => false, arguments: uri.toString());
+      return;
+    }
+
+    navigator.pushNamedAndRemoveUntil(
+      routeName,
+      (route) => route.isFirst,
+      arguments: uri.toString(),
+    );
   }
 
   Route<dynamic> _onGenerateRoute(RouteSettings settings) {
@@ -77,11 +142,35 @@ class KosmenuApp extends StatelessWidget {
       );
     }
 
-    if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'orders') {
+    if (uri.pathSegments.length == 2 &&
+        (uri.pathSegments.first == 'orders' || uri.pathSegments.first == 'order')) {
       final orderId = uri.pathSegments[1];
       return MaterialPageRoute(
         settings: settings,
+        builder: (_) => OrderGateScreen(orderId: orderId),
+      );
+    }
+
+    if (uri.pathSegments.length == 3 &&
+        uri.pathSegments.first == 'orders' &&
+        uri.pathSegments[1] == 'view') {
+      final orderId = uri.pathSegments[2];
+      return MaterialPageRoute(
+        settings: settings,
         builder: (_) => OrderDetailScreen(orderId: orderId),
+      );
+    }
+
+    if (uri.pathSegments.length == 3 &&
+        uri.pathSegments.first == 'orders' &&
+        uri.pathSegments[1] == 'public') {
+      final orderId = uri.pathSegments[2];
+      return MaterialPageRoute(
+        settings: settings,
+        builder: (_) => OrderDetailScreen(
+          orderId: orderId,
+          readOnlyView: true,
+        ),
       );
     }
 
@@ -105,6 +194,7 @@ class KosmenuApp extends StatelessWidget {
     return MaterialApp(
       title: 'Kosmenu',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
       initialRoute: _resolveInitialRoute(),
       onGenerateRoute: _onGenerateRoute,
       theme: baseTheme.copyWith(

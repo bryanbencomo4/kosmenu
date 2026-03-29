@@ -34,6 +34,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.kosmenu.app</string>
+				<string>kosmenu</string>
 			</array>
 		</dict>
 	</array>
