@@ -10,6 +10,7 @@ import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
 import 'package:kosmenu_app/screens/public_menu_view.dart';
 import 'package:kosmenu_app/services/order_gate_handler.dart';
+import 'package:kosmenu_app/services/push_notification_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> main() async {
@@ -60,21 +61,47 @@ class KosmenuApp extends StatefulWidget {
 class _KosmenuAppState extends State<KosmenuApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final deep_links.AppLinks _appLinks = deep_links.AppLinks();
+  final PushNotificationService _pushNotifications = PushNotificationService.instance;
 
   StreamSubscription<Uri>? _appLinkSubscription;
+  StreamSubscription<String>? _pushTapSubscription;
 
   @override
   void initState() {
     super.initState();
     if (!kIsWeb) {
       _bindIncomingOrderLinks();
+      _initializePushNotifications();
     }
   }
 
   @override
   void dispose() {
     _appLinkSubscription?.cancel();
+    _pushTapSubscription?.cancel();
+    _pushNotifications.dispose();
     super.dispose();
+  }
+
+  Future<void> _initializePushNotifications() async {
+    try {
+      await _pushNotifications.initialize();
+      _pushTapSubscription = _pushNotifications.orderTapStream.listen((orderId) {
+        if (orderId.trim().isEmpty) {
+          return;
+        }
+
+        final uri = Uri.parse(
+          'https://kosmenu.vercel.app/orders/${Uri.encodeComponent(orderId)}',
+        );
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _openOrderLink(uri, replaceStack: true);
+        });
+      });
+    } catch (error) {
+      debugPrint('Push notification setup error: $error');
+    }
   }
 
   String _resolveInitialRoute() {

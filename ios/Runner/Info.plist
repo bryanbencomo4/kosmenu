@@ -44,6 +44,10 @@
 	<string>Kosmenu necesita acceso para guardar el QR de tu negocio en la galería.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Kosmenu necesita acceso a tus fotos para exportar y compartir tu material QR.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>FlutterDeepLinkingEnabled</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
