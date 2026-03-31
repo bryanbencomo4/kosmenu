@@ -22,7 +22,7 @@ class _AuthGateState extends State<AuthGate> {
   Future<_PostAuthTarget> _resolveTargetForUser(String userId) async {
     final row = await Supabase.instance.client
         .from('comercios')
-        .select('id')
+        .select('id, slug')
         .eq('owner_id', userId)
         .limit(1)
         .maybeSingle();
@@ -33,12 +33,13 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     final comercioId = row['id']?.toString().trim() ?? '';
+    final comercioSlug = row['slug']?.toString().trim();
     if (comercioId.isEmpty) {
       SupabaseConfig.clearCurrentComercioId();
       return _PostAuthTarget.setup;
     }
 
-    SupabaseConfig.setCurrentComercioId(comercioId);
+    SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
     return _PostAuthTarget.dashboard;
   }
 

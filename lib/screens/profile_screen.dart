@@ -31,7 +31,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .maybeSingle();
 
     if (row == null) return null;
-    return Map<String, dynamic>.from(row as Map);
+    final business = Map<String, dynamic>.from(row as Map);
+    final comercioId = business['id']?.toString().trim() ?? '';
+    final comercioSlug = business['slug']?.toString().trim();
+    if (comercioId.isNotEmpty) {
+      SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
+    }
+    return business;
   }
 
   String _displayName(User user) {

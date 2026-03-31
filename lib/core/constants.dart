@@ -1,3 +1,5 @@
+import 'package:kosmenu_app/models/comercio.dart';
+
 class SupabaseConfig {
   const SupabaseConfig._();
 
@@ -5,18 +7,33 @@ class SupabaseConfig {
   static const String anonKey =
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaGJlcmFheWhvaHhsYmJoZHlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzE4MTQsImV4cCI6MjA5MDIwNzgxNH0.lkNtqj0_xPekAGuFg_sNHq4uWJOcYnhSX-RNBwAKk8A';
   static String _currentComercioId = '';
+  static String _currentComercioSlug = '';
 
   static String get currentComercioId => _currentComercioId;
+  static String? get currentComercioSlug =>
+      _currentComercioSlug.trim().isEmpty ? null : _currentComercioSlug.trim();
 
   static bool get hasCurrentComercioId => _currentComercioId.trim().isNotEmpty;
 
-  static void setCurrentComercioId(String comercioId) {
+  static void setCurrentComercioId(String comercioId, {String? slug}) {
     _currentComercioId = comercioId.trim();
+    _currentComercioSlug = (slug ?? '').trim();
+  }
+
+  static void setCurrentComercioSlug(String? slug) {
+    _currentComercioSlug = (slug ?? '').trim();
   }
 
   static void clearCurrentComercioId() {
     _currentComercioId = '';
+    _currentComercioSlug = '';
   }
+}
+
+String getPublicMenuUrl(ComercioModel comercio) {
+  final slug = (comercio.slug ?? '').trim();
+  final identifier = slug.isNotEmpty ? slug : comercio.id.trim();
+  return AppLinks.publicMenuByComercio(identifier);
 }
 
 class AppLinks {

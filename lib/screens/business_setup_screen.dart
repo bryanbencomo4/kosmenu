@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/models/comercio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class BusinessSetupScreen extends StatefulWidget {
@@ -181,7 +182,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         (message.contains('column') || message.contains('schema cache'));
   }
 
-  Future<String> _insertComercioWithFallback({
+  Future<ComercioModel> _insertComercioWithFallback({
     required User user,
     required String logoUrl,
   }) async {
@@ -198,9 +199,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final row = await Supabase.instance.client
           .from('comercios')
           .insert(payload)
-          .select('id')
+          .select('id, slug, nombre, logo_url, whatsapp, en_linea')
           .single();
-      return row['id'].toString();
+      return ComercioModel.fromMap(Map<String, dynamic>.from(row));
     } on PostgrestException catch (error) {
       // Graceful fallback in case older schemas still lack optional columns.
       if (_isMissingColumnError(error, 'categoria')) {
@@ -216,9 +217,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final row = await Supabase.instance.client
           .from('comercios')
           .insert(payload)
-          .select('id')
+          .select('id, slug, nombre, logo_url, whatsapp, en_linea')
           .single();
-      return row['id'].toString();
+      return ComercioModel.fromMap(Map<String, dynamic>.from(row));
     }
   }
 
@@ -245,12 +246,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     try {
       final logoUrl = await _uploadLogoIfNeeded(user) ?? '';
-      final comercioId = await _insertComercioWithFallback(
+      final comercio = await _insertComercioWithFallback(
         user: user,
         logoUrl: logoUrl,
       );
 
-      SupabaseConfig.setCurrentComercioId(comercioId);
+      SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

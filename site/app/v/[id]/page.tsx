@@ -66,6 +66,12 @@ const defaultProductImage =
   );
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const uuidRegex =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string) {
+  return uuidRegex.test(value);
+}
 
 function formatCop(value: number | null | undefined) {
   const safeValue = typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -129,12 +135,10 @@ export default function PublicMenuPage() {
           auth: { persistSession: false },
         });
 
-        const { data: comercios, error: comercioError } = await supabase
-          .from('comercios')
-          .select('*')
-          .or(`id.eq.${comercioId},slug.eq.${comercioId}`)
-          .limit(1)
-          .returns<ComercioRow[]>();
+        const comercioQuery = supabase.from('comercios').select('*').limit(1);
+        const { data: comercios, error: comercioError } = isUuid(comercioId)
+          ? await comercioQuery.eq('id', comercioId).returns<ComercioRow[]>()
+          : await comercioQuery.eq('slug', comercioId).returns<ComercioRow[]>();
 
         if (comercioError) throw new Error(comercioError.message);
 

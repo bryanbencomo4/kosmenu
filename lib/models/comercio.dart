@@ -21,10 +21,11 @@ class ComercioModel {
 
   factory ComercioModel.fromMap(Map<String, dynamic> map) {
     final confianzaValue = map['confianza_ia'];
+    final rawSlug = map['slug']?.toString().trim();
 
     return ComercioModel(
       id: map['id']?.toString() ?? '',
-      slug: map['slug']?.toString(),
+      slug: (rawSlug == null || rawSlug.isEmpty) ? null : rawSlug,
       nombre: map['nombre']?.toString() ?? 'Comercio',
       logoUrl: map['logo_url']?.toString(),
       whatsapp: map['whatsapp']?.toString(),

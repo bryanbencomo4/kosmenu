@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:kosmenu_app/core/constants.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import 'package:kosmenu_app/models/comercio.dart';
@@ -19,11 +20,11 @@ class QrGeneratorScreen extends StatefulWidget {
   const QrGeneratorScreen({
     super.key,
     required this.comercio,
-    required this.comercioUrl,
+    this.comercioUrl,
   });
 
   final ComercioModel comercio;
-  final String comercioUrl;
+  final String? comercioUrl;
 
   @override
   State<QrGeneratorScreen> createState() => _QrGeneratorScreenState();
@@ -44,7 +45,13 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
 
   bool get _isProcessing => _busyAction != null;
 
-  String get _menuUrl => widget.comercioUrl.trim();
+  String get _menuUrl {
+    final resolved = getPublicMenuUrl(widget.comercio).trim();
+    if (resolved.isNotEmpty) {
+      return resolved;
+    }
+    return (widget.comercioUrl ?? '').trim();
+  }
 
   String get _businessName {
     final value = widget.comercio.nombre.trim();

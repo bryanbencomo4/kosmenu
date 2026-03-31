@@ -534,7 +534,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
-    final url = AppLinks.publicMenuByComercio(SupabaseConfig.currentComercioId);
+    final comercio = await _resolveCurrentComercioForPublicUrl();
+    final url = getPublicMenuUrl(comercio);
     debugPrint('Abriendo Menú Público: $url');
 
     final uri = Uri.parse(url);
@@ -558,7 +559,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
-    final url = AppLinks.publicMenuByComercio(SupabaseConfig.currentComercioId);
+    final comercio = await _resolveCurrentComercioForPublicUrl();
+    final url = getPublicMenuUrl(comercio);
     debugPrint('Copiando Menú Público: $url');
 
     await Clipboard.setData(ClipboardData(text: url));
@@ -580,13 +582,48 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
-    final url = AppLinks.publicMenuByComercio(SupabaseConfig.currentComercioId);
+    final comercio = await _resolveCurrentComercioForPublicUrl();
+    final url = getPublicMenuUrl(comercio);
     await SharePlus.instance.share(
       ShareParams(
         text: 'Mira nuestro menú digital: $url',
         subject: 'Menú digital Kosmenu',
       ),
     );
+  }
+
+  Future<ComercioModel> _resolveCurrentComercioForPublicUrl() async {
+    final id = SupabaseConfig.currentComercioId.trim();
+    if (id.isEmpty) {
+      return const ComercioModel(id: '', nombre: 'Comercio');
+    }
+
+    try {
+      final row = await Supabase.instance.client
+          .from('comercios')
+          .select('id, slug, nombre, logo_url, whatsapp, en_linea')
+          .eq('id', id)
+          .limit(1)
+          .maybeSingle();
+
+      if (row == null) {
+        return ComercioModel(
+          id: id,
+          slug: SupabaseConfig.currentComercioSlug,
+          nombre: 'Comercio',
+        );
+      }
+
+      final comercio = ComercioModel.fromMap(Map<String, dynamic>.from(row));
+      SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
+      return comercio;
+    } catch (_) {
+      return ComercioModel(
+        id: id,
+        slug: SupabaseConfig.currentComercioSlug,
+        nombre: 'Comercio',
+      );
+    }
   }
 
   Future<void> _openQrGenerator() async {
@@ -600,29 +637,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
-    final row = await Supabase.instance.client
-        .from('comercios')
-        .select()
-        .eq('id', SupabaseConfig.currentComercioId)
-        .limit(1)
-        .maybeSingle();
+    final comercio = await _resolveCurrentComercioForPublicUrl();
 
     if (!mounted) {
       return;
     }
 
-    final comercio = ComercioModel.fromMap(
-      Map<String, dynamic>.from((row as Map?) ?? const <String, dynamic>{}),
-    );
-
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => QrGeneratorScreen(
           comercio: comercio,
-          comercioUrl: AppLinks.publicMenuByIdentifier(
-            comercioId: comercio.id,
-            slug: comercio.slug,
-          ),
         ),
       ),
     );
@@ -757,12 +781,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       productosFuture,
     ]);
 
-    return _DashboardData(
-      comercio: ComercioModel.fromMap(
-        Map<String, dynamic>.from(
-          (results[0] as Map?) ?? const <String, dynamic>{},
-        ),
+    final comercio = ComercioModel.fromMap(
+      Map<String, dynamic>.from(
+        (results[0] as Map?) ?? const <String, dynamic>{},
       ),
+    );
+    if (comercio.id.trim().isNotEmpty) {
+      SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
+    }
+
+    return _DashboardData(
+      comercio: comercio,
       categoryCount: (results[1] as List<dynamic>).length,
       productCount: (results[2] as List<dynamic>).length,
     );
