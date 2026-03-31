@@ -17,32 +17,39 @@ export async function GET(_: Request, { params }: Params) {
 
     const supabase = getServerSupabaseClient();
 
-    const [comercioResult, categoriasResult, productosResult, metodosPagoResult] =
-      await Promise.all([
-        supabase
-          .from('comercios')
-          .select('*')
-          .eq('id', comercioId)
-          .maybeSingle(),
-        supabase
-          .from('categorias')
-          .select('*')
-          .eq('comercio_id', comercioId)
-          .order('orden', { ascending: true }),
-        supabase
-          .from('productos')
-          .select('*')
-          .eq('comercio_id', comercioId)
-          .order('nombre', { ascending: true }),
-        supabase
-          .from('metodos_pago')
-          .select('*')
-          .eq('comercio_id', comercioId),
-      ]);
+    const { data: comercios, error: comercioError } = await supabase
+      .from('comercios')
+      .select('*')
+      .or(`id.eq.${comercioId},slug.eq.${comercioId}`)
+      .limit(1);
 
-    if (comercioResult.error) {
-      throw new Error(comercioResult.error.message);
+    if (comercioError) {
+      throw new Error(comercioError.message);
     }
+
+    const comercio = (comercios ?? [])[0] ?? null;
+    if (!comercio) {
+      return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
+    }
+
+    const resolvedComercioId = comercio.id;
+
+    const [categoriasResult, productosResult, metodosPagoResult] = await Promise.all([
+      supabase
+        .from('categorias')
+        .select('*')
+        .eq('comercio_id', resolvedComercioId)
+        .order('orden', { ascending: true }),
+      supabase
+        .from('productos')
+        .select('*')
+        .eq('comercio_id', resolvedComercioId)
+        .order('nombre', { ascending: true }),
+      supabase
+        .from('metodos_pago')
+        .select('*')
+        .eq('comercio_id', resolvedComercioId),
+    ]);
 
     if (categoriasResult.error) {
       throw new Error(categoriasResult.error.message);
@@ -54,11 +61,6 @@ export async function GET(_: Request, { params }: Params) {
 
     if (metodosPagoResult.error) {
       throw new Error(metodosPagoResult.error.message);
-    }
-
-    const comercio = comercioResult.data;
-    if (!comercio) {
-      return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
 
     const productos = (productosResult.data ?? []).filter((producto: any) => {

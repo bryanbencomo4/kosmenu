@@ -33,6 +33,16 @@ class AppLinks {
     return '$base/v/$encodedId';
   }
 
+  static String publicMenuByIdentifier({
+    required String comercioId,
+    String? slug,
+  }) {
+    final identifier = (slug ?? '').trim().isNotEmpty
+        ? slug!.trim()
+        : comercioId.trim();
+    return publicMenuByComercio(identifier);
+  }
+
   static String orderDetailsById(String orderId, {bool forceWebView = false}) {
     final base = productionUrl.endsWith('/')
         ? productionUrl.substring(0, productionUrl.length - 1)

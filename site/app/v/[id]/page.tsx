@@ -23,6 +23,7 @@ type ProductoRow = {
 
 type ComercioRow = {
   id: string;
+  slug?: string | null;
   nombre?: string | null;
   whatsapp?: string | null;
   telefono?: string | null;
@@ -128,41 +129,45 @@ export default function PublicMenuPage() {
           auth: { persistSession: false },
         });
 
-        const [comercioResult, categoriasResult, productosResult, metodosPagoResult] =
-          await Promise.all([
-          supabase
-            .from('comercios')
-            .select('*')
-            .eq('id', comercioId)
-            .maybeSingle<ComercioRow>(),
+        const { data: comercios, error: comercioError } = await supabase
+          .from('comercios')
+          .select('*')
+          .or(`id.eq.${comercioId},slug.eq.${comercioId}`)
+          .limit(1)
+          .returns<ComercioRow[]>();
+
+        if (comercioError) throw new Error(comercioError.message);
+
+        const comercio = (comercios ?? [])[0] ?? null;
+        if (!comercio) {
+          throw new Error('No se encontro el comercio para esta URL.');
+        }
+
+        const resolvedComercioId = comercio.id;
+
+        const [categoriasResult, productosResult, metodosPagoResult] = await Promise.all([
           supabase
             .from('categorias')
             .select('*')
-            .eq('comercio_id', comercioId)
+            .eq('comercio_id', resolvedComercioId)
             .order('orden', { ascending: true })
             .returns<CategoriaRow[]>(),
           supabase
             .from('productos')
             .select('*')
-            .eq('comercio_id', comercioId)
+            .eq('comercio_id', resolvedComercioId)
             .order('nombre', { ascending: true })
             .returns<ProductoRow[]>(),
           supabase
             .from('metodos_pago')
             .select('*')
-            .eq('comercio_id', comercioId)
+            .eq('comercio_id', resolvedComercioId)
             .returns<MetodoPagoRow[]>(),
         ]);
 
-        if (comercioResult.error) throw new Error(comercioResult.error.message);
         if (categoriasResult.error) throw new Error(categoriasResult.error.message);
         if (productosResult.error) throw new Error(productosResult.error.message);
         if (metodosPagoResult.error) throw new Error(metodosPagoResult.error.message);
-
-        const comercio = comercioResult.data;
-        if (!comercio) {
-          throw new Error('No se encontro el comercio para esta URL.');
-        }
 
         const productos = (productosResult.data ?? []).filter((producto) => {
           if (typeof producto.disponible === 'boolean') {

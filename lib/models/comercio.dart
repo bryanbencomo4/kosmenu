@@ -1,5 +1,6 @@
 class ComercioModel {
   final String id;
+  final String? slug;
   final String nombre;
   final String? logoUrl;
   final String? whatsapp;
@@ -9,6 +10,7 @@ class ComercioModel {
 
   const ComercioModel({
     required this.id,
+    this.slug,
     required this.nombre,
     this.logoUrl,
     this.whatsapp,
@@ -22,6 +24,7 @@ class ComercioModel {
 
     return ComercioModel(
       id: map['id']?.toString() ?? '',
+      slug: map['slug']?.toString(),
       nombre: map['nombre']?.toString() ?? 'Comercio',
       logoUrl: map['logo_url']?.toString(),
       whatsapp: map['whatsapp']?.toString(),
@@ -36,6 +39,7 @@ class ComercioModel {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'slug': slug,
       'nombre': nombre,
       'logo_url': logoUrl,
       'whatsapp': whatsapp,

@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,6 +17,7 @@ class BusinessSetupScreen extends StatefulWidget {
 class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _slugController = TextEditingController();
 
   static const List<String> _categories = <String>[
     'Restaurante',
@@ -31,11 +33,91 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedCategory = _categories.first;
   XFile? _selectedLogo;
   bool _saving = false;
+  bool _checkingSlug = false;
+  bool _isSlugAvailable = false;
+  String? _slugAvailabilityMessage;
+  Timer? _slugDebounce;
 
   @override
   void dispose() {
     _nameController.dispose();
+    _slugController.dispose();
+    _slugDebounce?.cancel();
     super.dispose();
+  }
+
+  String _normalizeSlug(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), '-')
+        .replaceAll(RegExp(r'[^a-z0-9-]'), '')
+        .replaceAll(RegExp(r'-+'), '-')
+        .replaceAll(RegExp(r'^-|-$'), '');
+  }
+
+  bool _isSlugFormatValid(String value) {
+    return RegExp(r'^[a-z0-9]+(?:-[a-z0-9]+)*$').hasMatch(value);
+  }
+
+  Future<void> _checkSlugAvailability(String rawValue) async {
+    final slug = _normalizeSlug(rawValue);
+
+    if (slug.length < 3 || !_isSlugFormatValid(slug)) {
+      if (!mounted) return;
+      setState(() {
+        _checkingSlug = false;
+        _isSlugAvailable = false;
+        _slugAvailabilityMessage = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _checkingSlug = true;
+      _isSlugAvailable = false;
+      _slugAvailabilityMessage = null;
+    });
+
+    try {
+      final existing = await Supabase.instance.client
+          .from('comercios')
+          .select('id')
+          .eq('slug', slug)
+          .limit(1)
+          .maybeSingle();
+
+      if (!mounted) return;
+      setState(() {
+        _checkingSlug = false;
+        _isSlugAvailable = existing == null;
+        _slugAvailabilityMessage = existing == null
+            ? '¡Nombre disponible!'
+            : 'Este link ya está en uso.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _checkingSlug = false;
+        _isSlugAvailable = false;
+        _slugAvailabilityMessage = null;
+      });
+    }
+  }
+
+  void _onSlugChanged(String value) {
+    final normalized = _normalizeSlug(value);
+    if (normalized != value) {
+      _slugController.value = TextEditingValue(
+        text: normalized,
+        selection: TextSelection.collapsed(offset: normalized.length),
+      );
+    }
+
+    _slugDebounce?.cancel();
+    _slugDebounce = Timer(const Duration(milliseconds: 350), () {
+      _checkSlugAvailability(_slugController.text);
+    });
   }
 
   Future<void> _pickLogo() async {
@@ -103,9 +185,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     required User user,
     required String logoUrl,
   }) async {
+    final slug = _normalizeSlug(_slugController.text);
     final payload = <String, dynamic>{
       'owner_id': user.id,
       'nombre': _nameController.text.trim(),
+      'slug': slug,
       'categoria': _selectedCategory,
       'logo_url': logoUrl,
     };
@@ -122,6 +206,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (_isMissingColumnError(error, 'categoria')) {
         payload.remove('categoria');
       }
+      if (_isMissingColumnError(error, 'slug')) {
+        payload.remove('slug');
+      }
       if (_isMissingColumnError(error, 'logo_url')) {
         payload.remove('logo_url');
       }
@@ -137,6 +224,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   Future<void> _saveBusiness() async {
     if (_saving || !_formKey.currentState!.validate()) return;
+
+    if (!_isSlugAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El link del menú no está disponible.')),
+      );
+      return;
+    }
 
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
@@ -189,6 +283,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final text = value?.trim() ?? '';
     if (text.isEmpty) return 'Ingresa el nombre del restaurante.';
     if (text.length < 3) return 'El nombre debe tener al menos 3 caracteres.';
+    return null;
+  }
+
+  String? _validateSlug(String? value) {
+    final slug = _normalizeSlug(value ?? '');
+    if (slug.isEmpty) return 'Ingresa tu link de menú.';
+    if (slug.length < 3) return 'Debe tener al menos 3 caracteres.';
+    if (!_isSlugFormatValid(slug)) {
+      return 'Solo letras minúsculas, números y guiones.';
+    }
     return null;
   }
 
@@ -312,6 +416,64 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: _slugController,
+                        validator: _validateSlug,
+                        onChanged: _onSlugChanged,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'Link de Menú',
+                          hintText: 'ej: pizza-bella-vista',
+                          helperText: 'Tu URL será: kosmenu.vercel.app/v/tu-slug',
+                          labelStyle: const TextStyle(color: Color(0xFFCCB18E)),
+                          prefixIcon: const Icon(
+                            Icons.link_rounded,
+                            color: Color(0xFFFFB04A),
+                          ),
+                          suffixIcon: _checkingSlug
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Color(0xFFFFB04A),
+                                    ),
+                                  ),
+                                )
+                              : _slugController.text.trim().isEmpty
+                              ? null
+                              : Icon(
+                                  _isSlugAvailable
+                                      ? Icons.check_circle_rounded
+                                      : Icons.cancel_rounded,
+                                  color: _isSlugAvailable
+                                      ? const Color(0xFF1AB15E)
+                                      : const Color(0xFFE74C3C),
+                                ),
+                          filled: true,
+                          fillColor: const Color(0xFF17120E),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                      ),
+                      if (_slugAvailabilityMessage != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8, left: 4),
+                          child: Text(
+                            _slugAvailabilityMessage!,
+                            style: GoogleFonts.poppins(
+                              color: _isSlugAvailable
+                                  ? const Color(0xFF1AB15E)
+                                  : const Color(0xFFE74C3C),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 14),
                       DropdownButtonFormField<String>(
                         initialValue: _selectedCategory,

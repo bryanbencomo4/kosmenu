@@ -619,7 +619,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       MaterialPageRoute(
         builder: (_) => QrGeneratorScreen(
           comercio: comercio,
-          comercioUrl: AppLinks.publicMenuByComercio(comercio.id),
+          comercioUrl: AppLinks.publicMenuByIdentifier(
+            comercioId: comercio.id,
+            slug: comercio.slug,
+          ),
         ),
       ),
     );
