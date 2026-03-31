@@ -1,4 +1,4 @@
-package com.kosmenu.kosmenu_app
+package com.kosmenu.app
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

@@ -26,7 +26,7 @@ class PushNotificationService {
   static const String _channelDescription =
       'Notificaciones de pedidos nuevos para tu comercio.';
 
-  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  FirebaseMessaging? _messaging;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
   final StreamController<String> _orderTapController =
@@ -44,6 +44,7 @@ class PushNotificationService {
     }
 
     await Firebase.initializeApp();
+    _messaging = FirebaseMessaging.instance;
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
     await _initializeLocalNotifications();
@@ -53,12 +54,12 @@ class PushNotificationService {
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
     FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageTap);
 
-    final initialMessage = await _messaging.getInitialMessage();
+    final initialMessage = await _messaging!.getInitialMessage();
     if (initialMessage != null) {
       _handleMessageTap(initialMessage);
     }
 
-    _tokenRefreshSubscription = _messaging.onTokenRefresh.listen(
+    _tokenRefreshSubscription = _messaging!.onTokenRefresh.listen(
       (token) => _upsertToken(token),
     );
 
@@ -116,7 +117,7 @@ class PushNotificationService {
   }
 
   Future<void> _requestPermissions() async {
-    await _messaging.requestPermission(
+    await _messaging!.requestPermission(
       alert: true,
       badge: true,
       sound: true,
@@ -202,7 +203,7 @@ class PushNotificationService {
       return;
     }
 
-    final token = await _messaging.getToken();
+    final token = await _messaging!.getToken();
     if (token == null || token.trim().isEmpty) {
       return;
     }

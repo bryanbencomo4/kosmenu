@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1014835588090",
+    "project_id": "kosmenu-c0983",
+    "storage_bucket": "kosmenu-c0983.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1014835588090:android:7dd274c579000c8c5e1243",
+        "android_client_info": {
+          "package_name": "com.kosmenu.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCvdhJUanMLWBI25S4pQKtMMybS_DuePxs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

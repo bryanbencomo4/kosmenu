@@ -101,6 +101,32 @@ Deno.serve(async (req: Request) => {
 
     const delivered = results.filter((result) => result.ok).length;
     const failed = results.length - delivered;
+    const unregisteredTokens = results
+      .filter(
+        (result) =>
+          !result.ok &&
+          result.status == 404 &&
+          result.body.toUpperCase().includes('UNREGISTERED'),
+      )
+      .map((result) => result.fcmToken);
+
+    if (unregisteredTokens.length > 0) {
+      const { error: cleanupError } = await supabase
+          .from('user_tokens')
+          .delete()
+          .in('fcm_token', unregisteredTokens);
+      if (cleanupError) {
+        console.error('Failed to clean invalid FCM tokens', cleanupError.message);
+      }
+    }
+
+    const failures = results
+      .filter((result) => !result.ok)
+      .map((result) => ({
+        status: result.status,
+        body: result.body,
+        tokenSuffix: result.tokenSuffix,
+      }));
 
     return jsonResponse(
       {
@@ -111,6 +137,8 @@ Deno.serve(async (req: Request) => {
         tokens: tokens.length,
         delivered,
         failed,
+        invalidTokensRemoved: unregisteredTokens.length,
+        failures,
       },
       200,
     );
@@ -250,7 +278,13 @@ async function sendPushNotification(params: {
   firebaseProjectId: string;
   fcmToken: string;
   orderId: string;
-}): Promise<{ ok: boolean; status: number; body: string }> {
+}): Promise<{
+  ok: boolean;
+  status: number;
+  body: string;
+  tokenSuffix: string;
+  fcmToken: string;
+}> {
   const endpoint = `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(
     params.firebaseProjectId,
   )}/messages:send`;
@@ -295,6 +329,10 @@ async function sendPushNotification(params: {
     ok: response.ok,
     status: response.status,
     body: text,
+    fcmToken: params.fcmToken,
+    tokenSuffix: params.fcmToken.length > 8
+        ? params.fcmToken.substring(params.fcmToken.length - 8)
+        : params.fcmToken,
   };
 }
 

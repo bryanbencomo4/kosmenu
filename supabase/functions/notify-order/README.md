@@ -24,8 +24,10 @@ Important:
 ## Deploy
 
 ```bash
-supabase functions deploy notify-order
+supabase functions deploy notify-order --no-verify-jwt
 ```
+
+`--no-verify-jwt` is required when invoking this function from a Supabase Database Webhook.
 
 Set secrets:
 
