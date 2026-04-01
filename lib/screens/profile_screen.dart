@@ -400,7 +400,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .trim();
     if (fullName.isNotEmpty) return fullName;
     final email = user.email?.trim() ?? '';
-    return email.isNotEmpty ? email : 'Usuario Kosmenu';
+    return email.isNotEmpty ? email : 'Usuario elmenuxfa.com';
   }
 
   String _avatarUrl(User user) {

@@ -66,7 +66,7 @@ function maskEmail(email: string) {
 }
 
 function buildTrustKey(comercioId: string | null | undefined, email: string) {
-  return `kosmenu-order-access:${(comercioId ?? 'global').trim()}:${normalizeEmail(email)}`;
+  return `elmenuxfa-order-access:${(comercioId ?? 'global').trim()}:${normalizeEmail(email)}`;
 }
 
 function hasTrustedDevice(comercioId: string | null | undefined, email: string) {
@@ -188,7 +188,7 @@ export default function OrderDetailsPage() {
       return;
     }
 
-    const appUrl = `kosmenu://order/${encodeURIComponent(orderId)}`;
+    const appUrl = `elmenuxfa://order/${encodeURIComponent(orderId)}`;
     let pageHidden = false;
 
     const handleVisibilityChange = () => {
@@ -340,7 +340,7 @@ export default function OrderDetailsPage() {
 
   const items = order?.detalles?.items ?? [];
   const total = order?.detalles?.total ?? order?.total ?? 0;
-  const comercioNombre = (comercio?.nombre ?? 'Kosmenu').trim();
+  const comercioNombre = (comercio?.nombre ?? 'elmenuxfa.com').trim();
 
   if (loading) {
     return (

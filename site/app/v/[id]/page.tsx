@@ -88,10 +88,10 @@ const defaultProductImage =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">' +
-      '<rect width="240" height="240" fill="#2A2118"/>' +
-      '<circle cx="120" cy="95" r="34" fill="#D7A74D"/>' +
-      '<rect x="56" y="145" width="128" height="22" rx="11" fill="#F5D39A"/>' +
-      '<text x="120" y="206" text-anchor="middle" font-size="18" font-family="Arial" fill="#FFE8C6">Kosmenu</text>' +
+      '<rect width="240" height="240" fill="#F6F2FF"/>' +
+      '<circle cx="120" cy="95" r="34" fill="#6D28D9"/>' +
+      '<rect x="56" y="145" width="128" height="22" rx="11" fill="#C4B5FD"/>' +
+      '<text x="120" y="206" text-anchor="middle" font-size="16" font-family="Arial" fill="#1F1147">elmenuxfa.com</text>' +
       '</svg>',
   );
 
@@ -339,7 +339,7 @@ export default function PublicMenuPage() {
     [cartItems],
   );
 
-  const comercioNombre = (menuData?.comercio.nombre ?? 'Kosmenu').trim();
+  const comercioNombre = (menuData?.comercio.nombre ?? 'elmenuxfa.com').trim();
   const resolvedComercioId = (menuData?.comercio.id ?? comercioId).trim();
   const branding = menuData?.comercio.branding_ia ?? null;
   const comercioLogoUrl = (menuData?.comercio.logo_url ?? '').trim();
@@ -650,7 +650,7 @@ export default function PublicMenuPage() {
               </div>
             )}
             <div>
-            <p className="text-[10px] uppercase tracking-[0.35em] text-slate-500">Kosmenu</p>
+            <p className="text-[10px] uppercase tracking-[0.35em] text-slate-500">elmenuxfa.com</p>
             <h1 className="text-2xl font-bold leading-tight text-slate-900" style={titleFontStyle}>
               {comercioNombre}
             </h1>

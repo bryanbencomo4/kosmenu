@@ -11,14 +11,14 @@ class AppSpacing {
 }
 
 class AppColors {
-  static const Color canvas = Color(0xFFF8FAFC);
+  static const Color canvas = Color(0xFFF6F2FF);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceMuted = Color(0xFFF1F5F9);
-  static const Color textStrong = Color(0xFF0F172A);
-  static const Color textSoft = Color(0xFF475569);
-  static const Color borderSubtle = Color(0xFFE2E8F0);
-  static const Color accent = Color(0xFF2563EB);
-  static const Color accentSoft = Color(0xFFDBEAFE);
+  static const Color surfaceMuted = Color(0xFFF1EAFE);
+  static const Color textStrong = Color(0xFF1E1238);
+  static const Color textSoft = Color(0xFF5B4B7A);
+  static const Color borderSubtle = Color(0xFFE3D8F8);
+  static const Color accent = Color(0xFF5B21B6);
+  static const Color accentSoft = Color(0xFFEDE9FE);
   static const Color success = Color(0xFF15803D);
   static const Color warning = Color(0xFFD97706);
   static const Color danger = Color(0xFFB42318);

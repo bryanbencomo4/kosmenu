@@ -54,20 +54,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       description:
           'Activa notificaciones para responder mas rapido y vender mas.',
       icon: Icons.notifications_active_rounded,
-      accent: Color(0xFFFFB04A),
+      accent: Color(0xFF6D28D9),
     ),
     _NewsItem(
       title: 'Comparte tu menu digital',
       description: 'Envialo por WhatsApp y redes para captar nuevos clientes.',
       icon: Icons.share_rounded,
-      accent: Color(0xFF5AD8A6),
+      accent: Color(0xFF8B5CF6),
     ),
     _NewsItem(
       title: 'Actualiza tus categorias',
       description:
           'Un menu ordenado aumenta conversion y reduce dudas del cliente.',
       icon: Icons.auto_awesome_rounded,
-      accent: Color(0xFF8BB3FF),
+      accent: Color(0xFFA78BFA),
     ),
   ];
 
@@ -588,7 +588,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     await SharePlus.instance.share(
       ShareParams(
         text: 'Mira nuestro menú digital: $url',
-        subject: 'Menú digital Kosmenu',
+        subject: 'Menú digital elmenuxfa.com',
       ),
     );
   }

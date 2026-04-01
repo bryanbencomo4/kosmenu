@@ -15,7 +15,7 @@ const bodyFont = Roboto({
 });
 
 export const metadata: Metadata = {
-  title: 'Kosmenu',
+  title: 'elmenuxfa.com',
   description: 'Menu digital publico',
 };
 

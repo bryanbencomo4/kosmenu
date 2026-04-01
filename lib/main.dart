@@ -214,7 +214,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Kosmenu',
+      title: 'elmenuxfa.com',
       debugShowCheckedModeBanner: false,
       navigatorKey: _navigatorKey,
       initialRoute: _resolveInitialRoute(),
