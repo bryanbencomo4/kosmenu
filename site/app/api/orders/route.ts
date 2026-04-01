@@ -8,6 +8,13 @@ import {
 import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
 import { getServerSupabaseClient } from '../_lib/supabase-server';
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string) {
+  return UUID_PATTERN.test(value);
+}
+
 type CreateOrderPayload = {
   comercioId?: string;
   clientEmail?: string;
@@ -33,8 +40,26 @@ export async function POST(request: Request) {
     }
 
     const total = calculateTotal(items);
-    const orderId = createOrderId(comercioId);
     const supabase = getServerSupabaseClient();
+
+    const comercioQuery = supabase
+      .from('comercios')
+      .select('id')
+      .limit(1);
+    const { data: comercios, error: comercioError } = isUuid(comercioId)
+      ? await comercioQuery.eq('id', comercioId)
+      : await comercioQuery.eq('slug', comercioId);
+
+    if (comercioError) {
+      throw new Error(comercioError.message);
+    }
+
+    const resolvedComercioId = (comercios ?? [])[0]?.id?.toString().trim() ?? '';
+    if (!resolvedComercioId) {
+      return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
+    }
+
+    const orderId = createOrderId(resolvedComercioId);
 
     const detalles = {
       order_id: orderId,
@@ -44,7 +69,7 @@ export async function POST(request: Request) {
     };
 
     const payload = {
-      comercio_id: comercioId,
+      comercio_id: resolvedComercioId,
       estado: 'pendiente',
       total,
       detalles,
@@ -57,7 +82,7 @@ export async function POST(request: Request) {
 
     if (insertError?.message?.toLowerCase().includes('cliente_email')) {
       const fallbackResult = await supabase.from('pedidos').insert({
-        comercio_id: comercioId,
+        comercio_id: resolvedComercioId,
         estado: 'pendiente',
         total,
         detalles,
@@ -91,7 +116,7 @@ export async function POST(request: Request) {
         ok: true,
         data: {
           orderId,
-          comercioId,
+          comercioId: resolvedComercioId,
           total,
           trackingUrl,
           emailStatus,

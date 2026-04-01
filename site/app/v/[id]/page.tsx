@@ -26,8 +26,10 @@ type ComercioRow = {
   id: string;
   slug?: string | null;
   nombre?: string | null;
+  logo_url?: string | null;
   whatsapp?: string | null;
   telefono?: string | null;
+  telefonos?: string | null;
   celular?: string | null;
   branding_ia?: BrandingConfig | null;
 };
@@ -108,9 +110,22 @@ function safeImageSrc(imageUrl: string | null | undefined) {
   return src.length > 0 ? src : defaultProductImage;
 }
 
+function comercioInitial(name: string | null | undefined) {
+  const clean = (name ?? '').trim();
+  return clean.length > 0 ? clean.slice(0, 1).toUpperCase() : 'K';
+}
+
 function normalizeFontName(value: string | null | undefined) {
   const font = (value ?? '').trim();
   return font.length > 0 ? font : '';
+}
+
+function normalizeHexColor(value: string | null | undefined, fallback: string) {
+  const raw = (value ?? '').trim();
+  if (!/^#[0-9A-Fa-f]{6}$/.test(raw)) {
+    return fallback;
+  }
+  return raw;
 }
 
 function fontFamilyCssValue(fontName: string, fallback: string) {
@@ -120,17 +135,21 @@ function fontFamilyCssValue(fontName: string, fallback: string) {
 function getGoogleFontsUrl(branding: BrandingConfig | null | undefined) {
   const titleFont = normalizeFontName(branding?.fuente_titulos);
   const bodyFont = normalizeFontName(branding?.fuente_cuerpo);
-  const families = Array.from(new Set([titleFont, bodyFont].filter(Boolean)));
-
-  if (families.length === 0) {
+  if (!titleFont && !bodyFont) {
     return '';
   }
 
-  const query = families
-    .map((family) => `family=${encodeURIComponent(family).replace(/%20/g, '+')}`)
-    .join('&');
+  const safeTitle = (titleFont || 'Montserrat').replace(/\s+/g, '+');
+  const safeBody = (bodyFont || 'Roboto').replace(/\s+/g, '+');
+  const query = `family=${safeTitle}&family=${safeBody}`;
 
   return `https://fonts.googleapis.com/css2?${query}&display=swap`;
+}
+
+function borderRadiusByStyle(style: string | null | undefined) {
+  if (style === 'pill') return '999px';
+  if (style === 'sharp') return '0px';
+  return '12px';
 }
 
 export default function PublicMenuPage() {
@@ -170,9 +189,19 @@ export default function PublicMenuPage() {
 
         const supabase = createClient(supabaseUrl, supabaseAnonKey, {
           auth: { persistSession: false },
+          global: {
+            fetch: (input, init) =>
+              fetch(input, {
+                ...init,
+                cache: 'no-store',
+              }),
+          },
         });
 
-        const comercioQuery = supabase.from('comercios').select('*').limit(1);
+        const comercioQuery = supabase
+          .from('comercios')
+          .select('*')
+          .limit(1);
         const { data: comercios, error: comercioError } = isUuid(comercioId)
           ? await comercioQuery.eq('id', comercioId).returns<ComercioRow[]>()
           : await comercioQuery.eq('slug', comercioId).returns<ComercioRow[]>();
@@ -284,19 +313,31 @@ export default function PublicMenuPage() {
   );
 
   const comercioNombre = (menuData?.comercio.nombre ?? 'Kosmenu').trim();
+  const resolvedComercioId = (menuData?.comercio.id ?? comercioId).trim();
   const branding = menuData?.comercio.branding_ia ?? null;
+  const comercioLogoUrl = (menuData?.comercio.logo_url ?? '').trim();
+  const comercioInitialLetter = comercioInitial(comercioNombre);
+  const primaryColor = normalizeHexColor(branding?.color_principal, '#D7A74D');
+  const secondaryColor = normalizeHexColor(branding?.color_secundario, '#F5D39A');
   const googleFontsUrl = useMemo(
     () => getGoogleFontsUrl(branding),
     [branding?.fuente_titulos, branding?.fuente_cuerpo],
   );
+  const borderRadius = useMemo(
+    () => borderRadiusByStyle(branding?.estilo_botones),
+    [branding?.estilo_botones],
+  );
   const containerStyle = useMemo(
     () =>
       ({
+        '--primary-color': primaryColor,
+        '--secondary-color': secondaryColor,
         '--font-title': fontFamilyCssValue(normalizeFontName(branding?.fuente_titulos), 'serif'),
         '--font-body': fontFamilyCssValue(normalizeFontName(branding?.fuente_cuerpo), 'sans-serif'),
+        '--border-radius': borderRadius,
         fontFamily: 'var(--font-body)',
       }) as React.CSSProperties,
-    [branding?.fuente_titulos, branding?.fuente_cuerpo],
+    [primaryColor, secondaryColor, borderRadius, branding?.fuente_titulos, branding?.fuente_cuerpo],
   );
   const titleFontStyle = useMemo(
     () => ({ fontFamily: 'var(--font-title)' }) as React.CSSProperties,
@@ -305,7 +346,10 @@ export default function PublicMenuPage() {
   const normalizedClientEmail = clientEmail.trim().toLowerCase();
   const isClientEmailValid = emailRegex.test(normalizedClientEmail);
   const whatsappNumber = normalizePhone(
-    menuData?.comercio.whatsapp ?? menuData?.comercio.telefono ?? menuData?.comercio.celular,
+    menuData?.comercio.whatsapp ??
+      menuData?.comercio.telefono ??
+      menuData?.comercio.telefonos ??
+      menuData?.comercio.celular,
   );
 
   useEffect(() => {
@@ -403,7 +447,7 @@ export default function PublicMenuPage() {
       };
 
       const payload = {
-        comercio_id: comercioId,
+        comercio_id: resolvedComercioId,
         estado: 'pendiente',
         total: cartTotal,
         detalles,
@@ -415,7 +459,7 @@ export default function PublicMenuPage() {
 
       if (insertError?.message?.toLowerCase().includes('cliente_email')) {
         const fallbackPayload = {
-          comercio_id: comercioId,
+          comercio_id: resolvedComercioId,
           estado: 'pendiente',
           total: cartTotal,
           detalles,
@@ -439,7 +483,7 @@ export default function PublicMenuPage() {
 
     setIsSubmittingOrder(true);
     try {
-      const orderId = orderIdFrom(comercioId);
+      const orderId = orderIdFrom(resolvedComercioId);
       await persistOrderOptional(orderId, normalizedClientEmail, selectedMethod);
 
       const orderUrl = `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`;
@@ -512,16 +556,54 @@ export default function PublicMenuPage() {
           <link rel="stylesheet" href={googleFontsUrl} />
         </Head>
       ) : null}
+      <style jsx global>{`
+        :root {
+          --primary-color: ${primaryColor};
+          --secondary-color: ${secondaryColor};
+          --font-title: ${fontFamilyCssValue(normalizeFontName(branding?.fuente_titulos), 'sans-serif')};
+          --font-body: ${fontFamilyCssValue(normalizeFontName(branding?.fuente_cuerpo), 'sans-serif')};
+          --btn-radius: ${borderRadius};
+          --border-radius: ${borderRadius};
+        }
+      `}</style>
       <main className="min-h-screen bg-[#0F0D0B] text-[#F9F3EB]" style={containerStyle}>
       <header className="fixed inset-x-0 top-0 z-40 border-b border-[#C08A2C]/30 bg-[#16110C]/95 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3 sm:px-6">
-          <div>
+          <div className="flex items-center gap-3">
+            {comercioLogoUrl ? (
+              <img
+                src={comercioLogoUrl}
+                alt={`Logo de ${comercioNombre}`}
+                className="h-11 w-11 rounded-full object-cover ring-2 ring-white/20"
+                onError={(event) => {
+                  const img = event.currentTarget;
+                  img.style.display = 'none';
+                }}
+              />
+            ) : (
+              <div
+                className="grid h-11 w-11 place-items-center rounded-full text-sm font-bold text-[#1A1208]"
+                style={{ backgroundColor: 'var(--primary-color)' }}
+              >
+                {comercioInitialLetter}
+              </div>
+            )}
+            <div>
             <p className="text-[10px] uppercase tracking-[0.35em] text-[#D7A74D]">Kosmenu</p>
             <h1 className="text-2xl font-bold leading-tight text-[#FFF4E2]" style={titleFontStyle}>
               {comercioNombre}
             </h1>
+            </div>
           </div>
-          <span className="rounded-full border border-[#D7A74D]/60 bg-[#251A10] px-4 py-2 text-xs font-bold uppercase tracking-[0.15em] text-[#F8D287]">
+          <span
+            className="px-4 py-2 text-xs font-bold uppercase tracking-[0.15em]"
+            style={{
+              borderRadius: 'var(--btn-radius)',
+              border: '1px solid color-mix(in srgb, var(--primary-color) 65%, white)',
+              backgroundColor: 'color-mix(in srgb, var(--primary-color) 18%, #251A10)',
+              color: 'var(--primary-color)',
+            }}
+          >
             Menu en linea
           </span>
         </div>
@@ -557,7 +639,7 @@ export default function PublicMenuPage() {
             {categoriasConProductos.map((categoria) => (
               <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-36 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-semibold text-[#FFEACC]" style={titleFontStyle}>{categoria.nombre}</h2>
+                  <h2 className="text-2xl font-semibold" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>{categoria.nombre}</h2>
                   <span className="text-xs uppercase tracking-[0.25em] text-[#BFA383]">
                     {categoria.productos.length} items
                   </span>
@@ -591,7 +673,14 @@ export default function PublicMenuPage() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-3">
                               <h3 className="text-base font-bold leading-5 text-[#FFF6E8]" style={titleFontStyle}>{producto.nombre}</h3>
-                              <span className="rounded-full bg-[#169A56]/20 px-3 py-1 text-sm font-extrabold text-[#40D887]">
+                              <span
+                                className="px-3 py-1 text-sm font-extrabold"
+                                style={{
+                                  borderRadius: 'var(--border-radius)',
+                                  backgroundColor: 'color-mix(in srgb, var(--primary-color) 22%, transparent)',
+                                  color: 'var(--primary-color)',
+                                }}
+                              >
                                 {formatCop(producto.precio)}
                               </span>
                             </div>
@@ -616,7 +705,8 @@ export default function PublicMenuPage() {
                               <button
                                 type="button"
                                 onClick={() => incrementProduct(producto.id)}
-                                className="h-8 w-8 rounded-full bg-[#1A9F56] text-base font-bold text-white transition hover:bg-[#128347]"
+                                className="h-8 w-8 rounded-full text-base font-bold text-white transition"
+                                style={{ backgroundColor: 'var(--primary-color)' }}
                               >
                                 +
                               </button>
@@ -650,8 +740,16 @@ export default function PublicMenuPage() {
               className={`rounded-full px-5 py-3 text-sm font-extrabold transition ${
                 !whatsappNumber || isSubmittingOrder
                   ? 'cursor-not-allowed bg-[#5A4A38] text-[#C3B299]'
-                  : 'bg-[#1AB15E] text-white hover:bg-[#159650]'
+                  : 'text-white'
               }`}
+              style={
+                !whatsappNumber || isSubmittingOrder
+                  ? undefined
+                  : {
+                      borderRadius: 'var(--border-radius)',
+                      backgroundColor: 'var(--primary-color)',
+                    }
+              }
             >
               {isSubmittingOrder ? 'Procesando...' : 'Confirmar Pedido'}
             </button>
@@ -763,8 +861,16 @@ export default function PublicMenuPage() {
               className={`mt-4 w-full rounded-full px-5 py-3 text-sm font-extrabold transition ${
                 isSubmittingOrder || !isClientEmailValid
                   ? 'cursor-not-allowed bg-[#5A4A38] text-[#C3B299]'
-                  : 'bg-[#1AB15E] text-white hover:bg-[#159650]'
+                  : 'text-white'
               }`}
+              style={
+                isSubmittingOrder || !isClientEmailValid
+                  ? undefined
+                  : {
+                      borderRadius: 'var(--border-radius)',
+                      backgroundColor: 'var(--primary-color)',
+                    }
+              }
             >
               {isSubmittingOrder ? 'Procesando...' : 'Enviar por WhatsApp'}
             </button>
