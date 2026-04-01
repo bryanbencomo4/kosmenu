@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:app_links/app_links.dart' as deep_links;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
@@ -61,7 +61,8 @@ class KosmenuApp extends StatefulWidget {
 class _KosmenuAppState extends State<KosmenuApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final deep_links.AppLinks _appLinks = deep_links.AppLinks();
-  final PushNotificationService _pushNotifications = PushNotificationService.instance;
+  final PushNotificationService _pushNotifications =
+      PushNotificationService.instance;
 
   StreamSubscription<Uri>? _appLinkSubscription;
   StreamSubscription<String>? _pushTapSubscription;
@@ -86,7 +87,9 @@ class _KosmenuAppState extends State<KosmenuApp> {
   Future<void> _initializePushNotifications() async {
     try {
       await _pushNotifications.initialize();
-      _pushTapSubscription = _pushNotifications.orderTapStream.listen((orderId) {
+      _pushTapSubscription = _pushNotifications.orderTapStream.listen((
+        orderId,
+      ) {
         if (orderId.trim().isEmpty) {
           return;
         }
@@ -210,24 +213,13 @@ class _KosmenuAppState extends State<KosmenuApp> {
 
   @override
   Widget build(BuildContext context) {
-    final baseTheme = ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFFFF6B00),
-        brightness: Brightness.dark,
-      ),
-    );
-
     return MaterialApp(
       title: 'Kosmenu',
       debugShowCheckedModeBanner: false,
       navigatorKey: _navigatorKey,
       initialRoute: _resolveInitialRoute(),
       onGenerateRoute: _onGenerateRoute,
-      theme: baseTheme.copyWith(
-        textTheme: GoogleFonts.poppinsTextTheme(baseTheme.textTheme),
-      ),
+      theme: AppTheme.lightTheme(),
     );
   }
 }

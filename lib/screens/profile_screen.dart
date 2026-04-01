@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -647,24 +648,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required String value,
     required Color fallback,
   }) {
+    final theme = Theme.of(context);
     final color = _parseHexColor(value, fallback);
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFF211912),
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0x22FFFFFF)),
+          border: Border.all(color: AppColors.borderSubtle),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               label,
-              style: GoogleFonts.poppins(
-                color: const Color(0xFFE7CCAA),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: AppColors.textSoft,
               ),
             ),
             const SizedBox(height: 10),
@@ -678,7 +678,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 8),
             Text(
               value,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.textSoft,
+              ),
             ),
           ],
         ),
@@ -687,6 +689,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildBrandingPreview(BrandingDraft branding) {
+    final theme = Theme.of(context);
     final colorPrincipal = branding.colorPrincipal;
     final colorSecundario = branding.colorSecundario;
     final fuenteTitulos = branding.fuenteTitulos;
@@ -696,16 +699,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final moodTags = branding.moodTags;
     final titlePreviewStyle = _previewFontStyle(
       fontFamily: fuenteTitulos,
-      fallback: GoogleFonts.poppins(
-        color: const Color(0xFFFFF2DD),
+      fallback: GoogleFonts.montserrat(
+        color: AppColors.textStrong,
         fontSize: 24,
         fontWeight: FontWeight.w700,
       ),
     );
     final bodyPreviewStyle = _previewFontStyle(
       fontFamily: fuenteCuerpo,
-      fallback: GoogleFonts.poppins(
-        color: const Color(0xFFCEB89A),
+      fallback: GoogleFonts.roboto(
+        color: AppColors.textSoft,
         fontSize: 14,
         height: 1.5,
       ),
@@ -714,13 +717,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Vista previa en vivo',
-          style: GoogleFonts.poppins(
-            color: const Color(0xFFFFE2BF),
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        Text('Vista previa en vivo', style: theme.textTheme.titleMedium),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -738,34 +735,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        Text(
-          'Titulares: $fuenteTitulos',
-          style: const TextStyle(color: Colors.white70),
-        ),
+        Text('Titulares: $fuenteTitulos', style: theme.textTheme.bodyMedium),
         const SizedBox(height: 4),
-        Text(
-          'Cuerpo: $fuenteCuerpo',
-          style: const TextStyle(color: Colors.white70),
-        ),
+        Text('Cuerpo: $fuenteCuerpo', style: theme.textTheme.bodyMedium),
         const SizedBox(height: 4),
-        Text(
-          'Botones: $estiloBotones',
-          style: const TextStyle(color: Colors.white70),
-        ),
+        Text('Botones: $estiloBotones', style: theme.textTheme.bodyMedium),
         const SizedBox(height: 4),
         Text(
           'Layout: ${branding.layoutType.name} | Items por fila: ${branding.itemsPerRow}',
-          style: const TextStyle(color: Colors.white70),
+          style: theme.textTheme.bodyMedium,
         ),
         const SizedBox(height: 4),
         Text(
           'Sticky menu: ${branding.menuSticky ? 'si' : 'no'} | Mostrar imagenes: ${branding.showImages ? 'si' : 'no'}',
-          style: const TextStyle(color: Colors.white70),
+          style: theme.textTheme.bodyMedium,
         ),
         const SizedBox(height: 4),
         Text(
           'Moneda: ${branding.monedaDefault} | Metodos: ${branding.metodosPago.join(', ')}',
-          style: const TextStyle(color: Colors.white70),
+          style: theme.textTheme.bodyMedium,
         ),
         const SizedBox(height: 12),
         FutureBuilder<List<void>>(
@@ -779,9 +767,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFF120F0C),
+                color: AppColors.surfaceMuted,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0x22FFFFFF)),
+                border: Border.all(color: AppColors.borderSubtle),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -798,10 +786,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Expanded(
                           child: Text(
                             'Descargando las fuentes elegidas por la IA para mostrarte la vista real...',
-                            style: GoogleFonts.poppins(
-                              color: const Color(0xFFE7CCAA),
-                              fontSize: 12,
-                            ),
+                            style: theme.textTheme.bodySmall,
                           ),
                         ),
                       ],
@@ -832,16 +817,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2B2118),
+                      color: AppColors.accentSoft,
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: const Color(0x33FFFFFF)),
+                      border: Border.all(color: AppColors.borderSubtle),
                     ),
                     child: Text(
                       tag,
-                      style: GoogleFonts.poppins(
-                        color: const Color(0xFFFFD8A7),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: AppColors.textStrong,
                       ),
                     ),
                   ),
@@ -851,13 +834,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
         if (descripcionVisual.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text(
-            descripcionVisual,
-            style: GoogleFonts.poppins(
-              color: const Color(0xFFCEB89A),
-              height: 1.45,
-            ),
-          ),
+          Text(descripcionVisual, style: theme.textTheme.bodyMedium),
         ],
       ],
     );
@@ -865,6 +842,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
       return Scaffold(
@@ -878,13 +857,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final avatar = _avatarUrl(user);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0D0B),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF17120E),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: const Text('Perfil'),
-      ),
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(title: const Text('Perfil')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -892,29 +866,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(20),
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF2A1C12), Color(0xFF15100C)],
+                  colors: [AppColors.surface, AppColors.surfaceMuted],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
-                border: Border.all(color: const Color(0x33FFFFFF)),
+                border: Border.all(color: AppColors.borderSubtle),
+                boxShadow: AppTheme.softShadow,
               ),
               child: Row(
                 children: [
                   CircleAvatar(
                     radius: 34,
-                    backgroundColor: const Color(0xFF352316),
+                    backgroundColor: colorScheme.primary.withValues(
+                      alpha: 0.12,
+                    ),
                     backgroundImage: avatar.isNotEmpty
                         ? NetworkImage(avatar)
                         : null,
                     child: avatar.isEmpty
                         ? Text(
                             _avatarInitial(name),
-                            style: GoogleFonts.poppins(
-                              color: const Color(0xFFFFD8A7),
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
+                            style: theme.textTheme.headlineMedium?.copyWith(
+                              color: colorScheme.primary,
                             ),
                           )
                         : null,
@@ -928,21 +903,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           name,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: theme.textTheme.titleLarge,
                         ),
                         const SizedBox(height: 4),
                         Text(
                           email,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            color: const Color(0xFFE7CCAA),
-                            fontSize: 12,
-                          ),
+                          style: theme.textTheme.bodyMedium,
                         ),
                       ],
                     ),
@@ -956,7 +924,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Card(
-                    color: Color(0xFF17120E),
                     child: Padding(
                       padding: EdgeInsets.all(16),
                       child: Center(child: CircularProgressIndicator()),
@@ -966,12 +933,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 if (snapshot.hasError) {
                   return Card(
-                    color: const Color(0xFF17120E),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Text(
                         'No se pudo cargar el negocio: ${snapshot.error}',
-                        style: const TextStyle(color: Colors.white70),
+                        style: theme.textTheme.bodyMedium,
                       ),
                     ),
                   );
@@ -980,19 +946,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 final business = snapshot.data;
                 if (business == null) {
                   return const Card(
-                    color: Color(0xFF17120E),
                     child: Padding(
                       padding: EdgeInsets.all(16),
                       child: Text(
                         'No se encontro informacion del negocio actual.',
-                        style: TextStyle(color: Colors.white70),
                       ),
                     ),
                   );
                 }
 
                 return Card(
-                  color: const Color(0xFF17120E),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
@@ -1003,35 +966,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         Text(
                           'Negocio actual',
-                          style: GoogleFonts.poppins(
-                            color: const Color(0xFFFFE2BF),
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: theme.textTheme.titleMedium,
                         ),
                         const SizedBox(height: 10),
                         Text(
                           business['nombre']?.toString() ?? 'Sin nombre',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: theme.textTheme.titleLarge,
                         ),
                         const SizedBox(height: 6),
                         Text(
                           'Categoria: ${(business['categoria'] ?? 'No definida').toString()}',
-                          style: const TextStyle(color: Colors.white70),
+                          style: theme.textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 4),
                         Text(
                           'WhatsApp: ${(business['whatsapp'] ?? 'No configurado').toString()}',
-                          style: const TextStyle(color: Colors.white70),
+                          style: theme.textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 4),
                         Text(
                           'ID: ${(business['id'] ?? '').toString()}',
                           style: const TextStyle(
-                            color: Colors.white54,
+                            color: AppColors.textSoft,
                             fontSize: 12,
                           ),
                         ),
@@ -1041,36 +997,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           enabled: !_isGeneratingBranding,
                           minLines: 2,
                           maxLines: 4,
-                          style: GoogleFonts.poppins(color: Colors.white),
                           decoration: InputDecoration(
                             labelText: 'Describe el estilo de tu marca',
                             hintText: 'Quiero algo minimalista y elegante',
-                            hintStyle: GoogleFonts.poppins(
-                              color: const Color(0xFF8F7B68),
-                            ),
-                            labelStyle: GoogleFonts.poppins(
-                              color: const Color(0xFFE7CCAA),
-                            ),
-                            filled: true,
-                            fillColor: const Color(0xFF120F0C),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Color(0x33FFFFFF),
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Color(0x33FFFFFF),
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Color(0xFFFFB45C),
-                              ),
-                            ),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -1078,14 +1007,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onPressed: _isGeneratingBranding
                               ? null
                               : () => _generateBranding(business),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF8C42),
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size.fromHeight(50),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
                           icon: const Icon(Icons.auto_awesome_rounded),
                           label: const Text('Diseño con IA'),
                         ),
@@ -1095,11 +1016,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF120F0C),
+                              color: AppColors.surfaceMuted,
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0x22FFFFFF),
-                              ),
+                              border: Border.all(color: AppColors.borderSubtle),
                             ),
                             child: Row(
                               children: [
@@ -1114,10 +1033,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 Expanded(
                                   child: Text(
                                     'La IA está afinando una identidad visual con más sabor para tu negocio...',
-                                    style: GoogleFonts.poppins(
-                                      color: const Color(0xFFCEB89A),
-                                      height: 1.4,
-                                    ),
+                                    style: theme.textTheme.bodyMedium,
                                   ),
                                 ),
                               ],
@@ -1142,10 +1058,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               children: [
                                 Text(
                                   'Editor de Layout y Estilos',
-                                  style: GoogleFonts.poppins(
-                                    color: const Color(0xFFFFE2BF),
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                                  style: theme.textTheme.titleMedium,
                                 ),
                                 const SizedBox(height: 12),
                                 SegmentedButton<LayoutType>(
@@ -1236,7 +1149,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   onChanged:
                                       _brandingEditor.updateMonedaDefault,
                                   maxLength: 3,
-                                  style: const TextStyle(color: Colors.white),
                                   decoration: const InputDecoration(
                                     labelText:
                                         'Moneda por defecto (ISO 3 letras)',
@@ -1264,7 +1176,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   initialValue: draft.colorPrincipal,
                                   onChanged:
                                       _brandingEditor.updateColorPrincipal,
-                                  style: const TextStyle(color: Colors.white),
                                   decoration: const InputDecoration(
                                     labelText: 'Color principal (HEX)',
                                   ),
@@ -1274,7 +1185,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   initialValue: draft.colorSecundario,
                                   onChanged:
                                       _brandingEditor.updateColorSecundario,
-                                  style: const TextStyle(color: Colors.white),
                                   decoration: const InputDecoration(
                                     labelText: 'Color secundario (HEX)',
                                   ),
@@ -1283,7 +1193,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 TextFormField(
                                   initialValue: draft.background,
                                   onChanged: _brandingEditor.updateBackground,
-                                  style: const TextStyle(color: Colors.white),
                                   decoration: const InputDecoration(
                                     labelText: 'Background (HEX)',
                                   ),
@@ -1292,7 +1201,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 TextFormField(
                                   initialValue: draft.cardSurface,
                                   onChanged: _brandingEditor.updateCardSurface,
-                                  style: const TextStyle(color: Colors.white),
                                   decoration: const InputDecoration(
                                     labelText: 'Card surface (HEX)',
                                   ),
@@ -1302,7 +1210,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   initialValue: draft.textOnPrimary,
                                   onChanged:
                                       _brandingEditor.updateTextOnPrimary,
-                                  style: const TextStyle(color: Colors.white),
                                   decoration: const InputDecoration(
                                     labelText: 'Texto sobre primario (HEX)',
                                   ),
@@ -1339,8 +1246,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             FilledButton.icon(
               onPressed: _signingOut ? null : _signOut,
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFBF2F2F),
-                foregroundColor: Colors.white,
+                backgroundColor: colorScheme.error,
+                foregroundColor: colorScheme.onError,
                 minimumSize: const Size.fromHeight(52),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),

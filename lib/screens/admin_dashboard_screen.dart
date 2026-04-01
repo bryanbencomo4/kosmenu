@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/theme/app_theme.dart';
 
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
@@ -644,11 +645,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
 
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => QrGeneratorScreen(
-          comercio: comercio,
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => QrGeneratorScreen(comercio: comercio)),
     );
   }
 
@@ -799,16 +796,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final colorScheme = Theme.of(context).colorScheme;
     final safeBottomInset = MediaQuery.of(context).viewPadding.bottom;
     final listBottomPadding = safeBottomInset + 96;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0D0B),
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF17120E),
-        foregroundColor: Colors.white,
-        elevation: 0,
         title: const Text('Panel de Control'),
         actions: [
           IconButton(
@@ -824,7 +819,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           PopupMenuButton<_NavbarMenuAction>(
             tooltip: 'Más acciones',
             icon: const Icon(Icons.more_vert_rounded),
-            color: const Color(0xFF1B140F),
             onSelected: (value) {
               _onNavbarMenuSelected(value);
             },
@@ -874,7 +868,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFFFF6B00),
         onPressed: _openMagicOnboarding,
         child: const Icon(Icons.camera_alt),
       ),
@@ -896,7 +889,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     const SizedBox(height: 12),
                     Text(
                       'Cargando estadísticas...',
-                      style: GoogleFonts.poppins(color: Colors.white70),
+                      style: theme.textTheme.bodyMedium,
                     ),
                   ],
                 ),
@@ -909,7 +902,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Text(
                     'Error cargando dashboard: ${snapshot.error}',
-                    style: const TextStyle(color: Colors.white),
+                    style: theme.textTheme.bodyLarge,
                   ),
                 ),
               );
@@ -918,17 +911,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             final data = snapshot.data;
             if (data == null) {
               return const Center(
-                child: Text(
-                  'No se pudo cargar el dashboard',
-                  style: TextStyle(color: Colors.white),
-                ),
+                child: Text('No se pudo cargar el dashboard'),
               );
             }
 
             final webBadgeText = _hasWebUrlConfigured ? 'En Línea' : 'Sin URL';
             final webBadgeColor = _hasWebUrlConfigured
-                ? const Color(0xFF1AB15E)
-                : const Color(0xFFE67E22);
+                ? AppColors.success
+                : AppColors.warning;
 
             if (!_didInitBusinessOnline) {
               _businessOnline = data.comercio.enLinea;
@@ -937,7 +927,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
             return RefreshIndicator(
               onRefresh: _refreshDashboard,
-              color: const Color(0xFFFFB04A),
+              color: colorScheme.primary,
               child: ListView(
                 controller: _dashboardScrollController,
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -979,8 +969,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   _StaggeredReveal(
                     order: 2,
                     child: Card(
-                      elevation: 3,
-                      color: const Color(0x0017120E),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(24),
                       ),
@@ -988,18 +976,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(24),
                           gradient: const LinearGradient(
-                            colors: [Color(0xFF2A1C12), Color(0xFF15100C)],
+                            colors: [AppColors.surface, AppColors.surfaceMuted],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           ),
-                          border: Border.all(color: const Color(0x55B07432)),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x33000000),
-                              blurRadius: 16,
-                              offset: Offset(0, 8),
-                            ),
-                          ],
+                          border: Border.all(color: AppColors.borderSubtle),
+                          boxShadow: AppTheme.softShadow,
                         ),
                         child: Padding(
                           padding: const EdgeInsets.all(18),
@@ -1012,28 +994,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   vertical: 7,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: const Color(0x22FFB04A),
+                                  color: colorScheme.primary.withValues(
+                                    alpha: 0.08,
+                                  ),
                                   borderRadius: BorderRadius.circular(999),
                                   border: Border.all(
-                                    color: const Color(0x44FFB04A),
+                                    color: AppColors.borderSubtle,
                                   ),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(
+                                    Icon(
                                       Icons.space_dashboard_rounded,
                                       size: 16,
-                                      color: Color(0xFFFFC977),
+                                      color: colorScheme.primary,
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
                                       'Panel principal',
-                                      style: GoogleFonts.poppins(
-                                        color: const Color(0xFFFFD49A),
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
-                                      ),
+                                      style: theme.textTheme.labelMedium
+                                          ?.copyWith(
+                                            color: colorScheme.primary,
+                                          ),
                                     ),
                                   ],
                                 ),
@@ -1043,21 +1026,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 data.comercio.nombre,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.1,
-                                ),
+                                style: theme.textTheme.headlineMedium,
                               ),
                               const SizedBox(height: 10),
                               Text(
                                 'Gestiona tu menú y tus pedidos desde un solo lugar.',
-                                style: GoogleFonts.poppins(
-                                  color: const Color(0xFFE7CCAA),
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                                style: theme.textTheme.bodyMedium,
                               ),
                               const SizedBox(height: 16),
                               LayoutBuilder(
@@ -1066,16 +1040,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                                   final manageButton = FilledButton.icon(
                                     style: FilledButton.styleFrom(
-                                      backgroundColor: const Color(0xFFFF6B00),
-                                      foregroundColor: Colors.white,
                                       minimumSize: const Size.fromHeight(52),
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 18,
                                         vertical: 14,
-                                      ),
-                                      textStyle: GoogleFonts.poppins(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 15,
                                       ),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(14),
@@ -1101,18 +1069,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                                   final qrButton = OutlinedButton.icon(
                                     style: OutlinedButton.styleFrom(
-                                      foregroundColor: const Color(0xFFFFC977),
-                                      side: const BorderSide(
-                                        color: Color(0xFF7E5930),
-                                      ),
                                       minimumSize: const Size.fromHeight(48),
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 16,
                                         vertical: 12,
-                                      ),
-                                      textStyle: GoogleFonts.poppins(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 14,
                                       ),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(14),
@@ -1170,7 +1130,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   _StaggeredReveal(
                     order: 3,
                     child: Card(
-                      color: const Color(0xFF17120E),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
                       ),
@@ -1181,11 +1140,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           children: [
                             Text(
                               'Atajos y noticias',
-                              style: GoogleFonts.poppins(
-                                color: const Color(0xFFFFE2BF),
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
+                              style: theme.textTheme.titleLarge,
                             ),
                             const SizedBox(height: 10),
                             SizedBox(
@@ -1219,8 +1174,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   margin: const EdgeInsets.only(right: 6),
                                   decoration: BoxDecoration(
                                     color: active
-                                        ? const Color(0xFFFFB04A)
-                                        : const Color(0x44FFFFFF),
+                                        ? colorScheme.primary
+                                        : AppColors.borderSubtle,
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                 );
@@ -1235,7 +1190,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   _StaggeredReveal(
                     order: 4,
                     child: Card(
-                      color: const Color(0xFF17120E),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
                       ),
@@ -1246,24 +1200,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           children: [
                             Text(
                               'Configuracion del negocio',
-                              style: GoogleFonts.poppins(
-                                color: const Color(0xFFFFE2BF),
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
+                              style: theme.textTheme.titleLarge,
                             ),
                             const SizedBox(height: 10),
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(
                                 Icons.store_mall_directory_rounded,
-                                color: Color(0xFFFFB04A),
+                                color: AppColors.accent,
                               ),
                               title: Text(
                                 data.comercio.nombre,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white),
+                                style: theme.textTheme.titleMedium,
                               ),
                               subtitle: Text(
                                 data.comercio.whatsapp?.trim().isNotEmpty ==
@@ -1272,7 +1222,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                     : 'Sin WhatsApp configurado',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white70),
+                                style: theme.textTheme.bodyMedium,
                               ),
                               trailing: TextButton.icon(
                                 onPressed: () =>
@@ -1281,18 +1231,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 label: const Text('Editar'),
                               ),
                             ),
-                            const Divider(color: Color(0x33FFFFFF)),
+                            const Divider(),
                             SwitchListTile.adaptive(
                               contentPadding: EdgeInsets.zero,
-                              title: const Text(
-                                'Negocio en linea',
-                                style: TextStyle(color: Colors.white),
-                              ),
+                              title: const Text('Negocio en linea'),
                               subtitle: Text(
                                 _businessOnline
                                     ? 'Los clientes pueden realizar pedidos.'
                                     : 'Tu menu sigue visible, pero fuera de servicio.',
-                                style: const TextStyle(color: Colors.white70),
+                                style: theme.textTheme.bodyMedium,
                               ),
                               value: _businessOnline,
                               onChanged: _isUpdatingBusiness
@@ -1307,14 +1254,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   const SizedBox(height: 16),
                   _StaggeredReveal(
                     order: 5,
-                    child: Text(
-                      'Pedidos',
-                      style: GoogleFonts.poppins(
-                        color: const Color(0xFFFFE2BF),
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    child: Text('Pedidos', style: theme.textTheme.titleLarge),
                   ),
                   const SizedBox(height: 10),
                   _ElegantSearchBar(
@@ -1396,7 +1336,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               ConnectionState.waiting &&
                           !ordersSnapshot.hasData) {
                         return const Card(
-                          color: Color(0xFF17120E),
                           child: Padding(
                             padding: EdgeInsets.all(16),
                             child: Center(child: CircularProgressIndicator()),
@@ -1406,12 +1345,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                       if (ordersSnapshot.hasError) {
                         return Card(
-                          color: const Color(0xFF17120E),
                           child: Padding(
                             padding: const EdgeInsets.all(16),
                             child: Text(
                               'Error cargando pedidos: ${ordersSnapshot.error}',
-                              style: const TextStyle(color: Colors.white),
+                              style: theme.textTheme.bodyLarge,
                             ),
                           ),
                         );
@@ -1433,13 +1371,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                       if (filteredOrders.isEmpty) {
                         return const Card(
-                          color: Color(0xFF17120E),
                           child: Padding(
                             padding: EdgeInsets.all(16),
-                            child: Text(
-                              'No hay pedidos para este filtro',
-                              style: TextStyle(color: Colors.white),
-                            ),
+                            child: Text('No hay pedidos para este filtro'),
                           ),
                         );
                       }
@@ -1459,7 +1393,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 : 'Pendiente';
 
                             return Card(
-                              color: const Color(0xFF17120E),
                               child: ListTile(
                                 contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 12,
@@ -1549,10 +1482,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                     textAlign: TextAlign.end,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Color(0xFFFF6B00),
-                                      fontWeight: FontWeight.w700,
-                                    ),
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(color: colorScheme.primary),
                                   ),
                                 ),
                               ),
@@ -1636,16 +1567,18 @@ class _NewsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         gradient: const LinearGradient(
-          colors: [Color(0xFF2B1C11), Color(0xFF1A140E)],
+          colors: [AppColors.surface, AppColors.surfaceMuted],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         border: Border.all(color: item.accent.withValues(alpha: 0.35)),
+        boxShadow: AppTheme.softShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1659,11 +1592,7 @@ class _NewsCard extends StatelessWidget {
                   item.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    color: const Color(0xFFFFE2BF),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
+                  style: theme.textTheme.titleMedium,
                 ),
               ),
             ],
@@ -1673,11 +1602,7 @@ class _NewsCard extends StatelessWidget {
             item.description,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-              color: const Color(0xFFD5B995),
-              fontSize: 12.5,
-              height: 1.35,
-            ),
+            style: theme.textTheme.bodyMedium,
           ),
         ],
       ),
@@ -1712,23 +1637,22 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Card(
       margin: EdgeInsets.zero,
-      color: const Color(0xFF17120E),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: const Color(0xFFFFB04A), size: 20),
+            Icon(icon, color: colorScheme.primary, size: 20),
             const Spacer(),
             Text(
               value,
-              style: GoogleFonts.poppins(
-                color: valueColor ?? Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: valueColor ?? AppColors.textStrong,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -1736,10 +1660,8 @@ class _StatCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               title,
-              style: GoogleFonts.poppins(
-                color: const Color(0xFFE6C9A8),
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.textSoft,
               ),
             ),
           ],
@@ -1757,15 +1679,15 @@ class _NavbarMenuItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Row(
       children: [
-        Icon(icon, size: 18, color: const Color(0xFFFFD49A)),
+        Icon(icon, size: 18, color: theme.colorScheme.primary),
         const SizedBox(width: 10),
         Text(
           label,
-          style: GoogleFonts.poppins(
-            color: const Color(0xFFFFE2BF),
-            fontWeight: FontWeight.w600,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: AppColors.textStrong,
           ),
         ),
       ],
@@ -1788,29 +1710,37 @@ class _ElegantSearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
         gradient: const LinearGradient(
-          colors: [Color(0xFF21160F), Color(0xFF17120E)],
+          colors: [AppColors.surface, AppColors.surfaceMuted],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: const Color(0x33FFD49A)),
+        border: Border.all(color: AppColors.borderSubtle),
+        boxShadow: AppTheme.softShadow,
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
-          const Icon(Icons.search_rounded, color: Color(0xFFFFC977), size: 20),
+          Icon(
+            Icons.search_rounded,
+            color: theme.colorScheme.primary,
+            size: 20,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: controller,
               onChanged: onChanged,
-              style: const TextStyle(color: Colors.white),
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: AppColors.textStrong,
+              ),
               decoration: InputDecoration(
                 hintText: hintText,
-                hintStyle: const TextStyle(color: Color(0x80E6C9A8)),
+                hintStyle: theme.textTheme.bodyMedium,
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 14),
@@ -1820,7 +1750,7 @@ class _ElegantSearchBar extends StatelessWidget {
           if (controller.text.trim().isNotEmpty)
             IconButton(
               onPressed: onClear,
-              icon: const Icon(Icons.close_rounded, color: Colors.white70),
+              icon: Icon(Icons.close_rounded, color: theme.colorScheme.primary),
               tooltip: 'Limpiar búsqueda',
             ),
         ],

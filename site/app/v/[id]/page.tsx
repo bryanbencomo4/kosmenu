@@ -344,19 +344,19 @@ export default function PublicMenuPage() {
   const branding = menuData?.comercio.branding_ia ?? null;
   const comercioLogoUrl = (menuData?.comercio.logo_url ?? '').trim();
   const comercioInitialLetter = comercioInitial(comercioNombre);
-  const primaryColor = normalizeHexColor(branding?.color_principal, '#D7A74D');
-  const secondaryColor = normalizeHexColor(branding?.color_secundario, '#F5D39A');
+  const primaryColor = normalizeHexColor(branding?.color_principal, '#2563EB');
+  const secondaryColor = normalizeHexColor(branding?.color_secundario, '#1D4ED8');
   const layoutType = normalizeLayoutType(branding?.layout_type ?? null);
   const itemsPerRow = clampItemsPerRow(branding?.config_visual?.items_per_row ?? null, layoutType);
   const menuSticky = branding?.config_visual?.menu_sticky ?? true;
   const showImages = branding?.config_visual?.show_images ?? layoutType !== 'compact';
   const backgroundColor = normalizeHexColor(
     branding?.colores_personalizados?.background,
-    '#0F0D0B',
+    '#F8FAFC',
   );
   const cardSurfaceColor = normalizeHexColor(
     branding?.colores_personalizados?.card_surface,
-    '#1A140E',
+    '#FFFFFF',
   );
   const textOnPrimaryColor = normalizeHexColor(
     branding?.colores_personalizados?.text_on_primary,
@@ -583,10 +583,10 @@ export default function PublicMenuPage() {
 
   if (loading) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#0F0D0B] text-[#F9F3EB]">
+      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-900">
         <div className="text-center">
-          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-[#D7A74D]/50 border-t-[#D7A74D]" />
-          <p className="mt-3 text-sm text-[#D8C6AE]">Cargando menu...</p>
+          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-slate-200 border-t-[var(--brand-primary)]" />
+          <p className="mt-3 text-sm text-slate-500">Cargando menu...</p>
         </div>
       </main>
     );
@@ -594,8 +594,8 @@ export default function PublicMenuPage() {
 
   if (error || !menuData) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#0F0D0B] px-6 text-[#F9F3EB]">
-        <p className="max-w-md text-center text-sm text-[#E7D5BF]">
+      <main className="grid min-h-screen place-items-center bg-slate-50 px-6 text-slate-900">
+        <p className="max-w-md text-center text-sm text-slate-500">
           {error ?? 'No se pudo cargar el menu.'}
         </p>
       </main>
@@ -621,21 +621,21 @@ export default function PublicMenuPage() {
           --card-surface: ${cardSurfaceColor};
           --text-on-primary: ${textOnPrimaryColor};
           --items-per-row: ${itemsPerRow};
-          --font-title: ${fontFamilyCssValue(normalizeFontName(branding?.fuente_titulos), 'sans-serif')};
-          --font-body: ${fontFamilyCssValue(normalizeFontName(branding?.fuente_cuerpo), 'sans-serif')};
+          --font-title: ${fontFamilyCssValue(normalizeFontName(branding?.fuente_titulos), 'var(--font-display), sans-serif')};
+          --font-body: ${fontFamilyCssValue(normalizeFontName(branding?.fuente_cuerpo), 'var(--font-body), sans-serif')};
           --btn-radius: ${borderRadius};
           --border-radius: ${borderRadius};
         }
       `}</style>
-      <main className="min-h-screen text-[#F9F3EB]" style={{ ...containerStyle, backgroundColor: 'var(--bg-color)' }}>
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-[#C08A2C]/30 bg-[#16110C]/95 backdrop-blur">
+      <main className="min-h-screen text-slate-900" style={{ ...containerStyle, backgroundColor: 'var(--bg-color)' }}>
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-white/88 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             {comercioLogoUrl ? (
               <img
                 src={comercioLogoUrl}
                 alt={`Logo de ${comercioNombre}`}
-                className="h-11 w-11 rounded-full object-cover ring-2 ring-white/20"
+                className="h-11 w-11 rounded-full object-cover ring-1 ring-slate-200"
                 onError={(event) => {
                   const img = event.currentTarget;
                   img.style.display = 'none';
@@ -643,15 +643,15 @@ export default function PublicMenuPage() {
               />
             ) : (
               <div
-                className="grid h-11 w-11 place-items-center rounded-full text-sm font-bold text-[#1A1208]"
+                className="grid h-11 w-11 place-items-center rounded-full text-sm font-bold"
                 style={{ backgroundColor: 'var(--primary-color)' }}
               >
                 {comercioInitialLetter}
               </div>
             )}
             <div>
-            <p className="text-[10px] uppercase tracking-[0.35em] text-[#D7A74D]">Kosmenu</p>
-            <h1 className="text-2xl font-bold leading-tight text-[#FFF4E2]" style={titleFontStyle}>
+            <p className="text-[10px] uppercase tracking-[0.35em] text-slate-500">Kosmenu</p>
+            <h1 className="text-2xl font-bold leading-tight text-slate-900" style={titleFontStyle}>
               {comercioNombre}
             </h1>
             </div>
@@ -660,8 +660,8 @@ export default function PublicMenuPage() {
             className="px-4 py-2 text-xs font-bold uppercase tracking-[0.15em]"
             style={{
               borderRadius: 'var(--btn-radius)',
-              border: '1px solid color-mix(in srgb, var(--primary-color) 65%, white)',
-              backgroundColor: 'color-mix(in srgb, var(--primary-color) 18%, #251A10)',
+              border: '1px solid color-mix(in srgb, var(--primary-color) 24%, white)',
+              backgroundColor: 'color-mix(in srgb, var(--primary-color) 10%, white)',
               color: 'var(--primary-color)',
             }}
           >
@@ -671,12 +671,12 @@ export default function PublicMenuPage() {
       </header>
 
       <div className="mx-auto max-w-3xl px-4 pb-36 pt-24 sm:px-6">
-        <p className="max-w-xl text-sm leading-6 text-[#D8C6AE]">
+        <p className="max-w-xl text-sm leading-6 text-slate-600">
           Sabores listos para ordenar. Agrega productos al carrito y confirma por WhatsApp.
         </p>
 
         <nav
-          className={`z-30 -mx-4 mt-4 overflow-x-auto border-y border-[#D7A74D]/20 bg-[#130F0B]/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 ${
+          className={`z-30 -mx-4 mt-4 overflow-x-auto border-y border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 ${
             menuSticky ? 'sticky top-[72px]' : 'relative'
           }`}
         >
@@ -685,7 +685,7 @@ export default function PublicMenuPage() {
               <a
                 key={categoria.id}
                 href={`#categoria-${categoria.id}`}
-                className="rounded-full border border-[#D7A74D]/40 bg-[#2A1D12] px-4 py-2 text-sm font-semibold text-[#F5D39A] transition hover:bg-[#3A2919]"
+                className="rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition-all duration-300 hover:border-slate-300 hover:bg-slate-200"
               >
                 {categoria.nombre}
               </a>
@@ -694,8 +694,8 @@ export default function PublicMenuPage() {
         </nav>
 
         {!hasProducts ? (
-          <section className="mt-10 rounded-3xl border border-[#D7A74D]/20 bg-[#1B140E] p-8 text-center shadow-xl shadow-black/30">
-            <p className="text-lg font-semibold text-[#FFEAC8]">
+          <section className="mt-10 rounded-[var(--radius-card)] border border-slate-200 bg-white p-8 text-center shadow-[var(--shadow-soft)]">
+            <p className="text-lg font-semibold text-slate-900">
               Estamos preparando nuestro menu digital... 👨‍🍳
             </p>
           </section>
@@ -705,7 +705,7 @@ export default function PublicMenuPage() {
               <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-36 space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-semibold" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>{categoria.nombre}</h2>
-                  <span className="text-xs uppercase tracking-[0.25em] text-[#BFA383]">
+                  <span className="text-xs uppercase tracking-[0.25em] text-slate-400">
                     {categoria.productos.length} items
                   </span>
                 </div>
@@ -739,8 +739,8 @@ export default function PublicMenuPage() {
                         key={producto.id}
                         className={
                           compact
-                            ? 'rounded-2xl border border-[#D7A74D]/20 p-2 shadow-lg shadow-black/20'
-                            : 'rounded-3xl border border-[#D7A74D]/20 p-3 shadow-xl shadow-black/30'
+                            ? 'rounded-2xl border border-slate-200 p-2 shadow-[var(--shadow-soft)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[var(--shadow-floating)]'
+                            : 'rounded-[var(--radius-card)] border border-slate-200 p-3 shadow-[var(--shadow-soft)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[var(--shadow-floating)]'
                         }
                         style={{ backgroundColor: 'var(--card-surface)' }}
                       >
@@ -749,10 +749,10 @@ export default function PublicMenuPage() {
                             <div
                               className={
                                 grid
-                                  ? 'h-36 w-full shrink-0 overflow-hidden rounded-2xl bg-[#2A2118]'
+                                  ? 'aspect-[4/3] w-full shrink-0 overflow-hidden rounded-2xl bg-slate-100'
                                   : compact
-                                    ? 'h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-[#2A2118]'
-                                    : 'h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-[#2A2118]'
+                                    ? 'h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-slate-100'
+                                    : 'h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-slate-100'
                               }
                             >
                               <img
@@ -773,7 +773,7 @@ export default function PublicMenuPage() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-3">
                               <h3
-                                className={compact ? 'text-sm font-bold leading-5 text-[#FFF6E8]' : 'text-base font-bold leading-5 text-[#FFF6E8]'}
+                                className={compact ? 'text-sm font-bold leading-5 text-slate-900' : 'text-base font-bold leading-5 text-slate-900'}
                                 style={titleFontStyle}
                               >
                                 {producto.nombre}
@@ -791,27 +791,27 @@ export default function PublicMenuPage() {
                             </div>
 
                             {producto.descripcion ? (
-                              <p className={compact ? 'mt-1 text-xs leading-4 text-[#D9C6AB]' : 'mt-2 text-sm leading-5 text-[#D9C6AB]'}>{producto.descripcion}</p>
+                              <p className={compact ? 'mt-1 text-xs leading-4 text-slate-500' : 'mt-2 text-sm leading-5 text-slate-500'}>{producto.descripcion}</p>
                             ) : (
-                              <p className={compact ? 'mt-1 text-xs leading-4 text-[#B89A77]' : 'mt-2 text-sm leading-5 text-[#B89A77]'}>Especialidad de la casa.</p>
+                              <p className={compact ? 'mt-1 text-xs leading-4 text-slate-400' : 'mt-2 text-sm leading-5 text-slate-400'}>Especialidad de la casa.</p>
                             )}
 
-                            <div className={compact ? 'mt-2 inline-flex items-center gap-2 rounded-full bg-[#120D08] p-1' : 'mt-3 inline-flex items-center gap-2 rounded-full bg-[#120D08] p-1'}>
+                            <div className={compact ? 'mt-2 inline-flex items-center gap-2 rounded-full bg-slate-100 p-1' : 'mt-3 inline-flex items-center gap-2 rounded-full bg-slate-100 p-1'}>
                               <button
                                 type="button"
                                 onClick={() => decrementProduct(producto.id)}
-                                className="h-8 w-8 rounded-full bg-[#2A1E14] text-base font-bold text-[#FFD7A1] transition hover:bg-[#3A291C]"
+                                className="h-8 w-8 rounded-full bg-white text-base font-bold text-slate-700 ring-1 ring-slate-200 transition-all duration-300 hover:bg-slate-50"
                               >
                                 -
                               </button>
-                              <span className="min-w-7 text-center text-sm font-bold text-[#FFE8C6]">
+                              <span className="min-w-7 text-center text-sm font-bold text-slate-900">
                                 {quantity}
                               </span>
                               <button
                                 type="button"
                                 onClick={() => incrementProduct(producto.id)}
-                                className="h-8 w-8 rounded-full text-base font-bold text-white transition"
-                                style={{ backgroundColor: 'var(--primary-color)' }}
+                                className="h-8 w-8 rounded-full text-base font-bold transition-all duration-300 hover:brightness-95"
+                                style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
                               >
                                 +
                               </button>
@@ -829,23 +829,23 @@ export default function PublicMenuPage() {
       </div>
 
       {cartCount > 0 ? (
-        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-[#D7A74D]/30 bg-[#140F0B]/95 px-4 py-3 backdrop-blur">
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/92 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-[#C9AB83]">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
                 {cartCount} item{cartCount === 1 ? '' : 's'} en carrito
               </p>
-              <p className="text-lg font-black text-[#FFE5BC]">{formatCop(cartTotal)}</p>
+              <p className="text-lg font-black text-slate-900">{formatCop(cartTotal)}</p>
             </div>
 
             <button
               type="button"
               onClick={() => setIsConfirmOpen(true)}
               disabled={!whatsappNumber || isSubmittingOrder}
-              className={`rounded-full px-5 py-3 text-sm font-extrabold transition ${
+              className={`rounded-full px-5 py-3 text-sm font-extrabold transition-all duration-300 ${
                 !whatsappNumber || isSubmittingOrder
-                  ? 'cursor-not-allowed bg-[#5A4A38] text-[#C3B299]'
-                  : 'text-white'
+                  ? 'cursor-not-allowed bg-slate-200 text-slate-400'
+                  : ''
               }`}
               style={
                 !whatsappNumber || isSubmittingOrder
@@ -853,6 +853,7 @@ export default function PublicMenuPage() {
                   : {
                       borderRadius: 'var(--border-radius)',
                       backgroundColor: 'var(--primary-color)',
+                      color: 'var(--text-on-primary)',
                     }
               }
             >
@@ -864,24 +865,24 @@ export default function PublicMenuPage() {
 
       {isConfirmOpen ? (
         <div className="fixed inset-0 z-[60] flex items-end bg-black/55 backdrop-blur-sm sm:items-center sm:justify-center">
-          <div className="w-full rounded-t-3xl border border-[#D7A74D]/25 bg-[#16110C] p-5 shadow-2xl sm:max-w-xl sm:rounded-3xl">
+          <div className="w-full rounded-t-3xl border border-slate-200 bg-white p-5 shadow-[var(--shadow-floating)] sm:max-w-xl sm:rounded-3xl">
             <div className="flex items-center justify-between">
-              <h3 className="text-2xl font-bold text-[#FFEACC]" style={titleFontStyle}>
+              <h3 className="text-2xl font-bold text-slate-900" style={titleFontStyle}>
                 Confirmar pedido
               </h3>
               <button
                 type="button"
                 onClick={() => setIsConfirmOpen(false)}
-                className="rounded-full bg-[#2D2015] px-3 py-1 text-xs font-bold text-[#F5D39A]"
+                className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700"
               >
                 Cerrar
               </button>
             </div>
 
-            <p className="mt-2 text-sm text-[#D8C6AE]">
+            <p className="mt-2 text-sm text-slate-600">
               Selecciona como deseas pagar para incluirlo en el mensaje al restaurante.
             </p>
-            <p className="mt-1 text-xs text-[#CFAF85]">
+            <p className="mt-1 text-xs text-slate-500">
               Importante: al enviar el pedido por WhatsApp, adjunta el comprobante de pago.
             </p>
 
@@ -896,25 +897,25 @@ export default function PublicMenuPage() {
                       key={method.id}
                       type="button"
                       onClick={() => setSelectedPaymentMethodId(method.id)}
-                      className={`w-full rounded-2xl border p-3 text-left transition ${
+                      className={`w-full rounded-2xl border p-3 text-left transition-all duration-300 ${
                         isSelected
-                          ? 'border-[#1AB15E] bg-[#112417]'
-                          : 'border-[#6B4A2A] bg-[#1F160F] hover:border-[#D7A74D]/40'
+                          ? 'border-transparent bg-[var(--color-accent-soft)]'
+                          : 'border-slate-200 bg-slate-50 hover:border-slate-300'
                       }`}
                     >
-                      <p className="text-sm font-extrabold text-[#FFE8C6]">
+                      <p className="text-sm font-extrabold text-slate-900">
                         {paymentMethodLabel(method)}
                       </p>
                       {details.length > 0 ? (
                         <div className="mt-2 space-y-1">
                           {details.map((detail, index) => (
-                            <p key={`${method.id}-detail-${index}`} className="text-xs text-[#D0B697]">
+                            <p key={`${method.id}-detail-${index}`} className="text-xs text-slate-500">
                               {detail}
                             </p>
                           ))}
                         </div>
                       ) : (
-                        <p className="mt-2 text-xs text-[#B89A77]">
+                        <p className="mt-2 text-xs text-slate-400">
                           Sin datos adicionales configurados.
                         </p>
                       )}
@@ -922,21 +923,21 @@ export default function PublicMenuPage() {
                   );
                 })
               ) : (
-                <div className="rounded-2xl border border-[#6B4A2A] bg-[#1F160F] p-3">
-                  <p className="text-sm text-[#D8C6AE]">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-sm text-slate-600">
                     Este comercio no tiene metodos de pago configurados. El pedido se enviara sin metodo seleccionado.
                   </p>
                 </div>
               )}
             </div>
 
-            <div className="mt-4 flex items-center justify-between rounded-2xl border border-[#D7A74D]/20 bg-[#130F0A] px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Total</p>
-              <p className="text-xl font-black text-[#FFE5BC]">{formatCop(cartTotal)}</p>
+            <div className="mt-4 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Total</p>
+              <p className="text-xl font-black text-slate-900">{formatCop(cartTotal)}</p>
             </div>
 
             <div className="mt-4">
-              <label htmlFor="client-email" className="mb-2 block text-sm font-semibold text-[#F5D39A]">
+              <label htmlFor="client-email" className="mb-2 block text-sm font-semibold text-slate-700">
                 Tu Correo Electrónico
               </label>
               <input
@@ -947,13 +948,13 @@ export default function PublicMenuPage() {
                 placeholder="tucorreo@ejemplo.com"
                 value={clientEmail}
                 onChange={(event) => setClientEmail(event.target.value)}
-                className="h-12 w-full rounded-xl border border-[#6B4A2A] bg-[#1F160F] px-4 text-base text-[#FFF3DE] outline-none transition placeholder:text-[#9D8266] focus:border-[#1AB15E] focus:ring-2 focus:ring-[#1AB15E]/25"
+                className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition-all duration-300 placeholder:text-slate-400 focus:border-[var(--primary-color)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--primary-color)_18%,white)]"
               />
-              <p className="mt-2 text-xs text-[#CFAF85]">
+              <p className="mt-2 text-xs text-slate-500">
                 Te enviaremos el enlace de seguimiento a este correo por si pierdes esta pestaña.
               </p>
               {clientEmail.trim().length > 0 && !isClientEmailValid ? (
-                <p className="mt-2 text-xs font-semibold text-[#F58C7E]">
+                <p className="mt-2 text-xs font-semibold text-red-500">
                   Ingresa un correo valido para continuar.
                 </p>
               ) : null}
@@ -963,10 +964,10 @@ export default function PublicMenuPage() {
               type="button"
               onClick={() => void confirmOrder()}
               disabled={isSubmittingOrder || !isClientEmailValid}
-              className={`mt-4 w-full rounded-full px-5 py-3 text-sm font-extrabold transition ${
+              className={`mt-4 w-full rounded-full px-5 py-3 text-sm font-extrabold transition-all duration-300 ${
                 isSubmittingOrder || !isClientEmailValid
-                  ? 'cursor-not-allowed bg-[#5A4A38] text-[#C3B299]'
-                  : 'text-white'
+                  ? 'cursor-not-allowed bg-slate-200 text-slate-400'
+                  : ''
               }`}
               style={
                 isSubmittingOrder || !isClientEmailValid
@@ -974,6 +975,7 @@ export default function PublicMenuPage() {
                   : {
                       borderRadius: 'var(--border-radius)',
                       backgroundColor: 'var(--primary-color)',
+                      color: 'var(--text-on-primary)',
                     }
               }
             >
