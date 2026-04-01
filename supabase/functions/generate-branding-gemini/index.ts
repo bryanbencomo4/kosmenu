@@ -45,6 +45,7 @@ const SYSTEM_PROMPT =
   '}. ' +
   'Los colores deben estar en formato HEX de 6 digitos, por ejemplo: #C84B31. ' +
   'Las fuentes deben ser nombres reales de Google Fonts. ' +
+  'Use ONLY official Google Fonts names. If unsure, default to popular ones like Montserrat, Roboto, or Open Sans. ' +
   'mood_tags debe contener entre 3 y 6 tags cortos. ' +
   'descripcion_visual debe ser una sola frase o un parrafo breve, no una lista. ' +
   'No inventes campos extra.';
@@ -170,7 +171,6 @@ async function generateBrandingWithGemini(params: {
         responseMimeType: 'application/json',
         responseSchema: {
           type: 'object',
-          additionalProperties: false,
           properties: {
             color_principal: { type: 'string' },
             color_secundario: { type: 'string' },
@@ -213,7 +213,13 @@ async function generateBrandingWithGemini(params: {
   }
 
   const parsed = parseBrandingJson(text);
-  return normalizeBranding(parsed);
+
+  try {
+    return await normalizeBranding(parsed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'invalid branding payload';
+    throw new Error(`Gemini returned invalid branding JSON: ${message}`);
+  }
 }
 
 function resolveComercioId(req: Request, body: Record<string, unknown>): string {
@@ -254,36 +260,43 @@ async function toInlineImageData(imageUrl: string): Promise<{ mime_type: string;
   };
 }
 
-function parseBrandingJson(rawText: string): BrandingResult {
+function parseBrandingJson(rawText: string): unknown {
   const cleaned = rawText.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
 
   try {
-    return JSON.parse(cleaned) as BrandingResult;
+    return JSON.parse(cleaned);
   } catch {
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
     if (start >= 0 && end > start) {
-      return JSON.parse(cleaned.slice(start, end + 1)) as BrandingResult;
+      return JSON.parse(cleaned.slice(start, end + 1));
     }
     throw new Error('Could not parse Gemini branding JSON response');
   }
 }
 
-function normalizeBranding(value: BrandingResult): BrandingResult {
-  const colorPrincipal = normalizeHexColor(value?.color_principal);
-  const colorSecundario = normalizeHexColor(value?.color_secundario);
-  const fuenteTitulos = normalizeString(value?.fuente_titulos);
-  const fuenteCuerpo = normalizeString(value?.fuente_cuerpo);
-  const estiloBotones = normalizeButtonStyle(value?.estilo_botones);
-  const moodTags = normalizeMoodTags(value?.mood_tags);
-  const descripcionVisual = normalizeString(value?.descripcion_visual);
+async function normalizeBranding(value: unknown): Promise<BrandingResult> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Branding payload must be an object');
+  }
+
+  const map = value as Record<string, unknown>;
+  const colorPrincipal = normalizeHexColor(map.color_principal);
+  const colorSecundario = normalizeHexColor(map.color_secundario);
+  const fuenteTitulos = await resolveGoogleFontOrFallback(
+    normalizeString(map.fuente_titulos),
+    'Montserrat',
+  );
+  const fuenteCuerpo = await resolveGoogleFontOrFallback(
+    normalizeString(map.fuente_cuerpo),
+    'Roboto',
+  );
+  const estiloBotones = normalizeButtonStyle(map.estilo_botones);
+  const moodTags = normalizeMoodTags(map.mood_tags);
+  const descripcionVisual = normalizeString(map.descripcion_visual);
 
   if (!colorPrincipal || !colorSecundario) {
     throw new Error('Gemini returned invalid HEX colors for branding_ia');
-  }
-
-  if (!fuenteTitulos || !fuenteCuerpo) {
-    throw new Error('Gemini returned invalid Google Fonts names for branding_ia');
   }
 
   if (!descripcionVisual) {
@@ -353,4 +366,43 @@ function jsonResponse(body: unknown, status: number): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+async function resolveGoogleFontOrFallback(fontName: string, fallback: string): Promise<string> {
+  const candidate = normalizeString(fontName);
+  if (!isLikelyFontName(candidate)) {
+    return fallback;
+  }
+
+  const exists = await googleFontExists(candidate);
+  return exists ? candidate : fallback;
+}
+
+function isLikelyFontName(value: string): boolean {
+  if (!value) {
+    return false;
+  }
+  return /^[A-Za-z0-9][A-Za-z0-9\s\-+&.']{1,63}$/.test(value);
+}
+
+async function googleFontExists(fontName: string): Promise<boolean> {
+  const encodedFamily = encodeURIComponent(fontName).replace(/%20/g, '+');
+  const url = `https://fonts.googleapis.com/css2?family=${encodedFamily}&display=swap`;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        // Google Fonts can be stricter without a browser-like UA.
+        'User-Agent': 'Mozilla/5.0',
+      },
+    });
+    if (!response.ok) {
+      return false;
+    }
+
+    const css = await response.text();
+    return css.toLowerCase().includes('@font-face');
+  } catch {
+    return false;
+  }
 }
