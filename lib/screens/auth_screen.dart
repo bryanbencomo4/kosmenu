@@ -5,6 +5,7 @@ import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum _PostAuthTarget { dashboard, setup }
@@ -17,11 +18,21 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
+  static const String _setupDraftKeyPrefix = 'business_setup_draft_v2';
+
   Future<_PostAuthTarget>? _targetFuture;
   String _targetUserId = '';
 
+  Future<bool> _hasSetupDraft(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = '$_setupDraftKeyPrefix:$userId';
+    final raw = prefs.getString(key);
+    return raw != null && raw.trim().isNotEmpty;
+  }
+
   Future<_PostAuthTarget> _resolveTargetForUser(String userId) async {
     Future<_PostAuthTarget> resolveOnce() async {
+      final hasDraft = await _hasSetupDraft(userId);
       final row = await Supabase.instance.client
           .from('comercios')
           .select('id, slug')
@@ -42,6 +53,9 @@ class _AuthGateState extends State<AuthGate> {
       }
 
       SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
+      if (hasDraft) {
+        return _PostAuthTarget.setup;
+      }
       return _PostAuthTarget.dashboard;
     }
 
