@@ -624,16 +624,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return null;
   }
 
-  List<String> _brandingMoodTags(dynamic value) {
-    if (value is! List) {
-      return const <String>[];
-    }
-    return value
-        .map((item) => item?.toString().trim() ?? '')
-        .where((item) => item.isNotEmpty)
-        .toList();
-  }
-
   Color _parseHexColor(String? value, Color fallback) {
     final raw = (value ?? '').trim();
     if (!RegExp(r'^#?[0-9A-Fa-f]{6}$').hasMatch(raw)) {

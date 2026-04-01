@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -31,7 +30,7 @@ class QrGeneratorScreen extends StatefulWidget {
 }
 
 class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
-  static const String _fallbackLogoAsset = 'assets/logo_kosmenu.png';
+  static const String _fallbackLogoAsset = 'assets/branding/isotipo.png';
 
   final GlobalKey _posterKey = GlobalKey();
   late final Future<Uint8List> _logoBytesFuture;

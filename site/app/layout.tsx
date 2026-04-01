@@ -17,6 +17,11 @@ const bodyFont = Roboto({
 export const metadata: Metadata = {
   title: 'elmenuxfa.com',
   description: 'Menu digital publico',
+  icons: {
+    icon: '/branding/isotipo.png',
+    apple: '/branding/isotipo.png',
+    shortcut: '/branding/isotipo.png',
+  },
 };
 
 export default function RootLayout({

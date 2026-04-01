@@ -387,6 +387,11 @@ export default function OrderDetailsPage() {
     return (
       <main className="grid min-h-screen place-items-center bg-[#0F0D0B] px-4 py-10 text-[#F9F3EB] sm:px-6">
         <section className="w-full max-w-xl rounded-3xl border border-[#D7A74D]/25 bg-[#1A140E] p-6 shadow-2xl shadow-black/35">
+          <img
+            src="/branding/full_logo.png"
+            alt="elmenuxfa.com"
+            className="h-10 w-auto object-contain"
+          />
           <p className="text-[10px] uppercase tracking-[0.35em] text-[#D7A74D]">Verificación del cliente</p>
           <h1 className="mt-2 font-serif text-3xl font-bold text-[#FFF4E2]">Confirma tu correo</h1>
           <p className="mt-3 text-sm text-[#D8C6AE]">
@@ -442,6 +447,11 @@ export default function OrderDetailsPage() {
   return (
     <main className="min-h-screen bg-[#0F0D0B] px-4 py-10 text-[#F9F3EB] sm:px-6">
       <section className="mx-auto max-w-2xl rounded-3xl border border-[#D7A74D]/25 bg-[#1A140E] p-6 shadow-2xl shadow-black/35">
+        <img
+          src="/branding/full_logo.png"
+          alt="elmenuxfa.com"
+          className="h-10 w-auto object-contain"
+        />
         {smartRoutingActive ? (
           <div className="mb-5 rounded-2xl border border-[#40D887]/20 bg-[#102116] px-4 py-3 text-sm text-[#DDF8E8]">
             Intentando abrir la app del vendedor. Si no está instalada, seguirás viendo este pedido aquí mismo.

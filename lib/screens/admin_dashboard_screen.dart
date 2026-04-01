@@ -131,13 +131,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
         gradient: const LinearGradient(
-          colors: [Color(0xFF2C1B11), Color(0xFF17110D)],
+          colors: [Color(0xFF2B1455), Color(0xFF1A1030)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         border: Border.all(
           color: result.isNewCatalog
-              ? const Color(0x66FFB04A)
+              ? const Color(0x668B5CF6)
               : const Color(0x445AD8A6),
         ),
         boxShadow: const [
@@ -156,7 +156,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: result.isNewCatalog
-                  ? const Color(0x1AFFB04A)
+                  ? const Color(0x1A8B5CF6)
                   : const Color(0x1A5AD8A6),
             ),
             child: Icon(
@@ -164,7 +164,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ? Icons.fiber_new_rounded
                   : Icons.flash_on_rounded,
               color: result.isNewCatalog
-                  ? const Color(0xFFFFB04A)
+                  ? const Color(0xFF8B5CF6)
                   : const Color(0xFF5AD8A6),
             ),
           ),
@@ -178,7 +178,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ? 'Nuevo catálogo creado'
                       : 'Catálogo actualizado',
                   style: GoogleFonts.poppins(
-                    color: const Color(0xFFFFE2BF),
+                    color: const Color(0xFFF3E8FF),
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -196,7 +196,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 Text(
                   '${result.createdCategories} categorías · ${result.createdProducts} productos',
                   style: GoogleFonts.poppins(
-                    color: const Color(0xFFE4CCAC),
+                    color: const Color(0xFFD8B4FE),
                     fontSize: 12.5,
                   ),
                 ),
@@ -260,7 +260,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF17120E),
+      backgroundColor: const Color(0xFF1A1030),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -276,13 +276,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   children: [
                     const Icon(
                       Icons.notifications_active,
-                      color: Color(0xFFFFB04A),
+                      color: Color(0xFF8B5CF6),
                     ),
                     const SizedBox(width: 8),
                     Text(
                       'Notificaciones',
                       style: GoogleFonts.poppins(
-                        color: const Color(0xFFFFE2BF),
+                        color: const Color(0xFFF3E8FF),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -312,7 +312,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         final label = done ? 'Completado' : 'Pendiente';
                         final color = done
                             ? const Color(0xFF1AB15E)
-                            : const Color(0xFFFFB04A);
+                            : const Color(0xFF8B5CF6);
                         final orderText =
                             item['order_id']?.toString() ??
                             item['id']?.toString() ??
@@ -471,33 +471,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _seenOrderIds = <String>{};
     _didPrimeOrderAlert = false;
 
-    _recentOrdersSubscription = _recentOrdersStream.listen((orders) {
-      final currentIds = orders.map((order) => order.id).toSet();
+    _recentOrdersSubscription = _recentOrdersStream.listen(
+      (orders) {
+        final currentIds = orders.map((order) => order.id).toSet();
 
-      if (!_didPrimeOrderAlert) {
+        if (!_didPrimeOrderAlert) {
+          _seenOrderIds = currentIds;
+          _didPrimeOrderAlert = true;
+          return;
+        }
+
+        final newOrders = orders
+            .where((order) => !_seenOrderIds.contains(order.id))
+            .toList();
+
         _seenOrderIds = currentIds;
-        _didPrimeOrderAlert = true;
-        return;
-      }
 
-      final newOrders = orders
-          .where((order) => !_seenOrderIds.contains(order.id))
-          .toList();
+        if (newOrders.isEmpty || !mounted) return;
 
-      _seenOrderIds = currentIds;
-
-      if (newOrders.isEmpty || !mounted) return;
-
-      SystemSound.play(SystemSoundType.alert);
-      final latestOrder = newOrders.first;
-      final orderLabel = latestOrder.orderId ?? latestOrder.id;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Nuevo pedido recibido: $orderLabel'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    });
+        SystemSound.play(SystemSoundType.alert);
+        final latestOrder = newOrders.first;
+        final orderLabel = latestOrder.orderId ?? latestOrder.id;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Nuevo pedido recibido: $orderLabel'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('Recent orders stream error: $error');
+      },
+    );
   }
 
   Future<void> _openOrderDetail(PedidoModel pedido) async {
@@ -650,6 +655,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Stream<List<PedidoModel>> _buildRecentOrdersStream() {
+    if (!SupabaseConfig.hasCurrentComercioId) {
+      return Stream<List<PedidoModel>>.value(const <PedidoModel>[]);
+    }
+
     return Supabase.instance.client
         .from('pedidos')
         .stream(primaryKey: ['id'])
@@ -754,7 +763,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Future<_DashboardData> _fetchDashboardData() async {
     if (!SupabaseConfig.hasCurrentComercioId) {
-      throw StateError('No hay un comercio activo asociado a esta sesion.');
+      return const _DashboardData(
+        comercio: ComercioModel(id: '', nombre: 'Comercio'),
+        categoryCount: 0,
+        productCount: 0,
+      );
     }
 
     final client = Supabase.instance.client;
@@ -1299,21 +1312,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               _orderFilterIcon(filter),
                               size: 16,
                               color: selected
-                                  ? const Color(0xFF1A1209)
-                                  : const Color(0xFFFFD49A),
+                                  ? const Color(0xFFF3E8FF)
+                                  : const Color(0xFFD8B4FE),
                             ),
                             labelStyle: GoogleFonts.poppins(
                               color: selected
-                                  ? const Color(0xFF1A1209)
-                                  : const Color(0xFFFFD49A),
+                                  ? const Color(0xFFF3E8FF)
+                                  : const Color(0xFFD8B4FE),
                               fontWeight: FontWeight.w600,
                             ),
-                            selectedColor: const Color(0xFFFFB04A),
-                            backgroundColor: const Color(0xFF2A1C12),
+                            selectedColor: const Color(0xFF6D28D9),
+                            backgroundColor: const Color(0xFF2B1455),
                             side: BorderSide(
                               color: selected
-                                  ? const Color(0xFFFFB04A)
-                                  : const Color(0xFF5A4028),
+                                  ? const Color(0xFF8B5CF6)
+                                  : const Color(0xFF6D28D9),
                             ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(999),
@@ -1384,7 +1397,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             final status = _getOrderStatus(pedido);
                             final statusColor = status == _OrderStatus.completed
                                 ? const Color(0xFF1AB15E)
-                                : const Color(0xFFFFB04A);
+                                : const Color(0xFF8B5CF6);
                             final statusIcon = status == _OrderStatus.completed
                                 ? Icons.check_circle_rounded
                                 : Icons.timelapse_rounded;

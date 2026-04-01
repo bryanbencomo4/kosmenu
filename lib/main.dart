@@ -167,6 +167,13 @@ class _KosmenuAppState extends State<KosmenuApp> {
     final routeName = settings.name ?? '/';
     final uri = Uri.parse(routeName.isEmpty ? '/' : routeName);
 
+    if (uri.path == '/' || uri.path.isEmpty) {
+      return MaterialPageRoute(
+        settings: settings,
+        builder: (_) => const _BrandedEntryScreen(),
+      );
+    }
+
     if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'v') {
       final comercioId = uri.pathSegments[1];
       return MaterialPageRoute(
@@ -220,6 +227,152 @@ class _KosmenuAppState extends State<KosmenuApp> {
       initialRoute: _resolveInitialRoute(),
       onGenerateRoute: _onGenerateRoute,
       theme: AppTheme.lightTheme(),
+    );
+  }
+}
+
+class _BrandedEntryScreen extends StatefulWidget {
+  const _BrandedEntryScreen();
+
+  @override
+  State<_BrandedEntryScreen> createState() => _BrandedEntryScreenState();
+}
+
+class _BrandedEntryScreenState extends State<_BrandedEntryScreen> {
+  bool _startExit = false;
+  bool _showAuth = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(const Duration(milliseconds: 880), () {
+      if (!mounted) return;
+      setState(() => _startExit = true);
+    });
+
+    Future<void>.delayed(const Duration(milliseconds: 1460), () {
+      if (!mounted) return;
+      setState(() => _showAuth = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 420),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, animation) {
+        final fade = CurvedAnimation(parent: animation, curve: Curves.easeOut);
+        final slide = Tween<Offset>(
+          begin: const Offset(0, 0.08),
+          end: Offset.zero,
+        ).animate(fade);
+        return FadeTransition(
+          opacity: fade,
+          child: SlideTransition(position: slide, child: child),
+        );
+      },
+      child: _showAuth
+          ? const AuthGate(key: ValueKey<String>('auth'))
+          : _BrandedSplash(
+              key: const ValueKey<String>('splash'),
+              exiting: _startExit,
+            ),
+    );
+  }
+}
+
+class _BrandedSplash extends StatelessWidget {
+  const _BrandedSplash({super.key, required this.exiting});
+
+  final bool exiting;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF5B21B6),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isotipoWidth = (constraints.maxWidth * 0.36)
+                .clamp(108.0, 160.0)
+                .toDouble();
+
+            return Center(
+              child: SingleChildScrollView(
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0.94, end: 1),
+                  duration: const Duration(milliseconds: 760),
+                  curve: Curves.easeOutBack,
+                  builder: (context, value, child) {
+                    final introOpacity = value.clamp(0.0, 1.0).toDouble();
+                    final introScale = value;
+                    final outOpacity = exiting ? 0.0 : 1.0;
+                    final outOffset = exiting
+                        ? const Offset(0, -0.12)
+                        : Offset.zero;
+                    final outScale = exiting ? 0.9 : 1.0;
+
+                    return AnimatedSlide(
+                      duration: const Duration(milliseconds: 420),
+                      curve: Curves.easeInOutCubic,
+                      offset: outOffset,
+                      child: AnimatedScale(
+                        duration: const Duration(milliseconds: 420),
+                        curve: Curves.easeInOutCubic,
+                        scale: outScale,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 360),
+                          curve: Curves.easeIn,
+                          opacity: outOpacity,
+                          child: Opacity(
+                            opacity: introOpacity,
+                            child: Transform.scale(
+                              scale: introScale,
+                              child: child,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/branding/isotipo.png',
+                        width: isotipoWidth,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'elmenuxfa.com',
+                        style: TextStyle(
+                          color: const Color(0xFFF4ECFF),
+                          fontSize: constraints.maxWidth < 380 ? 34 : 38,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.8,
+                          shadows: const [
+                            Shadow(
+                              color: Color(0x40000000),
+                              blurRadius: 12,
+                              offset: Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }

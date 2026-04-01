@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
@@ -20,27 +21,36 @@ class _AuthGateState extends State<AuthGate> {
   String _targetUserId = '';
 
   Future<_PostAuthTarget> _resolveTargetForUser(String userId) async {
-    final row = await Supabase.instance.client
-        .from('comercios')
-        .select('id, slug')
-        .eq('owner_id', userId)
-        .limit(1)
-        .maybeSingle();
+    Future<_PostAuthTarget> resolveOnce() async {
+      final row = await Supabase.instance.client
+          .from('comercios')
+          .select('id, slug')
+          .eq('owner_id', userId)
+          .limit(1)
+          .maybeSingle();
 
-    if (row == null) {
-      SupabaseConfig.clearCurrentComercioId();
-      return _PostAuthTarget.setup;
+      if (row == null) {
+        SupabaseConfig.clearCurrentComercioId();
+        return _PostAuthTarget.setup;
+      }
+
+      final comercioId = row['id']?.toString().trim() ?? '';
+      final comercioSlug = row['slug']?.toString().trim();
+      if (comercioId.isEmpty) {
+        SupabaseConfig.clearCurrentComercioId();
+        return _PostAuthTarget.setup;
+      }
+
+      SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
+      return _PostAuthTarget.dashboard;
     }
 
-    final comercioId = row['id']?.toString().trim() ?? '';
-    final comercioSlug = row['slug']?.toString().trim();
-    if (comercioId.isEmpty) {
-      SupabaseConfig.clearCurrentComercioId();
-      return _PostAuthTarget.setup;
+    try {
+      return await resolveOnce();
+    } catch (_) {
+      await Future<void>.delayed(const Duration(milliseconds: 320));
+      return resolveOnce();
     }
-
-    SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
-    return _PostAuthTarget.dashboard;
   }
 
   Future<_PostAuthTarget> _targetFutureFor(String userId) {
@@ -121,7 +131,6 @@ class _AuthGateState extends State<AuthGate> {
             return const BusinessSetupScreen();
           },
         );
-
       },
     );
   }
@@ -136,6 +145,7 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   static const String _mobileOAuthRedirect = 'com.kosmenu.app://login-callback';
+  static const String _fullLogoAsset = 'assets/branding/full_logo.png';
 
   final _loginFormKey = GlobalKey<FormState>();
   final _registerFormKey = GlobalKey<FormState>();
@@ -191,7 +201,9 @@ class _AuthScreenState extends State<AuthScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? const Color(0xFFB83D3D) : const Color(0xFF1C8F57),
+        backgroundColor: isError
+            ? const Color(0xFFB83D3D)
+            : const Color(0xFF1C8F57),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -209,7 +221,10 @@ class _AuthScreenState extends State<AuthScreen> {
     } on AuthException catch (error) {
       _showSnack(error.message, isError: true);
     } catch (_) {
-      _showSnack('No se pudo iniciar sesión. Inténtalo nuevamente.', isError: true);
+      _showSnack(
+        'No se pudo iniciar sesión. Inténtalo nuevamente.',
+        isError: true,
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoginLoading = false);
@@ -218,7 +233,9 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _register() async {
-    if (!_registerFormKey.currentState!.validate() || _isRegisterLoading) return;
+    if (!_registerFormKey.currentState!.validate() || _isRegisterLoading) {
+      return;
+    }
 
     setState(() => _isRegisterLoading = true);
     try {
@@ -231,7 +248,10 @@ class _AuthScreenState extends State<AuthScreen> {
     } on AuthException catch (error) {
       _showSnack(error.message, isError: true);
     } catch (_) {
-      _showSnack('No se pudo registrar tu cuenta. Inténtalo nuevamente.', isError: true);
+      _showSnack(
+        'No se pudo registrar tu cuenta. Inténtalo nuevamente.',
+        isError: true,
+      );
     } finally {
       if (mounted) {
         setState(() => _isRegisterLoading = false);
@@ -244,7 +264,10 @@ class _AuthScreenState extends State<AuthScreen> {
     final emailError = _validateEmail(email);
 
     if (emailError != null) {
-      _showSnack('Ingresa un correo válido para recuperar contraseña.', isError: true);
+      _showSnack(
+        'Ingresa un correo válido para recuperar contraseña.',
+        isError: true,
+      );
       return;
     }
 
@@ -304,21 +327,21 @@ class _AuthScreenState extends State<AuthScreen> {
   }) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(color: Color(0xFFC7B39A)),
-      prefixIcon: Icon(icon, color: const Color(0xFFFFB04A)),
+      labelStyle: const TextStyle(color: AppColors.textSoft),
+      prefixIcon: Icon(icon, color: AppColors.accent),
       filled: true,
-      fillColor: const Color(0xFF1A140F),
+      fillColor: Colors.white,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0x22FFFFFF)),
+        borderSide: const BorderSide(color: AppColors.borderSubtle),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0x22FFFFFF)),
+        borderSide: const BorderSide(color: AppColors.borderSubtle),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0x99FFB04A), width: 1.4),
+        borderSide: const BorderSide(color: AppColors.accent, width: 1.4),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
@@ -340,16 +363,22 @@ class _AuthScreenState extends State<AuthScreen> {
             controller: _loginEmailController,
             keyboardType: TextInputType.emailAddress,
             validator: _validateEmail,
-            style: const TextStyle(color: Colors.white),
-            decoration: _inputDecoration(label: 'Correo electrónico', icon: Icons.mail_outline),
+            style: const TextStyle(color: AppColors.textStrong),
+            decoration: _inputDecoration(
+              label: 'Correo electrónico',
+              icon: Icons.mail_outline,
+            ),
           ),
           const SizedBox(height: 14),
           TextFormField(
             controller: _loginPasswordController,
             obscureText: true,
             validator: _validatePassword,
-            style: const TextStyle(color: Colors.white),
-            decoration: _inputDecoration(label: 'Contraseña', icon: Icons.lock_outline),
+            style: const TextStyle(color: AppColors.textStrong),
+            decoration: _inputDecoration(
+              label: 'Contraseña',
+              icon: Icons.lock_outline,
+            ),
           ),
           Align(
             alignment: Alignment.centerRight,
@@ -364,9 +393,11 @@ class _AuthScreenState extends State<AuthScreen> {
             child: FilledButton(
               onPressed: _isLoginLoading ? null : _signIn,
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B00),
+                backgroundColor: AppColors.accent,
                 minimumSize: const Size.fromHeight(52),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
               child: _isLoginLoading
                   ? const SizedBox(
@@ -394,16 +425,22 @@ class _AuthScreenState extends State<AuthScreen> {
             controller: _registerEmailController,
             keyboardType: TextInputType.emailAddress,
             validator: _validateEmail,
-            style: const TextStyle(color: Colors.white),
-            decoration: _inputDecoration(label: 'Correo electrónico', icon: Icons.alternate_email),
+            style: const TextStyle(color: AppColors.textStrong),
+            decoration: _inputDecoration(
+              label: 'Correo electrónico',
+              icon: Icons.alternate_email,
+            ),
           ),
           const SizedBox(height: 14),
           TextFormField(
             controller: _registerPasswordController,
             obscureText: true,
             validator: _validatePassword,
-            style: const TextStyle(color: Colors.white),
-            decoration: _inputDecoration(label: 'Contraseña (mínimo 6)', icon: Icons.lock_reset),
+            style: const TextStyle(color: AppColors.textStrong),
+            decoration: _inputDecoration(
+              label: 'Contraseña (mínimo 6)',
+              icon: Icons.lock_reset,
+            ),
           ),
           const SizedBox(height: 18),
           SizedBox(
@@ -411,9 +448,11 @@ class _AuthScreenState extends State<AuthScreen> {
             child: FilledButton(
               onPressed: _isRegisterLoading ? null : _register,
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1F8A55),
+                backgroundColor: const Color(0xFF6D28D9),
                 minimumSize: const Size.fromHeight(52),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
               child: _isRegisterLoading
                   ? const SizedBox(
@@ -440,7 +479,10 @@ class _AuthScreenState extends State<AuthScreen> {
             Expanded(child: Divider(color: Color(0x22FFFFFF))),
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Text('o continuar con', style: TextStyle(color: Color(0xFF9E8D7B))),
+              child: Text(
+                'o continuar con',
+                style: TextStyle(color: AppColors.textSoft),
+              ),
             ),
             Expanded(child: Divider(color: Color(0x22FFFFFF))),
           ],
@@ -451,11 +493,13 @@ class _AuthScreenState extends State<AuthScreen> {
           child: OutlinedButton.icon(
             onPressed: _isGoogleLoading ? null : _signInWithGoogle,
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Color(0x33FFFFFF)),
+              foregroundColor: AppColors.textStrong,
+              side: const BorderSide(color: AppColors.borderSubtle),
               minimumSize: const Size.fromHeight(50),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              backgroundColor: const Color(0xFF17120E),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: Colors.white,
             ),
             icon: _isGoogleLoading
                 ? const SizedBox(
@@ -463,7 +507,10 @@ class _AuthScreenState extends State<AuthScreen> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('G', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                : const Text(
+                    'G',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                  ),
             label: const Text('Continuar con Google'),
           ),
         ),
@@ -474,11 +521,13 @@ class _AuthScreenState extends State<AuthScreen> {
             child: OutlinedButton.icon(
               onPressed: _isAppleLoading ? null : _signInWithApple,
               style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Color(0x33FFFFFF)),
+                foregroundColor: AppColors.textStrong,
+                side: const BorderSide(color: AppColors.borderSubtle),
                 minimumSize: const Size.fromHeight(50),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                backgroundColor: const Color(0xFF17120E),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                backgroundColor: Colors.white,
               ),
               icon: _isAppleLoading
                   ? const SizedBox(
@@ -503,7 +552,7 @@ class _AuthScreenState extends State<AuthScreen> {
         body: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFF100D0B), Color(0xFF1A130E), Color(0xFF100D0B)],
+              colors: [Color(0xFF2B1455), Color(0xFF5B21B6), Color(0xFF2B1455)],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
             ),
@@ -517,9 +566,9 @@ class _AuthScreenState extends State<AuthScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
-                      color: const Color(0xCC19130F),
+                      color: const Color(0xF8FFFFFF),
                       borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: const Color(0x22FFFFFF)),
+                      border: Border.all(color: const Color(0xFFDDD6FE)),
                       boxShadow: const [
                         BoxShadow(
                           color: Color(0x33000000),
@@ -531,24 +580,18 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 54,
-                          height: 54,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [Color(0xFFFFB04A), Color(0xFFFF6B00)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
+                        Center(
+                          child: Image.asset(
+                            _fullLogoAsset,
+                            height: 52,
+                            fit: BoxFit.contain,
                           ),
-                          child: const Icon(Icons.restaurant_menu, color: Colors.white),
                         ),
                         const SizedBox(height: 14),
                         Text(
-                          'Bienvenido a Kosmenú',
+                          'Bienvenido a elmenuxfa.com',
                           style: GoogleFonts.manrope(
-                            color: Colors.white,
+                            color: AppColors.textStrong,
                             fontSize: 30,
                             fontWeight: FontWeight.w800,
                             height: 1,
@@ -558,25 +601,27 @@ class _AuthScreenState extends State<AuthScreen> {
                         Text(
                           'Gestiona tu menú digital con una experiencia premium.',
                           style: GoogleFonts.poppins(
-                            color: const Color(0xFFD5BFA4),
+                            color: AppColors.textSoft,
                             fontSize: 13.5,
                           ),
                         ),
                         const SizedBox(height: 18),
                         Container(
                           decoration: BoxDecoration(
-                            color: const Color(0xFF16110D),
+                            color: const Color(0xFFF1EAFE),
                             borderRadius: BorderRadius.circular(14),
                           ),
                           child: const TabBar(
                             dividerColor: Colors.transparent,
                             indicatorSize: TabBarIndicatorSize.tab,
                             indicator: BoxDecoration(
-                              color: Color(0xFFFF6B00),
-                              borderRadius: BorderRadius.all(Radius.circular(12)),
+                              color: AppColors.accent,
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(12),
+                              ),
                             ),
                             labelColor: Colors.white,
-                            unselectedLabelColor: Color(0xFFD5BFA4),
+                            unselectedLabelColor: AppColors.textSoft,
                             tabs: [
                               Tab(text: 'Iniciar Sesión'),
                               Tab(text: 'Registrarse'),
@@ -587,10 +632,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         SizedBox(
                           height: 300,
                           child: TabBarView(
-                            children: [
-                              _buildLoginTab(),
-                              _buildRegisterTab(),
-                            ],
+                            children: [_buildLoginTab(), _buildRegisterTab()],
                           ),
                         ),
                         const SizedBox(height: 8),

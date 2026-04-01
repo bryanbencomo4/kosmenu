@@ -650,7 +650,11 @@ export default function PublicMenuPage() {
               </div>
             )}
             <div>
-            <p className="text-[10px] uppercase tracking-[0.35em] text-slate-500">elmenuxfa.com</p>
+            <img
+              src="/branding/logotipo.png"
+              alt="elmenuxfa.com"
+              className="mb-1 h-4 w-auto object-contain"
+            />
             <h1 className="text-2xl font-bold leading-tight text-slate-900" style={titleFontStyle}>
               {comercioNombre}
             </h1>

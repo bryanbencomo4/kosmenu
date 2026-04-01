@@ -1,11 +1,11 @@
 {
-    "name": "kosmenu_app",
-    "short_name": "kosmenu_app",
+    "name": "elmenuxfa.com",
+    "short_name": "elmenuxfa",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#ffffff",
+    "theme_color": "#6D28D9",
+    "description": "Menu digital para restaurantes.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
