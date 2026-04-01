@@ -35,6 +35,7 @@ type ComercioRow = {
 };
 
 type BrandingConfig = {
+  schema_version?: number | null;
   color_principal?: string | null;
   color_secundario?: string | null;
   fuente_titulos?: string | null;
@@ -42,6 +43,21 @@ type BrandingConfig = {
   estilo_botones?: string | null;
   mood_tags?: string[] | null;
   descripcion_visual?: string | null;
+  layout_type?: 'list' | 'grid' | 'compact' | string | null;
+  config_visual?: {
+    items_per_row?: number | null;
+    menu_sticky?: boolean | null;
+    show_images?: boolean | null;
+  } | null;
+  config_negocio?: {
+    metodos_pago?: string[] | null;
+    moneda_default?: string | null;
+  } | null;
+  colores_personalizados?: {
+    background?: string | null;
+    card_surface?: string | null;
+    text_on_primary?: string | null;
+  } | null;
 };
 
 type MetodoPagoRow = {
@@ -150,6 +166,17 @@ function borderRadiusByStyle(style: string | null | undefined) {
   if (style === 'pill') return '999px';
   if (style === 'sharp') return '0px';
   return '12px';
+}
+
+function normalizeLayoutType(value: string | null | undefined): 'list' | 'grid' | 'compact' {
+  if (value === 'grid' || value === 'compact') return value;
+  return 'list';
+}
+
+function clampItemsPerRow(value: number | null | undefined, layoutType: 'list' | 'grid' | 'compact') {
+  const fallback = layoutType === 'grid' ? 2 : 1;
+  const parsed = typeof value === 'number' ? Math.round(value) : fallback;
+  return Math.min(3, Math.max(1, parsed));
 }
 
 export default function PublicMenuPage() {
@@ -319,6 +346,22 @@ export default function PublicMenuPage() {
   const comercioInitialLetter = comercioInitial(comercioNombre);
   const primaryColor = normalizeHexColor(branding?.color_principal, '#D7A74D');
   const secondaryColor = normalizeHexColor(branding?.color_secundario, '#F5D39A');
+  const layoutType = normalizeLayoutType(branding?.layout_type ?? null);
+  const itemsPerRow = clampItemsPerRow(branding?.config_visual?.items_per_row ?? null, layoutType);
+  const menuSticky = branding?.config_visual?.menu_sticky ?? true;
+  const showImages = branding?.config_visual?.show_images ?? layoutType !== 'compact';
+  const backgroundColor = normalizeHexColor(
+    branding?.colores_personalizados?.background,
+    '#0F0D0B',
+  );
+  const cardSurfaceColor = normalizeHexColor(
+    branding?.colores_personalizados?.card_surface,
+    '#1A140E',
+  );
+  const textOnPrimaryColor = normalizeHexColor(
+    branding?.colores_personalizados?.text_on_primary,
+    '#FFFFFF',
+  );
   const googleFontsUrl = useMemo(
     () => getGoogleFontsUrl(branding),
     [branding?.fuente_titulos, branding?.fuente_cuerpo],
@@ -332,12 +375,26 @@ export default function PublicMenuPage() {
       ({
         '--primary-color': primaryColor,
         '--secondary-color': secondaryColor,
+        '--bg-color': backgroundColor,
+        '--card-surface': cardSurfaceColor,
+        '--text-on-primary': textOnPrimaryColor,
+        '--items-per-row': itemsPerRow,
         '--font-title': fontFamilyCssValue(normalizeFontName(branding?.fuente_titulos), 'serif'),
         '--font-body': fontFamilyCssValue(normalizeFontName(branding?.fuente_cuerpo), 'sans-serif'),
         '--border-radius': borderRadius,
         fontFamily: 'var(--font-body)',
       }) as React.CSSProperties,
-    [primaryColor, secondaryColor, borderRadius, branding?.fuente_titulos, branding?.fuente_cuerpo],
+    [
+      primaryColor,
+      secondaryColor,
+      backgroundColor,
+      cardSurfaceColor,
+      textOnPrimaryColor,
+      itemsPerRow,
+      borderRadius,
+      branding?.fuente_titulos,
+      branding?.fuente_cuerpo,
+    ],
   );
   const titleFontStyle = useMemo(
     () => ({ fontFamily: 'var(--font-title)' }) as React.CSSProperties,
@@ -560,13 +617,17 @@ export default function PublicMenuPage() {
         :root {
           --primary-color: ${primaryColor};
           --secondary-color: ${secondaryColor};
+          --bg-color: ${backgroundColor};
+          --card-surface: ${cardSurfaceColor};
+          --text-on-primary: ${textOnPrimaryColor};
+          --items-per-row: ${itemsPerRow};
           --font-title: ${fontFamilyCssValue(normalizeFontName(branding?.fuente_titulos), 'sans-serif')};
           --font-body: ${fontFamilyCssValue(normalizeFontName(branding?.fuente_cuerpo), 'sans-serif')};
           --btn-radius: ${borderRadius};
           --border-radius: ${borderRadius};
         }
       `}</style>
-      <main className="min-h-screen bg-[#0F0D0B] text-[#F9F3EB]" style={containerStyle}>
+      <main className="min-h-screen text-[#F9F3EB]" style={{ ...containerStyle, backgroundColor: 'var(--bg-color)' }}>
       <header className="fixed inset-x-0 top-0 z-40 border-b border-[#C08A2C]/30 bg-[#16110C]/95 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
@@ -614,7 +675,11 @@ export default function PublicMenuPage() {
           Sabores listos para ordenar. Agrega productos al carrito y confirma por WhatsApp.
         </p>
 
-        <nav className="sticky top-[72px] z-30 -mx-4 mt-4 overflow-x-auto border-y border-[#D7A74D]/20 bg-[#130F0B]/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+        <nav
+          className={`z-30 -mx-4 mt-4 overflow-x-auto border-y border-[#D7A74D]/20 bg-[#130F0B]/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 ${
+            menuSticky ? 'sticky top-[72px]' : 'relative'
+          }`}
+        >
           <div className="flex w-max gap-2">
             {categoriasConProductos.map((categoria) => (
               <a
@@ -645,36 +710,76 @@ export default function PublicMenuPage() {
                   </span>
                 </div>
 
-                <div className="space-y-3">
+                <div
+                  className={
+                    layoutType === 'grid'
+                      ? 'grid gap-3 sm:gap-4'
+                      : layoutType === 'compact'
+                        ? 'space-y-2'
+                        : 'space-y-3'
+                  }
+                  style={
+                    layoutType === 'grid'
+                      ? {
+                          gridTemplateColumns:
+                            itemsPerRow >= 3
+                              ? 'repeat(3, minmax(0, 1fr))'
+                              : 'repeat(2, minmax(0, 1fr))',
+                        }
+                      : undefined
+                  }
+                >
                   {categoria.productos.map((producto) => {
                     const quantity = cart[producto.id] ?? 0;
+                    const compact = layoutType === 'compact';
+                    const grid = layoutType === 'grid';
 
                     return (
                       <article
                         key={producto.id}
-                        className="rounded-3xl border border-[#D7A74D]/20 bg-[#1A140E] p-3 shadow-xl shadow-black/30"
+                        className={
+                          compact
+                            ? 'rounded-2xl border border-[#D7A74D]/20 p-2 shadow-lg shadow-black/20'
+                            : 'rounded-3xl border border-[#D7A74D]/20 p-3 shadow-xl shadow-black/30'
+                        }
+                        style={{ backgroundColor: 'var(--card-surface)' }}
                       >
-                        <div className="flex gap-3">
-                          <div className="h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-[#2A2118]">
-                            <img
-                              src={safeImageSrc(producto.imagen_url)}
-                              alt={producto.nombre}
-                              className="h-full w-full object-cover"
-                              onError={(event) => {
-                                const img = event.currentTarget;
-                                if (img.src !== defaultProductImage) {
-                                  img.onerror = null;
-                                  img.src = defaultProductImage;
-                                }
-                              }}
-                            />
-                          </div>
+                        <div className={grid ? 'flex flex-col gap-3' : 'flex gap-3'}>
+                          {showImages ? (
+                            <div
+                              className={
+                                grid
+                                  ? 'h-36 w-full shrink-0 overflow-hidden rounded-2xl bg-[#2A2118]'
+                                  : compact
+                                    ? 'h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-[#2A2118]'
+                                    : 'h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-[#2A2118]'
+                              }
+                            >
+                              <img
+                                src={safeImageSrc(producto.imagen_url)}
+                                alt={producto.nombre}
+                                className="h-full w-full object-cover"
+                                onError={(event) => {
+                                  const img = event.currentTarget;
+                                  if (img.src !== defaultProductImage) {
+                                    img.onerror = null;
+                                    img.src = defaultProductImage;
+                                  }
+                                }}
+                              />
+                            </div>
+                          ) : null}
 
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-3">
-                              <h3 className="text-base font-bold leading-5 text-[#FFF6E8]" style={titleFontStyle}>{producto.nombre}</h3>
+                              <h3
+                                className={compact ? 'text-sm font-bold leading-5 text-[#FFF6E8]' : 'text-base font-bold leading-5 text-[#FFF6E8]'}
+                                style={titleFontStyle}
+                              >
+                                {producto.nombre}
+                              </h3>
                               <span
-                                className="px-3 py-1 text-sm font-extrabold"
+                                className={compact ? 'px-2 py-1 text-xs font-extrabold' : 'px-3 py-1 text-sm font-extrabold'}
                                 style={{
                                   borderRadius: 'var(--border-radius)',
                                   backgroundColor: 'color-mix(in srgb, var(--primary-color) 22%, transparent)',
@@ -686,12 +791,12 @@ export default function PublicMenuPage() {
                             </div>
 
                             {producto.descripcion ? (
-                              <p className="mt-2 text-sm leading-5 text-[#D9C6AB]">{producto.descripcion}</p>
+                              <p className={compact ? 'mt-1 text-xs leading-4 text-[#D9C6AB]' : 'mt-2 text-sm leading-5 text-[#D9C6AB]'}>{producto.descripcion}</p>
                             ) : (
-                              <p className="mt-2 text-sm leading-5 text-[#B89A77]">Especialidad de la casa.</p>
+                              <p className={compact ? 'mt-1 text-xs leading-4 text-[#B89A77]' : 'mt-2 text-sm leading-5 text-[#B89A77]'}>Especialidad de la casa.</p>
                             )}
 
-                            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-[#120D08] p-1">
+                            <div className={compact ? 'mt-2 inline-flex items-center gap-2 rounded-full bg-[#120D08] p-1' : 'mt-3 inline-flex items-center gap-2 rounded-full bg-[#120D08] p-1'}>
                               <button
                                 type="button"
                                 onClick={() => decrementProduct(producto.id)}

@@ -3,8 +3,27 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 type BrandingStyle = 'rounded' | 'sharp' | 'pill';
+type LayoutType = 'list' | 'grid' | 'compact';
+
+type BrandingVisualConfig = {
+  items_per_row: number;
+  menu_sticky: boolean;
+  show_images: boolean;
+};
+
+type BrandingBusinessConfig = {
+  metodos_pago: string[];
+  moneda_default: string;
+};
+
+type BrandingCustomColors = {
+  background: string;
+  card_surface: string;
+  text_on_primary: string;
+};
 
 type BrandingResult = {
+  schema_version: 2;
   color_principal: string;
   color_secundario: string;
   fuente_titulos: string;
@@ -12,6 +31,10 @@ type BrandingResult = {
   estilo_botones: BrandingStyle;
   mood_tags: string[];
   descripcion_visual: string;
+  layout_type: LayoutType;
+  config_visual: BrandingVisualConfig;
+  config_negocio: BrandingBusinessConfig;
+  colores_personalizados: BrandingCustomColors;
 };
 
 const corsHeaders = {
@@ -22,32 +45,56 @@ const corsHeaders = {
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
 const SYSTEM_PROMPT =
-  'Eres un Director de Arte Senior especializado en branding para restaurantes. ' +
-  'Tu trabajo es traducir el concepto del usuario en una identidad visual clara, coherente y utilizable en producto digital. ' +
+  'Eres un Director de Arte Senior especializado en branding y UX para restaurantes. ' +
+  'Tu trabajo es traducir el concepto del usuario en una identidad visual y de layout clara, coherente y utilizable en producto digital. ' +
   'Debes: ' +
   '1. Definir una paleta tecnica con colores HEX validos. ' +
   '2. Seleccionar dos fuentes de Google Fonts que contrasten bien entre si: una para titulos y una para cuerpo de texto. ' +
   '3. Elegir el estilo de botones mas adecuado entre: rounded, sharp o pill. ' +
-  '4. Generar etiquetas de mood visual que ayuden a renderizar el estilo posteriormente. ' +
-  '5. Redactar una descripcion visual breve, concreta y accionable para diseño de interfaz. ' +
+  '4. Elegir el layout_type mas adecuado entre: list, grid o compact. ' +
+  '5. Definir config_visual (items_per_row, menu_sticky, show_images) acorde al layout. ' +
+  '6. Definir config_negocio con metodos_pago sugeridos y moneda_default de 3 letras. ' +
+  '7. Definir colores_personalizados de superficie y legibilidad. ' +
+  '8. Generar etiquetas de mood visual que ayuden a renderizar el estilo posteriormente. ' +
+  '9. Redactar una descripcion visual breve, concreta y accionable para diseño de interfaz. ' +
   'Reglas estrictas: ' +
   'Responde UNICAMENTE JSON valido. ' +
   'No escribas texto fuera del JSON. ' +
   'Usa exactamente esta estructura: ' +
   '{' +
+  '"schema_version": 2,' +
   '"color_principal": string,' +
   '"color_secundario": string,' +
   '"fuente_titulos": string,' +
   '"fuente_cuerpo": string,' +
   '"estilo_botones": "rounded" | "sharp" | "pill",' +
   '"mood_tags": string[],' +
-  '"descripcion_visual": string' +
+  '"descripcion_visual": string,' +
+  '"layout_type": "list" | "grid" | "compact",' +
+  '"config_visual": {' +
+  '"items_per_row": number,' +
+  '"menu_sticky": boolean,' +
+  '"show_images": boolean' +
+  '},' +
+  '"config_negocio": {' +
+  '"metodos_pago": string[],' +
+  '"moneda_default": string' +
+  '},' +
+  '"colores_personalizados": {' +
+  '"background": string,' +
+  '"card_surface": string,' +
+  '"text_on_primary": string' +
+  '}' +
   '}. ' +
   'Los colores deben estar en formato HEX de 6 digitos, por ejemplo: #C84B31. ' +
   'Las fuentes deben ser nombres reales de Google Fonts. ' +
   'Use ONLY official Google Fonts names. If unsure, default to popular ones like Montserrat, Roboto, or Open Sans. ' +
   'mood_tags debe contener entre 3 y 6 tags cortos. ' +
   'descripcion_visual debe ser una sola frase o un parrafo breve, no una lista. ' +
+  'Reglas de layout: ' +
+  'si el concepto sugiere alta rotacion o decision rapida (ej: comida rapida), prioriza grid; ' +
+  'si sugiere experiencia detallada o premium (ej: restaurante elegante), prioriza list; ' +
+  'si sugiere menu corto o take-away, evalua compact. ' +
   'No inventes campos extra.';
 
 Deno.serve(async (req: Request) => {
@@ -172,6 +219,7 @@ async function generateBrandingWithGemini(params: {
         responseSchema: {
           type: 'object',
           properties: {
+            schema_version: { type: 'number' },
             color_principal: { type: 'string' },
             color_secundario: { type: 'string' },
             fuente_titulos: { type: 'string' },
@@ -185,8 +233,42 @@ async function generateBrandingWithGemini(params: {
               items: { type: 'string' },
             },
             descripcion_visual: { type: 'string' },
+            layout_type: {
+              type: 'string',
+              enum: ['list', 'grid', 'compact'],
+            },
+            config_visual: {
+              type: 'object',
+              properties: {
+                items_per_row: { type: 'number' },
+                menu_sticky: { type: 'boolean' },
+                show_images: { type: 'boolean' },
+              },
+              required: ['items_per_row', 'menu_sticky', 'show_images'],
+            },
+            config_negocio: {
+              type: 'object',
+              properties: {
+                metodos_pago: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+                moneda_default: { type: 'string' },
+              },
+              required: ['metodos_pago', 'moneda_default'],
+            },
+            colores_personalizados: {
+              type: 'object',
+              properties: {
+                background: { type: 'string' },
+                card_surface: { type: 'string' },
+                text_on_primary: { type: 'string' },
+              },
+              required: ['background', 'card_surface', 'text_on_primary'],
+            },
           },
           required: [
+            'schema_version',
             'color_principal',
             'color_secundario',
             'fuente_titulos',
@@ -194,6 +276,10 @@ async function generateBrandingWithGemini(params: {
             'estilo_botones',
             'mood_tags',
             'descripcion_visual',
+            'layout_type',
+            'config_visual',
+            'config_negocio',
+            'colores_personalizados',
           ],
         },
       },
@@ -215,7 +301,7 @@ async function generateBrandingWithGemini(params: {
   const parsed = parseBrandingJson(text);
 
   try {
-    return await normalizeBranding(parsed);
+    return await normalizeBranding(parsed, params.promptUsuario);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'invalid branding payload';
     throw new Error(`Gemini returned invalid branding JSON: ${message}`);
@@ -275,7 +361,7 @@ function parseBrandingJson(rawText: string): unknown {
   }
 }
 
-async function normalizeBranding(value: unknown): Promise<BrandingResult> {
+async function normalizeBranding(value: unknown, promptUsuario: string): Promise<BrandingResult> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Branding payload must be an object');
   }
@@ -294,6 +380,10 @@ async function normalizeBranding(value: unknown): Promise<BrandingResult> {
   const estiloBotones = normalizeButtonStyle(map.estilo_botones);
   const moodTags = normalizeMoodTags(map.mood_tags);
   const descripcionVisual = normalizeString(map.descripcion_visual);
+  const layoutType = normalizeLayoutType(map.layout_type, promptUsuario);
+  const configVisual = normalizeVisualConfig(map.config_visual, layoutType);
+  const configNegocio = normalizeBusinessConfig(map.config_negocio, promptUsuario);
+  const customColors = normalizeCustomColors(map.colores_personalizados);
 
   if (!colorPrincipal || !colorSecundario) {
     throw new Error('Gemini returned invalid HEX colors for branding_ia');
@@ -304,6 +394,7 @@ async function normalizeBranding(value: unknown): Promise<BrandingResult> {
   }
 
   return {
+    schema_version: 2,
     color_principal: colorPrincipal,
     color_secundario: colorSecundario,
     fuente_titulos: fuenteTitulos,
@@ -311,6 +402,10 @@ async function normalizeBranding(value: unknown): Promise<BrandingResult> {
     estilo_botones: estiloBotones,
     mood_tags: moodTags,
     descripcion_visual: descripcionVisual,
+    layout_type: layoutType,
+    config_visual: configVisual,
+    config_negocio: configNegocio,
+    colores_personalizados: customColors,
   };
 }
 
@@ -346,6 +441,147 @@ function normalizeMoodTags(value: unknown): string[] {
   }
 
   return Array.from(unique).slice(0, 6);
+}
+
+function normalizeLayoutType(value: unknown, promptUsuario: string): LayoutType {
+  const raw = normalizeString(value).toLowerCase();
+  if (raw === 'list' || raw === 'grid' || raw === 'compact') {
+    return raw;
+  }
+
+  const prompt = normalizeString(promptUsuario).toLowerCase();
+  if (
+    prompt.includes('rapida') ||
+    prompt.includes('rápida') ||
+    prompt.includes('comida rapida') ||
+    prompt.includes('street food') ||
+    prompt.includes('fast food')
+  ) {
+    return 'grid';
+  }
+
+  if (
+    prompt.includes('elegante') ||
+    prompt.includes('premium') ||
+    prompt.includes('fine dining') ||
+    prompt.includes('gourmet')
+  ) {
+    return 'list';
+  }
+
+  if (
+    prompt.includes('take away') ||
+    prompt.includes('takeaway') ||
+    prompt.includes('cafeteria') ||
+    prompt.includes('cafetería')
+  ) {
+    return 'compact';
+  }
+
+  return 'list';
+}
+
+function normalizeVisualConfig(value: unknown, layoutType: LayoutType): BrandingVisualConfig {
+  const map = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+  const defaultItemsByLayout = layoutType === 'grid' ? 2 : 1;
+  const defaultShowImages = layoutType !== 'compact';
+  const itemsPerRow = clampInt(map.items_per_row, 1, 3, defaultItemsByLayout);
+
+  return {
+    items_per_row: itemsPerRow,
+    menu_sticky: normalizeBoolean(map.menu_sticky, true),
+    show_images: normalizeBoolean(map.show_images, defaultShowImages),
+  };
+}
+
+function normalizeBusinessConfig(value: unknown, promptUsuario: string): BrandingBusinessConfig {
+  const map = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+  const monedaRaw = normalizeString(map.moneda_default).toUpperCase();
+  const monedaDefault = /^[A-Z]{3}$/.test(monedaRaw)
+    ? monedaRaw
+    : inferDefaultCurrency(promptUsuario);
+
+  const metodos = Array.isArray(map.metodos_pago)
+    ? map.metodos_pago
+    : inferPaymentMethods(promptUsuario);
+
+  return {
+    metodos_pago: normalizePaymentMethods(metodos),
+    moneda_default: monedaDefault,
+  };
+}
+
+function normalizeCustomColors(value: unknown): BrandingCustomColors {
+  const map = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+  return {
+    background: normalizeHexColor(map.background) || '#0F0D0B',
+    card_surface: normalizeHexColor(map.card_surface) || '#1A140E',
+    text_on_primary: normalizeHexColor(map.text_on_primary) || '#FFFFFF',
+  };
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const rounded = Math.round(parsed);
+  if (rounded < min) return min;
+  if (rounded > max) return max;
+  return rounded;
+}
+
+function normalizeBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return fallback;
+}
+
+function normalizePaymentMethods(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return ['efectivo', 'transferencia'];
+  }
+
+  const unique = new Set<string>();
+  for (const item of value) {
+    const method = normalizeString(item).toLowerCase();
+    if (method) {
+      unique.add(method);
+    }
+  }
+
+  const result = Array.from(unique).slice(0, 8);
+  return result.length > 0 ? result : ['efectivo', 'transferencia'];
+}
+
+function inferDefaultCurrency(promptUsuario: string): string {
+  const prompt = normalizeString(promptUsuario).toLowerCase();
+  if (prompt.includes('mexico') || prompt.includes('méxico')) return 'MXN';
+  if (prompt.includes('peru') || prompt.includes('perú')) return 'PEN';
+  if (prompt.includes('argentina')) return 'ARS';
+  if (prompt.includes('chile')) return 'CLP';
+  if (prompt.includes('ecuador')) return 'USD';
+  return 'COP';
+}
+
+function inferPaymentMethods(promptUsuario: string): string[] {
+  const prompt = normalizeString(promptUsuario).toLowerCase();
+  const methods = ['efectivo', 'transferencia'];
+  if (prompt.includes('colombia')) {
+    methods.push('nequi');
+  }
+  return methods;
 }
 
 function normalizeString(value: unknown): string {

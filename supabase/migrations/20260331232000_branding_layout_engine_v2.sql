@@ -14,7 +14,6 @@ check (
   or (
     jsonb_typeof(branding_ia) = 'object'
     and (
-      -- Legacy v1 shape.
       (
         (branding_ia->>'schema_version' is null or (branding_ia->>'schema_version') = '1')
         and branding_ia ? 'color_principal'
@@ -36,7 +35,6 @@ check (
         and (branding_ia->>'color_secundario') ~ '^#[0-9A-Fa-f]{6}$'
       )
       or
-      -- New v2 shape.
       (
         (branding_ia->>'schema_version') = '2'
         and branding_ia ? 'color_principal'
