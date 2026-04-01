@@ -1,6 +1,7 @@
 // @ts-nocheck
 'use client';
 
+import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
@@ -28,6 +29,17 @@ type ComercioRow = {
   whatsapp?: string | null;
   telefono?: string | null;
   celular?: string | null;
+  branding_ia?: BrandingConfig | null;
+};
+
+type BrandingConfig = {
+  color_principal?: string | null;
+  color_secundario?: string | null;
+  fuente_titulos?: string | null;
+  fuente_cuerpo?: string | null;
+  estilo_botones?: string | null;
+  mood_tags?: string[] | null;
+  descripcion_visual?: string | null;
 };
 
 type MetodoPagoRow = {
@@ -94,6 +106,31 @@ function orderIdFrom(comercioId: string) {
 function safeImageSrc(imageUrl: string | null | undefined) {
   const src = (imageUrl ?? '').trim();
   return src.length > 0 ? src : defaultProductImage;
+}
+
+function normalizeFontName(value: string | null | undefined) {
+  const font = (value ?? '').trim();
+  return font.length > 0 ? font : '';
+}
+
+function fontFamilyCssValue(fontName: string, fallback: string) {
+  return fontName ? `"${fontName.replace(/"/g, '')}", ${fallback}` : fallback;
+}
+
+function getGoogleFontsUrl(branding: BrandingConfig | null | undefined) {
+  const titleFont = normalizeFontName(branding?.fuente_titulos);
+  const bodyFont = normalizeFontName(branding?.fuente_cuerpo);
+  const families = Array.from(new Set([titleFont, bodyFont].filter(Boolean)));
+
+  if (families.length === 0) {
+    return '';
+  }
+
+  const query = families
+    .map((family) => `family=${encodeURIComponent(family).replace(/%20/g, '+')}`)
+    .join('&');
+
+  return `https://fonts.googleapis.com/css2?${query}&display=swap`;
 }
 
 export default function PublicMenuPage() {
@@ -247,6 +284,24 @@ export default function PublicMenuPage() {
   );
 
   const comercioNombre = (menuData?.comercio.nombre ?? 'Kosmenu').trim();
+  const branding = menuData?.comercio.branding_ia ?? null;
+  const googleFontsUrl = useMemo(
+    () => getGoogleFontsUrl(branding),
+    [branding?.fuente_titulos, branding?.fuente_cuerpo],
+  );
+  const containerStyle = useMemo(
+    () =>
+      ({
+        '--font-title': fontFamilyCssValue(normalizeFontName(branding?.fuente_titulos), 'serif'),
+        '--font-body': fontFamilyCssValue(normalizeFontName(branding?.fuente_cuerpo), 'sans-serif'),
+        fontFamily: 'var(--font-body)',
+      }) as React.CSSProperties,
+    [branding?.fuente_titulos, branding?.fuente_cuerpo],
+  );
+  const titleFontStyle = useMemo(
+    () => ({ fontFamily: 'var(--font-title)' }) as React.CSSProperties,
+    [],
+  );
   const normalizedClientEmail = clientEmail.trim().toLowerCase();
   const isClientEmailValid = emailRegex.test(normalizedClientEmail);
   const whatsappNumber = normalizePhone(
@@ -449,12 +504,20 @@ export default function PublicMenuPage() {
   const hasProducts = categoriasConProductos.length > 0;
 
   return (
-    <main className="min-h-screen bg-[#0F0D0B] text-[#F9F3EB]">
+    <>
+      {googleFontsUrl ? (
+        <Head>
+          <link rel="preconnect" href="https://fonts.googleapis.com" />
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+          <link rel="stylesheet" href={googleFontsUrl} />
+        </Head>
+      ) : null}
+      <main className="min-h-screen bg-[#0F0D0B] text-[#F9F3EB]" style={containerStyle}>
       <header className="fixed inset-x-0 top-0 z-40 border-b border-[#C08A2C]/30 bg-[#16110C]/95 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3 sm:px-6">
           <div>
             <p className="text-[10px] uppercase tracking-[0.35em] text-[#D7A74D]">Kosmenu</p>
-            <h1 className="font-serif text-2xl font-bold leading-tight text-[#FFF4E2]">
+            <h1 className="text-2xl font-bold leading-tight text-[#FFF4E2]" style={titleFontStyle}>
               {comercioNombre}
             </h1>
           </div>
@@ -494,7 +557,7 @@ export default function PublicMenuPage() {
             {categoriasConProductos.map((categoria) => (
               <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-36 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="font-serif text-2xl font-semibold text-[#FFEACC]">{categoria.nombre}</h2>
+                  <h2 className="text-2xl font-semibold text-[#FFEACC]" style={titleFontStyle}>{categoria.nombre}</h2>
                   <span className="text-xs uppercase tracking-[0.25em] text-[#BFA383]">
                     {categoria.productos.length} items
                   </span>
@@ -527,7 +590,7 @@ export default function PublicMenuPage() {
 
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-3">
-                              <h3 className="text-base font-bold leading-5 text-[#FFF6E8]">{producto.nombre}</h3>
+                              <h3 className="text-base font-bold leading-5 text-[#FFF6E8]" style={titleFontStyle}>{producto.nombre}</h3>
                               <span className="rounded-full bg-[#169A56]/20 px-3 py-1 text-sm font-extrabold text-[#40D887]">
                                 {formatCop(producto.precio)}
                               </span>
@@ -600,7 +663,7 @@ export default function PublicMenuPage() {
         <div className="fixed inset-0 z-[60] flex items-end bg-black/55 backdrop-blur-sm sm:items-center sm:justify-center">
           <div className="w-full rounded-t-3xl border border-[#D7A74D]/25 bg-[#16110C] p-5 shadow-2xl sm:max-w-xl sm:rounded-3xl">
             <div className="flex items-center justify-between">
-              <h3 className="font-serif text-2xl font-bold text-[#FFEACC]">
+              <h3 className="text-2xl font-bold text-[#FFEACC]" style={titleFontStyle}>
                 Confirmar pedido
               </h3>
               <button
@@ -708,6 +771,7 @@ export default function PublicMenuPage() {
           </div>
         </div>
       ) : null}
-    </main>
+      </main>
+    </>
   );
 }
