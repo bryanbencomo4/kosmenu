@@ -10,6 +10,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
+import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:path_provider/path_provider.dart';
@@ -27,7 +28,7 @@ class BusinessSetupScreen extends StatefulWidget {
   State<BusinessSetupScreen> createState() => _BusinessSetupScreenState();
 }
 
-enum _SetupStep { identity, style, checkout, finish }
+enum _SetupStep { identity, style, checkout, operation, scan, finish }
 
 enum _LogoPickAction { gallery, camera, editCurrent, removeCurrent }
 
@@ -173,6 +174,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _slugController = TextEditingController();
   final TextEditingController _exchangeRateController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _whatsappController = TextEditingController();
   final BrandingAiService _brandingAiService = const BrandingAiService();
 
   _SetupStep _step = _SetupStep.identity;
@@ -217,6 +220,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedHeadingFont = 'Poppins';
   bool _showAllFontSuggestions = false;
   String _selectedFooter = 'Simple';
+  bool _allowDelivery = false;
+  bool _receiveOrdersOnWhatsapp = true;
+  bool _menuScanCompleted = false;
+  int _scanCreatedCategories = 0;
+  int _scanCreatedProducts = 0;
+  String _scanCatalogName = '';
 
   XFile? _selectedLogo;
   String? _editingComercioId;
@@ -261,6 +270,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _nameController.dispose();
     _slugController.dispose();
     _exchangeRateController.dispose();
+    _phoneController.dispose();
+    _whatsappController.dispose();
     _slugDebounce?.cancel();
     super.dispose();
   }
@@ -341,6 +352,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (_categories.contains(category)) {
       _selectedCategory = category;
     }
+
+    _whatsappController.text = (raw?['whatsapp']?.toString() ?? '').trim();
+    _phoneController.text = (raw?['telefono']?.toString() ?? '').trim();
+    _allowDelivery = raw?['permite_delivery'] == true;
+    _receiveOrdersOnWhatsapp = raw?['recibe_pedidos_whatsapp'] == true;
 
     final currency = (raw?['moneda']?.toString().trim().toUpperCase() ?? '');
     if (_currencies.contains(currency)) {
@@ -677,6 +693,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _editingComercioId = editingId;
       }
 
+      _phoneController.text = (map['phone'] as String? ?? '').trim();
+      _whatsappController.text = (map['whatsapp'] as String? ?? '').trim();
+      _allowDelivery = map['allowDelivery'] as bool? ?? false;
+      _receiveOrdersOnWhatsapp =
+          map['receiveOrdersOnWhatsapp'] as bool? ?? true;
+      _menuScanCompleted = map['menuScanCompleted'] as bool? ?? false;
+      _scanCreatedCategories =
+          (map['scanCreatedCategories'] as num?)?.toInt() ?? 0;
+      _scanCreatedProducts = (map['scanCreatedProducts'] as num?)?.toInt() ?? 0;
+      _scanCatalogName = (map['scanCatalogName'] as String? ?? '').trim();
+
       _lastPaletteLogoPath = (map['lastPaletteLogoPath'] as String? ?? '')
           .trim();
       _lastFontLogoPath = (map['lastFontLogoPath'] as String? ?? '').trim();
@@ -797,6 +824,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'lastSuggestedRateCurrency': _lastSuggestedRateCurrency,
       'exchangeRateManuallyEdited': _exchangeRateManuallyEdited,
       'editingComercioId': _editingComercioId ?? '',
+      'phone': _phoneController.text.trim(),
+      'whatsapp': _whatsappController.text.trim(),
+      'allowDelivery': _allowDelivery,
+      'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
+      'menuScanCompleted': _menuScanCompleted,
+      'scanCreatedCategories': _scanCreatedCategories,
+      'scanCreatedProducts': _scanCreatedProducts,
+      'scanCatalogName': _scanCatalogName,
       'lastPaletteLogoPath': _lastPaletteLogoPath,
       'lastFontLogoPath': _lastFontLogoPath,
       'paletteManuallyEdited': _paletteManuallyEdited,
@@ -1826,6 +1861,78 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return name.length >= 3 && slug.length >= 3 && _isSlugAvailable;
   }
 
+  int _digitsCount(String input) {
+    return input.replaceAll(RegExp(r'\D'), '').length;
+  }
+
+  String? _operationValidationMessage() {
+    final phone = _phoneController.text.trim();
+    final whatsapp = _whatsappController.text.trim();
+
+    if (_allowDelivery && _digitsCount(phone) < 8) {
+      return 'Para habilitar delivery, agrega un telefono valido (minimo 8 digitos).';
+    }
+
+    if (_receiveOrdersOnWhatsapp && _digitsCount(whatsapp) < 8) {
+      return 'Si recibiras pedidos por WhatsApp, agrega un numero valido (minimo 8 digitos).';
+    }
+
+    return null;
+  }
+
+  Future<void> _openMenuScan() async {
+    final comercioId = await _ensureComercioIdForGemini();
+    if (!mounted) {
+      return;
+    }
+    if (comercioId.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Completa y guarda los datos base antes de escanear el menu.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    SupabaseConfig.setCurrentComercioId(
+      comercioId,
+      slug: _normalizeSlug(_slugController.text),
+    );
+
+    final result = await Navigator.of(context).push<MagicOnboardingResult>(
+      MaterialPageRoute(builder: (_) => const MagicOnboardingScreen()),
+    );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    setState(() {
+      _menuScanCompleted = true;
+      _scanCreatedCategories = result.createdCategories;
+      _scanCreatedProducts = result.createdProducts;
+      _scanCatalogName = result.catalog.nombre;
+    });
+    await _saveDraft();
+  }
+
+  Future<void> _openDraftPreview() async {
+    final slug = _normalizeSlug(_slugController.text);
+    if (slug.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Define una URL del menu para abrir el preview real.'),
+        ),
+      );
+      return;
+    }
+
+    final url = AppLinks.publicMenuByIdentifier(comercioId: slug, slug: slug);
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
   Future<void> _nextStep() async {
     if (_step == _SetupStep.checkout) {
       _syncActiveCurrencyDataFromController();
@@ -1861,6 +1968,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           content: Text(
             'Agrega al menos un detalle en cada metodo de pago seleccionado.',
           ),
+        ),
+      );
+      return;
+    }
+
+    if (_step == _SetupStep.operation) {
+      final operationMessage = _operationValidationMessage();
+      if (operationMessage != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(operationMessage)));
+        return;
+      }
+    }
+
+    if (_step == _SetupStep.scan && !_menuScanCompleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Completa el escaneo del menu antes de continuar.'),
         ),
       );
       return;
@@ -2963,6 +3089,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'nombre': _nameController.text.trim(),
       'slug': _normalizeSlug(_slugController.text),
       'categoria': _selectedCategory,
+      if (_phoneController.text.trim().isNotEmpty)
+        'telefono': _phoneController.text.trim(),
+      if (_whatsappController.text.trim().isNotEmpty)
+        'whatsapp': _whatsappController.text.trim(),
+      'permite_delivery': _allowDelivery,
+      'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
       if (logoUrl != null && logoUrl.trim().isNotEmpty) 'logo_url': logoUrl,
       'moneda': primaryCurrency,
       'tasa_cambio_pesos': primaryCurrency == 'COP' && primaryExchangeRate > 0
@@ -2978,6 +3110,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     final removable = <String>{
       'categoria',
+      'telefono',
+      'whatsapp',
+      'permite_delivery',
+      'recibe_pedidos_whatsapp',
       'slug',
       'logo_url',
       'moneda',
@@ -3078,6 +3214,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         const SnackBar(
           content: Text(
             'Completa al menos un detalle en cada metodo de pago seleccionado.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final operationMessage = _operationValidationMessage();
+    if (operationMessage != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(operationMessage)));
+      return;
+    }
+
+    if (!_menuScanCompleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Debes completar el escaneo del menu antes de guardar.',
           ),
         ),
       );
@@ -3393,6 +3548,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _SetupStep.identity => _buildIdentityStep(compact),
       _SetupStep.style => _buildStyleStep(),
       _SetupStep.checkout => _buildCheckoutStep(),
+      _SetupStep.operation => _buildOperationStep(),
+      _SetupStep.scan => _buildScanStep(),
       _SetupStep.finish => _buildFinishStep(),
     };
 
@@ -4314,6 +4471,195 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
   }
 
+  Widget _buildOperationStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Operacion del negocio',
+          style: GoogleFonts.poppins(
+            color: _setupTextHigh,
+            fontSize: 19,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Configura como recibir pedidos y como contactarte.',
+          style: TextStyle(color: _setupTextMedium, fontSize: 12),
+        ),
+        const SizedBox(height: 12),
+        SwitchListTile.adaptive(
+          value: _allowDelivery,
+          onChanged: (value) {
+            setState(() => _allowDelivery = value);
+            unawaited(_saveDraft());
+          },
+          activeThumbColor: _palette.primary,
+          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+          inactiveThumbColor: const Color(0xFFE7E0F9),
+          inactiveTrackColor: const Color(0xFF3A305A),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: const Text('Permitir delivery'),
+          subtitle: const Text(
+            'Activa entregas a domicilio para tus clientes.',
+            style: TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _phoneController,
+          keyboardType: TextInputType.phone,
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()]')),
+          ],
+          style: const TextStyle(color: _setupTextHigh),
+          decoration: InputDecoration(
+            labelText: 'Numero de telefono',
+            hintText: 'Ej. +58 412 123 4567',
+            filled: true,
+            fillColor: const Color(0xFF120E25),
+            labelStyle: const TextStyle(color: _setupTextLow),
+            hintStyle: const TextStyle(color: _setupTextLow),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+            ),
+          ),
+          onChanged: (_) => unawaited(_saveDraft()),
+        ),
+        const SizedBox(height: 10),
+        TextFormField(
+          controller: _whatsappController,
+          keyboardType: TextInputType.phone,
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()]')),
+          ],
+          style: const TextStyle(color: _setupTextHigh),
+          decoration: InputDecoration(
+            labelText: 'Numero de WhatsApp',
+            hintText: 'Ej. +58 412 123 4567',
+            filled: true,
+            fillColor: const Color(0xFF120E25),
+            labelStyle: const TextStyle(color: _setupTextLow),
+            hintStyle: const TextStyle(color: _setupTextLow),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+            ),
+          ),
+          onChanged: (_) => unawaited(_saveDraft()),
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          value: _receiveOrdersOnWhatsapp,
+          onChanged: (value) {
+            setState(() => _receiveOrdersOnWhatsapp = value);
+            unawaited(_saveDraft());
+          },
+          activeThumbColor: _palette.primary,
+          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+          inactiveThumbColor: const Color(0xFFE7E0F9),
+          inactiveTrackColor: const Color(0xFF3A305A),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: const Text('Recibir pedidos por WhatsApp'),
+          subtitle: const Text(
+            'Muestra WhatsApp como canal principal para tomar pedidos.',
+            style: TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScanStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Escaneo del menu',
+          style: GoogleFonts.poppins(
+            color: _setupTextHigh,
+            fontSize: 19,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Digitaliza tu menu con el escaneo para crear categorias y productos automaticamente.',
+          style: TextStyle(color: _setupTextMedium, fontSize: 12),
+        ),
+        const SizedBox(height: 14),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF17122E),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: _menuScanCompleted
+                  ? const Color(0xFF2C6E49)
+                  : const Color(0xFF3B2F63),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _menuScanCompleted
+                        ? Icons.check_circle_rounded
+                        : Icons.document_scanner_rounded,
+                    color: _menuScanCompleted
+                        ? const Color(0xFFA7F3D0)
+                        : _setupTextMedium,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _menuScanCompleted
+                          ? 'Escaneo completado'
+                          : 'Escaneo pendiente',
+                      style: const TextStyle(
+                        color: _setupTextHigh,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _menuScanCompleted
+                    ? 'Catalogo: ${_scanCatalogName.isEmpty ? 'Menú principal' : _scanCatalogName} · $_scanCreatedCategories categorias · $_scanCreatedProducts productos.'
+                    : 'Abre el escaneo y toma una foto clara para procesar tu menu.',
+                style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _openMenuScan,
+                icon: const Icon(Icons.document_scanner_rounded),
+                label: Text(
+                  _menuScanCompleted ? 'Reescanear menu' : 'Escanear menu',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildFinishStep() {
     final base = AppLinks.productionUrl;
     final slug = _normalizeSlug(_slugController.text);
@@ -4358,7 +4704,86 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     .name,
               ),
               _SummaryTag(label: _selectedCurrencies.join(' + ')),
+              _SummaryTag(
+                label: _allowDelivery ? 'Delivery activo' : 'Sin delivery',
+              ),
+              _SummaryTag(
+                label: _receiveOrdersOnWhatsapp
+                    ? 'Pedidos por WhatsApp'
+                    : 'Sin pedidos por WhatsApp',
+              ),
             ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF120E25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF3B2F63)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Contacto operativo',
+                  style: GoogleFonts.poppins(
+                    color: _setupTextHigh,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Telefono: ${_phoneController.text.trim().isEmpty ? 'No configurado' : _phoneController.text.trim()}',
+                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'WhatsApp: ${_whatsappController.text.trim().isEmpty ? 'No configurado' : _whatsappController.text.trim()}',
+                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF120E25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _menuScanCompleted
+                    ? const Color(0xFF2C6E49)
+                    : const Color(0xFF7A294E),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _menuScanCompleted
+                      ? Icons.check_circle_rounded
+                      : Icons.warning_amber_rounded,
+                  color: _menuScanCompleted
+                      ? const Color(0xFFA7F3D0)
+                      : const Color(0xFFF59E0B),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _menuScanCompleted
+                        ? 'Escaneo listo: $_scanCreatedCategories categorias y $_scanCreatedProducts productos.'
+                        : 'Escaneo pendiente. Vuelve al paso de escaneo para completarlo.',
+                    style: const TextStyle(
+                      color: _setupTextMedium,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           ..._selectedCurrencies.map((currency) {
@@ -4488,6 +4913,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.tonalIcon(
+              onPressed: _openDraftPreview,
+              icon: const Icon(Icons.open_in_browser_rounded),
+              label: const Text('Ver preview real'),
+              style: FilledButton.styleFrom(
+                foregroundColor: const Color(0xFFF8F5FF),
+                backgroundColor: const Color(0xFF2D2152),
               ),
             ),
           ),
@@ -4735,44 +5173,80 @@ class _StepPills extends StatelessWidget {
     'Marca',
     'Estilo',
     'Pagos',
+    'Operacion',
+    'Escaneo',
     'Final',
+  ];
+
+  static const List<IconData> _icons = <IconData>[
+    Icons.storefront_rounded,
+    Icons.palette_rounded,
+    Icons.payments_rounded,
+    Icons.settings_phone_rounded,
+    Icons.document_scanner_rounded,
+    Icons.visibility_rounded,
   ];
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: List.generate(_labels.length, (index) {
-        final active = index == step.index;
-        final done = index < step.index;
+    final activeIndex = step.index;
 
-        return Expanded(
-          child: Container(
-            margin: EdgeInsets.only(right: index == _labels.length - 1 ? 0 : 6),
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: active
-                  ? const Color(0xFF6D28D9)
-                  : done
-                  ? const Color(0xFF2D2152)
-                  : const Color(0xFF17122E),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF3B2F63)),
-            ),
-            child: Center(
-              child: Text(
-                _labels[index],
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: _setupTextHigh,
-                  fontSize: 14,
-                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: List.generate(_labels.length * 2 - 1, (slotIndex) {
+            if (slotIndex.isOdd) {
+              final connectorIndex = (slotIndex - 1) ~/ 2;
+              final done = connectorIndex < activeIndex;
+              return Expanded(
+                child: Container(
+                  height: 2,
+                  color: done
+                      ? const Color(0xFF8B5CF6)
+                      : const Color(0xFF3B2F63),
+                ),
+              );
+            }
+
+            final index = slotIndex ~/ 2;
+            final active = index == activeIndex;
+            final done = index < activeIndex;
+
+            return Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: active
+                    ? const Color(0xFF6D28D9)
+                    : done
+                    ? const Color(0xFF2D2152)
+                    : const Color(0xFF17122E),
+                border: Border.all(
+                  color: active
+                      ? const Color(0xFFD8B4FE)
+                      : const Color(0xFF3B2F63),
                 ),
               ),
-            ),
+              child: Icon(
+                done ? Icons.check_rounded : _icons[index],
+                size: 18,
+                color: _setupTextHigh,
+              ),
+            );
+          }),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _labels[activeIndex],
+          style: GoogleFonts.poppins(
+            color: _setupTextHigh,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
           ),
-        );
-      }),
+        ),
+      ],
     );
   }
 }
