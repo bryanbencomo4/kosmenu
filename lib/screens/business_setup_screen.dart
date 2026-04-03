@@ -14,6 +14,7 @@ import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:intl_phone_field/phone_number.dart' as intl_phone_number;
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
+import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
@@ -230,6 +231,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _receiveOrdersOnWhatsapp = true;
   String _selectedPhoneCountryIso = 'VE';
   bool _menuScanCompleted = false;
+  bool _manualMenuSetupSelected = false;
+  int _menuCatalogCount = 0;
   int _scanCreatedCategories = 0;
   int _scanCreatedProducts = 0;
   String _scanCatalogName = '';
@@ -251,6 +254,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _showDraftRecoveredHint = false;
 
   bool get _isEditing => _editingComercioId != null;
+
+  bool get _hasMenuSetupCompleted =>
+      _menuScanCompleted || _menuCatalogCount > 0;
 
   _PaletteOption get _palette => _paletteSuggestion;
 
@@ -329,6 +335,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     } finally {
       if (mounted) {
         setState(() => _loadingExisting = false);
+      }
+      final comercioId = (_editingComercioId ?? '').trim();
+      if (comercioId.isNotEmpty) {
+        unawaited(_refreshMenuCatalogCount(comercioId));
       }
       unawaited(_checkSlugAvailability(_slugController.text));
       final logoPath = _selectedLogo?.path ?? '';
@@ -733,10 +743,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _receiveOrdersOnWhatsapp =
           map['receiveOrdersOnWhatsapp'] as bool? ?? true;
       _menuScanCompleted = map['menuScanCompleted'] as bool? ?? false;
+      _manualMenuSetupSelected =
+          map['manualMenuSetupSelected'] as bool? ?? false;
+      _menuCatalogCount = (map['menuCatalogCount'] as num?)?.toInt() ?? 0;
       _scanCreatedCategories =
           (map['scanCreatedCategories'] as num?)?.toInt() ?? 0;
       _scanCreatedProducts = (map['scanCreatedProducts'] as num?)?.toInt() ?? 0;
       _scanCatalogName = (map['scanCatalogName'] as String? ?? '').trim();
+
+      if (!_menuScanCompleted) {
+        _manualMenuSetupSelected = _menuCatalogCount > 0;
+      }
 
       _lastPaletteLogoPath = (map['lastPaletteLogoPath'] as String? ?? '')
           .trim();
@@ -866,6 +883,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'allowDelivery': _allowDelivery,
       'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
       'menuScanCompleted': _menuScanCompleted,
+      'manualMenuSetupSelected': _manualMenuSetupSelected,
+      'menuCatalogCount': _menuCatalogCount,
       'scanCreatedCategories': _scanCreatedCategories,
       'scanCreatedProducts': _scanCreatedProducts,
       'scanCatalogName': _scanCatalogName,
@@ -2816,10 +2835,93 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     setState(() {
       _menuScanCompleted = true;
+      _manualMenuSetupSelected = false;
       _scanCreatedCategories = result.createdCategories;
       _scanCreatedProducts = result.createdProducts;
       _scanCatalogName = result.catalog.nombre;
+      if (_menuCatalogCount <= 0) {
+        _menuCatalogCount = 1;
+      }
     });
+    await _refreshMenuCatalogCount(comercioId);
+    await _saveDraft();
+  }
+
+  Future<void> _refreshMenuCatalogCount(String comercioId) async {
+    final trimmedId = comercioId.trim();
+    if (trimmedId.isEmpty) {
+      return;
+    }
+
+    try {
+      final rows = await Supabase.instance.client
+          .from('catalogos')
+          .select('id')
+          .eq('comercio_id', trimmedId);
+
+      final menuCount = (rows as List<dynamic>).length;
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _menuCatalogCount = menuCount;
+        if (!_menuScanCompleted) {
+          _manualMenuSetupSelected = menuCount > 0;
+        }
+      });
+    } catch (_) {
+      // Ignore counting errors to avoid blocking setup flow.
+    }
+  }
+
+  Future<void> _openManualMenuSetup() async {
+    final comercioId = await _ensureComercioIdForGemini();
+    if (!mounted) {
+      return;
+    }
+    if (comercioId.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Completa y guarda los datos base antes de crear manualmente.'),
+        ),
+      );
+      return;
+    }
+
+    SupabaseConfig.setCurrentComercioId(
+      comercioId,
+      slug: _normalizeSlug(_slugController.text),
+    );
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CategoryListScreen()),
+    );
+
+    await _refreshMenuCatalogCount(comercioId);
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      if (!_menuScanCompleted && _menuCatalogCount > 0) {
+        _manualMenuSetupSelected = true;
+      }
+      if (!_menuScanCompleted && _scanCatalogName.isEmpty && _menuCatalogCount > 0) {
+        _scanCatalogName = _menuCatalogCount == 1
+            ? '1 menu manual'
+            : '$_menuCatalogCount menus manuales';
+      }
+    });
+
+    if (_menuCatalogCount == 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aun no hay menus creados. Crea al menos 1 para completar este paso.'),
+        ),
+      );
+    }
+
     await _saveDraft();
   }
 
@@ -2888,10 +2990,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     }
 
-    if (_step == _SetupStep.scan && !_menuScanCompleted) {
+    if (_step == _SetupStep.scan && !_hasMenuSetupCompleted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Completa el escaneo del menu antes de continuar.'),
+          content: Text('Completa el escaneo o elige creacion manual antes de continuar.'),
         ),
       );
       return;
@@ -4136,11 +4238,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (!_menuScanCompleted) {
+    if (!_hasMenuSetupCompleted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Debes completar el escaneo del menu antes de guardar.',
+            'Debes completar el escaneo o usar la opcion manual antes de guardar.',
           ),
         ),
       );
@@ -4523,39 +4625,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Layout',
-          style: GoogleFonts.poppins(
-            color: _setupTextHigh,
-            fontSize: 19,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _layouts.map((layout) {
-            final selected = _selectedLayoutId == layout.id;
-            return ChoiceChip(
-              label: Text(layout.name),
-              selected: selected,
-              avatar: Icon(layout.icon, size: 18),
-              onSelected: (_) {
-                setState(() => _selectedLayoutId = layout.id);
-                unawaited(_saveDraft());
-              },
-              selectedColor: const Color(0xFF2D2152),
-              backgroundColor: const Color(0xFF1A1432),
-              labelStyle: const TextStyle(color: _setupTextHigh, fontSize: 14),
-              side: BorderSide(
-                color: selected ? _palette.primary : const Color(0xFF3B2F63),
-              ),
-              showCheckmark: false,
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 14),
         Text(
           'Paleta',
           style: GoogleFonts.poppins(
@@ -5591,82 +5660,140 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Widget _buildScanStep() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Escaneo del menu',
-          style: GoogleFonts.poppins(
-            color: _setupTextHigh,
-            fontSize: 19,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Digitaliza tu menu con el escaneo para crear categorias y productos automaticamente.',
-          style: TextStyle(color: _setupTextMedium, fontSize: 12),
-        ),
-        const SizedBox(height: 14),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF17122E),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _menuScanCompleted
-                  ? const Color(0xFF2C6E49)
-                  : const Color(0xFF3B2F63),
+    return SafeArea(
+      top: false,
+      bottom: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Escaneo del menu',
+            style: GoogleFonts.poppins(
+              color: _setupTextHigh,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    _menuScanCompleted
-                        ? Icons.check_circle_rounded
-                        : Icons.document_scanner_rounded,
-                    color: _menuScanCompleted
-                        ? const Color(0xFFA7F3D0)
-                        : _setupTextMedium,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _menuScanCompleted
-                          ? 'Escaneo completado'
-                          : 'Escaneo pendiente',
-                      style: const TextStyle(
-                        color: _setupTextHigh,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
+          const SizedBox(height: 6),
+          const Text(
+            'Digitaliza tu menu o crea manualmente. Debes completar una de las dos opciones para continuar.',
+            style: TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Layout',
+            style: GoogleFonts.poppins(
+              color: _setupTextHigh,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _layouts.map((layout) {
+              final selected = _selectedLayoutId == layout.id;
+              return ChoiceChip(
+                label: Text(layout.name),
+                selected: selected,
+                avatar: Icon(layout.icon, size: 18),
+                onSelected: (_) {
+                  setState(() => _selectedLayoutId = layout.id);
+                  unawaited(_saveDraft());
+                },
+                selectedColor: const Color(0xFF2D2152),
+                backgroundColor: const Color(0xFF1A1432),
+                labelStyle: const TextStyle(color: _setupTextHigh, fontSize: 14),
+                side: BorderSide(
+                  color: selected ? _palette.primary : const Color(0xFF3B2F63),
+                ),
+                showCheckmark: false,
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF17122E),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _hasMenuSetupCompleted
+                    ? const Color(0xFF2C6E49)
+                    : const Color(0xFF3B2F63),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      _hasMenuSetupCompleted
+                          ? Icons.check_circle_rounded
+                          : Icons.document_scanner_rounded,
+                      color: _hasMenuSetupCompleted
+                          ? const Color(0xFFA7F3D0)
+                          : _setupTextMedium,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _menuScanCompleted
+                            ? 'Escaneo completado'
+                            : _menuCatalogCount > 0
+                            ? 'Creacion manual completada'
+                            : 'Escaneo pendiente',
+                        style: const TextStyle(
+                          color: _setupTextHigh,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _menuScanCompleted
-                    ? 'Catalogo: ${_scanCatalogName.isEmpty ? 'Menú principal' : _scanCatalogName} · $_scanCreatedCategories categorias · $_scanCreatedProducts productos.'
-                    : 'Abre el escaneo y toma una foto clara para procesar tu menu.',
-                style: const TextStyle(color: _setupTextMedium, fontSize: 12),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: _openMenuScan,
-                icon: const Icon(Icons.document_scanner_rounded),
-                label: Text(
-                  _menuScanCompleted ? 'Reescanear menu' : 'Escanear menu',
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                Text(
+                  _menuScanCompleted
+                      ? 'Catalogo: ${_scanCatalogName.isEmpty ? 'Menú principal' : _scanCatalogName} · $_scanCreatedCategories categorias · $_scanCreatedProducts productos.'
+                      : _menuCatalogCount > 0
+                      ? _menuCatalogCount == 1
+                            ? 'Creacion manual lista: 1 menu detectado.'
+                            : 'Creacion manual lista: $_menuCatalogCount menus detectados.'
+                      : 'Abre el escaneo y toma una foto clara para procesar tu menu.',
+                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: _openMenuScan,
+                      icon: const Icon(Icons.document_scanner_rounded),
+                      label: Text(
+                        _menuScanCompleted ? 'Reescanear menu' : 'Escanear menu',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _openManualMenuSetup,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _setupTextHigh,
+                        side: const BorderSide(color: Color(0xFF6B5A9A)),
+                      ),
+                      icon: const Icon(Icons.edit_note_rounded),
+                      label: const Text('Crear manualmente'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -5770,7 +5897,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               color: const Color(0xFF120E25),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _menuScanCompleted
+                color: _hasMenuSetupCompleted
                     ? const Color(0xFF2C6E49)
                     : const Color(0xFF7A294E),
               ),
@@ -5778,10 +5905,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             child: Row(
               children: [
                 Icon(
-                  _menuScanCompleted
+                  _hasMenuSetupCompleted
                       ? Icons.check_circle_rounded
                       : Icons.warning_amber_rounded,
-                  color: _menuScanCompleted
+                  color: _hasMenuSetupCompleted
                       ? const Color(0xFFA7F3D0)
                       : const Color(0xFFF59E0B),
                 ),
@@ -5790,7 +5917,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   child: Text(
                     _menuScanCompleted
                         ? 'Escaneo listo: $_scanCreatedCategories categorias y $_scanCreatedProducts productos.'
-                        : 'Escaneo pendiente. Vuelve al paso de escaneo para completarlo.',
+                        : _menuCatalogCount > 0
+                        ? _menuCatalogCount == 1
+                            ? 'Creacion manual lista: 1 menu detectado.'
+                            : 'Creacion manual lista: $_menuCatalogCount menus detectados.'
+                        : 'Menu pendiente. Completa escaneo o selecciona creacion manual en el paso de escaneo.',
                     style: const TextStyle(
                       color: _setupTextMedium,
                       fontSize: 12,
