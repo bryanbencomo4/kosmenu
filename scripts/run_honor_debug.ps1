@@ -1,3 +1,8 @@
+param(
+	[string]$DeviceId = '',
+	[switch]$Clean
+)
+
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -9,8 +14,37 @@ $env:ANDROID_SDK_ROOT = $sdkRoot
 $env:ANDROID_HOME = $sdkRoot
 $env:PATH = "$env:JAVA_HOME\bin;$sdkRoot\platform-tools;$sdkRoot\cmdline-tools\latest\bin;$env:PATH"
 
-Push-Location android
-./gradlew clean
-Pop-Location
+if (-not $DeviceId) {
+	$firstDevice = adb devices |
+		Select-String 'device$' |
+		ForEach-Object { ($_ -split "`t")[0].Trim() } |
+		Select-Object -First 1
 
-fvm flutter run -d A76XUT5423002846
+	if (-not $firstDevice) {
+		throw 'No se encontro ningun dispositivo Android conectado.'
+	}
+
+	$DeviceId = $firstDevice
+}
+
+if ($Clean) {
+	Push-Location android
+	./gradlew clean
+	Pop-Location
+}
+
+adb -s $DeviceId logcat -c | Out-Null
+
+$logcatCommand = @(
+	"adb -s $DeviceId logcat -v color ",
+	'flutter:I Flutter:I Choreographer:W AndroidRuntime:E ',
+	'*:S'
+) -join ''
+
+Start-Process powershell -ArgumentList @(
+	'-NoExit',
+	'-Command',
+	$logcatCommand
+) | Out-Null
+
+fvm flutter run -d $DeviceId

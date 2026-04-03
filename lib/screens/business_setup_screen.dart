@@ -98,14 +98,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     'Otro',
   ];
 
-  static const List<String> _currencies = <String>['USD', 'EUR', 'MXN', 'COP'];
+  static const List<String> _currencies = <String>['USD', 'VES', 'COP', 'EUR'];
 
   static const List<String> _paymentMethods = <String>[
     'Efectivo',
-    'Tarjeta',
     'Transferencia',
-    'Pago movil',
   ];
+  static const int _maxTransferAccountsPerCurrency = 5;
+  static const int _maxTransferFieldsPerAccount = 8;
+  static const int _maxCashTextLength = 280;
+  static const int _maxTransferAccountNameLength = 60;
+  static const int _maxTransferFieldLabelLength = 40;
+  static const int _maxTransferFieldValueLength = 140;
 
   final List<_LayoutOption> _layouts = const <_LayoutOption>[
     _LayoutOption(
@@ -168,11 +172,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _slugController = TextEditingController();
+  final TextEditingController _exchangeRateController = TextEditingController();
   final BrandingAiService _brandingAiService = const BrandingAiService();
 
   _SetupStep _step = _SetupStep.identity;
   String _selectedCategory = _categories.first;
-  String _selectedCurrency = _currencies.first;
+  final Set<String> _selectedCurrencies = <String>{'USD'};
+  String _activeCheckoutCurrency = 'USD';
   String _selectedLayoutId = 'cards';
   String _selectedPaletteId = 'smart';
   _PaletteOption _paletteSuggestion = const _PaletteOption(
@@ -192,6 +198,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _isGeminiPaletteLoading = false;
   String? _paletteStatusMessage;
   bool _paletteStatusIsError = false;
+  bool _isExchangeRateLoading = false;
+  String? _exchangeRateMessage;
+  bool _exchangeRateIsError = false;
+  String _lastSuggestedRateCurrency = 'USD';
+  bool _exchangeRateManuallyEdited = false;
+  final Map<String, String> _exchangeRateByCurrency = <String, String>{
+    'USD': '1',
+  };
+  final Map<String, Set<String>> _selectedPaymentsByCurrency =
+      <String, Set<String>>{};
+  final Map<String, Map<String, _PaymentMethodDraft>>
+  _paymentMethodDraftsByCurrency = <String, Map<String, _PaymentMethodDraft>>{};
   String _lastPaletteLogoPath = '';
   String _lastFontLogoPath = '';
   bool _paletteManuallyEdited = false;
@@ -199,7 +217,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedHeadingFont = 'Poppins';
   bool _showAllFontSuggestions = false;
   String _selectedFooter = 'Simple';
-  final Set<String> _selectedPayments = <String>{'Efectivo'};
 
   XFile? _selectedLogo;
   String? _editingComercioId;
@@ -226,6 +243,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   @override
   void initState() {
     super.initState();
+    _ensureCurrencyConfig('USD');
+    _loadActiveCurrencyIntoController();
     _loadInitialData();
     _autosaveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_loadingExisting) {
@@ -241,6 +260,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     unawaited(_saveDraft());
     _nameController.dispose();
     _slugController.dispose();
+    _exchangeRateController.dispose();
     _slugDebounce?.cancel();
     super.dispose();
   }
@@ -272,7 +292,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
       final row = await Supabase.instance.client
           .from('comercios')
-          .select('id, slug, nombre, logo_url, whatsapp, en_linea, categoria')
+          .select(
+            'id, slug, nombre, logo_url, whatsapp, en_linea, categoria, moneda, tasa_cambio_pesos',
+          )
           .eq('owner_id', user.id)
           .limit(1)
           .maybeSingle();
@@ -280,6 +302,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (row != null) {
         final comercio = ComercioModel.fromMap(Map<String, dynamic>.from(row));
         _applyComercioSeed(comercio, raw: Map<String, dynamic>.from(row));
+        await _loadStoredPaymentMethods(comercio.id);
       }
     } catch (_) {
       // Keep defaults when loading fails.
@@ -291,6 +314,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final logoPath = _selectedLogo?.path ?? '';
       if (_shouldGeneratePaletteForLogo(logoPath)) {
         unawaited(_refreshSmartStyleSuggestions());
+      }
+      if (_step.index >= _SetupStep.checkout.index &&
+          !_isExchangeRateConfigured()) {
+        unawaited(_suggestExchangeRate());
       }
     }
   }
@@ -314,6 +341,90 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (_categories.contains(category)) {
       _selectedCategory = category;
     }
+
+    final currency = (raw?['moneda']?.toString().trim().toUpperCase() ?? '');
+    if (_currencies.contains(currency)) {
+      _selectedCurrencies
+        ..clear()
+        ..add(currency);
+      _activeCheckoutCurrency = currency;
+      _ensureCurrencyConfig(currency);
+    }
+
+    final rate = _parseExchangeRate(raw?['tasa_cambio_pesos']);
+    if (rate > 0) {
+      _exchangeRateByCurrency[_activeCheckoutCurrency] = _formatExchangeRate(
+        rate,
+      );
+      _loadActiveCurrencyIntoController();
+      _lastSuggestedRateCurrency = _activeCheckoutCurrency;
+    }
+  }
+
+  String get _currentCurrency {
+    if (_selectedCurrencies.contains(_activeCheckoutCurrency)) {
+      return _activeCheckoutCurrency;
+    }
+    return _selectedCurrencies.isNotEmpty ? _selectedCurrencies.first : 'USD';
+  }
+
+  void _ensureCurrencyConfig(String currency) {
+    _selectedPaymentsByCurrency.putIfAbsent(
+      currency,
+      () => <String>{'Efectivo'},
+    );
+    final drafts = _paymentMethodDraftsByCurrency.putIfAbsent(
+      currency,
+      () => <String, _PaymentMethodDraft>{},
+    );
+    for (final method in _selectedPaymentsByCurrency[currency]!) {
+      drafts.putIfAbsent(method, () => _PaymentMethodDraft(method: method));
+    }
+
+    if (currency == 'USD' &&
+        (_exchangeRateByCurrency[currency]?.trim().isEmpty ?? true)) {
+      _exchangeRateByCurrency[currency] = '1';
+    }
+  }
+
+  void _ensurePaymentDraftsForSelection(String currency) {
+    _ensureCurrencyConfig(currency);
+    final selected = _selectedPaymentsByCurrency[currency] ?? <String>{};
+    final drafts =
+        _paymentMethodDraftsByCurrency[currency] ??
+        <String, _PaymentMethodDraft>{};
+    for (final method in selected) {
+      drafts.putIfAbsent(method, () => _PaymentMethodDraft(method: method));
+    }
+    _paymentMethodDraftsByCurrency[currency] = drafts;
+  }
+
+  Set<String> _selectedPaymentsForCurrency(String currency) {
+    _ensureCurrencyConfig(currency);
+    return _selectedPaymentsByCurrency[currency]!;
+  }
+
+  Map<String, _PaymentMethodDraft> _paymentDraftsForCurrency(String currency) {
+    _ensureCurrencyConfig(currency);
+    return _paymentMethodDraftsByCurrency[currency]!;
+  }
+
+  void _syncActiveCurrencyDataFromController() {
+    final currency = _currentCurrency;
+    final text = _exchangeRateController.text.trim();
+    _exchangeRateByCurrency[currency] = currency == 'USD' ? '1' : text;
+  }
+
+  void _loadActiveCurrencyIntoController() {
+    final currency = _currentCurrency;
+    _ensureCurrencyConfig(currency);
+    final value = currency == 'USD'
+        ? '1'
+        : (_exchangeRateByCurrency[currency] ?? '');
+    _exchangeRateController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
   }
 
   Future<void> _hydrateEditingComercioId(String userId) async {
@@ -330,6 +441,124 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     } catch (_) {
       // Keep existing value if fetching fails.
+    }
+  }
+
+  Future<void> _loadStoredPaymentMethods(String comercioId) async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('metodos_pago')
+          .select('*')
+          .eq('comercio_id', comercioId);
+
+      final mappedByCurrency = <String, Map<String, _PaymentMethodDraft>>{};
+      final selectedByCurrency = <String, Set<String>>{};
+      for (final row in rows as List<dynamic>) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final rawType = map['tipo']?.toString().trim().toLowerCase() ?? '';
+        final typeParts = rawType.split('__');
+        final currency = typeParts.length > 1
+            ? typeParts.last.toUpperCase()
+            : _currentCurrency;
+        if (!_currencies.contains(currency)) {
+          continue;
+        }
+        var method =
+            (map['nombre']?.toString().trim() ??
+                    map['tipo']?.toString().trim().replaceAll('_', ' ') ??
+                    '')
+                .trim();
+        if (method.toLowerCase().startsWith('transferencia')) {
+          method = 'Transferencia';
+        }
+        if (method.isEmpty) {
+          continue;
+        }
+        selectedByCurrency.putIfAbsent(currency, () => <String>{}).add(method);
+
+        final target = mappedByCurrency.putIfAbsent(
+          currency,
+          () => <String, _PaymentMethodDraft>{},
+        );
+
+        if (method == 'Transferencia') {
+          final current =
+              target['Transferencia'] ??
+              _PaymentMethodDraft(method: 'Transferencia');
+          final detailsRaw = map['detalles']?.toString().trim() ?? '';
+          _TransferAccountDraft? account;
+          if (detailsRaw.isNotEmpty) {
+            try {
+              final parsed = jsonDecode(detailsRaw);
+              if (parsed is Map<String, dynamic>) {
+                account = _TransferAccountDraft.fromMap(parsed);
+              }
+            } catch (_) {
+              account = null;
+            }
+          }
+
+          account ??= _TransferAccountDraft.fromLegacyColumns(
+            name: map['nombre']?.toString().trim() ?? '',
+            bank: map['banco']?.toString() ?? '',
+            owner: map['titular']?.toString() ?? '',
+            documentId: map['cedula']?.toString() ?? '',
+            number: map['numero']?.toString() ?? '',
+            alias: map['alias']?.toString() ?? '',
+            description: map['descripcion']?.toString() ?? '',
+            notes: detailsRaw,
+          );
+
+          final mergedAccounts = <_TransferAccountDraft>[
+            ...current.transferAccounts,
+            account,
+          ];
+          target['Transferencia'] = current.copyWith(
+            transferAccounts: mergedAccounts,
+          );
+        } else {
+          target[method] = _PaymentMethodDraft(
+            method: method,
+            description: map['descripcion']?.toString() ?? '',
+            extraDetails: map['detalles']?.toString() ?? '',
+          );
+        }
+      }
+
+      if (selectedByCurrency.isEmpty) {
+        return;
+      }
+
+      _selectedCurrencies
+        ..clear()
+        ..addAll(selectedByCurrency.keys);
+      if (_selectedCurrencies.isEmpty) {
+        _selectedCurrencies.add('USD');
+      }
+      if (!_selectedCurrencies.contains(_activeCheckoutCurrency)) {
+        _activeCheckoutCurrency = _selectedCurrencies.first;
+      }
+
+      _selectedPaymentsByCurrency
+        ..clear()
+        ..addEntries(
+          selectedByCurrency.entries.map(
+            (entry) => MapEntry(
+              entry.key,
+              entry.value.where(_paymentMethods.contains).toSet(),
+            ),
+          ),
+        );
+
+      _paymentMethodDraftsByCurrency
+        ..clear()
+        ..addAll(mappedByCurrency);
+
+      for (final currency in _selectedCurrencies) {
+        _ensurePaymentDraftsForSelection(currency);
+      }
+    } catch (_) {
+      // Keep local defaults if loading fails.
     }
   }
 
@@ -361,9 +590,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
 
       final currency = (map['currency'] as String? ?? '').trim();
-      if (_currencies.contains(currency)) {
-        _selectedCurrency = currency;
+      final currencies = (map['currencies'] as List<dynamic>? ?? <dynamic>[])
+          .map((item) => item.toString().trim().toUpperCase())
+          .where(_currencies.contains)
+          .toSet();
+      if (currencies.isNotEmpty) {
+        _selectedCurrencies
+          ..clear()
+          ..addAll(currencies);
+      } else if (_currencies.contains(currency)) {
+        _selectedCurrencies
+          ..clear()
+          ..add(currency);
       }
+      if (_selectedCurrencies.isEmpty) {
+        _selectedCurrencies.add('USD');
+      }
+      final activeCurrency = (map['activeCurrency'] as String? ?? '')
+          .trim()
+          .toUpperCase();
+      _activeCheckoutCurrency = _selectedCurrencies.contains(activeCurrency)
+          ? activeCurrency
+          : _selectedCurrencies.first;
 
       final layout = (map['layout'] as String? ?? '').trim();
       if (_layouts.any((item) => item.id == layout)) {
@@ -400,6 +648,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _selectedHeadingFont = headingFont;
       }
 
+      final exchangeRate = _parseExchangeRate(map['exchangeRate']);
+      if (exchangeRate > 0) {
+        _exchangeRateByCurrency[_activeCheckoutCurrency] = _formatExchangeRate(
+          exchangeRate,
+        );
+      }
+
+      final exchangeRates = _toStringDynamicMap(map['exchangeRates']);
+      if (exchangeRates.isNotEmpty) {
+        for (final entry in exchangeRates.entries) {
+          final currencyCode = entry.key.trim().toUpperCase();
+          if (!_currencies.contains(currencyCode)) {
+            continue;
+          }
+          _exchangeRateByCurrency[currencyCode] =
+              entry.value?.toString().trim() ?? '';
+        }
+      }
+
+      _lastSuggestedRateCurrency =
+          (map['lastSuggestedRateCurrency'] as String? ?? '').trim();
+      _exchangeRateManuallyEdited =
+          map['exchangeRateManuallyEdited'] as bool? ?? false;
+
       final editingId = (map['editingComercioId'] as String? ?? '').trim();
       if (editingId.isNotEmpty) {
         _editingComercioId = editingId;
@@ -421,10 +693,61 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           .where(_paymentMethods.contains)
           .toSet();
       if (payments.isNotEmpty) {
-        _selectedPayments
-          ..clear()
-          ..addAll(payments);
+        _selectedPaymentsByCurrency[_activeCheckoutCurrency] = payments;
       }
+
+      final paymentsByCurrency = _toStringDynamicMap(map['paymentsByCurrency']);
+      if (paymentsByCurrency.isNotEmpty) {
+        _selectedPaymentsByCurrency.clear();
+        for (final entry in paymentsByCurrency.entries) {
+          final currencyCode = entry.key.trim().toUpperCase();
+          if (!_currencies.contains(currencyCode)) {
+            continue;
+          }
+          final values = (entry.value as List<dynamic>? ?? <dynamic>[])
+              .map((item) => item.toString())
+              .where(_paymentMethods.contains)
+              .toSet();
+          if (values.isNotEmpty) {
+            _selectedPaymentsByCurrency[currencyCode] = values;
+          }
+        }
+      }
+
+      final paymentDrafts = _toStringDynamicMap(map['paymentDrafts']);
+      _paymentMethodDraftsByCurrency.clear();
+
+      final paymentDraftsByCurrency = _toStringDynamicMap(
+        map['paymentDraftsByCurrency'],
+      );
+      if (paymentDraftsByCurrency.isNotEmpty) {
+        for (final currencyEntry in paymentDraftsByCurrency.entries) {
+          final currencyCode = currencyEntry.key.trim().toUpperCase();
+          if (!_currencies.contains(currencyCode)) {
+            continue;
+          }
+          final draftMap = _toStringDynamicMap(currencyEntry.value);
+          _paymentMethodDraftsByCurrency[currencyCode] = draftMap.map(
+            (method, value) => MapEntry(
+              method,
+              _PaymentMethodDraft.fromMap(method, _toStringDynamicMap(value)),
+            ),
+          );
+        }
+      } else {
+        _paymentMethodDraftsByCurrency[_activeCheckoutCurrency] = paymentDrafts
+            .map(
+              (key, value) => MapEntry(
+                key,
+                _PaymentMethodDraft.fromMap(key, _toStringDynamicMap(value)),
+              ),
+            );
+      }
+
+      for (final currencyCode in _selectedCurrencies) {
+        _ensurePaymentDraftsForSelection(currencyCode);
+      }
+      _loadActiveCurrencyIntoController();
 
       final logoPath = (map['logoPath'] as String? ?? '').trim();
       if (logoPath.isNotEmpty && await File(logoPath).exists()) {
@@ -449,13 +772,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
+    _syncActiveCurrencyDataFromController();
+
     final prefs = await SharedPreferences.getInstance();
     final payload = <String, dynamic>{
       'step': _step.index,
       'name': _nameController.text.trim(),
       'slug': _normalizeSlug(_slugController.text),
       'category': _selectedCategory,
-      'currency': _selectedCurrency,
+      'currency': _currentCurrency,
+      'currencies': _selectedCurrencies.toList(),
+      'activeCurrency': _currentCurrency,
       'layout': _selectedLayoutId,
       'palette': _selectedPaletteId,
       'palettePrimary': _paletteSuggestion.primary.toARGB32(),
@@ -463,13 +790,31 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'paletteSurface': _paletteSuggestion.surface.toARGB32(),
       'paletteText': _paletteSuggestion.text.toARGB32(),
       'headingFont': _selectedHeadingFont,
+      'exchangeRate':
+          _exchangeRateByCurrency[_currentCurrency] ??
+          _exchangeRateController.text.trim(),
+      'exchangeRates': _exchangeRateByCurrency,
+      'lastSuggestedRateCurrency': _lastSuggestedRateCurrency,
+      'exchangeRateManuallyEdited': _exchangeRateManuallyEdited,
       'editingComercioId': _editingComercioId ?? '',
       'lastPaletteLogoPath': _lastPaletteLogoPath,
       'lastFontLogoPath': _lastFontLogoPath,
       'paletteManuallyEdited': _paletteManuallyEdited,
       'fontManuallyEdited': _fontManuallyEdited,
       'footer': _selectedFooter,
-      'payments': _selectedPayments.toList(),
+      'payments': _selectedPaymentsForCurrency(_currentCurrency).toList(),
+      'paymentsByCurrency': _selectedPaymentsByCurrency.map(
+        (currency, methods) => MapEntry(currency, methods.toList()),
+      ),
+      'paymentDrafts': _paymentDraftsForCurrency(
+        _currentCurrency,
+      ).map((key, value) => MapEntry(key, value.toMap())),
+      'paymentDraftsByCurrency': _paymentMethodDraftsByCurrency.map(
+        (currency, drafts) => MapEntry(
+          currency,
+          drafts.map((key, value) => MapEntry(key, value.toMap())),
+        ),
+      ),
       'logoPath': _selectedLogo?.path ?? '',
     };
 
@@ -558,7 +903,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           existingOwnerId != null &&
           existingOwnerId == userId;
 
-      if (_editingComercioId == null && sameOwner && existingId != null) {
+      if (_editingComercioId == null && sameOwner) {
         _editingComercioId = existingId;
       }
 
@@ -587,6 +932,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
         final action = await showModalBottomSheet<_LogoPickAction>(
           context: context,
+          useSafeArea: false,
           backgroundColor: const Color(0xFF17122E),
           showDragHandle: true,
           builder: (context) {
@@ -597,54 +943,57 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   textColor: Color(0xFFF8F5FF),
                 ),
               ),
-              child: SafeArea(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 2, 16, 6),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Selecciona una opcion',
-                          style: TextStyle(
-                            color: Color(0xFFD8B4FE),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 2, 16, 6),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Selecciona una opcion',
+                        style: TextStyle(
+                          color: Color(0xFFD8B4FE),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.photo_library_rounded),
+                    title: const Text('Elegir de galeria'),
+                    onTap: () =>
+                        Navigator.of(context).pop(_LogoPickAction.gallery),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.photo_camera_rounded),
+                    title: const Text('Tomar foto'),
+                    onTap: () =>
+                        Navigator.of(context).pop(_LogoPickAction.camera),
+                  ),
+                  if (_selectedLogo != null)
                     ListTile(
-                      leading: const Icon(Icons.photo_library_rounded),
-                      title: const Text('Elegir de galeria'),
-                      onTap: () =>
-                          Navigator.of(context).pop(_LogoPickAction.gallery),
+                      leading: const Icon(Icons.crop_rounded),
+                      title: const Text('Editar foto actual'),
+                      onTap: () => Navigator.of(
+                        context,
+                      ).pop(_LogoPickAction.editCurrent),
                     ),
+                  if (_selectedLogo != null)
                     ListTile(
-                      leading: const Icon(Icons.photo_camera_rounded),
-                      title: const Text('Tomar foto'),
-                      onTap: () =>
-                          Navigator.of(context).pop(_LogoPickAction.camera),
+                      leading: const Icon(Icons.delete_outline_rounded),
+                      title: const Text('Eliminar logo'),
+                      onTap: () => Navigator.of(
+                        context,
+                      ).pop(_LogoPickAction.removeCurrent),
                     ),
-                    if (_selectedLogo != null)
-                      ListTile(
-                        leading: const Icon(Icons.crop_rounded),
-                        title: const Text('Editar foto actual'),
-                        onTap: () => Navigator.of(
-                          context,
-                        ).pop(_LogoPickAction.editCurrent),
-                      ),
-                    if (_selectedLogo != null)
-                      ListTile(
-                        leading: const Icon(Icons.delete_outline_rounded),
-                        title: const Text('Eliminar logo'),
-                        onTap: () => Navigator.of(
-                          context,
-                        ).pop(_LogoPickAction.removeCurrent),
-                      ),
-                  ],
-                ),
+                  ListTile(
+                    leading: const Icon(Icons.close_rounded),
+                    title: const Text('Cancelar'),
+                    onTap: () => Navigator.of(context).pop(),
+                  ),
+                ],
               ),
             );
           },
@@ -662,16 +1011,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             _paletteManuallyEdited = false;
             _fontManuallyEdited = false;
           });
-          _applyDefaultPalette();
           await _saveDraft();
           return;
         }
 
         if (action == _LogoPickAction.editCurrent) {
-          final currentPath = _selectedLogo?.path;
-          if (currentPath == null || currentPath.trim().isEmpty) {
+          final currentPath = (_selectedLogo?.path ?? '').trim();
+          if (currentPath.isEmpty) {
             return;
           }
+
           if (!await File(currentPath).exists()) {
             if (!mounted) {
               return;
@@ -1411,6 +1760,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               ),
               actions: [
                 TextButton(
+                  style: TextButton.styleFrom(foregroundColor: _setupTextHigh),
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text('Cancelar'),
                 ),
@@ -1477,6 +1827,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _nextStep() async {
+    if (_step == _SetupStep.checkout) {
+      _syncActiveCurrencyDataFromController();
+    }
+
     if (_step == _SetupStep.identity && !_canContinueIdentity()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Completa nombre y URL disponible.')),
@@ -1484,9 +1838,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (_step == _SetupStep.checkout && _selectedPayments.isEmpty) {
+    if (_step == _SetupStep.checkout && _selectedCurrencies.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona al menos 1 metodo de pago.')),
+        const SnackBar(content: Text('Selecciona al menos 1 moneda de cobro.')),
+      );
+      return;
+    }
+
+    if (_step == _SetupStep.checkout && !_isExchangeRateConfigured()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Configura una tasa de cambio antes de continuar.'),
+        ),
+      );
+      return;
+    }
+
+    if (_step == _SetupStep.checkout &&
+        !_hasPaymentDetailsForSelectedMethods()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Agrega al menos un detalle en cada metodo de pago seleccionado.',
+          ),
+        ),
       );
       return;
     }
@@ -1496,10 +1871,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
+    final nextStep = _SetupStep.values[_step.index + 1];
     setState(() {
-      _step = _SetupStep.values[_step.index + 1];
+      _step = nextStep;
     });
     await _saveDraft();
+
+    if (nextStep == _SetupStep.checkout) {
+      unawaited(_suggestExchangeRate());
+    }
   }
 
   String _colorToHex(Color color) {
@@ -1558,6 +1938,1003 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
+  double _parseExchangeRate(dynamic value) {
+    if (value is num) {
+      return value.toDouble();
+    }
+
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) {
+      return 0;
+    }
+
+    return double.tryParse(raw.replaceAll(',', '.')) ?? 0;
+  }
+
+  String _formatExchangeRate(double value) {
+    if (value <= 0) {
+      return '';
+    }
+    final text = value.toStringAsFixed(
+      value.truncateToDouble() == value ? 0 : 2,
+    );
+    return text
+        .replaceAll(RegExp(r'\.0+$'), '')
+        .replaceAll(RegExp(r'(\.\d*?)0+$'), r'$1');
+  }
+
+  String _currencyLabel(String code) {
+    return switch (code) {
+      'USD' => 'Dolares',
+      'VES' => 'Bs',
+      'COP' => 'Pesos Colombianos',
+      'EUR' => 'Euros',
+      _ => code,
+    };
+  }
+
+  IconData _paymentMethodIcon(String method) {
+    return switch (method) {
+      'Efectivo' => Icons.payments_rounded,
+      'Transferencia' => Icons.account_balance_rounded,
+      _ => Icons.account_balance_wallet_rounded,
+    };
+  }
+
+  String _paymentMethodLabel(String method) {
+    return switch (method) {
+      'Transferencia' => 'Pagos digitales',
+      _ => method,
+    };
+  }
+
+  double _defaultExchangeRateFor(String currency) {
+    return switch (currency) {
+      'VES' => 110,
+      'COP' => 4000,
+      'EUR' => 0.92,
+      _ => 1,
+    };
+  }
+
+  bool _isValidEmail(String value) {
+    return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value);
+  }
+
+  String? _cashValidationMessage(String notes) {
+    if (notes.trim().isEmpty) {
+      return 'Agrega una nota para el pago en efectivo.';
+    }
+    if (notes.length > _maxCashTextLength) {
+      return 'La nota de Efectivo debe tener maximo $_maxCashTextLength caracteres.';
+    }
+    return null;
+  }
+
+  String? _cashNotesError(String notes) {
+    if (notes.trim().isEmpty) {
+      return 'La nota es obligatoria.';
+    }
+    if (notes.length > _maxCashTextLength) {
+      return 'Maximo $_maxCashTextLength caracteres.';
+    }
+    return null;
+  }
+
+  String? _transferAccountNameError(String name) {
+    if (name.trim().isEmpty) {
+      return 'El nombre de la cuenta es obligatorio.';
+    }
+    if (name.trim().length > _maxTransferAccountNameLength) {
+      return 'Maximo $_maxTransferAccountNameLength caracteres.';
+    }
+    return null;
+  }
+
+  String? _transferFieldLabelError(String label) {
+    if (label.trim().length > _maxTransferFieldLabelLength) {
+      return 'Maximo $_maxTransferFieldLabelLength caracteres.';
+    }
+    return null;
+  }
+
+  String? _transferFieldValueError(_TransferFieldDraft field) {
+    final value = field.value.trim();
+    if (value.isEmpty) {
+      return 'Valor obligatorio.';
+    }
+    if (value.length > _maxTransferFieldValueLength) {
+      return 'Maximo $_maxTransferFieldValueLength caracteres.';
+    }
+    if (field.type == 'correo' && !_isValidEmail(value)) {
+      return 'Correo invalido.';
+    }
+    if (field.type == 'numero_cuenta') {
+      if (!RegExp(r'^\d+$').hasMatch(value)) {
+        return 'Solo numeros.';
+      }
+      if (value.length < 6) {
+        return 'Debe tener al menos 6 digitos.';
+      }
+    }
+    if (field.type == 'id' && value.length < 4) {
+      return 'El ID debe tener al menos 4 caracteres.';
+    }
+    return null;
+  }
+
+  TextInputType _transferFieldKeyboardType(String type) {
+    return switch (type) {
+      'numero_cuenta' => TextInputType.number,
+      'correo' => TextInputType.emailAddress,
+      'nota' => TextInputType.multiline,
+      _ => TextInputType.text,
+    };
+  }
+
+  List<TextInputFormatter> _transferFieldInputFormatters(String type) {
+    return switch (type) {
+      'numero_cuenta' => <TextInputFormatter>[
+        FilteringTextInputFormatter.digitsOnly,
+      ],
+      'correo' => <TextInputFormatter>[
+        FilteringTextInputFormatter.deny(RegExp(r'\s')),
+      ],
+      _ => const <TextInputFormatter>[],
+    };
+  }
+
+  String? _transferAccountValidationMessage(_TransferAccountDraft account) {
+    final nameError = _transferAccountNameError(account.name);
+    if (nameError != null) {
+      return nameError;
+    }
+    if (account.fields.isEmpty) {
+      return 'Agrega al menos un campo a la cuenta digital.';
+    }
+    if (account.fields.length > _maxTransferFieldsPerAccount) {
+      return 'Cada cuenta permite maximo $_maxTransferFieldsPerAccount campos.';
+    }
+
+    for (final field in account.fields) {
+      final label = field.label.trim();
+      final effectiveLabel = label.isEmpty
+          ? _TransferFieldDraft.labelForType(field.type)
+          : label;
+      final labelError = _transferFieldLabelError(field.label);
+      if (labelError != null) {
+        return 'Campo "$effectiveLabel": $labelError';
+      }
+      final valueError = _transferFieldValueError(field);
+      if (valueError != null) {
+        return 'Campo "$effectiveLabel": $valueError';
+      }
+    }
+
+    return null;
+  }
+
+  bool _isCurrencyExchangeRateConfigured(String currency) {
+    if (currency == 'USD') {
+      return true;
+    }
+    final rate = _parseExchangeRate(_exchangeRateByCurrency[currency]);
+    return rate > 0;
+  }
+
+  bool _hasPaymentDetailsForCurrency(String currency) {
+    final selected = _selectedPaymentsForCurrency(currency);
+    if (selected.isEmpty) {
+      return false;
+    }
+
+    final drafts = _paymentDraftsForCurrency(currency);
+    for (final method in selected) {
+      final draft = drafts[method];
+      if (draft == null || !draft.hasAnyDetail) {
+        return false;
+      }
+
+      if (method == 'Efectivo') {
+        final message = _cashValidationMessage(draft.extraDetails);
+        if (message != null) {
+          return false;
+        }
+      }
+
+      if (method == 'Transferencia') {
+        if (draft.transferAccounts.isEmpty ||
+            draft.transferAccounts.length > _maxTransferAccountsPerCurrency) {
+          return false;
+        }
+
+        for (final account in draft.transferAccounts) {
+          if (_transferAccountValidationMessage(account) != null) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  bool _isCurrencyCheckoutConfigured(String currency) {
+    return _isCurrencyExchangeRateConfigured(currency) &&
+        _hasPaymentDetailsForCurrency(currency);
+  }
+
+  int _configuredCurrenciesCount() {
+    var completed = 0;
+    for (final currency in _selectedCurrencies) {
+      if (_isCurrencyCheckoutConfigured(currency)) {
+        completed += 1;
+      }
+    }
+    return completed;
+  }
+
+  bool _isExchangeRateConfigured() {
+    if (_selectedCurrencies.isEmpty) {
+      return false;
+    }
+
+    for (final currency in _selectedCurrencies) {
+      if (!_isCurrencyExchangeRateConfigured(currency)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _hasPaymentDetailsForSelectedMethods() {
+    if (_selectedCurrencies.isEmpty) {
+      return false;
+    }
+
+    for (final currency in _selectedCurrencies) {
+      if (!_hasPaymentDetailsForCurrency(currency)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<String> _paymentSummaryLines(String method, _PaymentMethodDraft draft) {
+    if (method == 'Transferencia') {
+      if (draft.transferAccounts.isEmpty) {
+        return const <String>[];
+      }
+      return <String>[
+        '${draft.transferAccounts.length} cuenta(s) digital(es) configurada(s)',
+        ...draft.transferAccounts
+            .take(3)
+            .map(
+              (account) => account.name.trim().isEmpty
+                  ? 'Cuenta sin nombre'
+                  : account.name.trim(),
+            ),
+      ];
+    }
+
+    final details = <String>[];
+    if (draft.description.isNotEmpty) details.add(draft.description);
+    if (draft.extraDetails.isNotEmpty) details.add(draft.extraDetails);
+    return details;
+  }
+
+  Future<void> _openPaymentMethodEditor(
+    String method, {
+    int? transferIndex,
+  }) async {
+    if (method == 'Transferencia') {
+      await _openTransferAccountEditor(index: transferIndex);
+      return;
+    }
+
+    await _openCashEditor();
+  }
+
+  Future<void> _openCashEditor() async {
+    final currency = _currentCurrency;
+    final drafts = _paymentDraftsForCurrency(currency);
+    final current =
+        drafts['Efectivo'] ?? _PaymentMethodDraft(method: 'Efectivo');
+    var notes = current.extraDetails.trim().isEmpty
+        ? 'Por favor, usa billetes en buen estado.'
+        : current.extraDetails;
+    var showInlineErrors = false;
+
+    final updated = await showModalBottomSheet<_PaymentMethodDraft>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: false,
+      backgroundColor: const Color(0xFF17122E),
+      showDragHandle: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final mediaQuery = MediaQuery.of(context);
+            final bottomInset = mediaQuery.viewInsets.bottom > 0
+                ? mediaQuery.viewInsets.bottom
+                : mediaQuery.viewPadding.bottom;
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 8,
+                bottom: bottomInset + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Configurar Efectivo',
+                      style: GoogleFonts.poppins(
+                        color: _setupTextHigh,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Agrega una nota corta para orientar el cobro en efectivo.',
+                      style: const TextStyle(
+                        color: _setupTextMedium,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      initialValue: notes,
+                      onChanged: (text) {
+                        notes = text;
+                        if (showInlineErrors) {
+                          setModalState(() {});
+                        }
+                      },
+                      maxLength: _maxCashTextLength,
+                      style: const TextStyle(color: _setupTextHigh),
+                      minLines: 2,
+                      maxLines: 4,
+                      decoration: InputDecoration(
+                        labelText: 'Notas',
+                        hintText: 'Ej. Por favor, usa billetes en buen estado.',
+                        filled: true,
+                        fillColor: const Color(0xFF120E25),
+                        labelStyle: const TextStyle(color: _setupTextLow),
+                        hintStyle: const TextStyle(color: _setupTextLow),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
+                        ),
+                        errorText: showInlineErrors
+                            ? _cashNotesError(notes)
+                            : null,
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _setupTextHigh,
+                              side: const BorderSide(color: Color(0xFF6B5A9A)),
+                            ),
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('Cancelar'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () {
+                              final message = _cashValidationMessage(notes);
+                              if (message != null) {
+                                setModalState(() {
+                                  showInlineErrors = true;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(message)),
+                                );
+                                return;
+                              }
+
+                              Navigator.of(context).pop(
+                                current.copyWith(
+                                  description: '',
+                                  extraDetails: notes.trim(),
+                                ),
+                              );
+                            },
+                            child: const Text('Guardar datos'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (updated == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _paymentMethodDraftsByCurrency[currency]!['Efectivo'] = updated;
+    });
+    await _saveDraft();
+  }
+
+  Future<void> _openTransferAccountEditor({int? index}) async {
+    final currency = _currentCurrency;
+    final drafts = _paymentDraftsForCurrency(currency);
+    final current =
+        drafts['Transferencia'] ?? _PaymentMethodDraft(method: 'Transferencia');
+
+    if (index == null &&
+        current.transferAccounts.length >= _maxTransferAccountsPerCurrency) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Maximo $_maxTransferAccountsPerCurrency cuentas digitales por moneda.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final editing =
+        index != null && index >= 0 && index < current.transferAccounts.length
+        ? current.transferAccounts[index]
+        : _TransferAccountDraft.empty();
+
+    var accountName = editing.name;
+    final fields = editing.fields.map((item) => item.copyWith()).toList();
+    var showInlineErrors = false;
+
+    final updatedAccount = await showModalBottomSheet<_TransferAccountDraft>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: false,
+      backgroundColor: const Color(0xFF17122E),
+      showDragHandle: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final mediaQuery = MediaQuery.of(context);
+            final bottomInset = mediaQuery.viewInsets.bottom > 0
+                ? mediaQuery.viewInsets.bottom
+                : mediaQuery.viewPadding.bottom;
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 8,
+                bottom: bottomInset + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      index == null
+                          ? 'Nueva cuenta de pago digital'
+                          : 'Editar cuenta de pago digital',
+                      style: GoogleFonts.poppins(
+                        color: _setupTextHigh,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Agrega solo los campos que necesites: banco, procesador, pago movil, correo, ID u otros.',
+                      style: TextStyle(color: _setupTextMedium, fontSize: 13),
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      initialValue: accountName,
+                      onChanged: (text) {
+                        accountName = text;
+                        if (showInlineErrors) {
+                          setModalState(() {});
+                        }
+                      },
+                      maxLength: _maxTransferAccountNameLength,
+                      style: const TextStyle(color: _setupTextHigh),
+                      decoration: InputDecoration(
+                        labelText: 'Nombre de la cuenta',
+                        hintText: 'Ej. Banco Principal',
+                        filled: true,
+                        fillColor: const Color(0xFF120E25),
+                        labelStyle: const TextStyle(color: _setupTextLow),
+                        hintStyle: const TextStyle(color: _setupTextLow),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
+                        ),
+                        errorText: showInlineErrors
+                            ? _transferAccountNameError(accountName)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...List.generate(fields.length, (fieldIndex) {
+                      final field = fields[fieldIndex];
+                      final effectiveLabel = field.label.trim().isEmpty
+                          ? _TransferFieldDraft.labelForType(field.type)
+                          : field.label;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF120E25),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF3B2F63)),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: DropdownButtonFormField<String>(
+                                      initialValue: field.type,
+                                      decoration: InputDecoration(
+                                        labelText: 'Tipo de campo',
+                                        filled: true,
+                                        fillColor: const Color(0xFF120E25),
+                                        labelStyle: const TextStyle(
+                                          color: _setupTextLow,
+                                        ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFF3B2F63),
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFF3B2F63),
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFF6B5A9A),
+                                          ),
+                                        ),
+                                      ),
+                                      dropdownColor: const Color(0xFF1A1432),
+                                      style: const TextStyle(
+                                        color: _setupTextHigh,
+                                      ),
+                                      iconEnabledColor: _setupTextHigh,
+                                      iconDisabledColor: _setupTextLow,
+                                      items: _TransferFieldDraft.typeOptions
+                                          .map(
+                                            (
+                                              option,
+                                            ) => DropdownMenuItem<String>(
+                                              value: option,
+                                              child: Text(
+                                                _TransferFieldDraft.labelForType(
+                                                  option,
+                                                ),
+                                              ),
+                                            ),
+                                          )
+                                          .toList(),
+                                      onChanged: (value) {
+                                        if (value == null) {
+                                          return;
+                                        }
+                                        setModalState(() {
+                                          final currentField =
+                                              fields[fieldIndex];
+                                          final currentDefaultLabel =
+                                              _TransferFieldDraft.labelForType(
+                                                currentField.type,
+                                              );
+                                          final keepAutoLabel =
+                                              currentField.label
+                                                  .trim()
+                                                  .isEmpty ||
+                                              currentField.label.trim() ==
+                                                  currentDefaultLabel;
+                                          final nextValue =
+                                              value == 'numero_cuenta'
+                                              ? currentField.value.replaceAll(
+                                                  RegExp(r'[^0-9]'),
+                                                  '',
+                                                )
+                                              : currentField.value;
+                                          fields[fieldIndex] = currentField
+                                              .copyWith(
+                                                type: value,
+                                                label: keepAutoLabel
+                                                    ? _TransferFieldDraft.labelForType(
+                                                        value,
+                                                      )
+                                                    : currentField.label,
+                                                value: nextValue,
+                                              );
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    onPressed: () {
+                                      if (fields.length <= 1) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Cada cuenta debe tener al menos un campo.',
+                                            ),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      setModalState(() {
+                                        fields.removeAt(fieldIndex);
+                                      });
+                                    },
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: Color(0xFFFFD1DC),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                key: ValueKey(
+                                  'transfer-label-$fieldIndex-${field.type}-${field.label}',
+                                ),
+                                initialValue: effectiveLabel,
+                                onChanged: (text) {
+                                  fields[fieldIndex] = fields[fieldIndex]
+                                      .copyWith(label: text);
+                                  if (showInlineErrors) {
+                                    setModalState(() {});
+                                  }
+                                },
+                                maxLength: _maxTransferFieldLabelLength,
+                                style: const TextStyle(color: _setupTextHigh),
+                                decoration: InputDecoration(
+                                  labelText: 'Etiqueta visible',
+                                  hintText:
+                                      'Opcional (se autocompleta segun tipo)',
+                                  filled: true,
+                                  fillColor: const Color(0xFF120E25),
+                                  labelStyle: const TextStyle(
+                                    color: _setupTextLow,
+                                  ),
+                                  hintStyle: const TextStyle(
+                                    color: _setupTextLow,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF3B2F63),
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF3B2F63),
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF6B5A9A),
+                                    ),
+                                  ),
+                                  errorText: showInlineErrors
+                                      ? _transferFieldLabelError(
+                                          fields[fieldIndex].label,
+                                        )
+                                      : null,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                key: ValueKey(
+                                  'transfer-value-$fieldIndex-${field.type}',
+                                ),
+                                initialValue: field.value,
+                                onChanged: (text) {
+                                  fields[fieldIndex] = fields[fieldIndex]
+                                      .copyWith(value: text);
+                                  if (showInlineErrors) {
+                                    setModalState(() {});
+                                  }
+                                },
+                                maxLength: _maxTransferFieldValueLength,
+                                style: const TextStyle(color: _setupTextHigh),
+                                minLines: 1,
+                                maxLines: field.type == 'nota' ? 3 : 1,
+                                keyboardType: _transferFieldKeyboardType(
+                                  field.type,
+                                ),
+                                inputFormatters: _transferFieldInputFormatters(
+                                  field.type,
+                                ),
+                                decoration: InputDecoration(
+                                  labelText: 'Valor',
+                                  hintText: 'Dato que verá el cliente',
+                                  filled: true,
+                                  fillColor: const Color(0xFF120E25),
+                                  labelStyle: const TextStyle(
+                                    color: _setupTextLow,
+                                  ),
+                                  hintStyle: const TextStyle(
+                                    color: _setupTextLow,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF3B2F63),
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF3B2F63),
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF6B5A9A),
+                                    ),
+                                  ),
+                                  errorText: showInlineErrors
+                                      ? _transferFieldValueError(
+                                          fields[fieldIndex],
+                                        )
+                                      : null,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _setupTextHigh,
+                        side: const BorderSide(color: Color(0xFF6B5A9A)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                      ),
+                      onPressed: () {
+                        if (fields.length >= _maxTransferFieldsPerAccount) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Cada cuenta permite maximo $_maxTransferFieldsPerAccount campos.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        setModalState(() {
+                          fields.add(_TransferFieldDraft.defaultField());
+                        });
+                      },
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Agregar campo'),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _setupTextHigh,
+                              side: const BorderSide(color: Color(0xFF6B5A9A)),
+                            ),
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('Cancelar'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () {
+                              final cleaned = fields
+                                  .map(
+                                    (field) => field.copyWith(
+                                      label: field.label.trim(),
+                                      value: field.value.trim(),
+                                    ),
+                                  )
+                                  .toList();
+
+                              final candidate = _TransferAccountDraft(
+                                name: accountName.trim(),
+                                fields: cleaned,
+                              );
+                              final validationMessage =
+                                  _transferAccountValidationMessage(candidate);
+                              if (validationMessage != null) {
+                                setModalState(() {
+                                  showInlineErrors = true;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(validationMessage)),
+                                );
+                                return;
+                              }
+
+                              Navigator.of(context).pop(candidate);
+                            },
+                            child: const Text('Guardar cuenta'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (updatedAccount == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      final list = current.transferAccounts.toList();
+      if (index != null && index >= 0 && index < list.length) {
+        list[index] = updatedAccount;
+      } else {
+        list.add(updatedAccount);
+      }
+      _paymentMethodDraftsByCurrency[currency]!['Transferencia'] = current
+          .copyWith(transferAccounts: list);
+    });
+    await _saveDraft();
+  }
+
+  Future<void> _suggestExchangeRate({bool force = false}) async {
+    final currency = _currentCurrency;
+    if (_isExchangeRateLoading) {
+      return;
+    }
+
+    if (currency == 'USD') {
+      setState(() {
+        _exchangeRateController.text = '1';
+        _lastSuggestedRateCurrency = 'USD';
+        _exchangeRateManuallyEdited = false;
+        _exchangeRateMessage = null;
+        _exchangeRateIsError = false;
+        _exchangeRateByCurrency['USD'] = '1';
+      });
+      await _saveDraft();
+      return;
+    }
+
+    if (!force &&
+        _lastSuggestedRateCurrency == currency &&
+        _exchangeRateController.text.trim().isNotEmpty) {
+      return;
+    }
+
+    final fallback = _defaultExchangeRateFor(currency);
+    setState(() {
+      if (_exchangeRateController.text.trim().isEmpty || force) {
+        _exchangeRateController.text = _formatExchangeRate(fallback);
+      }
+      _isExchangeRateLoading = true;
+      _exchangeRateIsError = false;
+      _exchangeRateMessage =
+          'Aplicando tasa de referencia para ${_currencyLabel(currency)}.';
+    });
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (!_exchangeRateManuallyEdited ||
+          force ||
+          _lastSuggestedRateCurrency != currency) {
+        _exchangeRateController.text = _formatExchangeRate(fallback);
+      }
+      _exchangeRateByCurrency[currency] = _exchangeRateController.text.trim();
+      _lastSuggestedRateCurrency = currency;
+      _exchangeRateIsError = false;
+      _exchangeRateMessage =
+          'Tasa base sugerida. Puedes ajustarla a tu medida.';
+      _isExchangeRateLoading = false;
+    });
+    await _saveDraft();
+  }
+
+  Future<void> _syncPaymentMethods(String comercioId) async {
+    final rows = <Map<String, dynamic>>[];
+    for (final currency in _selectedCurrencies) {
+      final selected = _selectedPaymentsForCurrency(currency);
+      final drafts = _paymentDraftsForCurrency(currency);
+      for (final method in selected) {
+        final draft = drafts[method] ?? _PaymentMethodDraft(method: method);
+        if (method == 'Transferencia') {
+          final accounts = draft.transferAccounts;
+          for (var index = 0; index < accounts.length; index += 1) {
+            final account = accounts[index];
+            rows.add(<String, dynamic>{
+              'comercio_id': comercioId,
+              'nombre': account.name.trim().isEmpty
+                  ? 'Pago digital'
+                  : 'Pago digital: ${account.name.trim()}',
+              'tipo': 'transferencia__${currency.toLowerCase()}__${index + 1}',
+              'descripcion': 'Cuenta de pago digital',
+              'detalles': jsonEncode(account.toMap()),
+            });
+          }
+        } else {
+          rows.add(<String, dynamic>{
+            'comercio_id': comercioId,
+            'nombre': method,
+            'tipo':
+                '${method.toLowerCase().replaceAll(' ', '_')}__${currency.toLowerCase()}',
+            if (draft.description.isNotEmpty) 'descripcion': draft.description,
+            if (draft.extraDetails.isNotEmpty) 'detalles': draft.extraDetails,
+          });
+        }
+      }
+    }
+
+    final client = Supabase.instance.client;
+    await client.from('metodos_pago').delete().eq('comercio_id', comercioId);
+    if (rows.isNotEmpty) {
+      await client.from('metodos_pago').insert(rows);
+    }
+  }
+
   void _previousStep() {
     if (_step == _SetupStep.identity) {
       return;
@@ -1573,15 +2950,26 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     required User user,
     required String? logoUrl,
   }) async {
+    final primaryCurrency = _currentCurrency;
+    final primaryExchangeRate = _parseExchangeRate(
+      _exchangeRateByCurrency[primaryCurrency],
+    );
+    final allMethods = _selectedCurrencies
+        .expand((currency) => _selectedPaymentsForCurrency(currency))
+        .toSet();
+    final defaultMethod = allMethods.isNotEmpty ? allMethods.first : 'Efectivo';
     final payload = <String, dynamic>{
       'owner_id': user.id,
       'nombre': _nameController.text.trim(),
       'slug': _normalizeSlug(_slugController.text),
       'categoria': _selectedCategory,
       if (logoUrl != null && logoUrl.trim().isNotEmpty) 'logo_url': logoUrl,
-      'moneda': _selectedCurrency,
-      'metodo_pago_predeterminado': _selectedPayments.first,
-      'metodos_pago': _selectedPayments.toList(),
+      'moneda': primaryCurrency,
+      'tasa_cambio_pesos': primaryCurrency == 'COP' && primaryExchangeRate > 0
+          ? primaryExchangeRate
+          : null,
+      'metodo_pago_predeterminado': defaultMethod,
+      'metodos_pago': allMethods.toList(),
       'menu_layout': _selectedLayoutId,
       'menu_palette': _selectedPaletteId,
       'menu_font': _selectedHeadingFont,
@@ -1593,6 +2981,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'slug',
       'logo_url',
       'moneda',
+      'tasa_cambio_pesos',
       'metodo_pago_predeterminado',
       'metodos_pago',
       'menu_layout',
@@ -1666,9 +3055,31 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (_selectedPayments.isEmpty) {
+    _syncActiveCurrencyDataFromController();
+
+    if (_selectedCurrencies.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona al menos 1 metodo de pago.')),
+        const SnackBar(content: Text('Selecciona al menos 1 moneda de cobro.')),
+      );
+      return;
+    }
+
+    if (!_isExchangeRateConfigured()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Configura una tasa de cambio antes de guardar.'),
+        ),
+      );
+      return;
+    }
+
+    if (!_hasPaymentDetailsForSelectedMethods()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Completa al menos un detalle en cada metodo de pago seleccionado.',
+          ),
+        ),
       );
       return;
     }
@@ -1678,6 +3089,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     try {
       final logoUrl = await _uploadLogoIfNeeded(user);
       final comercio = await _upsertComercio(user: user, logoUrl: logoUrl);
+      await _syncPaymentMethods(comercio.id);
 
       SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
       await _clearDraft();
@@ -1764,6 +3176,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     final action = await showModalBottomSheet<String>(
       context: context,
+      useSafeArea: false,
       backgroundColor: const Color(0xFF151029),
       showDragHandle: true,
       builder: (context) {
@@ -1883,60 +3296,48 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
                     child: _StepPills(step: _step),
                   ),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    child: _showDraftRecoveredHint
-                        ? Padding(
-                            key: const ValueKey<String>('draft-restored-hint'),
-                            padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1D1638),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: const Color(0xFF3B2F63),
-                                  ),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.history_rounded,
-                                      size: 14,
-                                      color: Color(0xFFD8B4FE),
-                                    ),
-                                    SizedBox(width: 6),
-                                    Text(
-                                      'Recuperado borrador',
-                                      style: TextStyle(
-                                        color: Color(0xFFEDE9FE),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
+                  if (_showDraftRecoveredHint)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1D1638),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: const Color(0xFF3B2F63)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.history_rounded,
+                                size: 14,
+                                color: Color(0xFFD8B4FE),
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                'Recuperado borrador',
+                                style: TextStyle(
+                                  color: Color(0xFFEDE9FE),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            ),
-                          )
-                        : const SizedBox.shrink(
-                            key: ValueKey<String>('no-draft-restored-hint'),
+                            ],
                           ),
-                  ),
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 240),
-                      child: Padding(
-                        key: ValueKey<_SetupStep>(_step),
-                        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                        child: _buildStepContent(compact),
+                        ),
                       ),
+                    ),
+                  Expanded(
+                    child: Padding(
+                      key: ValueKey<_SetupStep>(_step),
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                      child: _buildStepContent(compact),
                     ),
                   ),
                   Padding(
@@ -2287,54 +3688,340 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Widget _buildCheckoutStep() {
+    if (_selectedCurrencies.isEmpty) {
+      _selectedCurrencies.add('USD');
+    }
+
+    final currentCurrency = _currentCurrency;
+    _ensureCurrencyConfig(currentCurrency);
+    final currentPayments = _selectedPaymentsForCurrency(currentCurrency);
+    final currentDrafts = _paymentDraftsForCurrency(currentCurrency);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DropdownButtonFormField<String>(
-          key: ValueKey<String>('currency-$_selectedCurrency'),
-          initialValue: _selectedCurrency,
-          decoration: _fieldDecoration('Moneda', Icons.attach_money_rounded),
-          dropdownColor: const Color(0xFF1A1432),
-          style: const TextStyle(color: Colors.white),
-          items: _currencies
-              .map(
-                (item) =>
-                    DropdownMenuItem<String>(value: item, child: Text(item)),
-              )
-              .toList(),
-          onChanged: (value) {
-            if (value == null) return;
-            setState(() => _selectedCurrency = value);
-            unawaited(_saveDraft());
-          },
-        ),
-        const SizedBox(height: 14),
         Text(
-          'Metodos de pago',
+          'Moneda de cobro',
           style: GoogleFonts.poppins(
             color: _setupTextHigh,
             fontSize: 19,
             fontWeight: FontWeight.w700,
           ),
         ),
+        const SizedBox(height: 6),
+        Text(
+          'Selecciona una o varias monedas. Cada moneda se configura por separado.',
+          style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _currencies.map((currency) {
+            final selected = _selectedCurrencies.contains(currency);
+            return FilterChip(
+              avatar: Icon(
+                selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                size: 16,
+                color: selected ? const Color(0xFFA7F3D0) : _setupTextLow,
+              ),
+              label: Text('${_currencyLabel(currency)} ($currency)'),
+              selected: selected,
+              onSelected: (active) {
+                setState(() {
+                  _syncActiveCurrencyDataFromController();
+                  if (active) {
+                    _selectedCurrencies.add(currency);
+                    _activeCheckoutCurrency = currency;
+                    _ensureCurrencyConfig(currency);
+                    if (currency != 'USD' &&
+                        (_exchangeRateByCurrency[currency]?.trim().isEmpty ??
+                            true)) {
+                      _exchangeRateByCurrency[currency] = _formatExchangeRate(
+                        _defaultExchangeRateFor(currency),
+                      );
+                    }
+                  } else {
+                    if (_selectedCurrencies.length == 1) {
+                      return;
+                    }
+                    _selectedCurrencies.remove(currency);
+                    _selectedPaymentsByCurrency.remove(currency);
+                    _paymentMethodDraftsByCurrency.remove(currency);
+                    _exchangeRateByCurrency.remove(currency);
+                    if (_activeCheckoutCurrency == currency) {
+                      _activeCheckoutCurrency = _selectedCurrencies.first;
+                    }
+                  }
+                  _exchangeRateManuallyEdited = false;
+                  _exchangeRateMessage = null;
+                  _exchangeRateIsError = false;
+                  _loadActiveCurrencyIntoController();
+                });
+                unawaited(_saveDraft());
+              },
+              selectedColor: const Color(0xFF2D2152),
+              backgroundColor: const Color(0xFF1A1432),
+              labelStyle: const TextStyle(color: _setupTextHigh, fontSize: 13),
+              side: BorderSide(
+                color: selected ? _palette.primary : const Color(0xFF3B2F63),
+              ),
+              showCheckmark: false,
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF17122E),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF3B2F63)),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.checklist_rounded,
+                size: 16,
+                color: _setupTextMedium,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${_configuredCurrenciesCount()}/${_selectedCurrencies.length} monedas configuradas',
+                  style: const TextStyle(
+                    color: _setupTextMedium,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_selectedCurrencies.length > 1) ...[
+          const SizedBox(height: 10),
+          Text(
+            'Moneda en edicion: ${_currencyLabel(currentCurrency)} ($currentCurrency)',
+            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _selectedCurrencies.map((currency) {
+              final isActive = currency == currentCurrency;
+              final isReady = _isCurrencyCheckoutConfigured(currency);
+              return ChoiceChip(
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(currency),
+                    if (!isReady) ...[
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Color(0xFFF59E0B),
+                      ),
+                    ],
+                  ],
+                ),
+                selected: isActive,
+                onSelected: (_) {
+                  setState(() {
+                    _syncActiveCurrencyDataFromController();
+                    _activeCheckoutCurrency = currency;
+                    _exchangeRateManuallyEdited = false;
+                    _exchangeRateMessage = null;
+                    _exchangeRateIsError = false;
+                    _loadActiveCurrencyIntoController();
+                  });
+                  unawaited(_saveDraft());
+                },
+                selectedColor: const Color(0xFF2D2152),
+                backgroundColor: const Color(0xFF1A1432),
+                labelStyle: const TextStyle(color: _setupTextHigh),
+                side: BorderSide(
+                  color: isActive ? _palette.primary : const Color(0xFF3B2F63),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF17122E),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF3B2F63)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Tasa de referencia - $currentCurrency',
+                      style: GoogleFonts.poppins(
+                        color: _setupTextHigh,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _isCurrencyExchangeRateConfigured(currentCurrency)
+                          ? const Color(0xFF153222)
+                          : const Color(0xFF32151D),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      _isCurrencyExchangeRateConfigured(currentCurrency)
+                          ? 'Completa'
+                          : 'Pendiente',
+                      style: TextStyle(
+                        color:
+                            _isCurrencyExchangeRateConfigured(currentCurrency)
+                            ? const Color(0xFFA7F3D0)
+                            : const Color(0xFFFFD1DC),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                currentCurrency == 'USD'
+                    ? 'Tu moneda base es USD. Puedes cobrar sin conversion.'
+                    : 'Usa una tasa base sugerida y luego ajustala libremente.',
+                style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _exchangeRateController,
+                      enabled: currentCurrency != 'USD',
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                      ],
+                      style: const TextStyle(color: _setupTextHigh),
+                      decoration: InputDecoration(
+                        labelText: currentCurrency == 'USD'
+                            ? '1 USD = 1 USD'
+                            : '1 USD = ? $currentCurrency',
+                        hintText: currentCurrency == 'USD'
+                            ? '1'
+                            : _formatExchangeRate(
+                                _defaultExchangeRateFor(currentCurrency),
+                              ),
+                        filled: true,
+                        fillColor: const Color(0xFF120E25),
+                        labelStyle: const TextStyle(color: _setupTextLow),
+                        hintStyle: const TextStyle(color: _setupTextLow),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
+                        ),
+                      ),
+                      onChanged: (_) {
+                        _exchangeRateManuallyEdited = true;
+                        _exchangeRateByCurrency[currentCurrency] =
+                            _exchangeRateController.text.trim();
+                        unawaited(_saveDraft());
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              if (_exchangeRateMessage != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _exchangeRateMessage!,
+                  style: TextStyle(
+                    color: _exchangeRateIsError
+                        ? const Color(0xFFFFC7D8)
+                        : const Color(0xFFD3E8FF),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        Text(
+          'Metodos de pago - $currentCurrency',
+          style: GoogleFonts.poppins(
+            color: _setupTextHigh,
+            fontSize: 19,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Usa Efectivo o Pagos digitales. En Pagos digitales puedes crear cuentas para bancos y procesadores (Binance, Zinli, Zelle, pago movil, etc.).',
+          style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: _paymentMethods.map((method) {
-            final selected = _selectedPayments.contains(method);
+            final selected = currentPayments.contains(method);
             return FilterChip(
-              label: Text(method),
+              avatar: Icon(_paymentMethodIcon(method), size: 18),
+              label: Text(_paymentMethodLabel(method)),
               selected: selected,
-              onSelected: (active) {
+              onSelected: (active) async {
                 setState(() {
                   if (active) {
-                    _selectedPayments.add(method);
-                  } else if (_selectedPayments.length > 1) {
-                    _selectedPayments.remove(method);
+                    currentPayments.add(method);
+                    currentDrafts.putIfAbsent(
+                      method,
+                      () => _PaymentMethodDraft(method: method),
+                    );
+                  } else {
+                    currentPayments.remove(method);
                   }
                 });
                 unawaited(_saveDraft());
+
+                if (active && method == 'Efectivo') {
+                  await _openPaymentMethodEditor(method);
+                }
+                if (active && method == 'Transferencia') {
+                  final transferDraft =
+                      currentDrafts['Transferencia'] ??
+                      const _PaymentMethodDraft(method: 'Transferencia');
+                  if (transferDraft.transferAccounts.isEmpty) {
+                    await _openPaymentMethodEditor('Transferencia');
+                  }
+                }
               },
               selectedColor: const Color(0xFF2D2152),
               backgroundColor: const Color(0xFF1A1432),
@@ -2346,6 +4033,283 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             );
           }).toList(),
         ),
+        const SizedBox(height: 14),
+        ...currentPayments.map((method) {
+          final draft =
+              currentDrafts[method] ?? _PaymentMethodDraft(method: method);
+          final details = _paymentSummaryLines(method, draft);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF17122E),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: draft.hasAnyDetail
+                      ? _palette.primary.withValues(alpha: 0.5)
+                      : const Color(0xFF5A3351),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(_paymentMethodIcon(method), color: _setupTextHigh),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _paymentMethodLabel(method),
+                          style: GoogleFonts.poppins(
+                            color: _setupTextHigh,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: draft.hasAnyDetail
+                              ? const Color(0xFF153222)
+                              : const Color(0xFF32151D),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          draft.hasAnyDetail ? 'Completo' : 'Pendiente',
+                          style: TextStyle(
+                            color: draft.hasAnyDetail
+                                ? const Color(0xFFA7F3D0)
+                                : const Color(0xFFFFD1DC),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (details.isEmpty)
+                    const Text(
+                      'Aun no has agregado datos para este metodo.',
+                      style: TextStyle(color: _setupTextMedium, fontSize: 12),
+                    )
+                  else
+                    ...details
+                        .take(4)
+                        .map(
+                          (line) => Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text(
+                              line,
+                              style: const TextStyle(
+                                color: _setupTextMedium,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _setupTextHigh,
+                        side: const BorderSide(color: Color(0xFF6B5A9A)),
+                      ),
+                      onPressed: () {
+                        if (method == 'Transferencia' &&
+                            draft.transferAccounts.length >=
+                                _maxTransferAccountsPerCurrency) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Maximo $_maxTransferAccountsPerCurrency cuentas por moneda.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        unawaited(_openPaymentMethodEditor(method));
+                      },
+                      icon: const Icon(Icons.edit_rounded, size: 16),
+                      label: Text(
+                        method == 'Transferencia'
+                            ? 'Agregar cuenta digital'
+                            : details.isEmpty
+                            ? 'Agregar datos'
+                            : 'Editar datos',
+                      ),
+                    ),
+                  ),
+                  if (method == 'Transferencia' &&
+                      draft.transferAccounts.isEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF120E25),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF3B2F63)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Aun no tienes cuentas de pago digital.',
+                            style: TextStyle(
+                              color: _setupTextHigh,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Crea la primera cuenta y agrega solo los campos que necesites.',
+                            style: TextStyle(
+                              color: _setupTextMedium,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          FilledButton.icon(
+                            onPressed: () {
+                              if (draft.transferAccounts.length >=
+                                  _maxTransferAccountsPerCurrency) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Maximo $_maxTransferAccountsPerCurrency cuentas por moneda.',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              unawaited(
+                                _openPaymentMethodEditor('Transferencia'),
+                              );
+                            },
+                            icon: const Icon(Icons.add_rounded, size: 16),
+                            label: const Text('Crear primera cuenta'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (method == 'Transferencia' &&
+                      draft.transferAccounts.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    ...List.generate(draft.transferAccounts.length, (index) {
+                      final account = draft.transferAccounts[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF120E25),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF3B2F63)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      account.name.trim().isEmpty
+                                          ? 'Cuenta ${index + 1}'
+                                          : account.name.trim(),
+                                      style: const TextStyle(
+                                        color: _setupTextHigh,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        final updated = draft.transferAccounts
+                                            .toList();
+                                        updated.removeAt(index);
+                                        _paymentMethodDraftsByCurrency[currentCurrency]!['Transferencia'] =
+                                            draft.copyWith(
+                                              transferAccounts: updated,
+                                            );
+                                      });
+                                      unawaited(_saveDraft());
+                                    },
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 18,
+                                      color: Color(0xFFFFD1DC),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (account.fields.isEmpty)
+                                const Text(
+                                  'Sin campos configurados',
+                                  style: TextStyle(
+                                    color: _setupTextMedium,
+                                    fontSize: 12,
+                                  ),
+                                )
+                              else
+                                ...account.fields
+                                    .take(3)
+                                    .map(
+                                      (field) => Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 2,
+                                        ),
+                                        child: Text(
+                                          '${field.label.trim().isEmpty ? _TransferFieldDraft.labelForType(field.type) : field.label}: ${field.value}',
+                                          style: const TextStyle(
+                                            color: _setupTextMedium,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                              const SizedBox(height: 6),
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: _setupTextHigh,
+                                  side: const BorderSide(
+                                    color: Color(0xFF6B5A9A),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  unawaited(
+                                    _openPaymentMethodEditor(
+                                      'Transferencia',
+                                      transferIndex: index,
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.edit_rounded, size: 15),
+                                label: const Text('Editar cuenta'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }),
       ],
     );
   }
@@ -2393,10 +4357,78 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     .firstWhere((item) => item.id == _selectedLayoutId)
                     .name,
               ),
-              _SummaryTag(label: _selectedCurrency),
-              _SummaryTag(label: _selectedPayments.join(' + ')),
+              _SummaryTag(label: _selectedCurrencies.join(' + ')),
             ],
           ),
+          const SizedBox(height: 12),
+          ..._selectedCurrencies.map((currency) {
+            final methods = _selectedPaymentsForCurrency(currency).toList();
+            final isReady = _isCurrencyCheckoutConfigured(currency);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF120E25),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF3B2F63)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${_currencyLabel(currency)} ($currency)',
+                            style: const TextStyle(
+                              color: _setupTextHigh,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            methods.isEmpty
+                                ? 'Sin metodos seleccionados'
+                                : methods.map(_paymentMethodLabel).join(' / '),
+                            style: const TextStyle(
+                              color: _setupTextMedium,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isReady
+                            ? const Color(0xFF153222)
+                            : const Color(0xFF32151D),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        isReady ? 'Completa' : 'Pendiente',
+                        style: TextStyle(
+                          color: isReady
+                              ? const Color(0xFFA7F3D0)
+                              : const Color(0xFFFFD1DC),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
           const SizedBox(height: 16),
           SizedBox(
             height: 240,
@@ -3103,7 +5135,7 @@ class _BrandPreviewLogo extends StatelessWidget {
           width: 36,
           height: 36,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _logoFallback(),
+          errorBuilder: (context, error, stackTrace) => _logoFallback(),
         ),
       );
     }
@@ -3173,6 +5205,243 @@ class _SummaryTag extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
       ),
+    );
+  }
+}
+
+class _PaymentMethodDraft {
+  const _PaymentMethodDraft({
+    required this.method,
+    this.description = '',
+    this.extraDetails = '',
+    this.transferAccounts = const <_TransferAccountDraft>[],
+  });
+
+  final String method;
+  final String description;
+  final String extraDetails;
+  final List<_TransferAccountDraft> transferAccounts;
+
+  bool get hasAnyDetail {
+    final hasTransfer = transferAccounts.any((item) => item.hasAnyDetail);
+    return hasTransfer ||
+        description.trim().isNotEmpty ||
+        extraDetails.trim().isNotEmpty;
+  }
+
+  String valueFor(String key) {
+    return switch (key) {
+      'description' => description,
+      'extraDetails' => extraDetails,
+      _ => '',
+    };
+  }
+
+  _PaymentMethodDraft copyWith({
+    String? description,
+    String? extraDetails,
+    List<_TransferAccountDraft>? transferAccounts,
+  }) {
+    return _PaymentMethodDraft(
+      method: method,
+      description: description ?? this.description,
+      extraDetails: extraDetails ?? this.extraDetails,
+      transferAccounts: transferAccounts ?? this.transferAccounts,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'description': description,
+      'extraDetails': extraDetails,
+      'transferAccounts': transferAccounts.map((item) => item.toMap()).toList(),
+    };
+  }
+
+  factory _PaymentMethodDraft.fromMap(String method, Map<String, dynamic> map) {
+    final accounts = (map['transferAccounts'] as List<dynamic>? ?? <dynamic>[])
+        .whereType<Map>()
+        .map(
+          (item) => _TransferAccountDraft.fromMap(
+            item.map((key, value) => MapEntry('$key', value)),
+          ),
+        )
+        .toList();
+
+    return _PaymentMethodDraft(
+      method: method,
+      description: map['description']?.toString() ?? '',
+      extraDetails: map['extraDetails']?.toString() ?? '',
+      transferAccounts: accounts,
+    );
+  }
+}
+
+class _TransferAccountDraft {
+  const _TransferAccountDraft({required this.name, required this.fields});
+
+  final String name;
+  final List<_TransferFieldDraft> fields;
+
+  bool get hasAnyDetail {
+    return name.trim().isNotEmpty ||
+        fields.any((item) => item.value.trim().isNotEmpty);
+  }
+
+  factory _TransferAccountDraft.empty() {
+    return _TransferAccountDraft(
+      name: '',
+      fields: <_TransferFieldDraft>[_TransferFieldDraft.defaultField()],
+    );
+  }
+
+  factory _TransferAccountDraft.fromMap(Map<String, dynamic> map) {
+    final parsedFields = (map['fields'] as List<dynamic>? ?? <dynamic>[])
+        .whereType<Map>()
+        .map(
+          (item) => _TransferFieldDraft.fromMap(
+            item.map((key, value) => MapEntry('$key', value)),
+          ),
+        )
+        .toList();
+
+    return _TransferAccountDraft(
+      name: map['name']?.toString() ?? '',
+      fields: parsedFields,
+    );
+  }
+
+  factory _TransferAccountDraft.fromLegacyColumns({
+    required String name,
+    required String bank,
+    required String owner,
+    required String documentId,
+    required String number,
+    required String alias,
+    required String description,
+    required String notes,
+  }) {
+    final fields = <_TransferFieldDraft>[];
+    if (bank.trim().isNotEmpty) {
+      fields.add(
+        _TransferFieldDraft(type: 'texto', label: 'Banco', value: bank),
+      );
+    }
+    if (owner.trim().isNotEmpty) {
+      fields.add(
+        _TransferFieldDraft(type: 'texto', label: 'Titular', value: owner),
+      );
+    }
+    if (documentId.trim().isNotEmpty) {
+      fields.add(
+        _TransferFieldDraft(type: 'id', label: 'ID', value: documentId),
+      );
+    }
+    if (number.trim().isNotEmpty) {
+      fields.add(
+        _TransferFieldDraft(
+          type: 'numero_cuenta',
+          label: 'Numero de cuenta',
+          value: number,
+        ),
+      );
+    }
+    if (alias.trim().isNotEmpty) {
+      fields.add(
+        _TransferFieldDraft(type: 'texto', label: 'Alias', value: alias),
+      );
+    }
+    if (description.trim().isNotEmpty) {
+      fields.add(
+        _TransferFieldDraft(
+          type: 'nota',
+          label: 'Descripcion',
+          value: description,
+        ),
+      );
+    }
+
+    final legacyName = name
+        .replaceFirst(RegExp(r'^Transferencia:?\s*'), '')
+        .trim();
+    return _TransferAccountDraft(
+      name: legacyName,
+      fields: fields.isEmpty && notes.trim().isNotEmpty
+          ? <_TransferFieldDraft>[
+              _TransferFieldDraft(type: 'nota', label: 'Nota', value: notes),
+            ]
+          : fields,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'fields': fields.map((item) => item.toMap()).toList(),
+    };
+  }
+}
+
+class _TransferFieldDraft {
+  const _TransferFieldDraft({
+    required this.type,
+    required this.label,
+    required this.value,
+  });
+
+  static const List<String> typeOptions = <String>[
+    'texto',
+    'numero_cuenta',
+    'id',
+    'correo',
+    'nota',
+  ];
+
+  final String type;
+  final String label;
+  final String value;
+
+  static _TransferFieldDraft defaultField() {
+    return const _TransferFieldDraft(
+      type: 'numero_cuenta',
+      label: 'Numero de cuenta',
+      value: '',
+    );
+  }
+
+  static String labelForType(String type) {
+    return switch (type) {
+      'numero_cuenta' => 'Numero de cuenta',
+      'id' => 'ID',
+      'correo' => 'Correo',
+      'nota' => 'Nota',
+      _ => 'Campo de texto',
+    };
+  }
+
+  _TransferFieldDraft copyWith({String? type, String? label, String? value}) {
+    return _TransferFieldDraft(
+      type: type ?? this.type,
+      label: label ?? this.label,
+      value: value ?? this.value,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {'type': type, 'label': label, 'value': value};
+  }
+
+  factory _TransferFieldDraft.fromMap(Map<String, dynamic> map) {
+    final parsedType = map['type']?.toString() ?? 'texto';
+    final normalizedType = typeOptions.contains(parsedType)
+        ? parsedType
+        : 'texto';
+    return _TransferFieldDraft(
+      type: normalizedType,
+      label: map['label']?.toString().trim().isNotEmpty == true
+          ? map['label']!.toString()
+          : labelForType(normalizedType),
+      value: map['value']?.toString() ?? '',
     );
   }
 }

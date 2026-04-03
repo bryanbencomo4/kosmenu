@@ -23,13 +23,6 @@ Future<void> main() async {
 }
 
 Future<void> _initializeSupabase() {
-  if (kDebugMode) {
-    debugPrint('Supabase URL: ${SupabaseConfig.url}');
-    debugPrint(
-      'Supabase key prefix: ${SupabaseConfig.anonKey.isNotEmpty ? SupabaseConfig.anonKey.substring(0, 3) : 'EMPTY'}',
-    );
-  }
-
   final parsedUrl = Uri.tryParse(SupabaseConfig.url);
   if (parsedUrl == null || !parsedUrl.hasAuthority) {
     throw StateError('Supabase URL is invalid: ${SupabaseConfig.url}');
@@ -71,8 +64,13 @@ class _KosmenuAppState extends State<KosmenuApp> {
   void initState() {
     super.initState();
     if (!kIsWeb) {
-      _bindIncomingOrderLinks();
-      _initializePushNotifications();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        unawaited(_bindIncomingOrderLinks());
+        unawaited(_initializePushNotifications());
+      });
     }
   }
 
