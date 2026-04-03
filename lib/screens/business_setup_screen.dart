@@ -8,11 +8,17 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl_phone_field/countries.dart' as intl_phone_countries;
+import 'package:intl_phone_field/country_picker_dialog.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
+import 'package:intl_phone_field/phone_number.dart' as intl_phone_number;
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -174,8 +180,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _slugController = TextEditingController();
   final TextEditingController _exchangeRateController = TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _whatsappController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
   final BrandingAiService _brandingAiService = const BrandingAiService();
 
   _SetupStep _step = _SetupStep.identity;
@@ -222,10 +228,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedFooter = 'Simple';
   bool _allowDelivery = false;
   bool _receiveOrdersOnWhatsapp = true;
+  String _selectedPhoneCountryIso = 'VE';
   bool _menuScanCompleted = false;
   int _scanCreatedCategories = 0;
   int _scanCreatedProducts = 0;
   String _scanCatalogName = '';
+  double? _businessLatitude;
+  double? _businessLongitude;
 
   XFile? _selectedLogo;
   String? _editingComercioId;
@@ -270,8 +279,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _nameController.dispose();
     _slugController.dispose();
     _exchangeRateController.dispose();
-    _phoneController.dispose();
     _whatsappController.dispose();
+    _addressController.dispose();
     _slugDebounce?.cancel();
     super.dispose();
   }
@@ -353,8 +362,21 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _selectedCategory = category;
     }
 
-    _whatsappController.text = (raw?['whatsapp']?.toString() ?? '').trim();
-    _phoneController.text = (raw?['telefono']?.toString() ?? '').trim();
+    final seedWhatsapp = (raw?['whatsapp']?.toString() ?? '').trim();
+    final seedPhone = (raw?['telefono']?.toString() ?? '').trim();
+    final parsedPhone = _parsePhoneValue(
+      seedWhatsapp.isNotEmpty ? seedWhatsapp : seedPhone,
+      fallbackIso: 'VE',
+    );
+    _selectedPhoneCountryIso = parsedPhone.countryIso;
+    _whatsappController.text = parsedPhone.nationalNumber;
+    _addressController.text = (raw?['direccion']?.toString() ?? '').trim();
+    _businessLatitude = _toDoubleOrNull(
+      raw?['latitud'] ?? raw?['direccion_lat'] ?? raw?['latitude'],
+    );
+    _businessLongitude = _toDoubleOrNull(
+      raw?['longitud'] ?? raw?['direccion_lng'] ?? raw?['longitude'],
+    );
     _allowDelivery = raw?['permite_delivery'] == true;
     _receiveOrdersOnWhatsapp = raw?['recibe_pedidos_whatsapp'] == true;
 
@@ -693,8 +715,20 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _editingComercioId = editingId;
       }
 
-      _phoneController.text = (map['phone'] as String? ?? '').trim();
-      _whatsappController.text = (map['whatsapp'] as String? ?? '').trim();
+      final draftWhatsapp = (map['whatsapp'] as String? ?? '').trim();
+      final legacyPhone = (map['phone'] as String? ?? '').trim();
+      final draftCountryIso = (map['whatsappCountryIso'] as String? ?? '')
+          .trim()
+          .toUpperCase();
+      final parsedPhone = _parsePhoneValue(
+        draftWhatsapp.isNotEmpty ? draftWhatsapp : legacyPhone,
+        fallbackIso: draftCountryIso,
+      );
+      _selectedPhoneCountryIso = parsedPhone.countryIso;
+      _whatsappController.text = parsedPhone.nationalNumber;
+      _addressController.text = (map['address'] as String? ?? '').trim();
+      _businessLatitude = _toDoubleOrNull(map['businessLatitude']);
+      _businessLongitude = _toDoubleOrNull(map['businessLongitude']);
       _allowDelivery = map['allowDelivery'] as bool? ?? false;
       _receiveOrdersOnWhatsapp =
           map['receiveOrdersOnWhatsapp'] as bool? ?? true;
@@ -824,8 +858,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'lastSuggestedRateCurrency': _lastSuggestedRateCurrency,
       'exchangeRateManuallyEdited': _exchangeRateManuallyEdited,
       'editingComercioId': _editingComercioId ?? '',
-      'phone': _phoneController.text.trim(),
-      'whatsapp': _whatsappController.text.trim(),
+      'whatsapp': _whatsappE164,
+      'whatsappCountryIso': _selectedPhoneCountryIso,
+      'address': _addressController.text.trim(),
+      'businessLatitude': _businessLatitude,
+      'businessLongitude': _businessLongitude,
       'allowDelivery': _allowDelivery,
       'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
       'menuScanCompleted': _menuScanCompleted,
@@ -1861,23 +1898,891 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return name.length >= 3 && slug.length >= 3 && _isSlugAvailable;
   }
 
-  int _digitsCount(String input) {
-    return input.replaceAll(RegExp(r'\D'), '').length;
+  double? _toDoubleOrNull(dynamic value) {
+    if (value is num) {
+      return value.toDouble();
+    }
+    return double.tryParse((value ?? '').toString().trim());
+  }
+
+  intl_phone_countries.Country _countryByIso(String isoCode) {
+    return intl_phone_countries.countries.firstWhere(
+      (country) => country.code == isoCode,
+      orElse: () => intl_phone_countries.countries.firstWhere(
+        (country) => country.code == 'VE',
+        orElse: () => intl_phone_countries.countries.first,
+      ),
+    );
+  }
+
+  _ParsedPhoneNumber _parsePhoneValue(String value, {String? fallbackIso}) {
+    final normalized = value.trim();
+    final normalizedDigits = normalized.replaceAll(RegExp(r'\D'), '');
+    final normalizedFallback = (fallbackIso ?? '').trim().toUpperCase();
+    final hasFallbackCountry = intl_phone_countries.countries.any(
+      (country) => country.code == normalizedFallback,
+    );
+    final fallbackCountry = hasFallbackCountry
+        ? normalizedFallback
+        : _selectedPhoneCountryIso;
+
+    if (normalizedDigits.isEmpty) {
+      return _ParsedPhoneNumber(
+        countryIso: fallbackCountry,
+        nationalNumber: '',
+      );
+    }
+
+    final candidates = <intl_phone_countries.Country>[
+      ...intl_phone_countries.countries,
+    ]..sort(
+      (a, b) => b.fullCountryCode.length.compareTo(a.fullCountryCode.length),
+    );
+
+    String digitsToMatch = normalizedDigits;
+    if (normalized.startsWith('+')) {
+      digitsToMatch = normalized.substring(1).replaceAll(RegExp(r'\D'), '');
+    }
+
+    for (final country in candidates) {
+      final dialDigits = country.fullCountryCode;
+      if (digitsToMatch.startsWith(dialDigits) &&
+          digitsToMatch.length > dialDigits.length) {
+        return _ParsedPhoneNumber(
+          countryIso: country.code,
+          nationalNumber: digitsToMatch.substring(dialDigits.length),
+        );
+      }
+    }
+
+    return _ParsedPhoneNumber(
+      countryIso: fallbackCountry,
+      nationalNumber: normalizedDigits,
+    );
+  }
+
+  String get _whatsappE164 {
+    final local = _whatsappController.text.replaceAll(RegExp(r'\D'), '');
+    if (local.isEmpty) {
+      return '';
+    }
+    final country = _countryByIso(_selectedPhoneCountryIso);
+    return '+${country.fullCountryCode}$local';
   }
 
   String? _operationValidationMessage() {
-    final phone = _phoneController.text.trim();
-    final whatsapp = _whatsappController.text.trim();
+    final whatsapp = _whatsappController.text.trim().replaceAll(
+      RegExp(r'\D'),
+      '',
+    );
 
-    if (_allowDelivery && _digitsCount(phone) < 8) {
-      return 'Para habilitar delivery, agrega un telefono valido (minimo 8 digitos).';
+    if (_allowDelivery || _receiveOrdersOnWhatsapp) {
+      if (whatsapp.isEmpty) {
+        return 'Agrega un numero de telefono valido para WhatsApp.';
+      }
+      final country = _countryByIso(_selectedPhoneCountryIso);
+      final phone = intl_phone_number.PhoneNumber(
+        countryISOCode: _selectedPhoneCountryIso,
+        countryCode: '+${country.fullCountryCode}',
+        number: whatsapp,
+      );
+      try {
+        phone.isValidNumber();
+      } catch (_) {
+        return 'Agrega un numero de telefono valido para WhatsApp.';
+      }
     }
 
-    if (_receiveOrdersOnWhatsapp && _digitsCount(whatsapp) < 8) {
-      return 'Si recibiras pedidos por WhatsApp, agrega un numero valido (minimo 8 digitos).';
+    if (_allowDelivery &&
+        (_businessLatitude == null || _businessLongitude == null)) {
+      return 'Selecciona la ubicacion exacta del negocio en el mapa.';
     }
 
     return null;
+  }
+
+  Future<Map<String, dynamic>> _httpGetJson(Uri uri) async {
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+      return <String, dynamic>{};
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  String? _componentLongName(
+    List<Map<String, dynamic>> components,
+    String type,
+  ) {
+    for (final component in components) {
+      final types = (component['types'] as List<dynamic>? ?? <dynamic>[])
+          .map((item) => item.toString())
+          .toList();
+      if (types.contains(type)) {
+        final value = component['long_name']?.toString().trim();
+        if (value != null && value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+    return null;
+  }
+
+  String? _toSpecificAddress(Map<String, dynamic> result) {
+    final components = (result['address_components'] as List<dynamic>? ??
+            <dynamic>[])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+    if (components.isEmpty) {
+      return result['formatted_address']?.toString().trim();
+    }
+
+    final street = _componentLongName(components, 'route');
+    final streetNumber = _componentLongName(components, 'street_number');
+    final premise = _componentLongName(components, 'premise');
+    final subpremise = _componentLongName(components, 'subpremise');
+    final neighborhood =
+        _componentLongName(components, 'neighborhood') ??
+        _componentLongName(components, 'sublocality') ??
+        _componentLongName(components, 'sublocality_level_1');
+    final locality =
+        _componentLongName(components, 'locality') ??
+        _componentLongName(components, 'administrative_area_level_2');
+    final region = _componentLongName(
+      components,
+      'administrative_area_level_1',
+    );
+
+    final plusCodeMap = result['plus_code'] is Map
+      ? Map<String, dynamic>.from(result['plus_code'] as Map)
+      : <String, dynamic>{};
+    final plusCodeShort =
+      plusCodeMap['compound_code']?.toString().trim().isNotEmpty == true
+      ? plusCodeMap['compound_code'].toString().trim()
+      : (plusCodeMap['global_code']?.toString().trim() ?? '');
+
+    final firstLineParts = <String>[];
+    if (street != null && street.isNotEmpty) {
+      firstLineParts.add(street);
+      if (streetNumber != null && streetNumber.isNotEmpty) {
+        firstLineParts.add(streetNumber);
+      }
+    } else if (premise != null && premise.isNotEmpty) {
+      firstLineParts.add(premise);
+      if (subpremise != null && subpremise.isNotEmpty) {
+        firstLineParts.add(subpremise);
+      }
+    }
+
+    final detailParts = <String>[];
+    if (neighborhood != null && neighborhood.isNotEmpty) {
+      detailParts.add(neighborhood);
+    }
+    if (locality != null && locality.isNotEmpty) {
+      detailParts.add(locality);
+    }
+    if (region != null && region.isNotEmpty) {
+      detailParts.add(region);
+    }
+    if (plusCodeShort.isNotEmpty) {
+      detailParts.add(plusCodeShort);
+    }
+
+    final firstLine = firstLineParts.join(' ').trim();
+    final detailLine = detailParts.join(', ').trim();
+    if (firstLine.isNotEmpty && detailLine.isNotEmpty) {
+      return '$firstLine, $detailLine';
+    }
+    if (firstLine.isNotEmpty) {
+      return firstLine;
+    }
+    if (detailLine.isNotEmpty) {
+      return detailLine;
+    }
+    return result['formatted_address']?.toString().trim();
+  }
+
+  Future<String?> _reverseGeocodeFromLatLng(LatLng position) async {
+    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
+    if (apiKey.isEmpty) {
+      return null;
+    }
+
+    try {
+      final uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/geocode/json',
+        {
+          'latlng': '${position.latitude},${position.longitude}',
+          'language': 'es',
+          'key': apiKey,
+        },
+      );
+
+      final json = await _httpGetJson(uri);
+      final status = (json['status']?.toString().trim() ?? '');
+      if (status != 'OK') {
+        return null;
+      }
+
+      final results = (json['results'] as List<dynamic>? ?? <dynamic>[])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      if (results.isEmpty) {
+        return null;
+      }
+
+      Map<String, dynamic> best = results.first;
+      var bestScore = -1;
+      for (final result in results) {
+        final types = (result['types'] as List<dynamic>? ?? <dynamic>[])
+            .map((item) => item.toString())
+            .toList();
+        var score = 0;
+        if (types.contains('street_address')) score += 5;
+        if (types.contains('premise')) score += 4;
+        if (types.contains('subpremise')) score += 3;
+        if (types.contains('route')) score += 2;
+        if (types.contains('plus_code')) score += 1;
+        final components = result['address_components'] as List<dynamic>?;
+        if ((components?.length ?? 0) >= 4) {
+          score += 2;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = result;
+        }
+      }
+
+      final specific = _toSpecificAddress(best);
+      if (specific != null && specific.trim().isNotEmpty) {
+        return specific.trim();
+      }
+
+      final formatted = best['formatted_address']?.toString().trim();
+      if (formatted != null && formatted.isNotEmpty) {
+        return formatted;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<_PlaceSearchSuggestion>> _searchPlaceSuggestions(
+    String query, {
+    LatLng? near,
+  }) async {
+    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
+    if (apiKey.isEmpty || query.trim().length < 3) {
+      return <_PlaceSearchSuggestion>[];
+    }
+
+    try {
+      final params = <String, String>{
+        'input': query.trim(),
+        'language': 'es',
+        'types': 'geocode',
+        'key': apiKey,
+      };
+      if (near != null) {
+        params['location'] = '${near.latitude},${near.longitude}';
+        params['radius'] = '30000';
+      }
+
+      final uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/autocomplete/json',
+        params,
+      );
+      final json = await _httpGetJson(uri);
+      final status = (json['status']?.toString().trim() ?? '');
+      if (status != 'OK' && status != 'ZERO_RESULTS') {
+        return <_PlaceSearchSuggestion>[];
+      }
+
+      final predictions = (json['predictions'] as List<dynamic>? ??
+              <dynamic>[])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+
+      return predictions
+          .where((item) => item['place_id'] != null)
+          .map(
+            (item) => _PlaceSearchSuggestion(
+              placeId: item['place_id'].toString(),
+              description: item['description']?.toString().trim() ?? '',
+            ),
+          )
+          .where((item) => item.description.isNotEmpty)
+          .take(6)
+          .toList();
+    } catch (_) {
+      return <_PlaceSearchSuggestion>[];
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchPlaceDetails(String placeId) async {
+    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
+    if (apiKey.isEmpty || placeId.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
+        'place_id': placeId.trim(),
+        'fields': 'formatted_address,address_component,geometry/location,plus_code,types',
+        'language': 'es',
+        'key': apiKey,
+      });
+      final json = await _httpGetJson(uri);
+      final status = (json['status']?.toString().trim() ?? '');
+      if (status != 'OK') {
+        return null;
+      }
+
+      final result = json['result'];
+      if (result is Map) {
+        return Map<String, dynamic>.from(result);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<LatLng> _resolveInitialMapCenter() async {
+    if (_businessLatitude != null && _businessLongitude != null) {
+      return LatLng(_businessLatitude!, _businessLongitude!);
+    }
+
+    final servicesEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!servicesEnabled) {
+      return const LatLng(10.4806, -66.9036);
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return const LatLng(10.4806, -66.9036);
+    }
+
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      ).timeout(const Duration(seconds: 4));
+      return LatLng(position.latitude, position.longitude);
+    } catch (_) {
+      return const LatLng(10.4806, -66.9036);
+    }
+  }
+
+  Future<void> _openAddressPlacePicker() async {
+    final initial = await _resolveInitialMapCenter();
+    if (!mounted) {
+      return;
+    }
+    LatLng selected = initial;
+    String previewAddress = _addressController.text.trim();
+    final searchController = TextEditingController(text: previewAddress);
+    bool resolvingAddress = false;
+    bool searchingPlaces = false;
+    int geocodeRequestId = 0;
+    Timer? geocodeDebounce;
+    Timer? searchDebounce;
+    LatLng? lastGeocodedPoint;
+    List<_PlaceSearchSuggestion> placeSuggestions = <_PlaceSearchSuggestion>[];
+    final mapController = Completer<GoogleMapController>();
+
+    final picked = await showModalBottomSheet<_PickedBusinessLocation>(
+      context: context,
+      isScrollControlled: true,
+      enableDrag: false,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF0E0A1E),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            bool movedEnough(LatLng from, LatLng to) {
+              final meters = Geolocator.distanceBetween(
+                from.latitude,
+                from.longitude,
+                to.latitude,
+                to.longitude,
+              );
+              return meters >= 18;
+            }
+
+            Future<void> syncAddress() async {
+              final requestId = ++geocodeRequestId;
+              setSheetState(() => resolvingAddress = true);
+              final resolved = await _reverseGeocodeFromLatLng(selected);
+              if (!context.mounted) {
+                return;
+              }
+              if (requestId != geocodeRequestId) {
+                return;
+              }
+              setSheetState(() {
+                resolvingAddress = false;
+                if (resolved != null && resolved.isNotEmpty) {
+                  previewAddress = resolved;
+                  searchController.text = resolved;
+                }
+                lastGeocodedPoint = selected;
+              });
+            }
+
+            Future<void> searchPlaces(String value) async {
+              final query = value.trim();
+              if (query.length < 3) {
+                if (!context.mounted) {
+                  return;
+                }
+                setSheetState(() {
+                  searchingPlaces = false;
+                  placeSuggestions = <_PlaceSearchSuggestion>[];
+                });
+                return;
+              }
+
+              setSheetState(() => searchingPlaces = true);
+              final suggestions = await _searchPlaceSuggestions(
+                query,
+                near: selected,
+              );
+              if (!context.mounted) {
+                return;
+              }
+              setSheetState(() {
+                searchingPlaces = false;
+                placeSuggestions = suggestions;
+              });
+            }
+
+            Future<void> selectSuggestion(_PlaceSearchSuggestion suggestion) async {
+              final details = await _fetchPlaceDetails(suggestion.placeId);
+              if (details == null || !context.mounted) {
+                return;
+              }
+
+              final geometry = details['geometry'] is Map
+                  ? Map<String, dynamic>.from(details['geometry'] as Map)
+                  : <String, dynamic>{};
+              final location = geometry['location'] is Map
+                  ? Map<String, dynamic>.from(geometry['location'] as Map)
+                  : <String, dynamic>{};
+              final lat = _toDoubleOrNull(location['lat']);
+              final lng = _toDoubleOrNull(location['lng']);
+              if (lat == null || lng == null) {
+                return;
+              }
+
+              final controller = await mapController.future;
+              selected = LatLng(lat, lng);
+              await controller.animateCamera(
+                CameraUpdate.newCameraPosition(
+                  CameraPosition(target: selected, zoom: 18),
+                ),
+              );
+
+              final specific = _toSpecificAddress(details) ?? suggestion.description;
+              if (!context.mounted) {
+                return;
+              }
+              setSheetState(() {
+                previewAddress = specific;
+                searchController.text = specific;
+                placeSuggestions = <_PlaceSearchSuggestion>[];
+              });
+              unawaited(syncAddress());
+            }
+
+            Future<void> moveToCurrentLocation() async {
+              final servicesEnabled = await Geolocator.isLocationServiceEnabled();
+              if (!servicesEnabled) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Activa el GPS para usar tu ubicacion actual.'),
+                    ),
+                  );
+                }
+                return;
+              }
+
+              var permission = await Geolocator.checkPermission();
+              if (permission == LocationPermission.denied) {
+                permission = await Geolocator.requestPermission();
+              }
+
+              if (permission == LocationPermission.denied ||
+                  permission == LocationPermission.deniedForever) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Permiso de ubicacion denegado. Habilitalo para centrar el mapa.',
+                      ),
+                    ),
+                  );
+                }
+                return;
+              }
+
+              try {
+                final position = await Geolocator.getCurrentPosition(
+                  locationSettings: const LocationSettings(
+                    accuracy: LocationAccuracy.high,
+                  ),
+                );
+
+                final controller = await mapController.future;
+                final target = LatLng(position.latitude, position.longitude);
+                selected = target;
+                await controller.animateCamera(
+                  CameraUpdate.newCameraPosition(
+                    CameraPosition(target: target, zoom: 18),
+                  ),
+                );
+                await syncAddress();
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'No se pudo obtener tu ubicacion actual en este momento.',
+                      ),
+                    ),
+                  );
+                }
+              }
+            }
+
+            return SizedBox(
+              height: MediaQuery.of(context).size.height * 0.86,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: _setupTextHigh,
+                          ),
+                        ),
+                        const Expanded(
+                          child: Text(
+                            'Ubica tu negocio en el mapa',
+                            style: TextStyle(
+                              color: _setupTextHigh,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const SizedBox(width: 48),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                    child: TextField(
+                      controller: searchController,
+                      style: const TextStyle(color: _setupTextHigh),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar direccion o lugar',
+                        hintStyle: const TextStyle(color: _setupTextLow),
+                        prefixIcon: const Icon(
+                          Icons.search_rounded,
+                          color: _setupTextLow,
+                        ),
+                        suffixIcon: searchingPlaces
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              )
+                            : (searchController.text.trim().isEmpty
+                                  ? null
+                                  : IconButton(
+                                      onPressed: () {
+                                        searchController.clear();
+                                        setSheetState(() {
+                                          placeSuggestions =
+                                              <_PlaceSearchSuggestion>[];
+                                        });
+                                      },
+                                      icon: const Icon(
+                                        Icons.clear_rounded,
+                                        color: _setupTextLow,
+                                      ),
+                                    )),
+                        filled: true,
+                        fillColor: const Color(0xFF17122E),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _palette.primary),
+                        ),
+                      ),
+                      onChanged: (value) {
+                        searchDebounce?.cancel();
+                        searchDebounce = Timer(
+                          const Duration(milliseconds: 300),
+                          () => unawaited(searchPlaces(value)),
+                        );
+                      },
+                    ),
+                  ),
+                  if (placeSuggestions.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF17122E),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF3B2F63)),
+                      ),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: placeSuggestions.length,
+                        separatorBuilder: (_, _) => const Divider(
+                          height: 1,
+                          color: Color(0xFF2A2145),
+                        ),
+                        itemBuilder: (context, index) {
+                          final item = placeSuggestions[index];
+                          return ListTile(
+                            dense: true,
+                            leading: const Icon(
+                              Icons.place_rounded,
+                              size: 18,
+                              color: _setupTextLow,
+                            ),
+                            title: Text(
+                              item.description,
+                              style: const TextStyle(
+                                color: _setupTextHigh,
+                                fontSize: 12,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () {
+                              unawaited(selectSuggestion(item));
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  Expanded(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        GoogleMap(
+                          initialCameraPosition: CameraPosition(
+                            target: initial,
+                            zoom: _businessLatitude == null ? 14 : 17,
+                          ),
+                          onMapCreated: (controller) {
+                            if (!mapController.isCompleted) {
+                              mapController.complete(controller);
+                            }
+                            unawaited(syncAddress());
+                          },
+                          myLocationButtonEnabled: false,
+                          myLocationEnabled: false,
+                          zoomControlsEnabled: false,
+                          onCameraMove: (position) {
+                            selected = position.target;
+                          },
+                          onCameraIdle: () {
+                            if (lastGeocodedPoint != null &&
+                                !movedEnough(lastGeocodedPoint!, selected)) {
+                              return;
+                            }
+                            geocodeDebounce?.cancel();
+                            geocodeDebounce = Timer(
+                              const Duration(milliseconds: 350),
+                              () => unawaited(syncAddress()),
+                            );
+                          },
+                        ),
+                        const IgnorePointer(
+                          child: Icon(
+                            Icons.location_on_rounded,
+                            size: 48,
+                            color: Color(0xFFEF4444),
+                          ),
+                        ),
+                        Positioned(
+                          top: 12,
+                          right: 12,
+                          child: Material(
+                            color: const Color(0xFF17122E),
+                            borderRadius: BorderRadius.circular(12),
+                            child: IconButton(
+                              tooltip: 'Usar mi ubicacion',
+                              onPressed: () {
+                                unawaited(moveToCurrentLocation());
+                              },
+                              icon: const Icon(
+                                Icons.my_location_rounded,
+                                color: _setupTextHigh,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SafeArea(
+                    top: false,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF17122E),
+                        border: Border(
+                          top: BorderSide(color: Color(0xFF3B2F63)),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            resolvingAddress
+                                ? 'Buscando direccion...'
+                                : (previewAddress.isEmpty
+                                      ? 'Mueve el mapa para elegir el punto exacto'
+                                      : previewAddress),
+                            style: const TextStyle(
+                              color: _setupTextHigh,
+                              fontSize: 12,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Coordenadas: ${selected.latitude.toStringAsFixed(6)}, ${selected.longitude.toStringAsFixed(6)}',
+                            style: const TextStyle(
+                              color: _setupTextLow,
+                              fontSize: 11,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.info_outline_rounded,
+                                size: 14,
+                                color: _setupTextLow,
+                              ),
+                              const SizedBox(width: 6),
+                              const Expanded(
+                                child: Text(
+                                  'Ajusta el pin al centro antes de confirmar.',
+                                  style: TextStyle(
+                                    color: _setupTextLow,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: () async {
+                                FocusScope.of(context).unfocus();
+                                var resolvedAddress = previewAddress.trim();
+                                if (resolvedAddress.isEmpty) {
+                                  final onDemandAddress =
+                                      await _reverseGeocodeFromLatLng(selected);
+                                  if (onDemandAddress != null &&
+                                      onDemandAddress.trim().isNotEmpty) {
+                                    resolvedAddress = onDemandAddress.trim();
+                                  }
+                                }
+                                if (!context.mounted) {
+                                  return;
+                                }
+                                final previousAddress = _addressController.text
+                                    .trim();
+                                Navigator.of(context).pop(
+                                  _PickedBusinessLocation(
+                                    latitude: selected.latitude,
+                                    longitude: selected.longitude,
+                                    address: resolvedAddress.isNotEmpty
+                                        ? resolvedAddress
+                                        : (previousAddress.isNotEmpty
+                                              ? previousAddress
+                                              : 'Punto seleccionado en el mapa'),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.check_circle_rounded),
+                              label: const Text('Confirmar ubicacion'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    geocodeDebounce?.cancel();
+    searchDebounce?.cancel();
+
+    if (picked == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _businessLatitude = picked.latitude;
+      _businessLongitude = picked.longitude;
+      _addressController.text = picked.address;
+    });
+    await _saveDraft();
   }
 
   Future<void> _openMenuScan() async {
@@ -3089,10 +3994,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'nombre': _nameController.text.trim(),
       'slug': _normalizeSlug(_slugController.text),
       'categoria': _selectedCategory,
-      if (_phoneController.text.trim().isNotEmpty)
-        'telefono': _phoneController.text.trim(),
-      if (_whatsappController.text.trim().isNotEmpty)
-        'whatsapp': _whatsappController.text.trim(),
+      if (_whatsappE164.isNotEmpty) 'whatsapp': _whatsappE164,
+      if (_addressController.text.trim().isNotEmpty)
+        'direccion': _addressController.text.trim(),
+      if (_businessLatitude != null) 'latitud': _businessLatitude,
+      if (_businessLongitude != null) 'longitud': _businessLongitude,
       'permite_delivery': _allowDelivery,
       'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
       if (logoUrl != null && logoUrl.trim().isNotEmpty) 'logo_url': logoUrl,
@@ -3110,8 +4016,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     final removable = <String>{
       'categoria',
-      'telefono',
       'whatsapp',
+      'direccion',
+      'latitud',
+      'longitud',
       'permite_delivery',
       'recibe_pedidos_whatsapp',
       'slug',
@@ -4507,16 +5415,63 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        TextFormField(
-          controller: _phoneController,
-          keyboardType: TextInputType.phone,
-          inputFormatters: <TextInputFormatter>[
-            FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()]')),
-          ],
+        IntlPhoneField(
+          controller: _whatsappController,
+          initialCountryCode: _selectedPhoneCountryIso.trim().isEmpty
+              ? 'VE'
+              : _selectedPhoneCountryIso,
+          languageCode: 'es',
           style: const TextStyle(color: _setupTextHigh),
+          dropdownTextStyle: const TextStyle(
+            color: _setupTextHigh,
+            fontWeight: FontWeight.w600,
+          ),
+          pickerDialogStyle: PickerDialogStyle(
+            backgroundColor: const Color(0xFF120E25),
+            countryNameStyle: const TextStyle(
+              color: _setupTextHigh,
+              fontWeight: FontWeight.w700,
+            ),
+            countryCodeStyle: const TextStyle(
+              color: _setupTextMedium,
+              fontWeight: FontWeight.w600,
+            ),
+            searchFieldCursorColor: _setupTextHigh,
+            searchFieldInputDecoration: InputDecoration(
+              labelText: 'Buscar pais',
+              labelStyle: const TextStyle(color: _setupTextLow),
+              hintText: 'Ej. Venezuela, Colombia',
+              hintStyle: const TextStyle(color: _setupTextLow),
+              suffixIcon: const Icon(Icons.search, color: _setupTextMedium),
+              filled: true,
+              fillColor: const Color(0xFF1A1433),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: _palette.primary, width: 1.2),
+              ),
+            ),
+            listTileDivider: const Divider(
+              height: 1,
+              thickness: 1,
+              color: Color(0xFF2A2145),
+            ),
+          ),
+          invalidNumberMessage: 'Numero invalido para ese pais.',
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.digitsOnly,
+          ],
           decoration: InputDecoration(
-            labelText: 'Numero de telefono',
-            hintText: 'Ej. +58 412 123 4567',
+            labelText: 'Numero de telefono / WhatsApp',
+            hintText: 'Ingresa el numero',
             filled: true,
             fillColor: const Color(0xFF120E25),
             labelStyle: const TextStyle(color: _setupTextLow),
@@ -4529,34 +5484,89 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Color(0xFF3B2F63)),
             ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: _palette.primary, width: 1.4),
+            ),
           ),
-          onChanged: (_) => unawaited(_saveDraft()),
+          onCountryChanged: (country) {
+            setState(() => _selectedPhoneCountryIso = country.code);
+            unawaited(_saveDraft());
+          },
+          onChanged: (phone) {
+            _selectedPhoneCountryIso = phone.countryISOCode;
+            unawaited(_saveDraft());
+          },
+          validator: (phone) {
+            final number = phone?.number.trim() ?? '';
+            if ((_allowDelivery || _receiveOrdersOnWhatsapp) && number.isEmpty) {
+              return 'Ingresa un numero de WhatsApp.';
+            }
+            return null;
+          },
         ),
         const SizedBox(height: 10),
-        TextFormField(
-          controller: _whatsappController,
-          keyboardType: TextInputType.phone,
-          inputFormatters: <TextInputFormatter>[
-            FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()]')),
-          ],
-          style: const TextStyle(color: _setupTextHigh),
-          decoration: InputDecoration(
-            labelText: 'Numero de WhatsApp',
-            hintText: 'Ej. +58 412 123 4567',
-            filled: true,
-            fillColor: const Color(0xFF120E25),
-            labelStyle: const TextStyle(color: _setupTextLow),
-            hintStyle: const TextStyle(color: _setupTextLow),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF3B2F63)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF3B2F63)),
-            ),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF120E25),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF3B2F63)),
           ),
-          onChanged: (_) => unawaited(_saveDraft()),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Ubicacion del negocio',
+                style: TextStyle(
+                  color: _setupTextHigh,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Direccion',
+                style: TextStyle(
+                  color: _setupTextLow,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _addressController.text.trim().isEmpty
+                    ? 'Sin direccion seleccionada. Abre el mapa y arrastra hasta el punto exacto del negocio.'
+                    : _addressController.text.trim(),
+                style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+              ),
+              if (_businessLatitude != null && _businessLongitude != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Coordenadas: ${_businessLatitude!.toStringAsFixed(6)}, ${_businessLongitude!.toStringAsFixed(6)}',
+                  style: const TextStyle(color: _setupTextLow, fontSize: 11),
+                ),
+              ],
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _openAddressPlacePicker,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _setupTextHigh,
+                    side: const BorderSide(color: Color(0xFF6B5A9A)),
+                  ),
+                  icon: const Icon(Icons.place_rounded, size: 18),
+                  label: Text(
+                    _addressController.text.trim().isEmpty
+                        ? 'Elegir punto en el mapa'
+                        : 'Cambiar punto en el mapa',
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 8),
         SwitchListTile.adaptive(
@@ -4736,12 +5746,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Telefono: ${_phoneController.text.trim().isEmpty ? 'No configurado' : _phoneController.text.trim()}',
+                  'WhatsApp: ${_whatsappE164.isEmpty ? 'No configurado' : _whatsappE164}',
                   style: const TextStyle(color: _setupTextMedium, fontSize: 12),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'WhatsApp: ${_whatsappController.text.trim().isEmpty ? 'No configurado' : _whatsappController.text.trim()}',
+                  'Direccion: ${_addressController.text.trim().isEmpty ? 'No configurada' : _addressController.text.trim()}',
+                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Coordenadas: ${(_businessLatitude == null || _businessLongitude == null) ? 'No definidas' : '${_businessLatitude!.toStringAsFixed(6)}, ${_businessLongitude!.toStringAsFixed(6)}'}',
                   style: const TextStyle(color: _setupTextMedium, fontSize: 12),
                 ),
               ],
@@ -5918,6 +6933,38 @@ class _TransferFieldDraft {
       value: map['value']?.toString() ?? '',
     );
   }
+}
+
+class _PickedBusinessLocation {
+  const _PickedBusinessLocation({
+    required this.latitude,
+    required this.longitude,
+    required this.address,
+  });
+
+  final double latitude;
+  final double longitude;
+  final String address;
+}
+
+class _PlaceSearchSuggestion {
+  const _PlaceSearchSuggestion({
+    required this.placeId,
+    required this.description,
+  });
+
+  final String placeId;
+  final String description;
+}
+
+class _ParsedPhoneNumber {
+  const _ParsedPhoneNumber({
+    required this.countryIso,
+    required this.nationalNumber,
+  });
+
+  final String countryIso;
+  final String nationalNumber;
 }
 
 class _LayoutOption {

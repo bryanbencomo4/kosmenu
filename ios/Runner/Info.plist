@@ -46,6 +46,8 @@
 		<string>elmenuxfa.com necesita acceso a tus fotos para exportar y compartir tu material QR.</string>
 		<key>NSCameraUsageDescription</key>
 		<string>elmenuxfa.com necesita acceso a la cámara para capturar el logo de tu negocio.</string>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>elmenuxfa.com usa tu ubicacion para centrar el mapa al elegir la ubicacion del negocio.</string>
 		<key>UIBackgroundModes</key>
 		<array>
 			<string>remote-notification</string>
