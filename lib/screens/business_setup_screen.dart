@@ -14,9 +14,9 @@ import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:intl_phone_field/phone_number.dart' as intl_phone_number;
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
+import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
-import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -4112,6 +4112,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'metodos_pago': allMethods.toList(),
       'menu_layout': _selectedLayoutId,
       'menu_palette': _selectedPaletteId,
+      'menu_palette_primary': _paletteSuggestion.primary.toARGB32(),
+      'menu_palette_accent': _paletteSuggestion.accent.toARGB32(),
+      'menu_palette_surface': _paletteSuggestion.surface.toARGB32(),
+      'menu_palette_text': _paletteSuggestion.text.toARGB32(),
       'menu_font': _selectedHeadingFont,
       'menu_footer': _selectedFooter,
     };
@@ -4132,6 +4136,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'metodos_pago',
       'menu_layout',
       'menu_palette',
+      'menu_palette_primary',
+      'menu_palette_accent',
+      'menu_palette_surface',
+      'menu_palette_text',
       'menu_font',
       'menu_footer',
     };
@@ -4262,7 +4270,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (!mounted) {
         return;
       }
-      await _openCompletionActions(comercio);
+      await _openCompletionActions();
     } on StorageException catch (error) {
       if (!mounted) {
         return;
@@ -4336,77 +4344,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return '$userId/${safeName.isEmpty ? 'logo' : safeName}_$now.$ext';
   }
 
-  Future<void> _openCompletionActions(ComercioModel comercio) async {
-    final url = getPublicMenuUrl(comercio);
-
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      useSafeArea: false,
-      backgroundColor: const Color(0xFF151029),
-      showDragHandle: true,
-      builder: (context) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            textTheme: Theme.of(context).textTheme.apply(
-              bodyColor: const Color(0xFFF8F5FF),
-              displayColor: const Color(0xFFF8F5FF),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Listo',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 21,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.tonalIcon(
-                    onPressed: () => Navigator.of(context).pop('preview'),
-                    style: FilledButton.styleFrom(
-                      foregroundColor: const Color(0xFFF8F5FF),
-                      backgroundColor: const Color(0xFF2D2152),
-                    ),
-                    icon: const Icon(Icons.open_in_browser_rounded),
-                    label: const Text('Ver en navegador'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () => Navigator.of(context).pop('qr'),
-                    icon: const Icon(Icons.qr_code_2_rounded),
-                    label: const Text('Continuar a QR'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
+  Future<void> _openCompletionActions() async {
     if (!mounted) {
       return;
     }
 
-    if (action == 'preview') {
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      if (!mounted) {
-        return;
-      }
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Configuracion guardada correctamente.')),
+    );
 
-    await Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => QrGeneratorScreen(comercio: comercio)),
+    await Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+      (route) => false,
     );
   }
 
@@ -4564,7 +4513,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     };
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.only(bottom: _step == _SetupStep.finish ? 24 : 12),
       child: child,
     );
   }
@@ -5800,213 +5749,128 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   Widget _buildFinishStep() {
     final base = AppLinks.productionUrl;
     final slug = _normalizeSlug(_slugController.text);
+    final previewTextColor = _palette.surface.computeLuminance() > 0.42
+        ? const Color(0xFF1E1238)
+        : _palette.text;
+    final previewMutedColor = previewTextColor.withValues(alpha: 0.72);
+    final previewCurrency = _selectedCurrencies.isEmpty
+        ? 'USD'
+        : _selectedCurrencies.first;
+    final featuredItems = <Map<String, String>>[
+      {'name': 'Producto destacado', 'price': previewCurrency},
+      {'name': 'Especial de la casa', 'price': previewCurrency},
+      {'name': 'Recomendacion del dia', 'price': previewCurrency},
+    ];
 
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF17122E),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF3B2F63)),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _nameController.text.trim().isEmpty
-                ? 'Tu menu'
-                : _nameController.text.trim(),
-            style: _headingFontStyle(
-              color: _setupTextHigh,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '$base/v/$slug',
-            style: GoogleFonts.poppins(
-              color: _palette.text.withValues(alpha: 0.8),
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _SummaryTag(label: _selectedCategory),
-              _SummaryTag(
-                label: _layouts
-                    .firstWhere((item) => item.id == _selectedLayoutId)
-                    .name,
+    return SafeArea(
+      top: false,
+      bottom: true,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF17122E),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFF3B2F63)),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Revision final',
+              style: GoogleFonts.poppins(
+                color: _setupTextHigh,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
               ),
-              _SummaryTag(label: _selectedCurrencies.join(' + ')),
-              _SummaryTag(
-                label: _allowDelivery ? 'Delivery activo' : 'Sin delivery',
-              ),
-              _SummaryTag(
-                label: _receiveOrdersOnWhatsapp
-                    ? 'Pedidos por WhatsApp'
-                    : 'Sin pedidos por WhatsApp',
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF120E25),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF3B2F63)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 6),
+            const Text(
+              'Confirma la configuracion antes de guardar. El menu se publicara con esta base inicial.',
+              style: TextStyle(color: _setupTextMedium, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _nameController.text.trim().isEmpty
+                  ? 'Tu menu'
+                  : _nameController.text.trim(),
+              style: _headingFontStyle(
+                color: _setupTextHigh,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '$base/v/$slug',
+              style: GoogleFonts.poppins(
+                color: _setupTextLow,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                Text(
-                  'Contacto operativo',
-                  style: GoogleFonts.poppins(
-                    color: _setupTextHigh,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
+                _SummaryTag(label: _selectedCategory),
+                _SummaryTag(
+                  label: _layouts
+                      .firstWhere((item) => item.id == _selectedLayoutId)
+                      .name,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'WhatsApp: ${_whatsappE164.isEmpty ? 'No configurado' : _whatsappE164}',
-                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                _SummaryTag(label: _selectedCurrencies.join(' + ')),
+                _SummaryTag(
+                  label: _allowDelivery ? 'Delivery activo' : 'Sin delivery',
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'Direccion: ${_addressController.text.trim().isEmpty ? 'No configurada' : _addressController.text.trim()}',
-                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Coordenadas: ${(_businessLatitude == null || _businessLongitude == null) ? 'No definidas' : '${_businessLatitude!.toStringAsFixed(6)}, ${_businessLongitude!.toStringAsFixed(6)}'}',
-                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                _SummaryTag(
+                  label: _receiveOrdersOnWhatsapp
+                      ? 'Pedidos por WhatsApp'
+                      : 'Sin pedidos por WhatsApp',
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF120E25),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _hasMenuSetupCompleted
-                    ? const Color(0xFF2C6E49)
-                    : const Color(0xFF7A294E),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF120E25),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF3B2F63)),
               ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  _hasMenuSetupCompleted
-                      ? Icons.check_circle_rounded
-                      : Icons.warning_amber_rounded,
-                  color: _hasMenuSetupCompleted
-                      ? const Color(0xFFA7F3D0)
-                      : const Color(0xFFF59E0B),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _menuScanCompleted
-                        ? 'Escaneo listo: $_scanCreatedCategories categorias y $_scanCreatedProducts productos.'
-                        : _menuCatalogCount > 0
-                        ? _menuCatalogCount == 1
-                            ? 'Creacion manual lista: 1 menu detectado.'
-                            : 'Creacion manual lista: $_menuCatalogCount menus detectados.'
-                        : 'Menu pendiente. Completa escaneo o selecciona creacion manual en el paso de escaneo.',
-                    style: const TextStyle(
-                      color: _setupTextMedium,
-                      fontSize: 12,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Contacto operativo',
+                    style: GoogleFonts.poppins(
+                      color: _setupTextHigh,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          ..._selectedCurrencies.map((currency) {
-            final methods = _selectedPaymentsForCurrency(currency).toList();
-            final isReady = _isCurrencyCheckoutConfigured(currency);
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF120E25),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF3B2F63)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${_currencyLabel(currency)} ($currency)',
-                            style: const TextStyle(
-                              color: _setupTextHigh,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            methods.isEmpty
-                                ? 'Sin metodos seleccionados'
-                                : methods.map(_paymentMethodLabel).join(' / '),
-                            style: const TextStyle(
-                              color: _setupTextMedium,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isReady
-                            ? const Color(0xFF153222)
-                            : const Color(0xFF32151D),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        isReady ? 'Completa' : 'Pendiente',
-                        style: TextStyle(
-                          color: isReady
-                              ? const Color(0xFFA7F3D0)
-                              : const Color(0xFFFFD1DC),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'WhatsApp: ${_whatsappE164.isEmpty ? 'No configurado' : _whatsappE164}',
+                    style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Direccion: ${_addressController.text.trim().isEmpty ? 'No configurada' : _addressController.text.trim()}',
+                    style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                  ),
+                ],
               ),
-            );
-          }),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 240,
-            child: Container(
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
               decoration: BoxDecoration(
                 color: _palette.surface,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _palette.primary.withValues(alpha: 0.45),
+                ),
               ),
               padding: const EdgeInsets.all(14),
               child: Column(
@@ -6015,67 +5879,132 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   Row(
                     children: [
                       Container(
-                        width: 30,
-                        height: 30,
+                        width: 34,
+                        height: 34,
                         decoration: BoxDecoration(
-                          color: _palette.primary.withValues(alpha: 0.22),
-                          borderRadius: BorderRadius.circular(8),
+                          color: _palette.primary.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         child: Icon(
-                          Icons.menu_book_rounded,
+                          Icons.mobile_friendly_rounded,
                           color: _palette.primary,
                           size: 18,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Vista previa',
-                        style: GoogleFonts.poppins(
-                          color: _palette.text,
-                          fontWeight: FontWeight.w700,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Preview aproximado del menu publico',
+                          style: GoogleFonts.poppins(
+                            color: previewTextColor,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Expanded(
-                    child: GridView.count(
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 8,
-                      crossAxisSpacing: 8,
-                      childAspectRatio: 1.18,
-                      physics: const NeverScrollableScrollPhysics(),
-                      children: List.generate(4, (index) {
-                        return Container(
-                          decoration: BoxDecoration(
-                            color: _palette.primary.withValues(alpha: 0.16),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: _palette.primary.withValues(alpha: 0.38),
-                            ),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _nameController.text.trim().isEmpty
+                              ? 'Tu menu'
+                              : _nameController.text.trim(),
+                          style: _headingFontStyle(
+                            color: previewTextColor,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
                           ),
-                        );
-                      }),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _PreviewChip(
+                              label: _selectedCategory,
+                              textColor: previewTextColor,
+                            ),
+                            _PreviewChip(
+                              label: _layouts
+                                  .firstWhere(
+                                    (item) => item.id == _selectedLayoutId,
+                                  )
+                                  .name,
+                              textColor: previewTextColor,
+                            ),
+                            _PreviewChip(
+                              label: _selectedCurrencies.join(' + '),
+                              textColor: previewTextColor,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        ...featuredItems.map((item) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.11),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    item['name']!,
+                                    style: TextStyle(
+                                      color: previewTextColor,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  item['price']!,
+                                  style: TextStyle(
+                                    color: previewMutedColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.tonalIcon(
-              onPressed: _openDraftPreview,
-              icon: const Icon(Icons.open_in_browser_rounded),
-              label: const Text('Ver preview real'),
-              style: FilledButton.styleFrom(
-                foregroundColor: const Color(0xFFF8F5FF),
-                backgroundColor: const Color(0xFF2D2152),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                onPressed: _openDraftPreview,
+                icon: const Icon(Icons.open_in_browser_rounded),
+                label: const Text('Ver preview real'),
+                style: FilledButton.styleFrom(
+                  foregroundColor: const Color(0xFFF8F5FF),
+                  backgroundColor: const Color(0xFF2D2152),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -6822,6 +6751,32 @@ class _SummaryTag extends StatelessWidget {
         style: const TextStyle(
           color: _setupTextHigh,
           fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _PreviewChip extends StatelessWidget {
+  const _PreviewChip({required this.label, required this.textColor});
+
+  final String label;
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
       ),
