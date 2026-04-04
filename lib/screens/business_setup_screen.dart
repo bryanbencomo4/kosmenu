@@ -27,9 +27,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 
 class BusinessSetupScreen extends StatefulWidget {
-  const BusinessSetupScreen({super.key, this.initialComercio});
+  const BusinessSetupScreen({
+    super.key,
+    this.initialComercio,
+    this.businessConfigOnly = false,
+  });
 
   final ComercioModel? initialComercio;
+  final bool businessConfigOnly;
 
   @override
   State<BusinessSetupScreen> createState() => _BusinessSetupScreenState();
@@ -254,6 +259,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _showDraftRecoveredHint = false;
 
   bool get _isEditing => _editingComercioId != null;
+
+  List<_SetupStep> get _activeSteps =>
+      widget.businessConfigOnly
+      ? const <_SetupStep>[
+          _SetupStep.identity,
+          _SetupStep.style,
+          _SetupStep.checkout,
+          _SetupStep.operation,
+        ]
+      : _SetupStep.values;
+
+  int get _currentStepFlowIndex {
+    final index = _activeSteps.indexOf(_step);
+    return index < 0 ? 0 : index;
+  }
+
+  bool get _isLastStepInFlow => _currentStepFlowIndex == _activeSteps.length - 1;
+
+  void _ensureCurrentStepInFlow() {
+    if (_activeSteps.contains(_step)) {
+      return;
+    }
+    _step = _activeSteps.first;
+  }
 
   bool get _hasMenuSetupCompleted =>
       _menuScanCompleted || _menuCatalogCount > 0;
@@ -627,6 +656,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           stepIndex >= 0 &&
           stepIndex < _SetupStep.values.length) {
         _step = _SetupStep.values[stepIndex];
+        _ensureCurrentStepInFlow();
       }
 
       _nameController.text = (map['name'] as String? ?? '').trim();
@@ -2941,6 +2971,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _nextStep() async {
+    _ensureCurrentStepInFlow();
+
     if (_step == _SetupStep.checkout) {
       _syncActiveCurrencyDataFromController();
     }
@@ -2990,7 +3022,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     }
 
-    if (_step == _SetupStep.scan && !_hasMenuSetupCompleted) {
+    if (!widget.businessConfigOnly &&
+        _step == _SetupStep.scan &&
+        !_hasMenuSetupCompleted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Completa el escaneo o elige creacion manual antes de continuar.'),
@@ -2999,12 +3033,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (_step == _SetupStep.finish) {
+    if (_isLastStepInFlow) {
       await _saveBusiness();
       return;
     }
 
-    final nextStep = _SetupStep.values[_step.index + 1];
+    final nextStep = _activeSteps[_currentStepFlowIndex + 1];
     setState(() {
       _step = nextStep;
     });
@@ -4069,12 +4103,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   void _previousStep() {
-    if (_step == _SetupStep.identity) {
+    _ensureCurrentStepInFlow();
+    if (_currentStepFlowIndex == 0) {
       return;
     }
 
     setState(() {
-      _step = _SetupStep.values[_step.index - 1];
+      _step = _activeSteps[_currentStepFlowIndex - 1];
     });
     unawaited(_saveDraft());
   }
@@ -4246,7 +4281,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (!_hasMenuSetupCompleted) {
+    if (!widget.businessConfigOnly && !_hasMenuSetupCompleted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -4353,6 +4388,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       const SnackBar(content: Text('Configuracion guardada correctamente.')),
     );
 
+    if (widget.businessConfigOnly) {
+      Navigator.of(context).pop(true);
+      return;
+    }
+
     await Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
       (route) => false,
@@ -4365,7 +4405,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final progress = (_step.index + 1) / _SetupStep.values.length;
+    _ensureCurrentStepInFlow();
+    final progress = (_currentStepFlowIndex + 1) / _activeSteps.length;
     final localTheme = Theme.of(context).copyWith(
       textTheme: Theme.of(context).textTheme.apply(
         bodyColor: _setupTextHigh,
@@ -4392,7 +4433,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             fontSize: 28,
             fontWeight: FontWeight.w700,
           ),
-          title: Text(_isEditing ? 'Editar menu' : 'Crear menu'),
+          title: Text(
+            widget.businessConfigOnly
+                ? 'Configuración del negocio'
+                : (_isEditing ? 'Editar menu' : 'Crear menu'),
+          ),
         ),
         body: SafeArea(
           child: LayoutBuilder(
@@ -4408,7 +4453,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-                    child: _StepPills(step: _step),
+                    child: _StepPills(step: _step, steps: _activeSteps),
                   ),
                   if (_showDraftRecoveredHint)
                     Padding(
@@ -4460,7 +4505,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: _step == _SetupStep.identity
+                            onPressed: _currentStepFlowIndex == 0
                                 ? null
                                 : _previousStep,
                             style: OutlinedButton.styleFrom(
@@ -4484,8 +4529,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                             child: Text(
                               _saving
                                   ? 'Guardando...'
-                                  : _step == _SetupStep.finish
-                                  ? (_isEditing ? 'Guardar' : 'Crear menu')
+                                  : _isLastStepInFlow
+                                  ? (widget.businessConfigOnly
+                                        ? 'Guardar cambios'
+                                        : (_isEditing ? 'Guardar' : 'Crear menu'))
                                   : 'Continuar',
                             ),
                           ),
@@ -6240,9 +6287,10 @@ class _MenuPreviewNavbar extends StatelessWidget {
 }
 
 class _StepPills extends StatelessWidget {
-  const _StepPills({required this.step});
+  const _StepPills({required this.step, required this.steps});
 
   final _SetupStep step;
+  final List<_SetupStep> steps;
 
   static const List<String> _labels = <String>[
     'Marca',
@@ -6264,13 +6312,15 @@ class _StepPills extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeIndex = step.index;
+    final activeIndex = steps.indexOf(step) < 0 ? 0 : steps.indexOf(step);
+    final labels = steps.map((value) => _labels[value.index]).toList();
+    final icons = steps.map((value) => _icons[value.index]).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          children: List.generate(_labels.length * 2 - 1, (slotIndex) {
+          children: List.generate(labels.length * 2 - 1, (slotIndex) {
             if (slotIndex.isOdd) {
               final connectorIndex = (slotIndex - 1) ~/ 2;
               final done = connectorIndex < activeIndex;
@@ -6305,7 +6355,7 @@ class _StepPills extends StatelessWidget {
                 ),
               ),
               child: Icon(
-                done ? Icons.check_rounded : _icons[index],
+                done ? Icons.check_rounded : icons[index],
                 size: 18,
                 color: _setupTextHigh,
               ),
@@ -6314,7 +6364,7 @@ class _StepPills extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          _labels[activeIndex],
+          labels[activeIndex],
           style: GoogleFonts.poppins(
             color: _setupTextHigh,
             fontSize: 14,

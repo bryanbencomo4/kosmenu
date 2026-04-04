@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
@@ -614,68 +615,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _editBusinessInfo(ComercioModel comercio) async {
-    final nameController = TextEditingController(text: comercio.nombre);
-    final whatsappController = TextEditingController(
-      text: comercio.whatsapp ?? '',
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BusinessSetupScreen(
+          initialComercio: comercio,
+          businessConfigOnly: true,
+        ),
+      ),
     );
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Editar negocio'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: 'Nombre'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: whatsappController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'WhatsApp'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Guardar'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) {
-      nameController.dispose();
-      whatsappController.dispose();
-      return;
-    }
-
-    try {
-      await Supabase.instance.client
-          .from('comercios')
-          .update({
-            'nombre': nameController.text.trim(),
-            'whatsapp': whatsappController.text.trim(),
-          })
-          .eq('id', SupabaseConfig.currentComercioId);
-
-      await _refreshDashboard();
-    } catch (error) {
-      if (!mounted) return;
-      _showInfo('No se pudo guardar la configuración: $error');
-    } finally {
-      nameController.dispose();
-      whatsappController.dispose();
-    }
+    if (!mounted) return;
+    await _refreshDashboard();
   }
 
   Future<void> _updateBusinessOnline(bool value) async {
@@ -1689,49 +1638,183 @@ class _BusinessSettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final whatsappLabel = (comercio.whatsapp ?? '').trim().isEmpty
+        ? 'Sin configurar'
+        : comercio.whatsapp!.trim();
+    final slugLabel = (comercio.slug ?? '').trim().isEmpty
+        ? 'Sin slug'
+        : '@${comercio.slug!.trim()}';
+
     return Card(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _SectionTitle(title: 'Configuración del negocio'),
-            const SizedBox(height: 6),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.storefront_rounded),
-              title: Text(
-                comercio.nombre,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    colorScheme.primaryContainer,
+                    colorScheme.surfaceContainerHighest,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(14),
               ),
-              subtitle: Text(
-                (comercio.whatsapp ?? '').trim().isEmpty
-                    ? 'Sin WhatsApp configurado'
-                    : 'WhatsApp: ${comercio.whatsapp}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.settings_outlined,
+                      color: colorScheme.primary,
+                      size: 19,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Configuración del negocio',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          'Ajusta datos públicos y estado operativo',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11.5,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              trailing: TextButton.icon(
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonalIcon(
                 onPressed: onEditInfo,
-                icon: const Icon(Icons.edit_outlined, size: 16),
+                icon: const Icon(Icons.tune_rounded, size: 16),
                 label: const Text('Editar'),
               ),
             ),
-            const Divider(),
+            const SizedBox(height: 10),
+            _BusinessInfoLine(
+              icon: Icons.storefront_rounded,
+              label: 'Nombre',
+              value: comercio.nombre,
+            ),
+            const SizedBox(height: 8),
+            _BusinessInfoLine(
+              icon: Icons.phone_in_talk_outlined,
+              label: 'WhatsApp',
+              value: whatsappLabel,
+            ),
+            const SizedBox(height: 8),
+            _BusinessInfoLine(
+              icon: Icons.alternate_email_rounded,
+              label: 'Slug',
+              value: slugLabel,
+            ),
+            const SizedBox(height: 8),
             SwitchListTile.adaptive(
               value: businessOnline,
               onChanged: isUpdatingBusinessOnline ? null : onToggleOnline,
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Negocio en línea'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+              title: Text(
+                businessOnline ? 'Negocio en línea' : 'Negocio pausado',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+              ),
               subtitle: Text(
                 businessOnline
                     ? 'Aceptando pedidos de clientes.'
                     : 'Temporalmente pausado para nuevos pedidos.',
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              secondary: Icon(
+                businessOnline
+                    ? Icons.wifi_tethering_rounded
+                    : Icons.wifi_tethering_off_rounded,
+                size: 18,
+                color: businessOnline
+                    ? const Color(0xFF16A34A)
+                    : const Color(0xFFE11D48),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _BusinessInfoLine extends StatelessWidget {
+  const _BusinessInfoLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 17, color: colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$label: $value',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
