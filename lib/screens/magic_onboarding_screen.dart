@@ -36,9 +36,13 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     with SingleTickerProviderStateMixin {
   final ImagePicker _picker = ImagePicker();
   final StorageService _storageService = const StorageService();
+  static const String _defaultCatalogName = 'Menu principal';
 
   late final AnimationController _entryController;
   bool _isLaunchingScan = false;
+  String _scanProgressMessage = '';
+  double _scanProgressValue = 0;
+  int _capturedPages = 0;
 
   @override
   void initState() {
@@ -72,79 +76,169 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
           style: textTheme.titleLarge,
         ),
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            child: SafeArea(
-              top: false,
-              bottom: false,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                children: [
-                  _AnimatedReveal(
-                    animation: CurvedAnimation(
-                      parent: _entryController,
-                      curve: const Interval(0, 0.55, curve: Curves.easeOutCubic),
-                    ),
-                    child: _HeaderCard(),
-                  ),
-                  const SizedBox(height: 16),
-                  _AnimatedReveal(
-                    animation: CurvedAnimation(
-                      parent: _entryController,
-                      curve: const Interval(0.15, 0.75, curve: Curves.easeOutCubic),
-                    ),
-                    child: _InfographicCard(animation: _entryController),
-                  ),
-                  const SizedBox(height: 16),
-                  _AnimatedReveal(
-                    animation: CurvedAnimation(
-                      parent: _entryController,
-                      curve: const Interval(0.3, 0.9, curve: Curves.easeOutCubic),
-                    ),
-                    child: _AiNoteCard(),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SafeArea(
-            top: false,
-            bottom: true,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
-              child: _AnimatedReveal(
-                animation: CurvedAnimation(
-                  parent: _entryController,
-                  curve: const Interval(0.45, 1, curve: Curves.easeOutCubic),
-                ),
-                child: FilledButton.icon(
-                  onPressed: _isLaunchingScan ? null : _startScanFlow,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.accent,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(54),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  icon: Icon(
-                    _isLaunchingScan
-                        ? Icons.hourglass_top_rounded
-                        : Icons.check_circle_rounded,
-                  ),
-                  label: Text(
-                    _isLaunchingScan ? 'Abriendo camara...' : 'Entendido',
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                    ),
+          Column(
+            children: [
+              Expanded(
+                child: SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                    children: [
+                      _AnimatedReveal(
+                        animation: CurvedAnimation(
+                          parent: _entryController,
+                          curve: const Interval(0, 0.55, curve: Curves.easeOutCubic),
+                        ),
+                        child: _HeaderCard(),
+                      ),
+                      const SizedBox(height: 16),
+                      _AnimatedReveal(
+                        animation: CurvedAnimation(
+                          parent: _entryController,
+                          curve: const Interval(0.15, 0.75, curve: Curves.easeOutCubic),
+                        ),
+                        child: _InfographicCard(animation: _entryController),
+                      ),
+                      const SizedBox(height: 16),
+                      _AnimatedReveal(
+                        animation: CurvedAnimation(
+                          parent: _entryController,
+                          curve: const Interval(0.3, 0.9, curve: Curves.easeOutCubic),
+                        ),
+                        child: _AiNoteCard(),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
+              SafeArea(
+                top: false,
+                bottom: true,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+                  child: _AnimatedReveal(
+                    animation: CurvedAnimation(
+                      parent: _entryController,
+                      curve: const Interval(0.45, 1, curve: Curves.easeOutCubic),
+                    ),
+                    child: FilledButton.icon(
+                      onPressed: _isLaunchingScan ? null : _startScanFlow,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(54),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      icon: Icon(
+                        _isLaunchingScan
+                            ? Icons.hourglass_top_rounded
+                            : Icons.check_circle_rounded,
+                      ),
+                      label: Text(
+                        'Entendido',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
+          if (_isLaunchingScan) _buildFullscreenProgressOverlay(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFullscreenProgressOverlay() {
+    return Positioned.fill(
+      child: SafeArea(
+        child: Container(
+          color: AppColors.canvas.withValues(alpha: 0.96),
+          padding: const EdgeInsets.all(20),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.borderSubtle),
+                  boxShadow: AppTheme.softShadow,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2.2),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'La IA esta trabajando',
+                            style: GoogleFonts.manrope(
+                              color: AppColors.textStrong,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _scanProgressMessage.isEmpty
+                          ? 'Preparando escaneo con IA...'
+                          : _scanProgressMessage,
+                      style: GoogleFonts.poppins(
+                        color: AppColors.textStrong,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        minHeight: 8,
+                        value: _scanProgressValue.clamp(0.0, 1.0),
+                        backgroundColor: AppColors.accentSoft,
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          AppColors.accent,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _capturedPages > 0
+                          ? 'Paginas en proceso: $_capturedPages'
+                          : 'Preparando captura...',
+                      style: GoogleFonts.poppins(
+                        color: AppColors.textSoft,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -170,51 +264,129 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     setState(() => _isLaunchingScan = true);
 
     try {
-      final image = await _picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 90,
+      _setProgress(
+        value: 0.02,
+        message: 'Abriendo camara para capturar la primera pagina...',
       );
+
+      final images = await _captureMenuPages();
 
       if (!mounted) {
         return;
       }
 
-      if (image == null) {
+      if (images.isEmpty) {
         setState(() => _isLaunchingScan = false);
         return;
       }
 
+      _setProgress(
+        value: 0.04,
+        message: 'Revisa, ordena o elimina paginas antes de procesar.',
+      );
+
+      final reviewedImages = await _reviewCapturedPages(images);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (reviewedImages.isEmpty) {
+        setState(() => _isLaunchingScan = false);
+        return;
+      }
+
+      _capturedPages = reviewedImages.length;
+      _setProgress(
+        value: 0.06,
+        message: 'Se confirmaron ${reviewedImages.length} pagina(s). Iniciando analisis con IA...',
+      );
+
       final supabase = Supabase.instance.client;
+      String catalogId = '';
+      String catalogName = _defaultCatalogName;
+      bool isNewCatalog = false;
+      int totalCreatedCategories = 0;
+      int totalCreatedProducts = 0;
+      final detectedCategoryNames = <String>{};
 
-      final upload = await _storageService.uploadMenuScan(
-        imageFile: File(image.path),
-        comercioId: comercioId,
-      );
-      final imageUrl = supabase.storage.from('menu-scans').getPublicUrl(upload.path);
+      for (var i = 0; i < reviewedImages.length; i++) {
+        final pageNumber = i + 1;
+        final totalPages = reviewedImages.length;
+        final pageStart = i / totalPages;
 
-      final response = await supabase.functions.invoke(
-        'process-menu-gemini',
-        body: {
-          'image_url': imageUrl,
-          'comercio_id': comercioId,
-          'catalog_name': 'Menu principal',
-        },
-        headers: {
-          'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
-          'apikey': SupabaseConfig.anonKey,
-        },
-      );
+        _setProgress(
+          value: 0.08 + (pageStart * 0.84),
+          message: 'Subiendo pagina $pageNumber de $totalPages...',
+        );
 
-      final data = _responseMap(response.data);
-      if (response.status < 200 || response.status >= 300) {
-        throw StateError(
-          'Error al procesar menu (status ${response.status}): ${data['error'] ?? 'sin detalle'}.',
+        final upload = await _storageService.uploadMenuScan(
+          imageFile: File(reviewedImages[i].path),
+          comercioId: comercioId,
+        );
+        final imageUrl = supabase.storage.from('menu-scans').getPublicUrl(upload.path);
+
+        _setProgress(
+          value: 0.1 + (pageStart * 0.84) + (0.25 / totalPages),
+          message: 'IA analizando pagina $pageNumber de $totalPages...',
+        );
+
+        final response = await supabase.functions.invoke(
+          'process-menu-gemini',
+          body: {
+            'image_url': imageUrl,
+            'comercio_id': comercioId,
+            'catalog_name': catalogName,
+          },
+          headers: {
+            'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+            'apikey': SupabaseConfig.anonKey,
+          },
+        );
+
+        final data = _responseMap(response.data);
+        if (response.status < 200 || response.status >= 300) {
+          throw StateError(
+            'Error al procesar la pagina $pageNumber (status ${response.status}): ${data['error'] ?? 'sin detalle'}.',
+          );
+        }
+
+        final returnedCatalogId = data['catalog_id']?.toString().trim() ?? '';
+        if (catalogId.isEmpty && returnedCatalogId.isNotEmpty) {
+          catalogId = returnedCatalogId;
+        }
+
+        final returnedCatalogName = data['catalog_name']?.toString().trim() ?? '';
+        if (returnedCatalogName.isNotEmpty) {
+          catalogName = returnedCatalogName;
+        }
+
+        isNewCatalog = isNewCatalog || data['catalog_created'] == true;
+        totalCreatedCategories += _asInt(data['created_categories']);
+        totalCreatedProducts += _asInt(data['created_products']);
+        detectedCategoryNames.addAll(_extractCategoryNames(data['parsed_menu']));
+
+        _setProgress(
+          value: 0.1 + (((i + 1) / totalPages) * 0.84),
+          message: 'Pagina $pageNumber procesada.',
         );
       }
 
-      final catalogName = (data['catalog_name']?.toString().trim().isNotEmpty ?? false)
-          ? data['catalog_name'].toString().trim()
-          : 'Menu principal';
+      _setProgress(
+        value: 0.95,
+        message: 'Uniendo paginas y eliminando productos repetidos...',
+      );
+
+      final dedupedCount = await _dedupeCatalogProducts(
+        comercioId: comercioId,
+        catalogId: catalogId,
+      );
+      totalCreatedProducts = (totalCreatedProducts - dedupedCount).clamp(
+        0,
+        1 << 31,
+      );
+
+      _setProgress(value: 1, message: 'Listo. Menu consolidado correctamente.');
 
       if (!mounted) {
         return;
@@ -223,16 +395,16 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       Navigator.of(context).pop(
         MagicOnboardingResult(
           catalog: CatalogModel(
-            id: data['catalog_id']?.toString() ?? '',
+            id: catalogId,
             comercioId: comercioId,
             nombre: catalogName,
-            orden: _asInt(data['catalog_order']),
-            activo: data['catalog_active'] is bool ? data['catalog_active'] as bool : true,
+            orden: 0,
+            activo: true,
           ),
-          createdCategories: _asInt(data['created_categories']),
-          createdProducts: _asInt(data['created_products']),
-          detectedCategoryNames: _extractCategoryNames(data['parsed_menu']),
-          isNewCatalog: data['catalog_created'] == true,
+          createdCategories: totalCreatedCategories,
+          createdProducts: totalCreatedProducts,
+          detectedCategoryNames: detectedCategoryNames.toList(),
+          isNewCatalog: isNewCatalog,
         ),
       );
     } catch (error) {
@@ -248,6 +420,282 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
         ),
       );
     }
+  }
+
+  Future<List<XFile>> _captureMenuPages() async {
+    final image = await _picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 90,
+    );
+    if (image == null) {
+      return <XFile>[];
+    }
+    return <XFile>[image];
+  }
+
+  Future<List<XFile>> _reviewCapturedPages(List<XFile> pages) async {
+    final result = await showModalBottomSheet<List<XFile>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.canvas,
+      builder: (context) {
+        final working = List<XFile>.from(pages);
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SizedBox(
+              height: MediaQuery.of(context).size.height * 0.82,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Revisa las paginas capturadas',
+                            style: GoogleFonts.manrope(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textStrong,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(<XFile>[]),
+                          child: const Text('Cancelar'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Puedes arrastrar para reordenar o eliminar paginas borrosas antes del analisis IA.',
+                            style: GoogleFonts.poppins(
+                              color: AppColors.textSoft,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final newImage = await _picker.pickImage(
+                              source: ImageSource.camera,
+                              imageQuality: 90,
+                            );
+                            if (newImage == null) {
+                              return;
+                            }
+                            setModalState(() => working.add(newImage));
+                          },
+                          icon: const Icon(Icons.add_a_photo_rounded, size: 18),
+                          label: const Text('Tomar otra'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 40),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Text(
+                      'Paginas: ${working.length}',
+                      style: GoogleFonts.poppins(
+                        color: AppColors.textSoft,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ReorderableListView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                      itemCount: working.length,
+                      onReorder: (oldIndex, newIndex) {
+                        setModalState(() {
+                          if (newIndex > oldIndex) {
+                            newIndex -= 1;
+                          }
+                          final moved = working.removeAt(oldIndex);
+                          working.insert(newIndex, moved);
+                        });
+                      },
+                      itemBuilder: (context, index) {
+                        final image = working[index];
+                        return Container(
+                          key: ValueKey(image.path),
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.borderSubtle),
+                          ),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  File(image.path),
+                                  width: 62,
+                                  height: 62,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Pagina ${index + 1}',
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textStrong,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Eliminar pagina',
+                                onPressed: () {
+                                  setModalState(() => working.removeAt(index));
+                                },
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: AppColors.danger,
+                                ),
+                              ),
+                              const Icon(
+                                Icons.drag_handle_rounded,
+                                color: AppColors.textSoft,
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: FilledButton.icon(
+                        onPressed: working.isEmpty
+                            ? null
+                            : () => Navigator.of(context).pop(
+                                  List<XFile>.from(working),
+                                ),
+                        icon: const Icon(Icons.check_circle_rounded),
+                        label: Text(
+                          working.isEmpty
+                              ? 'Agrega al menos 1 pagina'
+                              : 'Procesar ${working.length} pagina(s)',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    return result ?? <XFile>[];
+  }
+
+  Future<int> _dedupeCatalogProducts({
+    required String comercioId,
+    required String catalogId,
+  }) async {
+    if (catalogId.trim().isEmpty) {
+      return 0;
+    }
+
+    final supabase = Supabase.instance.client;
+    final categoryRows = await supabase
+        .from('categorias')
+        .select('id')
+        .eq('comercio_id', comercioId)
+        .eq('catalogo_id', catalogId);
+
+    final categoryIds = (categoryRows as List<dynamic>)
+        .map((row) => row is Map ? row['id']?.toString() ?? '' : '')
+        .where((id) => id.isNotEmpty)
+        .toList();
+
+    if (categoryIds.isEmpty) {
+      return 0;
+    }
+
+    final productRows = await supabase
+        .from('productos')
+        .select('id,nombre,precio,categoria_id')
+        .eq('comercio_id', comercioId)
+        .inFilter('categoria_id', categoryIds);
+
+    final seen = <String>{};
+    final duplicateIds = <String>[];
+
+    for (final row in (productRows as List<dynamic>)) {
+      if (row is! Map) {
+        continue;
+      }
+      final id = row['id']?.toString() ?? '';
+      if (id.isEmpty) {
+        continue;
+      }
+
+      final rawName = row['nombre']?.toString().trim().toLowerCase() ?? '';
+      final normalizedName = rawName.replaceAll(RegExp(r'\s+'), ' ');
+      final price = _asDouble(row['precio']);
+      final categoryId = row['categoria_id']?.toString().trim() ?? '';
+      final key = '$categoryId|$normalizedName|${price.toStringAsFixed(2)}';
+
+      if (!seen.add(key)) {
+        duplicateIds.add(id);
+      }
+    }
+
+    for (var i = 0; i < duplicateIds.length; i += 100) {
+      final end = (i + 100 < duplicateIds.length) ? i + 100 : duplicateIds.length;
+      final chunk = duplicateIds.sublist(i, end);
+      if (chunk.isEmpty) {
+        continue;
+      }
+
+      await supabase.from('productos').delete().inFilter('id', chunk);
+    }
+
+    return duplicateIds.length;
+  }
+
+  double _asDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is num) return value.toDouble();
+    return double.tryParse('${value ?? ''}') ?? 0;
+  }
+
+  void _setProgress({required double value, required String message}) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _scanProgressValue = value.clamp(0.0, 1.0);
+      _scanProgressMessage = message;
+    });
   }
 
   Map<String, dynamic> _responseMap(dynamic value) {
