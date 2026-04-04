@@ -28,6 +28,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   StreamSubscription<List<PedidoModel>>? _ordersSubscription;
   final TextEditingController _ordersSearchController = TextEditingController();
+    final TextEditingController _manualOrderEmailController =
+      TextEditingController();
+    final TextEditingController _manualOrderTotalController =
+      TextEditingController();
+    final TextEditingController _manualOrderNotesController =
+      TextEditingController();
+    final TextEditingController _manualOrderPaymentController =
+      TextEditingController();
 
   _OrderFilter _orderFilter = _OrderFilter.all;
   String _ordersSearchQuery = '';
@@ -57,6 +65,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void dispose() {
     _ordersSubscription?.cancel();
     _ordersSearchController.dispose();
+    _manualOrderEmailController.dispose();
+    _manualOrderTotalController.dispose();
+    _manualOrderNotesController.dispose();
+    _manualOrderPaymentController.dispose();
     _recentCatalogTimer?.cancel();
     super.dispose();
   }
@@ -413,6 +425,194 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
+  String _generateManualOrderCode() {
+    final now = DateTime.now();
+    final seed = now.microsecondsSinceEpoch.toString();
+    final suffix = seed.substring(seed.length - 6);
+    return 'MAN-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-$suffix';
+  }
+
+  Future<void> _openCreateManualOrderSheet() async {
+    if (!_hasComercioId) {
+      _showInfo('No hay comercio configurado para crear pedidos.');
+      return;
+    }
+
+    _manualOrderEmailController.clear();
+    _manualOrderTotalController.clear();
+    _manualOrderNotesController.clear();
+    _manualOrderPaymentController.text = 'Efectivo';
+    var isSaving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      showDragHandle: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              top: false,
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                ),
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    6,
+                    16,
+                    16 + MediaQuery.of(context).viewPadding.bottom,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Crear pedido manual',
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _manualOrderTotalController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Total',
+                          hintText: 'Ej: 120000 o 25.50',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _manualOrderPaymentController,
+                        decoration: const InputDecoration(
+                          labelText: 'Metodo de pago',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _manualOrderEmailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email cliente (opcional)',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _manualOrderNotesController,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Notas internas (opcional)',
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: isSaving
+                                  ? null
+                                  : () => Navigator.of(context).pop(),
+                              child: const Text('Cancelar'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: isSaving
+                                  ? null
+                                  : () async {
+                                      final totalValue = double.tryParse(
+                                        _manualOrderTotalController.text
+                                            .trim()
+                                            .replaceAll(',', '.'),
+                                      );
+                                      if (totalValue == null || totalValue <= 0) {
+                                        _showInfo('Ingresa un total valido mayor a 0.');
+                                        return;
+                                      }
+
+                                      final orderCode = _generateManualOrderCode();
+                                        final email =
+                                          _manualOrderEmailController.text.trim();
+                                        final method = _manualOrderPaymentController
+                                            .text
+                                            .trim()
+                                            .isEmpty
+                                          ? 'Efectivo'
+                                          : _manualOrderPaymentController.text
+                                            .trim();
+
+                                      setModalState(() => isSaving = true);
+                                      try {
+                                        final payload = <String, dynamic>{
+                                          'comercio_id': SupabaseConfig.currentComercioId,
+                                          'estado': 'pendiente',
+                                          'total': totalValue,
+                                          'order_id': orderCode,
+                                          if (email.isNotEmpty) 'cliente_email': email,
+                                          'detalles': {
+                                            'order_id': orderCode,
+                                            if (email.isNotEmpty)
+                                              'cliente_email': email,
+                                            'metodo_pago': method,
+                                            'origen': 'manual_dashboard',
+                                            if (_manualOrderNotesController.text
+                                                .trim()
+                                                .isNotEmpty)
+                                              'notas': _manualOrderNotesController
+                                                  .text
+                                                  .trim(),
+                                            'items': const <Map<String, dynamic>>[],
+                                            'total': totalValue,
+                                          },
+                                        };
+
+                                        await Supabase.instance.client
+                                            .from('pedidos')
+                                            .insert(payload);
+
+                                        if (!context.mounted || !mounted) return;
+                                        Navigator.of(context).pop();
+                                        _showInfo('Pedido manual creado: $orderCode');
+                                        await _refreshDashboard();
+                                      } catch (error) {
+                                        if (!mounted) return;
+                                        _showInfo('No se pudo crear el pedido: $error');
+                                        if (context.mounted) {
+                                          setModalState(() => isSaving = false);
+                                        }
+                                      }
+                                    },
+                              icon: const Icon(Icons.add_task_rounded),
+                              label: Text(
+                                isSaving ? 'Guardando...' : 'Crear pedido',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _editBusinessInfo(ComercioModel comercio) async {
     final nameController = TextEditingController(text: comercio.nombre);
     final whatsappController = TextEditingController(
@@ -669,9 +869,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openMagicOnboarding,
-        icon: const Icon(Icons.camera_alt_rounded),
-        label: const Text('Escanear menú'),
+        onPressed: _openCreateManualOrderSheet,
+        icon: const Icon(Icons.receipt_long_rounded),
+        label: const Text('Crear pedido'),
       ),
       body: SafeArea(
         child: FutureBuilder<_DashboardSnapshot>(

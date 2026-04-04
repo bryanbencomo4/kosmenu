@@ -306,6 +306,23 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       String catalogId = '';
       String catalogName = _defaultCatalogName;
       bool isNewCatalog = false;
+      final existingCatalogRow = await supabase
+          .from('catalogos')
+          .select('id,nombre')
+          .eq('comercio_id', comercioId)
+          .order('orden', ascending: true)
+          .order('created_at', ascending: true)
+          .limit(1)
+          .maybeSingle();
+      final existing = existingCatalogRow ?? const <String, dynamic>{};
+      final existingId = existing['id']?.toString().trim() ?? '';
+      final existingName = existing['nombre']?.toString().trim() ?? '';
+      if (existingId.isNotEmpty) {
+        catalogId = existingId;
+      }
+      if (existingName.isNotEmpty) {
+        catalogName = existingName;
+      }
       int totalCreatedCategories = 0;
       int totalCreatedProducts = 0;
       final detectedCategoryNames = <String>{};

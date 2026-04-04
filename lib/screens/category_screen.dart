@@ -29,6 +29,8 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
   bool _isMutating = false;
   List<CatalogModel> _catalogs = <CatalogModel>[];
 
+  bool get _canCreateCatalog => _catalogs.isEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -128,6 +130,17 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
 
   Future<void> _createCatalog() async {
     if (_isMutating) return;
+    if (!_canCreateCatalog) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Por ahora solo se permite 1 catalogo por negocio.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final name = await _showNameDialog(title: 'Nuevo Catálogo');
     if (!mounted || name == null || name.isEmpty) return;
 
@@ -253,11 +266,15 @@ class _CatalogListScreenState extends State<CatalogListScreen> {
         title: const Text('Gestión de Catálogos'),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: (_loading || _isMutating) ? null : _createCatalog,
+        onPressed: (_loading || _isMutating || !_canCreateCatalog)
+            ? null
+            : _createCatalog,
         backgroundColor: const Color(0xFF1AB15E),
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Nuevo Catálogo'),
+        icon: Icon(_canCreateCatalog ? Icons.add : Icons.block_rounded),
+        label: Text(
+          _canCreateCatalog ? 'Nuevo Catálogo' : '1 catálogo activo',
+        ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
