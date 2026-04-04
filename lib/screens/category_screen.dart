@@ -624,7 +624,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   bool _isMutating = false;
   List<CategoryModel> _categories = <CategoryModel>[];
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
+  bool _showAppBarSearch = false;
+  double _headerCollapse = 0;
   Map<String, int> _productCountByCategory = <String, int>{};
 
   String get _currentCatalogoId => widget.catalog.id.trim();
@@ -632,11 +635,23 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _loadCategories();
+  }
+
+  void _onScroll() {
+    final next =
+        (_scrollController.hasClients ? (_scrollController.offset / 140) : 0.0)
+            .clamp(0.0, 1.0);
+    if ((next - _headerCollapse).abs() < 0.02 || !mounted) return;
+    setState(() => _headerCollapse = next);
   }
 
   @override
   void dispose() {
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -1001,6 +1016,20 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     await _loadCategories();
   }
 
+  void _toggleAppBarSearch() {
+    if (!mounted) return;
+    if (_showAppBarSearch) {
+      _searchController.clear();
+      setState(() {
+        _showAppBarSearch = false;
+        _searchQuery = '';
+      });
+      return;
+    }
+
+    setState(() => _showAppBarSearch = true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -1010,6 +1039,11 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       (sum, count) => sum + count,
     );
     final activeCategories = _categories.where((item) => item.activo).length;
+    final headerScale = (1 - (_headerCollapse * 0.2)).clamp(0.82, 1.0);
+    final headerOpacity = (1 - (_headerCollapse * 1.45)).clamp(0.0, 1.0);
+    final headerHeightFactor = (1 - (_headerCollapse * 1.4)).clamp(0.0, 1.0);
+    final showCompactHeader = _headerCollapse > 0.86;
+
     if (_loading) {
       return const BrandedLoadingScreen(withScaffold: true);
     }
@@ -1024,11 +1058,39 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           fontSize: 22,
           fontWeight: FontWeight.w800,
         ),
-        title: Text(
-          widget.catalog.nombre,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: _showAppBarSearch
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                onChanged: (value) {
+                  if (!mounted) return;
+                  setState(() => _searchQuery = value);
+                },
+                style: TextStyle(color: colorScheme.onSurface),
+                cursorColor: colorScheme.primary,
+                decoration: InputDecoration(
+                  hintText: 'Buscar categoría...',
+                  hintStyle: TextStyle(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                  ),
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
+              )
+            : Text(
+                widget.catalog.nombre,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+        actions: [
+          IconButton(
+            onPressed: _toggleAppBarSearch,
+            icon: Icon(
+              _showAppBarSearch ? Icons.close_rounded : Icons.search_rounded,
+            ),
+            tooltip: _showAppBarSearch ? 'Cerrar búsqueda' : 'Buscar categoría',
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: (_loading || _isMutating) ? null : _createCategory,
@@ -1042,97 +1104,148 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         color: colorScheme.primary,
         child: SafeArea(
           top: false,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 120),
+          child: Stack(
             children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
-                  color: colorScheme.surfaceContainerHigh,
-                  border: Border.all(color: colorScheme.outlineVariant),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Estructura del menú',
-                      style: GoogleFonts.manrope(
-                        color: colorScheme.onSurface,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 17,
+              ListView(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 120),
+                children: [
+                  ClipRect(
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      heightFactor: headerHeightFactor,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 140),
+                        opacity: headerOpacity,
+                        child: Transform.scale(
+                          scale: headerScale,
+                          alignment: Alignment.topCenter,
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(18),
+                              color: colorScheme.surfaceContainerHigh,
+                              border: Border.all(
+                                color: colorScheme.outlineVariant,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Estructura del menú',
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurface,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 17,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Organiza categorías claras para que agregar y encontrar productos sea más rápido.',
+                                  style: TextStyle(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    _StatChip(
+                                      label: 'Categorías',
+                                      value: '${_categories.length}',
+                                    ),
+                                    _StatChip(
+                                      label: 'Activas',
+                                      value: '$activeCategories',
+                                    ),
+                                    _StatChip(
+                                      label: 'Productos',
+                                      value: '$totalProducts',
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Organiza categorías claras para que agregar y encontrar productos sea más rápido.',
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _StatChip(
-                          label: 'Categorías',
-                          value: '${_categories.length}',
-                        ),
-                        _StatChip(label: 'Activas', value: '$activeCategories'),
-                        _StatChip(label: 'Productos', value: '$totalProducts'),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              _ElegantSearchBar(
-                controller: _searchController,
-                hintText: 'Buscar categoría o cantidad de productos...',
-                onChanged: (value) {
-                  if (!mounted) return;
-                  setState(() => _searchQuery = value);
-                },
-                onClear: () {
-                  _searchController.clear();
-                  if (!mounted) return;
-                  setState(() => _searchQuery = '');
-                },
-              ),
-              const SizedBox(height: 10),
-              if (_categories.isEmpty)
-                _EmptyMenuState(
-                  icon: Icons.category_outlined,
-                  title: 'No hay categorías en este menú',
-                  subtitle:
-                      'Crea tu primera categoría para empezar a cargar productos.',
-                  actionLabel: 'Crear primera categoría',
-                  onAction: _isMutating ? null : _createCategory,
-                )
-              else if (filtered.isEmpty)
-                _EmptyMenuState(
-                  icon: Icons.search_off_rounded,
-                  title: 'Sin resultados para la búsqueda',
-                  subtitle: 'Prueba otro término o limpia el filtro actual.',
-                  actionLabel: 'Limpiar búsqueda',
-                  onAction: () {
-                    _searchController.clear();
-                    setState(() => _searchQuery = '');
-                  },
-                )
-              else
-                ...filtered.map(
-                  (category) => _CategoryCard(
-                    category: category,
-                    enabled: !_isMutating,
-                    productCount: _productCountByCategory[category.id] ?? 0,
-                    onOpen: () => _openProducts(category),
-                    onEdit: () => _editCategory(category),
-                    onDelete: () => _deleteCategory(category),
-                    onToggleActive: (value) =>
-                        _toggleCategoryActive(category, value),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    child: showCompactHeader
+                        ? Padding(
+                            key: const ValueKey('compact-category-header'),
+                            padding: const EdgeInsets.only(top: 8, bottom: 10),
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  _StatChip(
+                                    label: 'Categorías',
+                                    value: '${_categories.length}',
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _StatChip(
+                                    label: 'Activas',
+                                    value: '$activeCategories',
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _StatChip(
+                                    label: 'Productos',
+                                    value: '$totalProducts',
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : const SizedBox(
+                            key: ValueKey('compact-category-spacer'),
+                            height: 10,
+                          ),
+                  ),
+                  if (_categories.isEmpty)
+                    _EmptyMenuState(
+                      icon: Icons.category_outlined,
+                      title: 'No hay categorías en este menú',
+                      subtitle:
+                          'Crea tu primera categoría para empezar a cargar productos.',
+                      actionLabel: 'Crear primera categoría',
+                      onAction: _isMutating ? null : _createCategory,
+                    )
+                  else if (filtered.isEmpty)
+                    _EmptyMenuState(
+                      icon: Icons.search_off_rounded,
+                      title: 'Sin resultados para la búsqueda',
+                      subtitle:
+                          'Prueba otro término o limpia el filtro actual.',
+                      actionLabel: 'Limpiar búsqueda',
+                      onAction: () {
+                        _searchController.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                    )
+                  else
+                    ...filtered.map(
+                      (category) => _CategoryCard(
+                        category: category,
+                        enabled: !_isMutating,
+                        productCount: _productCountByCategory[category.id] ?? 0,
+                        onOpen: () => _openProducts(category),
+                        onEdit: () => _editCategory(category),
+                        onDelete: () => _deleteCategory(category),
+                        onToggleActive: (value) =>
+                            _toggleCategoryActive(category, value),
+                      ),
+                    ),
+                ],
+              ),
             ],
           ),
         ),
@@ -1401,78 +1514,6 @@ class _StatChip extends StatelessWidget {
           fontWeight: FontWeight.w700,
           fontSize: 12,
         ),
-      ),
-    );
-  }
-}
-
-class _ElegantSearchBar extends StatelessWidget {
-  const _ElegantSearchBar({
-    required this.controller,
-    required this.hintText,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  final TextEditingController controller;
-  final String hintText;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: LinearGradient(
-          colors: [
-            colorScheme.surfaceContainerHigh,
-            colorScheme.surfaceContainerHighest,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: colorScheme.primary.withValues(alpha: 0.3)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          Icon(Icons.search_rounded, color: colorScheme.primary, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onChanged: onChanged,
-              style: TextStyle(color: colorScheme.onSurface),
-              cursorColor: colorScheme.primary,
-              decoration: InputDecoration(
-                hintText: hintText,
-                hintStyle: TextStyle(
-                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
-                ),
-                filled: false,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                errorBorder: InputBorder.none,
-                focusedErrorBorder: InputBorder.none,
-                disabledBorder: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ),
-          if (controller.text.trim().isNotEmpty)
-            IconButton(
-              onPressed: onClear,
-              icon: Icon(
-                Icons.close_rounded,
-                color: colorScheme.onSurfaceVariant,
-              ),
-              tooltip: 'Limpiar búsqueda',
-            ),
-        ],
       ),
     );
   }

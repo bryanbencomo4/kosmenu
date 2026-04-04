@@ -33,14 +33,26 @@ class _ProductListScreenState extends State<ProductListScreen> {
   List<ProductModel> _products = <ProductModel>[];
   String? _businessLogoUrl;
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
+  bool _showAppBarSearch = false;
+  double _headerCollapse = 0;
   _ProductVisibilityFilter _visibilityFilter = _ProductVisibilityFilter.all;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _loadBusinessLogo();
     _loadProducts(reset: true);
+  }
+
+  void _onScroll() {
+    final next =
+        (_scrollController.hasClients ? (_scrollController.offset / 170) : 0.0)
+            .clamp(0.0, 1.0);
+    if ((next - _headerCollapse).abs() < 0.02 || !mounted) return;
+    setState(() => _headerCollapse = next);
   }
 
   Future<void> _loadBusinessLogo() async {
@@ -63,6 +75,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
   @override
   void dispose() {
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -326,9 +341,27 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
   int get _hiddenCount => _products.length - _visibleCount;
 
+  void _toggleAppBarSearch() {
+    if (!mounted) return;
+    if (_showAppBarSearch) {
+      _searchController.clear();
+      setState(() {
+        _showAppBarSearch = false;
+        _searchQuery = '';
+      });
+      return;
+    }
+
+    setState(() => _showAppBarSearch = true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final headerScale = (1 - (_headerCollapse * 0.2)).clamp(0.82, 1.0);
+    final headerOpacity = (1 - (_headerCollapse * 1.55)).clamp(0.0, 1.0);
+    final headerHeightFactor = (1 - (_headerCollapse * 1.45)).clamp(0.0, 1.0);
+
     if (_loading) {
       return const BrandedLoadingScreen(withScaffold: true);
     }
@@ -343,16 +376,37 @@ class _ProductListScreenState extends State<ProductListScreen> {
           fontSize: 22,
           fontWeight: FontWeight.w800,
         ),
-        title: Text(
-          widget.category.nombre,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: _showAppBarSearch
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                onChanged: (value) {
+                  if (!mounted) return;
+                  setState(() => _searchQuery = value);
+                },
+                style: TextStyle(color: colorScheme.onSurface),
+                cursorColor: colorScheme.primary,
+                decoration: InputDecoration(
+                  hintText: 'Buscar producto...',
+                  hintStyle: TextStyle(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                  ),
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
+              )
+            : Text(
+                widget.category.nombre,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
         actions: [
           IconButton(
-            onPressed: _loading ? null : () => _openProductForm(),
-            icon: const Icon(Icons.add),
-            tooltip: 'Crear producto',
+            onPressed: _toggleAppBarSearch,
+            icon: Icon(
+              _showAppBarSearch ? Icons.close_rounded : Icons.search_rounded,
+            ),
+            tooltip: _showAppBarSearch ? 'Cerrar búsqueda' : 'Buscar producto',
           ),
         ],
       ),
@@ -367,8 +421,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
         onRefresh: () => _loadProducts(reset: true),
         color: colorScheme.primary,
         child: SafeArea(
-          top: false,
-          bottom: false,
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 760;
@@ -384,93 +436,67 @@ class _ProductListScreenState extends State<ProductListScreen> {
                     children: [
                       Column(
                         children: [
-                          Container(
-                            margin: EdgeInsets.fromLTRB(
-                              horizontalPadding,
-                              14,
-                              horizontalPadding,
-                              8,
-                            ),
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(18),
-                              color: colorScheme.surfaceContainerHigh,
-                              border: Border.all(
-                                color: colorScheme.outlineVariant,
+                          ClipRect(
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              heightFactor: headerHeightFactor,
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 140),
+                                opacity: headerOpacity,
+                                child: Transform.scale(
+                                  scale: headerScale,
+                                  alignment: Alignment.topCenter,
+                                  child: Container(
+                                    margin: EdgeInsets.fromLTRB(
+                                      horizontalPadding,
+                                      14,
+                                      horizontalPadding,
+                                      8,
+                                    ),
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(18),
+                                      color: colorScheme.surfaceContainerHigh,
+                                      border: Border.all(
+                                        color: colorScheme.outlineVariant,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Container(
+                                              width: 42,
+                                              height: 42,
+                                              decoration: BoxDecoration(
+                                                color: colorScheme.primary
+                                                    .withValues(alpha: 0.16),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: Icon(
+                                                Icons.inventory_2_outlined,
+                                                color: colorScheme.primary,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Text(
+                                                'Gestiona productos con orden, visibilidad y búsqueda instantánea.',
+                                                style: GoogleFonts.manrope(
+                                                  color: colorScheme
+                                                      .onSurfaceVariant,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                            child: Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 42,
-                                      height: 42,
-                                      decoration: BoxDecoration(
-                                        color: colorScheme.primary.withValues(
-                                          alpha: 0.16,
-                                        ),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Icon(
-                                        Icons.inventory_2_outlined,
-                                        color: colorScheme.primary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Text(
-                                        'Gestiona productos con orden, visibilidad y búsqueda instantánea.',
-                                        style: GoogleFonts.manrope(
-                                          color: colorScheme.onSurfaceVariant,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    _StatPill(
-                                      label: 'Total',
-                                      value: '${_products.length}',
-                                    ),
-                                    _StatPill(
-                                      label: 'Visibles',
-                                      value: '$_visibleCount',
-                                    ),
-                                    _StatPill(
-                                      label: 'Ocultos',
-                                      value: '$_hiddenCount',
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              horizontalPadding,
-                              2,
-                              horizontalPadding,
-                              8,
-                            ),
-                            child: _ElegantSearchBar(
-                              controller: _searchController,
-                              hintText:
-                                  'Buscar producto por nombre, descripcion o precio...',
-                              onChanged: (value) {
-                                if (!mounted) return;
-                                setState(() => _searchQuery = value);
-                              },
-                              onClear: () {
-                                _searchController.clear();
-                                if (!mounted) return;
-                                setState(() => _searchQuery = '');
-                              },
                             ),
                           ),
                           SingleChildScrollView(
@@ -491,7 +517,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                   child: ChoiceChip(
                                     selected: selected,
                                     showCheckmark: false,
-                                    label: Text(filter.label),
+                                    label: Text(
+                                      '${filter.label} (${filter == _ProductVisibilityFilter.all
+                                          ? _products.length
+                                          : filter == _ProductVisibilityFilter.visible
+                                          ? _visibleCount
+                                          : _hiddenCount})',
+                                    ),
                                     avatar: Icon(filter.icon, size: 16),
                                     onSelected: (_) {
                                       if (!mounted) return;
@@ -507,6 +539,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                           Expanded(
                             child: filteredProducts.isEmpty
                                 ? ListView(
+                                    controller: _scrollController,
                                     physics:
                                         const AlwaysScrollableScrollPhysics(),
                                     padding: EdgeInsets.fromLTRB(
@@ -535,6 +568,14 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                   )
                                 : NotificationListener<ScrollNotification>(
                                     onNotification: (notification) {
+                                      final next =
+                                          (notification.metrics.pixels / 170)
+                                              .clamp(0.0, 1.0);
+                                      if ((next - _headerCollapse).abs() >=
+                                              0.02 &&
+                                          mounted) {
+                                        setState(() => _headerCollapse = next);
+                                      }
                                       if (notification.metrics.pixels >=
                                           notification.metrics.maxScrollExtent -
                                               180) {
@@ -544,6 +585,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                     },
                                     child: hasSearch
                                         ? ListView.builder(
+                                            controller: _scrollController,
                                             physics:
                                                 const AlwaysScrollableScrollPhysics(),
                                             padding: EdgeInsets.fromLTRB(
@@ -916,78 +958,6 @@ class _ProductVisibilityBadge extends StatelessWidget {
   }
 }
 
-class _ElegantSearchBar extends StatelessWidget {
-  const _ElegantSearchBar({
-    required this.controller,
-    required this.hintText,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  final TextEditingController controller;
-  final String hintText;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: LinearGradient(
-          colors: [
-            colorScheme.surfaceContainerHigh,
-            colorScheme.surfaceContainerHighest,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: colorScheme.primary.withValues(alpha: 0.3)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          Icon(Icons.search_rounded, color: colorScheme.primary, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onChanged: onChanged,
-              style: TextStyle(color: colorScheme.onSurface),
-              cursorColor: colorScheme.primary,
-              decoration: InputDecoration(
-                hintText: hintText,
-                hintStyle: TextStyle(
-                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
-                ),
-                filled: false,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                errorBorder: InputBorder.none,
-                focusedErrorBorder: InputBorder.none,
-                disabledBorder: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ),
-          if (controller.text.trim().isNotEmpty)
-            IconButton(
-              onPressed: onClear,
-              icon: Icon(
-                Icons.close_rounded,
-                color: colorScheme.onSurfaceVariant,
-              ),
-              tooltip: 'Limpiar búsqueda',
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ProductThumb extends StatelessWidget {
   const _ProductThumb({
     required this.imageUrl,
@@ -1051,34 +1021,6 @@ class _ProductThumb extends StatelessWidget {
     }
 
     return Hero(tag: heroTag!, child: thumb);
-  }
-}
-
-class _StatPill extends StatelessWidget {
-  const _StatPill({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colorScheme.primary.withValues(alpha: 0.35)),
-      ),
-      child: Text(
-        '$label: $value',
-        style: TextStyle(
-          color: colorScheme.onSurface,
-          fontWeight: FontWeight.w700,
-          fontSize: 12,
-        ),
-      ),
-    );
   }
 }
 
