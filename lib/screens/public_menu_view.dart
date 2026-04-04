@@ -83,9 +83,22 @@ class _PublicMenuViewState extends State<PublicMenuView> {
       comercioNombre: comercioMap['nombre']?.toString() ?? 'Kosmenu',
       whatsappNumber: _normalizePhone(comercioMap['whatsapp']?.toString()),
       tasaCambioPesos: _parseRate(comercioMap['tasa_cambio_pesos']),
+      palette: _PublicMenuPalette.fromMenuPalette(
+        comercioMap['menu_palette']?.toString(),
+        primaryArgb: _toInt(comercioMap['menu_palette_primary']),
+        accentArgb: _toInt(comercioMap['menu_palette_accent']),
+        surfaceArgb: _toInt(comercioMap['menu_palette_surface']),
+        textArgb: _toInt(comercioMap['menu_palette_text']),
+      ),
       categories: categories,
       products: products,
     );
+  }
+
+  int? _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
   }
 
   String? _normalizePhone(String? rawValue) {
@@ -203,6 +216,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     final totalCop = data.tasaCambioPesos > 0
         ? totalUsd * data.tasaCambioPesos
         : 0.0;
+    final palette = data.palette;
 
     var selectedPaymentMethod = _paymentMethods.first;
     var isSubmittingOrder = false;
@@ -210,7 +224,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFFFFFBF5),
+      backgroundColor: palette.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
@@ -229,7 +243,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                         width: 44,
                         height: 5,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFD0B7A6),
+                          color: palette.onSurfaceMuted.withValues(alpha: 0.45),
                           borderRadius: BorderRadius.circular(999),
                         ),
                       ),
@@ -240,7 +254,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       style: GoogleFonts.manrope(
                         fontSize: 24,
                         fontWeight: FontWeight.w800,
-                        color: const Color(0xFF24160F),
+                        color: palette.onSurface,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -249,7 +263,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       style: GoogleFonts.manrope(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: const Color(0xFF775B4E),
+                        color: palette.onSurfaceMuted,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -270,7 +284,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                   style: GoogleFonts.manrope(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w800,
-                                    color: const Color(0xFF24160F),
+                                    color: palette.onSurface,
                                   ),
                                 ),
                               ),
@@ -280,7 +294,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                 style: GoogleFonts.manrope(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFFD65A1F),
+                                  color: palette.primary,
                                 ),
                               ),
                             ],
@@ -294,7 +308,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       style: GoogleFonts.manrope(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: const Color(0xFF775B4E),
+                        color: palette.onSurfaceMuted,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -312,6 +326,15 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                         () => selectedPaymentMethod = method,
                                       );
                                     },
+                              selectedColor: palette.primary,
+                              backgroundColor: palette.surfaceAlt,
+                              side: BorderSide.none,
+                              labelStyle: GoogleFonts.manrope(
+                                color: selectedPaymentMethod == method
+                                    ? palette.onPrimary
+                                    : palette.onSurface,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           )
                           .toList(),
@@ -320,7 +343,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF3E6D8),
+                        color: palette.surfaceAlt,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Column(
@@ -328,6 +351,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           _SummaryRow(
                             label: 'Total USD',
                             value: _formatUsd(totalUsd),
+                            labelColor: palette.onSurfaceMuted,
+                            valueColor: palette.onSurface,
                           ),
                           if (data.tasaCambioPesos > 0)
                             Padding(
@@ -335,6 +360,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                               child: _SummaryRow(
                                 label: 'Total COP',
                                 value: '${_formatCop(totalCop)} COP',
+                                labelColor: palette.onSurfaceMuted,
+                                valueColor: palette.onSurface,
                               ),
                             ),
                         ],
@@ -425,8 +452,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                 }
                               },
                         style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF1B9C5A),
-                          foregroundColor: Colors.white,
+                          backgroundColor: palette.primary,
+                          foregroundColor: palette.onPrimary,
                           padding: const EdgeInsets.symmetric(vertical: 18),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(18),
@@ -436,12 +463,12 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             if (isSubmittingOrder) ...[
-                              const SizedBox(
+                              SizedBox(
                                 width: 18,
                                 height: 18,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2.2,
-                                  color: Colors.white,
+                                  color: palette.onPrimary,
                                 ),
                               ),
                               const SizedBox(width: 10),
@@ -475,14 +502,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
   @override
   Widget build(BuildContext context) {
-    const background = Color(0xFFF7F1E8);
-    const surface = Color(0xFFFFFBF5);
-    const accent = Color(0xFFD65A1F);
-    const heading = Color(0xFF24160F);
-    const muted = Color(0xFF775B4E);
-
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: const Color(0xFF0F172A),
       body: SafeArea(
         child: FutureBuilder<_PublicMenuData>(
           future: _menuFuture,
@@ -510,6 +531,18 @@ class _PublicMenuViewState extends State<PublicMenuView> {
               );
             }
 
+            final palette = data.palette;
+            final categoryProductCount = <String, int>{};
+            for (final product in data.products) {
+              final categoryId = product.categoryId.trim();
+              if (categoryId.isEmpty) continue;
+              categoryProductCount.update(
+                categoryId,
+                (value) => value + 1,
+                ifAbsent: () => 1,
+              );
+            }
+
             final cartItemCount = _cart.values.fold<int>(
               0,
               (sum, item) => sum + item,
@@ -528,156 +561,226 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       )
                       .toList();
 
-            return Stack(
-              children: [
-                RefreshIndicator(
-                  color: accent,
-                  onRefresh: () async {
-                    final future = _fetchMenuData();
-                    setState(() => _menuFuture = future);
-                    await future;
-                  },
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 110),
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(28),
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xFF2F1B12), Color(0xFF7A3115)],
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Menu digital',
-                              style: GoogleFonts.manrope(
-                                color: Colors.white70,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              data.comercioNombre,
-                              style: GoogleFonts.manrope(
-                                color: Colors.white,
-                                fontSize: 30,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        'Categorias',
-                        style: GoogleFonts.manrope(
-                          color: heading,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 48,
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(right: 10),
-                              child: ChoiceChip(
-                                label: const Text('Todo'),
-                                selected: _selectedCategoryId == null,
-                                onSelected: (_) {
-                                  setState(() => _selectedCategoryId = null);
-                                },
-                                selectedColor: accent,
-                                labelStyle: GoogleFonts.manrope(
-                                  color: _selectedCategoryId == null
-                                      ? Colors.white
-                                      : heading,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                                side: BorderSide.none,
-                                backgroundColor: surface,
-                              ),
-                            ),
-                            ...data.categories.map(
-                              (category) => Padding(
-                                padding: const EdgeInsets.only(right: 10),
-                                child: ChoiceChip(
-                                  label: Text(category.nombre),
-                                  selected: _selectedCategoryId == category.id,
-                                  onSelected: (_) {
-                                    setState(
-                                      () => _selectedCategoryId = category.id,
-                                    );
-                                  },
-                                  selectedColor: accent,
-                                  labelStyle: GoogleFonts.manrope(
-                                    color: _selectedCategoryId == category.id
-                                        ? Colors.white
-                                        : heading,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                  side: BorderSide.none,
-                                  backgroundColor: surface,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      if (filteredProducts.isEmpty)
+            return Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    palette.surfaceEnd.withValues(alpha: 0.98),
+                    palette.surface.withValues(alpha: 0.98),
+                    palette.surfaceAlt.withValues(alpha: 0.98),
+                  ],
+                ),
+              ),
+              child: Stack(
+                children: [
+                  RefreshIndicator(
+                    color: palette.primary,
+                    onRefresh: () async {
+                      final future = _fetchMenuData();
+                      setState(() => _menuFuture = future);
+                      await future;
+                    },
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 110),
+                      children: [
                         Container(
-                          padding: const EdgeInsets.all(24),
+                          padding: const EdgeInsets.all(20),
                           decoration: BoxDecoration(
-                            color: surface,
-                            borderRadius: BorderRadius.circular(22),
+                            borderRadius: BorderRadius.circular(28),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                palette.surfaceStart,
+                                palette.surfaceEnd,
+                              ],
+                            ),
+                            border: Border.all(
+                              color: palette.primary.withValues(alpha: 0.4),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: palette.primary.withValues(alpha: 0.18),
+                                blurRadius: 20,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
                           ),
                           child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Icon(
-                                Icons.menu_book_rounded,
-                                size: 42,
-                                color: muted,
-                              ),
-                              const SizedBox(height: 12),
                               Text(
-                                'No hay productos disponibles en esta categoria.',
-                                textAlign: TextAlign.center,
+                                'Menu digital',
                                 style: GoogleFonts.manrope(
-                                  color: heading,
-                                  fontSize: 16,
+                                  color: palette.onSurfaceMuted,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                data.comercioNombre,
+                                style: GoogleFonts.manrope(
+                                  color: palette.onSurface,
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
                             ],
                           ),
-                        )
-                      else
-                        ...filteredProducts.map(
-                          (product) => _PublicProductCard(
-                            product: product,
-                            quantity: _cart[product.id] ?? 0,
-                            tasaCambioPesos: data.tasaCambioPesos,
-                            heading: heading,
-                            muted: muted,
-                            surface: surface,
-                            accent: accent,
-                            onIncrement: () => _incrementProduct(product.id),
-                            onDecrement: () => _decrementProduct(product.id),
+                        ),
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                          decoration: BoxDecoration(
+                            color: palette.surface.withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: palette.primary.withValues(alpha: 0.25),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.category_rounded,
+                                    size: 18,
+                                    color: palette.primary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Categorías',
+                                    style: GoogleFonts.manrope(
+                                      color: palette.onSurface,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                height: 42,
+                                child: ListView(
+                                  scrollDirection: Axis.horizontal,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: ChoiceChip(
+                                        label: Text(
+                                          'Todo (${data.products.length})',
+                                        ),
+                                        selected: _selectedCategoryId == null,
+                                        onSelected: (_) {
+                                          setState(() => _selectedCategoryId = null);
+                                        },
+                                        selectedColor: palette.primary,
+                                        labelStyle: GoogleFonts.manrope(
+                                          color: _selectedCategoryId == null
+                                              ? palette.onPrimary
+                                              : palette.onSurface,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                        side: BorderSide(
+                                          color: palette.primary.withValues(
+                                            alpha: 0.22,
+                                          ),
+                                        ),
+                                        backgroundColor: palette.surfaceAlt,
+                                      ),
+                                    ),
+                                    ...data.categories.map((category) {
+                                      final productCount =
+                                          categoryProductCount[category.id] ?? 0;
+                                      final selected =
+                                          _selectedCategoryId == category.id;
+                                      return Padding(
+                                        padding: const EdgeInsets.only(right: 8),
+                                        child: ChoiceChip(
+                                          label: Text(
+                                            '${category.nombre} ($productCount)',
+                                          ),
+                                          selected: selected,
+                                          onSelected: (_) {
+                                            setState(
+                                              () => _selectedCategoryId = category.id,
+                                            );
+                                          },
+                                          selectedColor: palette.primary,
+                                          labelStyle: GoogleFonts.manrope(
+                                            color: selected
+                                                ? palette.onPrimary
+                                                : palette.onSurface,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                          side: BorderSide(
+                                            color: palette.primary.withValues(
+                                              alpha: 0.22,
+                                            ),
+                                          ),
+                                          backgroundColor: palette.surfaceAlt,
+                                        ),
+                                      );
+                                    }),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                    ],
+                        const SizedBox(height: 16),
+                        if (filteredProducts.isEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: palette.surface,
+                              borderRadius: BorderRadius.circular(22),
+                              border: Border.all(
+                                color: palette.primary.withValues(alpha: 0.22),
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.menu_book_rounded,
+                                  size: 42,
+                                  color: palette.onSurfaceMuted,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No hay productos disponibles en esta categoria.',
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.manrope(
+                                    color: palette.onSurface,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          ...filteredProducts.map(
+                            (product) => _PublicProductCard(
+                              product: product,
+                              quantity: _cart[product.id] ?? 0,
+                              tasaCambioPesos: data.tasaCambioPesos,
+                              heading: palette.onSurface,
+                              muted: palette.onSurfaceMuted,
+                              surface: palette.surface,
+                              accent: palette.primary,
+                              surfaceAlt: palette.surfaceAlt,
+                              onIncrement: () => _incrementProduct(product.id),
+                              onDecrement: () => _decrementProduct(product.id),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
                 if (cartItemCount > 0)
                   Positioned(
                     right: 16,
@@ -686,8 +789,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                     child: FilledButton.icon(
                       onPressed: () => _openOrderSheet(data),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF1B9C5A),
-                        foregroundColor: Colors.white,
+                        backgroundColor: palette.primary,
+                        foregroundColor: palette.onPrimary,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(18),
@@ -700,7 +803,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       ),
                     ),
                   ),
-              ],
+                ],
+              ),
             );
           },
         ),
@@ -718,6 +822,7 @@ class _PublicProductCard extends StatelessWidget {
     required this.muted,
     required this.surface,
     required this.accent,
+    required this.surfaceAlt,
     required this.onIncrement,
     required this.onDecrement,
   });
@@ -729,6 +834,7 @@ class _PublicProductCard extends StatelessWidget {
   final Color muted;
   final Color surface;
   final Color accent;
+  final Color surfaceAlt;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
 
@@ -759,12 +865,12 @@ class _PublicProductCard extends StatelessWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stackTrace) {
                   return Container(
-                    color: const Color(0xFFF0E4D7),
+                    color: surfaceAlt,
                     alignment: Alignment.center,
-                    child: const Icon(
+                    child: Icon(
                       Icons.restaurant,
                       size: 44,
-                      color: Color(0xFFB88D77),
+                      color: muted,
                     ),
                   );
                 },
@@ -773,16 +879,16 @@ class _PublicProductCard extends StatelessWidget {
           else
             Container(
               height: 108,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Color(0xFFF1D3BF), Color(0xFFEAB08B)],
+                  colors: [surfaceAlt, accent.withValues(alpha: 0.42)],
                 ),
               ),
               alignment: Alignment.center,
-              child: const Icon(
+              child: Icon(
                 Icons.lunch_dining,
                 size: 42,
-                color: Color(0xFF8D4320),
+                color: accent,
               ),
             ),
           Padding(
@@ -833,7 +939,7 @@ class _PublicProductCard extends StatelessWidget {
                       Text(
                         '${(product.precio * tasaCambioPesos).toStringAsFixed(0)} COP',
                         style: GoogleFonts.manrope(
-                          color: const Color(0xFF8D8177),
+                          color: muted,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -850,7 +956,7 @@ class _PublicProductCard extends StatelessWidget {
               children: [
                 Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF4E0D3),
+                    color: surfaceAlt,
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Row(
@@ -859,7 +965,7 @@ class _PublicProductCard extends StatelessWidget {
                       IconButton(
                         onPressed: quantity == 0 ? null : onDecrement,
                         icon: const Icon(Icons.remove_circle_outline),
-                        color: const Color(0xFF7A3115),
+                        color: accent,
                       ),
                       SizedBox(
                         width: 28,
@@ -895,6 +1001,7 @@ class _PublicMenuData {
     required this.comercioNombre,
     required this.whatsappNumber,
     required this.tasaCambioPesos,
+    required this.palette,
     required this.categories,
     required this.products,
   });
@@ -902,8 +1009,117 @@ class _PublicMenuData {
   final String comercioNombre;
   final String? whatsappNumber;
   final double tasaCambioPesos;
+  final _PublicMenuPalette palette;
   final List<_PublicCategory> categories;
   final List<_PublicProduct> products;
+}
+
+class _PublicMenuPalette {
+  const _PublicMenuPalette({
+    required this.surfaceStart,
+    required this.surfaceEnd,
+    required this.surface,
+    required this.surfaceAlt,
+    required this.primary,
+    required this.onPrimary,
+    required this.onSurface,
+    required this.onSurfaceMuted,
+  });
+
+  final Color surfaceStart;
+  final Color surfaceEnd;
+  final Color surface;
+  final Color surfaceAlt;
+  final Color primary;
+  final Color onPrimary;
+  final Color onSurface;
+  final Color onSurfaceMuted;
+
+  static _PublicMenuPalette fromMenuPalette(
+    String? rawPalette, {
+    int? primaryArgb,
+    int? accentArgb,
+    int? surfaceArgb,
+    int? textArgb,
+  }) {
+    if (primaryArgb != null && surfaceArgb != null && textArgb != null) {
+      final primary = Color(primaryArgb);
+      final accent = Color(accentArgb ?? primaryArgb);
+      final surface = Color(surfaceArgb);
+      final onSurface = Color(textArgb);
+      final onPrimary = primary.computeLuminance() > 0.5
+          ? const Color(0xFF1F2937)
+          : Colors.white;
+      return _PublicMenuPalette(
+        surfaceStart: Color.lerp(surface, primary, 0.24) ?? surface,
+        surfaceEnd: Color.lerp(surface, accent, 0.16) ?? surface,
+        surface: Color.lerp(surface, Colors.white, 0.08) ?? surface,
+        surfaceAlt: Color.lerp(surface, Colors.white, 0.16) ?? surface,
+        primary: primary,
+        onPrimary: onPrimary,
+        onSurface: onSurface,
+        onSurfaceMuted: onSurface.withValues(alpha: 0.78),
+      );
+    }
+
+    switch ((rawPalette ?? '').trim().toLowerCase()) {
+      case 'uva':
+        return const _PublicMenuPalette(
+          surfaceStart: Color(0xFF2B1455),
+          surfaceEnd: Color(0xFF1A1030),
+          surface: Color(0xFF2A174C),
+          surfaceAlt: Color(0xFF3A2366),
+          primary: Color(0xFF8B5CF6),
+          onPrimary: Color(0xFF1A1030),
+          onSurface: Color(0xFFF5F3FF),
+          onSurfaceMuted: Color(0xFFD6CCF5),
+        );
+      case 'cafe':
+        return const _PublicMenuPalette(
+          surfaceStart: Color(0xFF332015),
+          surfaceEnd: Color(0xFF1E150F),
+          surface: Color(0xFF2E2018),
+          surfaceAlt: Color(0xFF3B2A1F),
+          primary: Color(0xFFF59E0B),
+          onPrimary: Color(0xFF2B1708),
+          onSurface: Color(0xFFFFF7ED),
+          onSurfaceMuted: Color(0xFFF2D7B0),
+        );
+      case 'oliva':
+        return const _PublicMenuPalette(
+          surfaceStart: Color(0xFF203019),
+          surfaceEnd: Color(0xFF152114),
+          surface: Color(0xFF1C2A17),
+          surfaceAlt: Color(0xFF273720),
+          primary: Color(0xFFA3E635),
+          onPrimary: Color(0xFF22330F),
+          onSurface: Color(0xFFF7FEE7),
+          onSurfaceMuted: Color(0xFFDCE8BE),
+        );
+      case 'oceano':
+        return const _PublicMenuPalette(
+          surfaceStart: Color(0xFF12314A),
+          surfaceEnd: Color(0xFF0F2233),
+          surface: Color(0xFF183349),
+          surfaceAlt: Color(0xFF22435E),
+          primary: Color(0xFF38BDF8),
+          onPrimary: Color(0xFF062033),
+          onSurface: Color(0xFFEFF9FF),
+          onSurfaceMuted: Color(0xFFBCD9EE),
+        );
+      default:
+        return const _PublicMenuPalette(
+          surfaceStart: Color(0xFF2B1C11),
+          surfaceEnd: Color(0xFF1B140E),
+          surface: Color(0xFF241A13),
+          surfaceAlt: Color(0xFF33251C),
+          primary: Color(0xFFD65A1F),
+          onPrimary: Colors.white,
+          onSurface: Color(0xFFFFEACC),
+          onSurfaceMuted: Color(0xFFD3BEA0),
+        );
+    }
+  }
 }
 
 class _PublicCategory {
@@ -987,10 +1203,17 @@ class _CartLine {
 }
 
 class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({required this.label, required this.value});
+  const _SummaryRow({
+    required this.label,
+    required this.value,
+    this.labelColor,
+    this.valueColor,
+  });
 
   final String label;
   final String value;
+  final Color? labelColor;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1002,7 +1225,7 @@ class _SummaryRow extends StatelessWidget {
             style: GoogleFonts.manrope(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: const Color(0xFF775B4E),
+              color: labelColor ?? const Color(0xFF775B4E),
             ),
           ),
         ),
@@ -1011,7 +1234,7 @@ class _SummaryRow extends StatelessWidget {
           style: GoogleFonts.manrope(
             fontSize: 17,
             fontWeight: FontWeight.w800,
-            color: const Color(0xFF24160F),
+            color: valueColor ?? const Color(0xFF24160F),
           ),
         ),
       ],

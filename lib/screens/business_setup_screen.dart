@@ -6312,7 +6312,7 @@ class _StepPills extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeIndex = steps.indexOf(step) < 0 ? 0 : steps.indexOf(step);
+    final activeIndex = steps.contains(step) ? steps.indexOf(step) : 0;
     final labels = steps.map((value) => _labels[value.index]).toList();
     final icons = steps.map((value) => _icons[value.index]).toList();
 
