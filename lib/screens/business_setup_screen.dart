@@ -18,6 +18,7 @@ import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
+import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -260,8 +261,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   bool get _isEditing => _editingComercioId != null;
 
-  List<_SetupStep> get _activeSteps =>
-      widget.businessConfigOnly
+  List<_SetupStep> get _activeSteps => widget.businessConfigOnly
       ? const <_SetupStep>[
           _SetupStep.identity,
           _SetupStep.style,
@@ -275,7 +275,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return index < 0 ? 0 : index;
   }
 
-  bool get _isLastStepInFlow => _currentStepFlowIndex == _activeSteps.length - 1;
+  bool get _isLastStepInFlow =>
+      _currentStepFlowIndex == _activeSteps.length - 1;
 
   void _ensureCurrentStepInFlow() {
     if (_activeSteps.contains(_step)) {
@@ -1982,11 +1983,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       );
     }
 
-    final candidates = <intl_phone_countries.Country>[
-      ...intl_phone_countries.countries,
-    ]..sort(
-      (a, b) => b.fullCountryCode.length.compareTo(a.fullCountryCode.length),
-    );
+    final candidates =
+        <intl_phone_countries.Country>[...intl_phone_countries.countries]..sort(
+          (a, b) =>
+              b.fullCountryCode.length.compareTo(a.fullCountryCode.length),
+        );
 
     String digitsToMatch = normalizedDigits;
     if (normalized.startsWith('+')) {
@@ -2088,11 +2089,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   String? _toSpecificAddress(Map<String, dynamic> result) {
-    final components = (result['address_components'] as List<dynamic>? ??
-            <dynamic>[])
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .toList();
+    final components =
+        (result['address_components'] as List<dynamic>? ?? <dynamic>[])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
     if (components.isEmpty) {
       return result['formatted_address']?.toString().trim();
     }
@@ -2114,12 +2115,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
 
     final plusCodeMap = result['plus_code'] is Map
-      ? Map<String, dynamic>.from(result['plus_code'] as Map)
-      : <String, dynamic>{};
+        ? Map<String, dynamic>.from(result['plus_code'] as Map)
+        : <String, dynamic>{};
     final plusCodeShort =
-      plusCodeMap['compound_code']?.toString().trim().isNotEmpty == true
-      ? plusCodeMap['compound_code'].toString().trim()
-      : (plusCodeMap['global_code']?.toString().trim() ?? '');
+        plusCodeMap['compound_code']?.toString().trim().isNotEmpty == true
+        ? plusCodeMap['compound_code'].toString().trim()
+        : (plusCodeMap['global_code']?.toString().trim() ?? '');
 
     final firstLineParts = <String>[];
     if (street != null && street.isNotEmpty) {
@@ -2169,15 +2170,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     try {
-      final uri = Uri.https(
-        'maps.googleapis.com',
-        '/maps/api/geocode/json',
-        {
-          'latlng': '${position.latitude},${position.longitude}',
-          'language': 'es',
-          'key': apiKey,
-        },
-      );
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
+        'latlng': '${position.latitude},${position.longitude}',
+        'language': 'es',
+        'key': apiKey,
+      });
 
       final json = await _httpGetJson(uri);
       final status = (json['status']?.toString().trim() ?? '');
@@ -2262,8 +2259,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         return <_PlaceSearchSuggestion>[];
       }
 
-      final predictions = (json['predictions'] as List<dynamic>? ??
-              <dynamic>[])
+      final predictions = (json['predictions'] as List<dynamic>? ?? <dynamic>[])
           .whereType<Map>()
           .map((item) => Map<String, dynamic>.from(item))
           .toList();
@@ -2291,12 +2287,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     try {
-      final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
-        'place_id': placeId.trim(),
-        'fields': 'formatted_address,address_component,geometry/location,plus_code,types',
-        'language': 'es',
-        'key': apiKey,
-      });
+      final uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/details/json',
+        {
+          'place_id': placeId.trim(),
+          'fields':
+              'formatted_address,address_component,geometry/location,plus_code,types',
+          'language': 'es',
+          'key': apiKey,
+        },
+      );
       final json = await _httpGetJson(uri);
       final status = (json['status']?.toString().trim() ?? '');
       if (status != 'OK') {
@@ -2334,7 +2335,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     try {
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       ).timeout(const Duration(seconds: 4));
       return LatLng(position.latitude, position.longitude);
     } catch (_) {
@@ -2425,7 +2428,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               });
             }
 
-            Future<void> selectSuggestion(_PlaceSearchSuggestion suggestion) async {
+            Future<void> selectSuggestion(
+              _PlaceSearchSuggestion suggestion,
+            ) async {
               final details = await _fetchPlaceDetails(suggestion.placeId);
               if (details == null || !context.mounted) {
                 return;
@@ -2451,7 +2456,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 ),
               );
 
-              final specific = _toSpecificAddress(details) ?? suggestion.description;
+              final specific =
+                  _toSpecificAddress(details) ?? suggestion.description;
               if (!context.mounted) {
                 return;
               }
@@ -2464,12 +2470,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             }
 
             Future<void> moveToCurrentLocation() async {
-              final servicesEnabled = await Geolocator.isLocationServiceEnabled();
+              final servicesEnabled =
+                  await Geolocator.isLocationServiceEnabled();
               if (!servicesEnabled) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Activa el GPS para usar tu ubicacion actual.'),
+                      content: Text(
+                        'Activa el GPS para usar tu ubicacion actual.',
+                      ),
                     ),
                   );
                 }
@@ -2572,7 +2581,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                 child: SizedBox(
                                   width: 14,
                                   height: 14,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 ),
                               )
                             : (searchController.text.trim().isEmpty
@@ -2594,11 +2605,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                         fillColor: const Color(0xFF17122E),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -2626,10 +2641,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       child: ListView.separated(
                         shrinkWrap: true,
                         itemCount: placeSuggestions.length,
-                        separatorBuilder: (_, _) => const Divider(
-                          height: 1,
-                          color: Color(0xFF2A2145),
-                        ),
+                        separatorBuilder: (_, _) =>
+                            const Divider(height: 1, color: Color(0xFF2A2145)),
                         itemBuilder: (context, index) {
                           final item = placeSuggestions[index];
                           return ListTile(
@@ -2913,7 +2926,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (comercioId.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Completa y guarda los datos base antes de crear manualmente.'),
+          content: Text(
+            'Completa y guarda los datos base antes de crear manualmente.',
+          ),
         ),
       );
       return;
@@ -2924,9 +2939,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       slug: _normalizeSlug(_slugController.text),
     );
 
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const CategoryListScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const CategoryListScreen()));
 
     await _refreshMenuCatalogCount(comercioId);
 
@@ -2937,7 +2952,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (!_menuScanCompleted && _menuCatalogCount > 0) {
         _manualMenuSetupSelected = true;
       }
-      if (!_menuScanCompleted && _scanCatalogName.isEmpty && _menuCatalogCount > 0) {
+      if (!_menuScanCompleted &&
+          _scanCatalogName.isEmpty &&
+          _menuCatalogCount > 0) {
         _scanCatalogName = _menuCatalogCount == 1
             ? '1 menu manual'
             : '$_menuCatalogCount menus manuales';
@@ -2947,7 +2964,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (_menuCatalogCount == 0 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Aun no hay menus creados. Crea al menos 1 para completar este paso.'),
+          content: Text(
+            'Aun no hay menus creados. Crea al menos 1 para completar este paso.',
+          ),
         ),
       );
     }
@@ -3027,7 +3046,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         !_hasMenuSetupCompleted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Completa el escaneo o elige creacion manual antes de continuar.'),
+          content: Text(
+            'Completa el escaneo o elige creacion manual antes de continuar.',
+          ),
         ),
       );
       return;
@@ -4402,7 +4423,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loadingExisting) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const BrandedLoadingScreen(withScaffold: true);
     }
 
     _ensureCurrentStepInFlow();
@@ -4532,7 +4553,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                   : _isLastStepInFlow
                                   ? (widget.businessConfigOnly
                                         ? 'Guardar cambios'
-                                        : (_isEditing ? 'Guardar' : 'Crear menu'))
+                                        : (_isEditing
+                                              ? 'Guardar'
+                                              : 'Crear menu'))
                                   : 'Continuar',
                             ),
                           ),
@@ -5564,7 +5587,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           },
           validator: (phone) {
             final number = phone?.number.trim() ?? '';
-            if ((_allowDelivery || _receiveOrdersOnWhatsapp) && number.isEmpty) {
+            if ((_allowDelivery || _receiveOrdersOnWhatsapp) &&
+                number.isEmpty) {
               return 'Ingresa un numero de WhatsApp.';
             }
             return null;
@@ -5700,7 +5724,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 },
                 selectedColor: const Color(0xFF2D2152),
                 backgroundColor: const Color(0xFF1A1432),
-                labelStyle: const TextStyle(color: _setupTextHigh, fontSize: 14),
+                labelStyle: const TextStyle(
+                  color: _setupTextHigh,
+                  fontSize: 14,
+                ),
                 side: BorderSide(
                   color: selected ? _palette.primary : const Color(0xFF3B2F63),
                 ),
@@ -5770,7 +5797,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       onPressed: _openMenuScan,
                       icon: const Icon(Icons.document_scanner_rounded),
                       label: Text(
-                        _menuScanCompleted ? 'Reescanear menu' : 'Escanear menu',
+                        _menuScanCompleted
+                            ? 'Reescanear menu'
+                            : 'Escanear menu',
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -5849,10 +5878,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             const SizedBox(height: 4),
             Text(
               '$base/v/$slug',
-              style: GoogleFonts.poppins(
-                color: _setupTextLow,
-                fontSize: 13,
-              ),
+              style: GoogleFonts.poppins(color: _setupTextLow, fontSize: 13),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -5899,12 +5925,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   const SizedBox(height: 6),
                   Text(
                     'WhatsApp: ${_whatsappE164.isEmpty ? 'No configurado' : _whatsappE164}',
-                    style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                    style: const TextStyle(
+                      color: _setupTextMedium,
+                      fontSize: 12,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     'Direccion: ${_addressController.text.trim().isEmpty ? 'No configurada' : _addressController.text.trim()}',
-                    style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                    style: const TextStyle(
+                      color: _setupTextMedium,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),

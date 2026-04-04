@@ -5,6 +5,7 @@ import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
+import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum _PostAuthTarget { dashboard, setup }
@@ -77,15 +78,7 @@ class _AuthGateState extends State<AuthGate> {
         final session = snapshot.data?.session ?? supabase.auth.currentSession;
 
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(strokeWidth: 2.6),
-              ),
-            ),
-          );
+          return const BrandedLoadingScreen(withScaffold: true);
         }
 
         if (session == null) {
@@ -99,15 +92,7 @@ class _AuthGateState extends State<AuthGate> {
           future: _targetFutureFor(userId),
           builder: (context, targetSnapshot) {
             if (targetSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(
-                  child: SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(strokeWidth: 2.6),
-                  ),
-                ),
-              );
+              return const BrandedLoadingScreen(withScaffold: true);
             }
 
             if (targetSnapshot.hasError) {

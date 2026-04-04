@@ -12,6 +12,7 @@ import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/profile_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
+import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -29,13 +30,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   StreamSubscription<List<PedidoModel>>? _ordersSubscription;
   final TextEditingController _ordersSearchController = TextEditingController();
-    final TextEditingController _manualOrderEmailController =
+  final TextEditingController _manualOrderEmailController =
       TextEditingController();
-    final TextEditingController _manualOrderTotalController =
+  final TextEditingController _manualOrderTotalController =
       TextEditingController();
-    final TextEditingController _manualOrderNotesController =
+  final TextEditingController _manualOrderNotesController =
       TextEditingController();
-    final TextEditingController _manualOrderPaymentController =
+  final TextEditingController _manualOrderPaymentController =
       TextEditingController();
 
   _OrderFilter _orderFilter = _OrderFilter.all;
@@ -393,8 +394,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final item = items[index];
-                        final rawStatus =
-                            (item['estado']?.toString() ?? '').toLowerCase();
+                        final rawStatus = (item['estado']?.toString() ?? '')
+                            .toLowerCase();
                         final done = rawStatus.contains('complet');
                         final color = done
                             ? const Color(0xFF15803D)
@@ -538,30 +539,37 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                             .trim()
                                             .replaceAll(',', '.'),
                                       );
-                                      if (totalValue == null || totalValue <= 0) {
-                                        _showInfo('Ingresa un total valido mayor a 0.');
+                                      if (totalValue == null ||
+                                          totalValue <= 0) {
+                                        _showInfo(
+                                          'Ingresa un total valido mayor a 0.',
+                                        );
                                         return;
                                       }
 
-                                      final orderCode = _generateManualOrderCode();
-                                        final email =
-                                          _manualOrderEmailController.text.trim();
-                                        final method = _manualOrderPaymentController
-                                            .text
-                                            .trim()
-                                            .isEmpty
+                                      final orderCode =
+                                          _generateManualOrderCode();
+                                      final email = _manualOrderEmailController
+                                          .text
+                                          .trim();
+                                      final method =
+                                          _manualOrderPaymentController.text
+                                              .trim()
+                                              .isEmpty
                                           ? 'Efectivo'
                                           : _manualOrderPaymentController.text
-                                            .trim();
+                                                .trim();
 
                                       setModalState(() => isSaving = true);
                                       try {
                                         final payload = <String, dynamic>{
-                                          'comercio_id': SupabaseConfig.currentComercioId,
+                                          'comercio_id':
+                                              SupabaseConfig.currentComercioId,
                                           'estado': 'pendiente',
                                           'total': totalValue,
                                           'order_id': orderCode,
-                                          if (email.isNotEmpty) 'cliente_email': email,
+                                          if (email.isNotEmpty)
+                                            'cliente_email': email,
                                           'detalles': {
                                             'order_id': orderCode,
                                             if (email.isNotEmpty)
@@ -571,10 +579,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                             if (_manualOrderNotesController.text
                                                 .trim()
                                                 .isNotEmpty)
-                                              'notas': _manualOrderNotesController
-                                                  .text
-                                                  .trim(),
-                                            'items': const <Map<String, dynamic>>[],
+                                              'notas':
+                                                  _manualOrderNotesController
+                                                      .text
+                                                      .trim(),
+                                            'items':
+                                                const <Map<String, dynamic>>[],
                                             'total': totalValue,
                                           },
                                         };
@@ -583,13 +593,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                             .from('pedidos')
                                             .insert(payload);
 
-                                        if (!context.mounted || !mounted) return;
+                                        if (!context.mounted || !mounted) {
+                                          return;
+                                        }
                                         Navigator.of(context).pop();
-                                        _showInfo('Pedido manual creado: $orderCode');
+                                        _showInfo(
+                                          'Pedido manual creado: $orderCode',
+                                        );
                                         await _refreshDashboard();
                                       } catch (error) {
                                         if (!mounted) return;
-                                        _showInfo('No se pudo crear el pedido: $error');
+                                        _showInfo(
+                                          'No se pudo crear el pedido: $error',
+                                        );
                                         if (context.mounted) {
                                           setModalState(() => isSaving = false);
                                         }
@@ -678,7 +694,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _isToday(DateTime? date) {
     if (date == null) return false;
     final now = DateTime.now();
-    return date.year == now.year && date.month == now.month && date.day == now.day;
+    return date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day;
   }
 
   bool _matchesFilter(PedidoModel pedido) {
@@ -730,307 +748,323 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final colorScheme = theme.colorScheme;
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Dashboard'),
-        actions: [
-          IconButton(
-            tooltip: 'Notificaciones',
-            onPressed: _openNotificationsSheet,
-            icon: const Icon(Icons.notifications_none_rounded),
-          ),
-          IconButton(
-            tooltip: 'Perfil',
-            onPressed: _openProfile,
-            icon: const Icon(Icons.account_circle_outlined),
-          ),
-          PopupMenuButton<_DashboardAction>(
-            tooltip: 'Más acciones',
-            onSelected: (value) async {
-              switch (value) {
-                case _DashboardAction.refresh:
-                  await _refreshDashboard();
-                  break;
-                case _DashboardAction.magicMenu:
-                  await _openMagicOnboarding();
-                  break;
-                case _DashboardAction.shareMenu:
-                  await _sharePublicMenu();
-                  break;
-                case _DashboardAction.copyLink:
-                  await _copyPublicMenuUrl();
-                  break;
-                case _DashboardAction.openWeb:
-                  await _openPublicMenu();
-                  break;
-                case _DashboardAction.showQr:
-                  await _openQrGenerator();
-                  break;
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: _DashboardAction.refresh,
-                child: _MenuActionRow(
-                  icon: Icons.refresh_rounded,
-                  label: 'Refrescar dashboard',
-                ),
+    return FutureBuilder<_DashboardSnapshot>(
+      future: _snapshotFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const BrandedLoadingScreen(withScaffold: true);
+        }
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Dashboard'),
+            actions: [
+              IconButton(
+                tooltip: 'Notificaciones',
+                onPressed: _openNotificationsSheet,
+                icon: const Icon(Icons.notifications_none_rounded),
               ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: _DashboardAction.magicMenu,
-                child: _MenuActionRow(
-                  icon: Icons.auto_awesome_rounded,
-                  label: 'Escanear con IA',
-                ),
+              IconButton(
+                tooltip: 'Perfil',
+                onPressed: _openProfile,
+                icon: const Icon(Icons.account_circle_outlined),
               ),
-              PopupMenuItem(
-                value: _DashboardAction.showQr,
-                child: _MenuActionRow(
-                  icon: Icons.qr_code_2_rounded,
-                  label: 'Generar QR',
-                ),
-              ),
-              PopupMenuItem(
-                value: _DashboardAction.shareMenu,
-                child: _MenuActionRow(
-                  icon: Icons.share_rounded,
-                  label: 'Compartir menú',
-                ),
-              ),
-              PopupMenuItem(
-                value: _DashboardAction.copyLink,
-                child: _MenuActionRow(
-                  icon: Icons.copy_all_rounded,
-                  label: 'Copiar enlace',
-                ),
-              ),
-              PopupMenuItem(
-                value: _DashboardAction.openWeb,
-                child: _MenuActionRow(
-                  icon: Icons.open_in_browser_rounded,
-                  label: 'Abrir menú web',
-                ),
+              PopupMenuButton<_DashboardAction>(
+                tooltip: 'Más acciones',
+                onSelected: (value) async {
+                  switch (value) {
+                    case _DashboardAction.refresh:
+                      await _refreshDashboard();
+                      break;
+                    case _DashboardAction.magicMenu:
+                      await _openMagicOnboarding();
+                      break;
+                    case _DashboardAction.shareMenu:
+                      await _sharePublicMenu();
+                      break;
+                    case _DashboardAction.copyLink:
+                      await _copyPublicMenuUrl();
+                      break;
+                    case _DashboardAction.openWeb:
+                      await _openPublicMenu();
+                      break;
+                    case _DashboardAction.showQr:
+                      await _openQrGenerator();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: _DashboardAction.refresh,
+                    child: _MenuActionRow(
+                      icon: Icons.refresh_rounded,
+                      label: 'Refrescar dashboard',
+                    ),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: _DashboardAction.magicMenu,
+                    child: _MenuActionRow(
+                      icon: Icons.auto_awesome_rounded,
+                      label: 'Escanear con IA',
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _DashboardAction.showQr,
+                    child: _MenuActionRow(
+                      icon: Icons.qr_code_2_rounded,
+                      label: 'Generar QR',
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _DashboardAction.shareMenu,
+                    child: _MenuActionRow(
+                      icon: Icons.share_rounded,
+                      label: 'Compartir menú',
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _DashboardAction.copyLink,
+                    child: _MenuActionRow(
+                      icon: Icons.copy_all_rounded,
+                      label: 'Copiar enlace',
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _DashboardAction.openWeb,
+                    child: _MenuActionRow(
+                      icon: Icons.open_in_browser_rounded,
+                      label: 'Abrir menú web',
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openCreateManualOrderSheet,
-        icon: const Icon(Icons.receipt_long_rounded),
-        label: const Text('Crear pedido'),
-      ),
-      body: SafeArea(
-        child: FutureBuilder<_DashboardSnapshot>(
-          future: _snapshotFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (snapshot.hasError) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.error_outline_rounded, size: 44),
-                      const SizedBox(height: 10),
-                      Text(
-                        'No se pudo cargar el dashboard.',
-                        style: theme.textTheme.titleMedium,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '${snapshot.error}',
-                        style: theme.textTheme.bodySmall,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 14),
-                      FilledButton.icon(
-                        onPressed: _refreshDashboard,
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: const Text('Intentar de nuevo'),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
-
-            final data = snapshot.data;
-            if (data == null) {
-              return const Center(child: Text('No hay datos disponibles.'));
-            }
-
-            if (!_didPrimeOnlineSwitch) {
-              _businessOnline = data.comercio.enLinea;
-              _didPrimeOnlineSwitch = true;
-            }
-
-            return StreamBuilder<List<PedidoModel>>(
-              stream: _ordersStream,
-              builder: (context, ordersSnapshot) {
-                final allOrders = ordersSnapshot.data ?? const <PedidoModel>[];
-                final filteredOrders = allOrders
-                    .where(_matchesFilter)
-                    .where(_matchesSearch)
-                    .toList();
-
-                final completedCount = allOrders.where(_isOrderCompleted).length;
-                final pendingCount = allOrders.length - completedCount;
-                final todayCount = allOrders.where((o) => _isToday(o.createdAt)).length;
-                final todayRevenue = allOrders
-                    .where((o) => _isToday(o.createdAt))
-                    .fold<double>(0, (sum, o) => sum + (o.total ?? 0));
-
-                return RefreshIndicator(
-                  onRefresh: _refreshDashboard,
-                  child: ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      16,
-                      12,
-                      16,
-                      110 + bottomInset,
-                    ),
-                    children: [
-                      if (_recentCatalogResult != null)
-                        _CatalogUpdateBanner(result: _recentCatalogResult!),
-                      _BusinessHeroCard(
-                        comercio: data.comercio,
-                        businessOnline: _businessOnline,
-                        onManageMenu: _goToMenuManagement,
-                        onOpenWeb: _openPublicMenu,
-                        onCopyUrl: _copyPublicMenuUrl,
-                        publicUrl: _buildPublicUrl(data.comercio),
-                      ),
-                      const SizedBox(height: 14),
-                      _SectionTitle(
-                        title: 'Indicadores',
-                        actionLabel: 'Refrescar',
-                        onActionTap: _refreshDashboard,
-                      ),
-                      const SizedBox(height: 10),
-                      GridView.count(
-                        crossAxisCount: 2,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        childAspectRatio: 1.28,
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: _openCreateManualOrderSheet,
+            icon: const Icon(Icons.receipt_long_rounded),
+            label: const Text('Crear pedido'),
+          ),
+          body: SafeArea(
+            child: Builder(
+              builder: (context) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          _KpiCard(
-                            label: 'Productos',
-                            value: '${data.productCount}',
-                            icon: Icons.restaurant_menu_rounded,
+                          const Icon(Icons.error_outline_rounded, size: 44),
+                          const SizedBox(height: 10),
+                          Text(
+                            'No se pudo cargar el dashboard.',
+                            style: theme.textTheme.titleMedium,
+                            textAlign: TextAlign.center,
                           ),
-                          _KpiCard(
-                            label: 'Categorías',
-                            value: '${data.categoryCount}',
-                            icon: Icons.grid_view_rounded,
+                          const SizedBox(height: 8),
+                          Text(
+                            '${snapshot.error}',
+                            style: theme.textTheme.bodySmall,
+                            textAlign: TextAlign.center,
                           ),
-                          _KpiCard(
-                            label: 'Pedidos hoy',
-                            value: '$todayCount',
-                            icon: Icons.receipt_long_rounded,
-                          ),
-                          _KpiCard(
-                            label: 'Ingresos hoy',
-                            value: '\$${todayRevenue.toStringAsFixed(2)}',
-                            icon: Icons.paid_rounded,
-                            highlight: colorScheme.primary,
+                          const SizedBox(height: 14),
+                          FilledButton.icon(
+                            onPressed: _refreshDashboard,
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('Intentar de nuevo'),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      _StatusRow(
-                        pendingCount: pendingCount,
-                        completedCount: completedCount,
-                        businessOnline: _businessOnline,
-                      ),
-                      const SizedBox(height: 16),
-                      const SizedBox(height: 6),
-                      _BusinessSettingsCard(
-                        comercio: data.comercio,
-                        isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
-                        businessOnline: _businessOnline,
-                        onEditInfo: () => _editBusinessInfo(data.comercio),
-                        onToggleOnline: _updateBusinessOnline,
-                      ),
-                      const SizedBox(height: 16),
-                      _SectionTitle(title: 'Pedidos recientes'),
-                      const SizedBox(height: 10),
-                      _OrderSearchField(
-                        controller: _ordersSearchController,
-                        onChanged: (value) {
-                          if (!mounted) return;
-                          setState(() => _ordersSearchQuery = value);
-                        },
-                        onClear: () {
-                          _ordersSearchController.clear();
-                          if (!mounted) return;
-                          setState(() => _ordersSearchQuery = '');
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: _OrderFilter.values.map((filter) {
-                            final selected = _orderFilter == filter;
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: ChoiceChip(
-                                selected: selected,
-                                onSelected: (_) {
-                                  if (!mounted) return;
-                                  setState(() => _orderFilter = filter);
-                                },
-                                label: Text(filter.label),
-                                avatar: Icon(filter.icon, size: 16),
-                              ),
-                            );
-                          }).toList(),
+                    ),
+                  );
+                }
+
+                final data = snapshot.data;
+                if (data == null) {
+                  return const Center(child: Text('No hay datos disponibles.'));
+                }
+
+                if (!_didPrimeOnlineSwitch) {
+                  _businessOnline = data.comercio.enLinea;
+                  _didPrimeOnlineSwitch = true;
+                }
+
+                return StreamBuilder<List<PedidoModel>>(
+                  stream: _ordersStream,
+                  builder: (context, ordersSnapshot) {
+                    final allOrders =
+                        ordersSnapshot.data ?? const <PedidoModel>[];
+                    final filteredOrders = allOrders
+                        .where(_matchesFilter)
+                        .where(_matchesSearch)
+                        .toList();
+
+                    final completedCount = allOrders
+                        .where(_isOrderCompleted)
+                        .length;
+                    final pendingCount = allOrders.length - completedCount;
+                    final todayCount = allOrders
+                        .where((o) => _isToday(o.createdAt))
+                        .length;
+                    final todayRevenue = allOrders
+                        .where((o) => _isToday(o.createdAt))
+                        .fold<double>(0, (sum, o) => sum + (o.total ?? 0));
+
+                    return RefreshIndicator(
+                      onRefresh: _refreshDashboard,
+                      child: ListView(
+                        padding: EdgeInsets.fromLTRB(
+                          16,
+                          12,
+                          16,
+                          110 + bottomInset,
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (ordersSnapshot.hasError)
-                        _EmptyStateCard(
-                          title: 'No se pudieron cargar los pedidos',
-                          subtitle: '${ordersSnapshot.error}',
-                          icon: Icons.error_outline_rounded,
-                        )
-                      else if (filteredOrders.isEmpty)
-                        const _EmptyStateCard(
-                          title: 'Sin pedidos para este filtro',
-                          subtitle:
-                              'Intenta cambiar el filtro o esperar nuevos pedidos.',
-                          icon: Icons.inbox_outlined,
-                        )
-                      else
-                        ...filteredOrders.map(
-                          (pedido) => _OrderTile(
-                            pedido: pedido,
-                            completed: _isOrderCompleted(pedido),
-                            onTap: () => _openOrderDetail(pedido),
+                        children: [
+                          if (_recentCatalogResult != null)
+                            _CatalogUpdateBanner(result: _recentCatalogResult!),
+                          _BusinessHeroCard(
+                            comercio: data.comercio,
+                            businessOnline: _businessOnline,
+                            onManageMenu: _goToMenuManagement,
+                            onOpenWeb: _openPublicMenu,
+                            onCopyUrl: _copyPublicMenuUrl,
+                            publicUrl: _buildPublicUrl(data.comercio),
                           ),
-                        ),
-                    ],
-                  ),
+                          const SizedBox(height: 14),
+                          _SectionTitle(
+                            title: 'Indicadores',
+                            actionLabel: 'Refrescar',
+                            onActionTap: _refreshDashboard,
+                          ),
+                          const SizedBox(height: 10),
+                          GridView.count(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            childAspectRatio: 1.28,
+                            children: [
+                              _KpiCard(
+                                label: 'Productos',
+                                value: '${data.productCount}',
+                                icon: Icons.restaurant_menu_rounded,
+                              ),
+                              _KpiCard(
+                                label: 'Categorías',
+                                value: '${data.categoryCount}',
+                                icon: Icons.grid_view_rounded,
+                              ),
+                              _KpiCard(
+                                label: 'Pedidos hoy',
+                                value: '$todayCount',
+                                icon: Icons.receipt_long_rounded,
+                              ),
+                              _KpiCard(
+                                label: 'Ingresos hoy',
+                                value: '\$${todayRevenue.toStringAsFixed(2)}',
+                                icon: Icons.paid_rounded,
+                                highlight: colorScheme.primary,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          _StatusRow(
+                            pendingCount: pendingCount,
+                            completedCount: completedCount,
+                            businessOnline: _businessOnline,
+                          ),
+                          const SizedBox(height: 16),
+                          const SizedBox(height: 6),
+                          _BusinessSettingsCard(
+                            comercio: data.comercio,
+                            isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
+                            businessOnline: _businessOnline,
+                            onEditInfo: () => _editBusinessInfo(data.comercio),
+                            onToggleOnline: _updateBusinessOnline,
+                          ),
+                          const SizedBox(height: 16),
+                          _SectionTitle(title: 'Pedidos recientes'),
+                          const SizedBox(height: 10),
+                          _OrderSearchField(
+                            controller: _ordersSearchController,
+                            onChanged: (value) {
+                              if (!mounted) return;
+                              setState(() => _ordersSearchQuery = value);
+                            },
+                            onClear: () {
+                              _ordersSearchController.clear();
+                              if (!mounted) return;
+                              setState(() => _ordersSearchQuery = '');
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: _OrderFilter.values.map((filter) {
+                                final selected = _orderFilter == filter;
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: ChoiceChip(
+                                    selected: selected,
+                                    onSelected: (_) {
+                                      if (!mounted) return;
+                                      setState(() => _orderFilter = filter);
+                                    },
+                                    label: Text(filter.label),
+                                    avatar: Icon(filter.icon, size: 16),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          if (ordersSnapshot.hasError)
+                            _EmptyStateCard(
+                              title: 'No se pudieron cargar los pedidos',
+                              subtitle: '${ordersSnapshot.error}',
+                              icon: Icons.error_outline_rounded,
+                            )
+                          else if (filteredOrders.isEmpty)
+                            const _EmptyStateCard(
+                              title: 'Sin pedidos para este filtro',
+                              subtitle:
+                                  'Intenta cambiar el filtro o esperar nuevos pedidos.',
+                              icon: Icons.inbox_outlined,
+                            )
+                          else
+                            ...filteredOrders.map(
+                              (pedido) => _OrderTile(
+                                pedido: pedido,
+                                completed: _isOrderCompleted(pedido),
+                                onTap: () => _openOrderDetail(pedido),
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
                 );
               },
-            );
-          },
-        ),
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
-enum _DashboardAction { refresh, magicMenu, showQr, shareMenu, copyLink, openWeb }
+enum _DashboardAction {
+  refresh,
+  magicMenu,
+  showQr,
+  shareMenu,
+  copyLink,
+  openWeb,
+}
 
 enum _OrderFilter { all, pending, completed }
 
@@ -1162,9 +1196,7 @@ class _BusinessHeroCard extends StatelessWidget {
               ),
               _StatusPill(
                 label: businessOnline ? 'En línea' : 'Pausado',
-                color: businessOnline
-                    ? palette.success
-                    : palette.warning,
+                color: businessOnline ? palette.success : palette.warning,
               ),
             ],
           ),
@@ -1336,14 +1368,12 @@ class _BusinessCardPalette {
 
   static _BusinessCardPalette fromMenuPalette(
     String? rawPalette,
-    ColorScheme colorScheme,
-    {
-      int? primaryArgb,
-      int? accentArgb,
-      int? surfaceArgb,
-      int? textArgb,
-    }
-  ) {
+    ColorScheme colorScheme, {
+    int? primaryArgb,
+    int? accentArgb,
+    int? surfaceArgb,
+    int? textArgb,
+  }) {
     if (primaryArgb != null && surfaceArgb != null && textArgb != null) {
       final primary = Color(primaryArgb);
       final accent = Color(accentArgb ?? primaryArgb);
@@ -1903,13 +1933,8 @@ class _OrderTile extends StatelessWidget {
           ],
         ),
         trailing: Text(
-          pedido.total != null
-              ? '\$${pedido.total!.toStringAsFixed(2)}'
-              : '--',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w700,
-            fontSize: 14,
-          ),
+          pedido.total != null ? '\$${pedido.total!.toStringAsFixed(2)}' : '--',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
         ),
       ),
     );
@@ -2013,11 +2038,7 @@ class _MenuActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: [
-        Icon(icon, size: 18),
-        const SizedBox(width: 10),
-        Text(label),
-      ],
+      children: [Icon(icon, size: 18), const SizedBox(width: 10), Text(label)],
     );
   }
 }

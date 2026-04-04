@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -33,6 +34,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   bool _emailVerified = false;
   bool _checkingTrustedDevice = false;
   bool _trustRestoreRequested = false;
+  bool _showTopBar = false;
   String? _verificationError;
 
   @override
@@ -357,20 +359,37 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0D0B),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0F0D0B),
-        foregroundColor: const Color(0xFFF9F3EB),
-        title: Text(
-          widget.readOnlyView ? 'Estado de tu pedido' : 'Detalle de pedido',
-        ),
-      ),
+      appBar: _showTopBar
+          ? AppBar(
+              backgroundColor: const Color(0xFF0F0D0B),
+              foregroundColor: const Color(0xFFF9F3EB),
+              title: Text(
+                widget.readOnlyView
+                    ? 'Estado de tu pedido'
+                    : 'Detalle de pedido',
+              ),
+            )
+          : null,
       body: Stack(
         children: [
           FutureBuilder<_OrderViewData?>(
             future: _orderFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
+                if (_showTopBar) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    setState(() => _showTopBar = false);
+                  });
+                }
+                return const BrandedLoadingScreen();
+              }
+
+              if (!_showTopBar && !_checkingTrustedDevice) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  setState(() => _showTopBar = true);
+                });
               }
 
               if (snapshot.hasError) {
@@ -420,7 +439,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               }
 
               if (isReadOnly && _checkingTrustedDevice) {
-                return const Center(child: CircularProgressIndicator());
+                if (_showTopBar) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    setState(() => _showTopBar = false);
+                  });
+                }
+                return const BrandedLoadingScreen();
               }
 
               if (isReadOnly && !_emailVerified) {

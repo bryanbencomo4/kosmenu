@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -509,7 +510,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
           future: _menuFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
+              return const BrandedLoadingScreen();
             }
 
             if (snapshot.hasError) {
@@ -676,7 +677,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                         ),
                                         selected: _selectedCategoryId == null,
                                         onSelected: (_) {
-                                          setState(() => _selectedCategoryId = null);
+                                          setState(
+                                            () => _selectedCategoryId = null,
+                                          );
                                         },
                                         selectedColor: palette.primary,
                                         labelStyle: GoogleFonts.manrope(
@@ -695,11 +698,14 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     ),
                                     ...data.categories.map((category) {
                                       final productCount =
-                                          categoryProductCount[category.id] ?? 0;
+                                          categoryProductCount[category.id] ??
+                                          0;
                                       final selected =
                                           _selectedCategoryId == category.id;
                                       return Padding(
-                                        padding: const EdgeInsets.only(right: 8),
+                                        padding: const EdgeInsets.only(
+                                          right: 8,
+                                        ),
                                         child: ChoiceChip(
                                           label: Text(
                                             '${category.nombre} ($productCount)',
@@ -707,7 +713,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                           selected: selected,
                                           onSelected: (_) {
                                             setState(
-                                              () => _selectedCategoryId = category.id,
+                                              () => _selectedCategoryId =
+                                                  category.id,
                                             );
                                           },
                                           selectedColor: palette.primary,
@@ -781,28 +788,30 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       ],
                     ),
                   ),
-                if (cartItemCount > 0)
-                  Positioned(
-                    right: 16,
-                    left: 16,
-                    bottom: 16,
-                    child: FilledButton.icon(
-                      onPressed: () => _openOrderSheet(data),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: palette.primary,
-                        foregroundColor: palette.onPrimary,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
+                  if (cartItemCount > 0)
+                    Positioned(
+                      right: 16,
+                      left: 16,
+                      bottom: 16,
+                      child: FilledButton.icon(
+                        onPressed: () => _openOrderSheet(data),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: palette.primary,
+                          foregroundColor: palette.onPrimary,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        icon: const Icon(Icons.shopping_bag_outlined),
+                        label: Text(
+                          'Ver Pedido ($cartItemCount - ${_formatUsd(cartTotalUsd)})',
+                          style: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
-                      icon: const Icon(Icons.shopping_bag_outlined),
-                      label: Text(
-                        'Ver Pedido ($cartItemCount - ${_formatUsd(cartTotalUsd)})',
-                        style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
-                      ),
                     ),
-                  ),
                 ],
               ),
             );
@@ -867,11 +876,7 @@ class _PublicProductCard extends StatelessWidget {
                   return Container(
                     color: surfaceAlt,
                     alignment: Alignment.center,
-                    child: Icon(
-                      Icons.restaurant,
-                      size: 44,
-                      color: muted,
-                    ),
+                    child: Icon(Icons.restaurant, size: 44, color: muted),
                   );
                 },
               ),
@@ -885,11 +890,7 @@ class _PublicProductCard extends StatelessWidget {
                 ),
               ),
               alignment: Alignment.center,
-              child: Icon(
-                Icons.lunch_dining,
-                size: 42,
-                color: accent,
-              ),
+              child: Icon(Icons.lunch_dining, size: 42, color: accent),
             ),
           Padding(
             padding: const EdgeInsets.all(16),

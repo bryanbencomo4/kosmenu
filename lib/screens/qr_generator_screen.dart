@@ -8,6 +8,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import 'package:kosmenu_app/models/comercio.dart';
+import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -365,10 +366,7 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
         }
 
         if (!snapshot.hasData) {
-          return const Scaffold(
-            backgroundColor: Color(0xFF0F0D0B),
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const BrandedLoadingScreen(withScaffold: true);
         }
 
         final embeddedLogo = MemoryImage(snapshot.data!);
