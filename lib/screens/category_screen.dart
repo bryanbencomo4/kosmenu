@@ -1196,7 +1196,21 @@ class _CatalogCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
+                IconButton(
+                  onPressed: enabled ? onOpen : null,
+                  icon: const Icon(Icons.folder_open_rounded, size: 18),
+                  tooltip: 'Abrir categorías',
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(32, 32),
+                    padding: EdgeInsets.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    backgroundColor: colorScheme.primary.withValues(
+                      alpha: 0.16,
+                    ),
+                    foregroundColor: colorScheme.primary,
+                  ),
+                ),
                 IconButton(
                   onPressed: enabled ? onEdit : null,
                   icon: const Icon(Icons.edit_outlined, size: 18),
@@ -1223,25 +1237,6 @@ class _CatalogCard extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
-                onPressed: enabled ? onOpen : null,
-                icon: const Icon(Icons.folder_open_rounded, size: 18),
-                label: const Text('Categorías'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: colorScheme.primary,
-                  foregroundColor: colorScheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  minimumSize: const Size(0, 34),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
             ),
           ],
         ),
@@ -1339,12 +1334,27 @@ class _CategoryCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                FilledButton.icon(
+                  onPressed: enabled ? onOpen : null,
+                  icon: const Icon(Icons.restaurant_menu_rounded, size: 16),
+                  label: const Text('Ver productos'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colorScheme.primary.withValues(
+                      alpha: 0.16,
+                    ),
+                    foregroundColor: colorScheme.primary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+                const SizedBox(width: 6),
                 IconButton(
                   onPressed: enabled ? onEdit : null,
                   icon: const Icon(Icons.edit_outlined, size: 18),
@@ -1357,6 +1367,7 @@ class _CategoryCard extends StatelessWidget {
                     foregroundColor: colorScheme.onSecondaryContainer,
                   ),
                 ),
+                const SizedBox(width: 6),
                 IconButton(
                   onPressed: enabled ? onDelete : null,
                   icon: const Icon(Icons.delete_outline, size: 18),
@@ -1367,21 +1378,6 @@ class _CategoryCard extends StatelessWidget {
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     backgroundColor: colorScheme.secondaryContainer,
                     foregroundColor: colorScheme.onSecondaryContainer,
-                  ),
-                ),
-                FilledButton.icon(
-                  onPressed: enabled ? onOpen : null,
-                  icon: const Icon(Icons.restaurant_menu_rounded, size: 18),
-                  label: const Text('Productos'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: colorScheme.primary,
-                    foregroundColor: colorScheme.onPrimary,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    minimumSize: const Size(0, 34),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                 ),
               ],
