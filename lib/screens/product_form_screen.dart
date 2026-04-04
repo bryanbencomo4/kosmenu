@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
@@ -30,14 +31,18 @@ class ProductFormScreen extends StatefulWidget {
 
 class _ProductFormScreenState extends State<ProductFormScreen> {
   static const _bucketName = 'product-images';
+  static const _defaultBrandLogoUrl =
+      'https://elmenuxfa.com/branding/isotipo.png';
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _priceController = TextEditingController();
+  final _picker = ImagePicker();
 
   String? _selectedCategoryId;
-  String? _imageUrl;
+  String? _remoteImageUrl;
+  String? _businessLogoUrl;
   XFile? _pickedImage;
   bool _isSaving = false;
   bool _isUploadingImage = false;
@@ -49,13 +54,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
     _nameController.text = product?.nombre ?? '';
     _descriptionController.text = product?.descripcion ?? '';
-    _priceController.text =
-        product != null ? product.precio.toStringAsFixed(2) : '';
+    _priceController.text = product != null
+        ? product.precio.toStringAsFixed(2)
+        : '';
     _selectedCategoryId =
         product?.categoriaId ??
         widget.initialCategoryId ??
         (widget.categories.isNotEmpty ? widget.categories.first.id : null);
-    _imageUrl = product?.imagenUrl;
+    _remoteImageUrl = product?.imagenUrl;
+    _loadBusinessLogo();
   }
 
   @override
@@ -66,14 +73,156 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     super.dispose();
   }
 
-  Future<void> _pickImageFromGallery() async {
-    final picker = ImagePicker();
-    final file = await picker.pickImage(source: ImageSource.gallery);
+  bool get _hasRemoteImage =>
+      _remoteImageUrl != null && _remoteImageUrl!.trim().isNotEmpty;
+
+  bool get _hasLocalImage => _pickedImage != null;
+
+  String get _fallbackImageUrl {
+    final businessLogo = _businessLogoUrl?.trim();
+    if (businessLogo != null && businessLogo.isNotEmpty) {
+      return businessLogo;
+    }
+    return _defaultBrandLogoUrl;
+  }
+
+  Future<void> _loadBusinessLogo() async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) return;
+
+    try {
+      final row = await Supabase.instance.client
+          .from('comercios')
+          .select('logo_url')
+          .eq('id', comercioId)
+          .maybeSingle();
+
+      if (!mounted || row == null) return;
+      setState(() => _businessLogoUrl = row['logo_url']?.toString().trim());
+    } catch (_) {
+      // Keep default fallback image when logo lookup fails.
+    }
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    final file = await _picker.pickImage(
+      source: source,
+      imageQuality: 82,
+      maxWidth: 1600,
+    );
     if (file == null) return;
 
+    if (!mounted) return;
+    setState(() => _pickedImage = file);
+  }
+
+  void _removeCurrentImageSelection() {
+    if (!_hasLocalImage && !_hasRemoteImage) return;
     setState(() {
-      _pickedImage = file;
+      _pickedImage = null;
+      _remoteImageUrl = null;
     });
+  }
+
+  Future<void> _showImageOptions() async {
+    if (_isSaving || _isUploadingImage) return;
+
+    final hasImage = _hasLocalImage || _hasRemoteImage;
+    final colorScheme = Theme.of(context).colorScheme;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: colorScheme.surfaceContainerHigh,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(
+                  Icons.photo_camera_rounded,
+                  color: colorScheme.onSurface,
+                ),
+                title: Text(
+                  'Tomar nueva foto',
+                  style: TextStyle(color: colorScheme.onSurface),
+                ),
+                onTap: () => Navigator.of(context).pop('camera'),
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.photo_library_rounded,
+                  color: colorScheme.onSurface,
+                ),
+                title: Text(
+                  'Cargar desde galería',
+                  style: TextStyle(color: colorScheme.onSurface),
+                ),
+                onTap: () => Navigator.of(context).pop('gallery'),
+              ),
+              if (hasImage)
+                ListTile(
+                  leading: Icon(
+                    Icons.delete_outline_rounded,
+                    color: colorScheme.error,
+                  ),
+                  title: Text(
+                    'Eliminar imagen',
+                    style: TextStyle(color: colorScheme.error),
+                  ),
+                  onTap: () => Navigator.of(context).pop('remove'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    switch (action) {
+      case 'camera':
+        await _pickImage(ImageSource.camera);
+        break;
+      case 'gallery':
+        await _pickImage(ImageSource.gallery);
+        break;
+      case 'remove':
+        _removeCurrentImageSelection();
+        break;
+      default:
+        break;
+    }
+  }
+
+  String? _validateCategory(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Selecciona una categoría';
+    }
+    return null;
+  }
+
+  String? _validateName(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Ingresa un nombre';
+    }
+    if (value.trim().length < 2) {
+      return 'El nombre es muy corto';
+    }
+    return null;
+  }
+
+  String? _validatePrice(String? value) {
+    final parsed = double.tryParse((value ?? '').trim().replaceAll(',', '.'));
+    if (parsed == null || parsed < 0) {
+      return 'Precio inválido';
+    }
+    return null;
+  }
+
+  double _parsePrice() {
+    return double.parse(_priceController.text.trim().replaceAll(',', '.'));
   }
 
   Future<String> _uploadImage(XFile sourceImage) async {
@@ -91,14 +240,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         minWidth: 1280,
       );
 
-      final fileToUpload = compressedFile ?? XFile(sourceImage.path);
+      final fileToUploadPath = compressedFile?.path ?? sourceImage.path;
 
       final fileName =
           '${SupabaseConfig.currentComercioId}/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
 
-      await Supabase.instance.client.storage.from(_bucketName).upload(
+      await Supabase.instance.client.storage
+          .from(_bucketName)
+          .upload(
             fileName,
-            File(fileToUpload.path),
+            File(fileToUploadPath),
             fileOptions: const FileOptions(upsert: true),
           );
 
@@ -116,17 +267,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (_isSaving) return;
     if (!_formKey.currentState!.validate()) return;
 
-    if (_selectedCategoryId == null || _selectedCategoryId!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona una categoría válida.')),
-      );
-      return;
-    }
-
     setState(() => _isSaving = true);
 
     try {
-      var finalImageUrl = _imageUrl;
+      var finalImageUrl = _remoteImageUrl;
       if (_pickedImage != null) {
         finalImageUrl = await _uploadImage(_pickedImage!);
       }
@@ -136,7 +280,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         'categoria_id': _selectedCategoryId,
         'nombre': _nameController.text.trim(),
         'descripcion': _descriptionController.text.trim(),
-        'precio': double.parse(_priceController.text.trim().replaceAll(',', '.')),
+        'precio': _parsePrice(),
         'imagen_url': finalImageUrl,
       };
 
@@ -181,98 +325,207 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final previewImage = _pickedImage?.path;
+    final media = MediaQuery.of(context);
+    final bottomSafePadding = max(media.padding.bottom, 16.0);
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0D0B),
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF17120E),
-        foregroundColor: Colors.white,
-        title: Text(widget.isEditing ? 'Editar Producto' : 'Nuevo Producto'),
-      ),
-      body: Stack(
-        children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 880;
-              final horizontalPadding = isWide ? 28.0 : 14.0;
-              final maxWidth = isWide ? 980.0 : 660.0;
-
-              final imagePanel = _ImagePanel(
-                previewImagePath: previewImage,
-                imageUrl: _imageUrl,
-                heroTag: widget.product != null
-                    ? 'hero-product-image-${widget.product!.id}'
-                    : null,
-                isSaving: _isSaving,
-                isUploadingImage: _isUploadingImage,
-                onPickImage: _pickImageFromGallery,
-              );
-
-              final formPanel = _FormPanel(
-                formKey: _formKey,
-                categories: widget.categories,
-                selectedCategoryId: _selectedCategoryId,
-                isSaving: _isSaving,
-                nameController: _nameController,
-                descriptionController: _descriptionController,
-                priceController: _priceController,
-                isEditing: widget.isEditing,
-                onCategoryChanged: (value) =>
-                    setState(() => _selectedCategoryId = value),
-                onSave: _save,
-              );
-
-              return Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: maxWidth),
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.fromLTRB(
-                      horizontalPadding,
-                      14,
-                      horizontalPadding,
-                      26,
-                    ),
-                    child: isWide
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(flex: 10, child: imagePanel),
-                              const SizedBox(width: 14),
-                              Expanded(flex: 14, child: formPanel),
-                            ],
-                          )
-                        : Column(
-                            children: [
-                              imagePanel,
-                              const SizedBox(height: 14),
-                              formPanel,
-                            ],
-                          ),
-                  ),
-                ),
-              );
-            },
-          ),
-          if (_isSaving)
+        backgroundColor: colorScheme.surfaceContainerHighest,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: colorScheme.onSurface,
+        titleSpacing: 14,
+        title: Row(
+          children: [
             Container(
-              color: Colors.black.withValues(alpha: 0.18),
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(height: 10),
-                  Text(
-                    _isUploadingImage
-                        ? 'Subiendo y optimizando imagen...'
-                        : 'Guardando producto...',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ],
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: colorScheme.primary.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.inventory_2_outlined, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                widget.isEditing ? 'Editar Producto' : 'Nuevo Producto',
+                style: GoogleFonts.manrope(
+                  fontWeight: FontWeight.w800,
+                  color: colorScheme.onSurface,
+                  fontSize: 22,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-        ],
+          ],
+        ),
+        bottom: PreferredSize(
+          preferredSize: Size.fromHeight(24),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(14, 0, 14, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Ajusta imagen, categoría, contenido y precio',
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: SafeArea(
+        top: false,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.38,
+                      ),
+                      colorScheme.surface,
+                    ],
+                  ),
+                ),
+                child: IgnorePointer(
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        top: -90,
+                        right: -60,
+                        child: Container(
+                          width: 220,
+                          height: 220,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: colorScheme.primary.withValues(alpha: 0.14),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: -120,
+                        left: -90,
+                        child: Container(
+                          width: 260,
+                          height: 260,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: colorScheme.tertiary.withValues(alpha: 0.12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 880;
+                final horizontalPadding = isWide ? 28.0 : 14.0;
+                final maxWidth = isWide ? 980.0 : 660.0;
+
+                final imagePanel = _ImagePanel(
+                  localImagePath: _pickedImage?.path,
+                  remoteImageUrl: _remoteImageUrl,
+                  fallbackImageUrl: _fallbackImageUrl,
+                  heroTag: widget.product != null
+                      ? 'hero-product-image-${widget.product!.id}'
+                      : null,
+                  isSaving: _isSaving,
+                  isUploadingImage: _isUploadingImage,
+                  onTapImageAction: _showImageOptions,
+                );
+
+                final formPanel = _FormPanel(
+                  formKey: _formKey,
+                  categories: widget.categories,
+                  selectedCategoryId: _selectedCategoryId,
+                  isSaving: _isSaving,
+                  nameController: _nameController,
+                  descriptionController: _descriptionController,
+                  priceController: _priceController,
+                  isEditing: widget.isEditing,
+                  validateCategory: _validateCategory,
+                  validateName: _validateName,
+                  validatePrice: _validatePrice,
+                  onCategoryChanged: (value) =>
+                      setState(() => _selectedCategoryId = value),
+                  onSave: _save,
+                );
+
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: maxWidth),
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.fromLTRB(
+                        horizontalPadding,
+                        14,
+                        horizontalPadding,
+                        26 + bottomSafePadding,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const _HeaderIntro(),
+                          const SizedBox(height: 14),
+                          isWide
+                              ? Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(flex: 10, child: imagePanel),
+                                    const SizedBox(width: 14),
+                                    Expanded(flex: 14, child: formPanel),
+                                  ],
+                                )
+                              : Column(
+                                  children: [
+                                    imagePanel,
+                                    const SizedBox(height: 14),
+                                    formPanel,
+                                  ],
+                                ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            if (_isSaving)
+              Container(
+                color: Colors.black.withValues(alpha: 0.28),
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      _isUploadingImage
+                          ? 'Subiendo y optimizando imagen...'
+                          : 'Guardando producto...',
+                      style: TextStyle(color: colorScheme.onSurface),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -280,20 +533,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
 class _ImagePanel extends StatelessWidget {
   const _ImagePanel({
-    required this.previewImagePath,
-    required this.imageUrl,
+    required this.localImagePath,
+    required this.remoteImageUrl,
+    required this.fallbackImageUrl,
     required this.heroTag,
     required this.isSaving,
     required this.isUploadingImage,
-    required this.onPickImage,
+    required this.onTapImageAction,
   });
 
-  final String? previewImagePath;
-  final String? imageUrl;
+  final String? localImagePath;
+  final String? remoteImageUrl;
+  final String fallbackImageUrl;
   final String? heroTag;
   final bool isSaving;
   final bool isUploadingImage;
-  final VoidCallback onPickImage;
+  final VoidCallback onTapImageAction;
 
   Widget _wrapHero(Widget child) {
     if (heroTag == null || heroTag!.isEmpty) return child;
@@ -302,75 +557,157 @@ class _ImagePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final hasLocalImage = localImagePath != null;
+    final hasRemoteImage =
+        remoteImageUrl != null && remoteImageUrl!.trim().isNotEmpty;
+    final hasFallbackImage = fallbackImageUrl.trim().isNotEmpty;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF17120E),
+        color: colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x2AD7A74D)),
+        border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Foto del producto',
-            style: TextStyle(
-              color: Colors.amber.shade100,
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
               fontWeight: FontWeight.w700,
               fontSize: 16,
             ),
           ),
-          const SizedBox(height: 10),
-          if (previewImagePath != null)
-            _wrapHero(
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  File(previewImagePath!),
-                  fit: BoxFit.cover,
-                  height: 230,
-                  width: double.infinity,
-                ),
-              ),
-            )
-          else if (imageUrl != null && imageUrl!.trim().isNotEmpty)
-            _wrapHero(
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.network(
-                  imageUrl!,
-                  fit: BoxFit.cover,
-                  height: 230,
-                  width: double.infinity,
-                ),
-              ),
-            )
-          else
-            Container(
-              height: 200,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: const Color(0xFF251B13),
-              ),
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.photo_camera_back_outlined, color: Colors.white54),
-                  SizedBox(height: 8),
-                  Text('Sin foto seleccionada', style: TextStyle(color: Colors.white70)),
-                ],
-              ),
+          const SizedBox(height: 2),
+          Text(
+            'Toca la imagen para tomar, cargar o eliminar.',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
             ),
+          ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: isSaving ? null : onTapImageAction,
+            child: Stack(
+              children: [
+                if (hasLocalImage)
+                  _wrapHero(
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(
+                        File(localImagePath!),
+                        fit: BoxFit.cover,
+                        height: 230,
+                        width: double.infinity,
+                      ),
+                    ),
+                  )
+                else if (hasRemoteImage)
+                  _wrapHero(
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        remoteImageUrl!,
+                        fit: BoxFit.cover,
+                        height: 230,
+                        width: double.infinity,
+                      ),
+                    ),
+                  )
+                else if (hasFallbackImage)
+                  _wrapHero(
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        fallbackImageUrl,
+                        fit: BoxFit.cover,
+                        height: 200,
+                        width: double.infinity,
+                        errorBuilder: (_, _, _) => Container(
+                          height: 200,
+                          width: double.infinity,
+                          color: colorScheme.surfaceContainerHighest,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    height: 200,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      color: colorScheme.surfaceContainerHighest,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.photo_camera_back_outlined,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Sin foto seleccionada',
+                          style: TextStyle(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                Positioned(
+                  right: 10,
+                  bottom: 10,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.48),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Icon(
+                        Icons.photo_camera_outlined,
+                        color: colorScheme.onPrimary,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 12),
           FilledButton.icon(
-            onPressed: isSaving ? null : onPickImage,
-            icon: const Icon(Icons.photo_library_outlined),
-            label: const Text('Seleccionar foto de galería'),
+            onPressed: isSaving ? null : onTapImageAction,
+            icon: const Icon(Icons.photo_camera_rounded),
+            label: const Text('Cambiar foto'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              backgroundColor: colorScheme.primary,
+              foregroundColor: colorScheme.onPrimary,
+              textStyle: GoogleFonts.manrope(
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+              ),
+            ),
           ),
           if (isUploadingImage) ...[
             const SizedBox(height: 10),
-            const LinearProgressIndicator(),
+            LinearProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
+              backgroundColor: colorScheme.surfaceContainerHighest,
+            ),
           ],
         ],
       ),
@@ -388,6 +725,9 @@ class _FormPanel extends StatelessWidget {
     required this.descriptionController,
     required this.priceController,
     required this.isEditing,
+    required this.validateCategory,
+    required this.validateName,
+    required this.validatePrice,
     required this.onCategoryChanged,
     required this.onSave,
   });
@@ -400,93 +740,269 @@ class _FormPanel extends StatelessWidget {
   final TextEditingController descriptionController;
   final TextEditingController priceController;
   final bool isEditing;
+  final FormFieldValidator<String> validateCategory;
+  final FormFieldValidator<String> validateName;
+  final FormFieldValidator<String> validatePrice;
   final ValueChanged<String?> onCategoryChanged;
   final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final categoryIds = categories.map((category) => category.id).toSet();
     final effectiveCategoryId = categoryIds.contains(selectedCategoryId)
         ? selectedCategoryId
         : null;
 
+    Widget fieldLabel(String text) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(
+          text,
+          style: GoogleFonts.manrope(
+            color: colorScheme.onSurface,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+    }
+
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF17120E),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x2AD7A74D)),
+        color: colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x18000000),
+            blurRadius: 18,
+            offset: Offset(0, 8),
+          ),
+        ],
       ),
-      child: Form(
-        key: formKey,
-        child: Column(
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: effectiveCategoryId,
-              isExpanded: true,
-              items: categories
-                  .map(
-                    (category) => DropdownMenuItem<String>(
-                      value: category.id,
-                      child: Text(
-                        category.nombre,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: isSaving ? null : onCategoryChanged,
-              decoration: const InputDecoration(labelText: 'Categoría'),
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: colorScheme.surfaceContainerLowest,
+            labelStyle: GoogleFonts.manrope(
+              color: colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: nameController,
-              enabled: !isSaving,
-              decoration: const InputDecoration(labelText: 'Nombre'),
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Ingresa un nombre';
-                }
-                return null;
-              },
+            floatingLabelStyle: TextStyle(
+              color: colorScheme.primary,
+              fontWeight: FontWeight.w700,
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: descriptionController,
-              enabled: !isSaving,
-              decoration: const InputDecoration(labelText: 'Descripción'),
-              minLines: 2,
-              maxLines: 4,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: priceController,
-              enabled: !isSaving,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Precio'),
-              validator: (value) {
-                final parsed =
-                    double.tryParse((value ?? '').trim().replaceAll(',', '.'));
-                if (parsed == null || parsed < 0) {
-                  return 'Precio inválido';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: isSaving ? null : onSave,
-                icon: const Icon(Icons.save_outlined),
-                label: Text(
-                  isEditing ? 'Guardar Cambios' : 'Crear Producto',
-                ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: colorScheme.outlineVariant,
+                width: 1,
               ),
             ),
-          ],
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: colorScheme.outlineVariant,
+                width: 1,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: colorScheme.primary, width: 1.4),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: colorScheme.error, width: 1.2),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: colorScheme.error, width: 1.4),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 13,
+            ),
+          ),
         ),
+        child: Form(
+          key: formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Datos del producto',
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Completa la información que verá el cliente en el menú.',
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 20),
+              fieldLabel('Categoría'),
+              DropdownButtonFormField<String>(
+                initialValue: effectiveCategoryId,
+                isExpanded: true,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+                dropdownColor: colorScheme.surfaceContainerHigh,
+                items: categories
+                    .map(
+                      (category) => DropdownMenuItem<String>(
+                        value: category.id,
+                        child: Text(
+                          category.nombre,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w700,
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: isSaving ? null : onCategoryChanged,
+                decoration: const InputDecoration(hintText: 'Seleccionar'),
+                validator: validateCategory,
+              ),
+              const SizedBox(height: 16),
+              fieldLabel('Nombre'),
+              TextFormField(
+                controller: nameController,
+                enabled: !isSaving,
+                textInputAction: TextInputAction.next,
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'Ej. Mushroom Swiss Dream',
+                ),
+                validator: validateName,
+              ),
+              const SizedBox(height: 16),
+              fieldLabel('Descripción'),
+              TextFormField(
+                controller: descriptionController,
+                enabled: !isSaving,
+                textInputAction: TextInputAction.newline,
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'Ingredientes, sabores o detalles clave',
+                ),
+                minLines: 2,
+                maxLines: 4,
+              ),
+              const SizedBox(height: 16),
+              fieldLabel('Precio'),
+              TextFormField(
+                controller: priceController,
+                enabled: !isSaving,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                textInputAction: TextInputAction.done,
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+                decoration: const InputDecoration(
+                  hintText: '0.00',
+                  prefixText: '\$ ',
+                ),
+                validator: validatePrice,
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Verifica que el precio esté en la moneda de tu negocio.',
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: isSaving ? null : onSave,
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(isEditing ? 'Guardar Cambios' : 'Crear Producto'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                    backgroundColor: colorScheme.primary,
+                    foregroundColor: colorScheme.onPrimary,
+                    textStyle: GoogleFonts.manrope(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderIntro extends StatelessWidget {
+  const _HeaderIntro();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Configura tu producto',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Define imagen, categoría, descripción y precio.',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }

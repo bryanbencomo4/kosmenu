@@ -182,6 +182,8 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
       backgroundColor: colorScheme.surface,
       appBar: AppBar(
         backgroundColor: colorScheme.surfaceContainerHighest,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
         foregroundColor: colorScheme.onSurface,
         titleTextStyle: GoogleFonts.manrope(
           color: colorScheme.onSurface,
@@ -1099,156 +1101,189 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Nueva Categoría'),
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadCategories,
-        color: colorScheme.primary,
-        child: SafeArea(
-          top: false,
-          child: Stack(
-            children: [
-              ListView(
-                controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 120),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.34,
+                      ),
+                      colorScheme.surface,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          RefreshIndicator(
+            onRefresh: _loadCategories,
+            color: colorScheme.primary,
+            child: SafeArea(
+              top: false,
+              child: Stack(
                 children: [
-                  ClipRect(
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      heightFactor: headerHeightFactor,
-                      child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 140),
-                        opacity: headerOpacity,
-                        child: Transform.scale(
-                          scale: headerScale,
+                  ListView(
+                    controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 120),
+                    children: [
+                      ClipRect(
+                        child: Align(
                           alignment: Alignment.topCenter,
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(18),
-                              color: colorScheme.surfaceContainerHigh,
-                              border: Border.all(
-                                color: colorScheme.outlineVariant,
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Estructura del menú',
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurface,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 17,
+                          heightFactor: headerHeightFactor,
+                          child: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 140),
+                            opacity: headerOpacity,
+                            child: Transform.scale(
+                              scale: headerScale,
+                              alignment: Alignment.topCenter,
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(18),
+                                  color: colorScheme.surfaceContainerHigh,
+                                  border: Border.all(
+                                    color: colorScheme.outlineVariant,
                                   ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Organiza categorías claras para que agregar y encontrar productos sea más rápido.',
-                                  style: TextStyle(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    _StatChip(
-                                      label: 'Categorías',
-                                      value: '${_categories.length}',
-                                    ),
-                                    _StatChip(
-                                      label: 'Activas',
-                                      value: '$activeCategories',
-                                    ),
-                                    _StatChip(
-                                      label: 'Productos',
-                                      value: '$totalProducts',
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x1F000000),
+                                      blurRadius: 22,
+                                      offset: Offset(0, 9),
                                     ),
                                   ],
                                 ),
-                              ],
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Estructura del menú',
+                                      style: GoogleFonts.manrope(
+                                        color: colorScheme.onSurface,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 17,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Organiza categorías claras para que agregar y encontrar productos sea más rápido.',
+                                      style: TextStyle(
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: [
+                                        _StatChip(
+                                          label: 'Categorías',
+                                          value: '${_categories.length}',
+                                        ),
+                                        _StatChip(
+                                          label: 'Activas',
+                                          value: '$activeCategories',
+                                        ),
+                                        _StatChip(
+                                          label: 'Productos',
+                                          value: '$totalProducts',
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    switchInCurve: Curves.easeOut,
-                    switchOutCurve: Curves.easeIn,
-                    child: showCompactHeader
-                        ? Padding(
-                            key: const ValueKey('compact-category-header'),
-                            padding: const EdgeInsets.only(top: 8, bottom: 10),
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: [
-                                  _StatChip(
-                                    label: 'Categorías',
-                                    value: '${_categories.length}',
+                      const SizedBox(height: 10),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        child: showCompactHeader
+                            ? Padding(
+                                key: const ValueKey('compact-category-header'),
+                                padding: const EdgeInsets.only(
+                                  top: 8,
+                                  bottom: 10,
+                                ),
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(
+                                    children: [
+                                      _StatChip(
+                                        label: 'Categorías',
+                                        value: '${_categories.length}',
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _StatChip(
+                                        label: 'Activas',
+                                        value: '$activeCategories',
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _StatChip(
+                                        label: 'Productos',
+                                        value: '$totalProducts',
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(width: 8),
-                                  _StatChip(
-                                    label: 'Activas',
-                                    value: '$activeCategories',
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _StatChip(
-                                    label: 'Productos',
-                                    value: '$totalProducts',
-                                  ),
-                                ],
+                                ),
+                              )
+                            : const SizedBox(
+                                key: ValueKey('compact-category-spacer'),
+                                height: 10,
                               ),
-                            ),
-                          )
-                        : const SizedBox(
-                            key: ValueKey('compact-category-spacer'),
-                            height: 10,
-                          ),
-                  ),
-                  if (_categories.isEmpty)
-                    _EmptyMenuState(
-                      icon: Icons.category_outlined,
-                      title: 'No hay categorías en este menú',
-                      subtitle:
-                          'Crea tu primera categoría para empezar a cargar productos.',
-                      actionLabel: 'Crear primera categoría',
-                      onAction: _isMutating ? null : _createCategory,
-                    )
-                  else if (filtered.isEmpty)
-                    _EmptyMenuState(
-                      icon: Icons.search_off_rounded,
-                      title: 'Sin resultados para la búsqueda',
-                      subtitle:
-                          'Prueba otro término o limpia el filtro actual.',
-                      actionLabel: 'Limpiar búsqueda',
-                      onAction: () {
-                        _searchController.clear();
-                        setState(() => _searchQuery = '');
-                      },
-                    )
-                  else
-                    ...filtered.map(
-                      (category) => _CategoryCard(
-                        category: category,
-                        enabled: !_isMutating,
-                        productCount: _productCountByCategory[category.id] ?? 0,
-                        onOpen: () => _openProducts(category),
-                        onEdit: () => _editCategory(category),
-                        onDelete: () => _deleteCategory(category),
-                        onToggleActive: (value) =>
-                            _toggleCategoryActive(category, value),
                       ),
-                    ),
+                      if (_categories.isEmpty)
+                        _EmptyMenuState(
+                          icon: Icons.category_outlined,
+                          title: 'No hay categorías en este menú',
+                          subtitle:
+                              'Crea tu primera categoría para empezar a cargar productos.',
+                          actionLabel: 'Crear primera categoría',
+                          onAction: _isMutating ? null : _createCategory,
+                        )
+                      else if (filtered.isEmpty)
+                        _EmptyMenuState(
+                          icon: Icons.search_off_rounded,
+                          title: 'Sin resultados para la búsqueda',
+                          subtitle:
+                              'Prueba otro término o limpia el filtro actual.',
+                          actionLabel: 'Limpiar búsqueda',
+                          onAction: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      else
+                        ...filtered.map(
+                          (category) => _CategoryCard(
+                            category: category,
+                            enabled: !_isMutating,
+                            productCount:
+                                _productCountByCategory[category.id] ?? 0,
+                            onOpen: () => _openProducts(category),
+                            onEdit: () => _editCategory(category),
+                            onDelete: () => _deleteCategory(category),
+                            onToggleActive: (value) =>
+                                _toggleCategoryActive(category, value),
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1275,6 +1310,8 @@ class _CatalogCard extends StatelessWidget {
     return Card(
       color: colorScheme.surfaceContainerHigh,
       margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(color: colorScheme.outlineVariant),
@@ -1372,6 +1409,8 @@ class _CategoryCard extends StatelessWidget {
     return Card(
       color: colorScheme.surfaceContainerHigh,
       margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(color: colorScheme.outlineVariant),
@@ -1503,7 +1542,7 @@ class _StatChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: colorScheme.surface,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: colorScheme.primary.withValues(alpha: 0.35)),
       ),

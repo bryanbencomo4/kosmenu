@@ -553,6 +553,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
       backgroundColor: colorScheme.surface,
       appBar: AppBar(
         backgroundColor: colorScheme.surfaceContainerHighest,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
         foregroundColor: colorScheme.onSurface,
         titleTextStyle: GoogleFonts.manrope(
           color: colorScheme.onSurface,
@@ -600,247 +602,299 @@ class _ProductListScreenState extends State<ProductListScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Nuevo Producto'),
       ),
-      body: RefreshIndicator(
-        onRefresh: () => _loadProducts(reset: true),
-        color: colorScheme.primary,
-        child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 760;
-              final horizontalPadding = isWide ? 28.0 : 14.0;
-              final maxWidth = isWide ? 980.0 : 680.0;
-              final filteredProducts = _filteredProducts;
-              final hasSearch = _searchQuery.trim().isNotEmpty;
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.34,
+                      ),
+                      colorScheme.surface,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          RefreshIndicator(
+            onRefresh: () => _loadProducts(reset: true),
+            color: colorScheme.primary,
+            child: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth >= 760;
+                  final horizontalPadding = isWide ? 28.0 : 14.0;
+                  final maxWidth = isWide ? 980.0 : 680.0;
+                  final filteredProducts = _filteredProducts;
+                  final hasSearch = _searchQuery.trim().isNotEmpty;
 
-              return Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: maxWidth),
-                  child: Stack(
-                    children: [
-                      Column(
+                  return Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: maxWidth),
+                      child: Stack(
                         children: [
-                          ClipRect(
-                            child: Align(
-                              alignment: Alignment.topCenter,
-                              heightFactor: headerHeightFactor,
-                              child: AnimatedOpacity(
-                                duration: const Duration(milliseconds: 140),
-                                opacity: headerOpacity,
-                                child: Transform.scale(
-                                  scale: headerScale,
+                          Column(
+                            children: [
+                              ClipRect(
+                                child: Align(
                                   alignment: Alignment.topCenter,
-                                  child: Container(
-                                    margin: EdgeInsets.fromLTRB(
-                                      horizontalPadding,
-                                      14,
-                                      horizontalPadding,
-                                      8,
-                                    ),
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(18),
-                                      color: colorScheme.surfaceContainerHigh,
-                                      border: Border.all(
-                                        color: colorScheme.outlineVariant,
-                                      ),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              width: 42,
-                                              height: 42,
-                                              decoration: BoxDecoration(
-                                                color: colorScheme.primary
-                                                    .withValues(alpha: 0.16),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                              ),
-                                              child: Icon(
-                                                Icons.inventory_2_outlined,
-                                                color: colorScheme.primary,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Text(
-                                                'Gestiona productos con orden, visibilidad y búsqueda instantánea.',
-                                                style: GoogleFonts.manrope(
-                                                  color: colorScheme
-                                                      .onSurfaceVariant,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
+                                  heightFactor: headerHeightFactor,
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 140),
+                                    opacity: headerOpacity,
+                                    child: Transform.scale(
+                                      scale: headerScale,
+                                      alignment: Alignment.topCenter,
+                                      child: Container(
+                                        margin: EdgeInsets.fromLTRB(
+                                          horizontalPadding,
+                                          14,
+                                          horizontalPadding,
+                                          8,
+                                        ),
+                                        padding: const EdgeInsets.all(16),
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            18,
+                                          ),
+                                          color:
+                                              colorScheme.surfaceContainerHigh,
+                                          border: Border.all(
+                                            color: colorScheme.outlineVariant,
+                                          ),
+                                          boxShadow: const [
+                                            BoxShadow(
+                                              color: Color(0x1F000000),
+                                              blurRadius: 22,
+                                              offset: Offset(0, 9),
                                             ),
                                           ],
                                         ),
-                                      ],
+                                        child: Column(
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Container(
+                                                  width: 42,
+                                                  height: 42,
+                                                  decoration: BoxDecoration(
+                                                    color: colorScheme.primary
+                                                        .withValues(
+                                                          alpha: 0.16,
+                                                        ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                  ),
+                                                  child: Icon(
+                                                    Icons.inventory_2_outlined,
+                                                    color: colorScheme.primary,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Text(
+                                                    'Gestiona productos con orden, visibilidad y búsqueda instantánea.',
+                                                    style: GoogleFonts.manrope(
+                                                      color: colorScheme
+                                                          .onSurfaceVariant,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ),
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            padding: EdgeInsets.fromLTRB(
-                              horizontalPadding,
-                              0,
-                              horizontalPadding,
-                              8,
-                            ),
-                            child: Row(
-                              children: _ProductVisibilityFilter.values.map((
-                                filter,
-                              ) {
-                                final selected = _visibilityFilter == filter;
-                                return Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: ChoiceChip(
-                                    selected: selected,
-                                    showCheckmark: false,
-                                    label: Text(
-                                      '${filter.label} (${filter == _ProductVisibilityFilter.all
-                                          ? _products.length
-                                          : filter == _ProductVisibilityFilter.visible
-                                          ? _visibleCount
-                                          : _hiddenCount})',
-                                    ),
-                                    avatar: Icon(filter.icon, size: 16),
-                                    onSelected: (_) {
-                                      if (!mounted) return;
-                                      setState(
-                                        () => _visibilityFilter = filter,
-                                      );
-                                    },
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                          ),
-                          Expanded(
-                            child: filteredProducts.isEmpty
-                                ? ListView(
-                                    controller: _scrollController,
-                                    physics:
-                                        const AlwaysScrollableScrollPhysics(),
-                                    padding: EdgeInsets.fromLTRB(
-                                      horizontalPadding,
-                                      56,
-                                      horizontalPadding,
-                                      126,
-                                    ),
-                                    children: [
-                                      _EmptyProductsCard(
-                                        hasSearchOrFilter:
-                                            hasSearch ||
-                                            _visibilityFilter !=
-                                                _ProductVisibilityFilter.all,
-                                        onClear: () {
-                                          _searchController.clear();
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                padding: EdgeInsets.fromLTRB(
+                                  horizontalPadding,
+                                  0,
+                                  horizontalPadding,
+                                  8,
+                                ),
+                                child: Row(
+                                  children: _ProductVisibilityFilter.values.map((
+                                    filter,
+                                  ) {
+                                    final selected =
+                                        _visibilityFilter == filter;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: ChoiceChip(
+                                        selected: selected,
+                                        showCheckmark: false,
+                                        label: Text(
+                                          '${filter.label} (${filter == _ProductVisibilityFilter.all
+                                              ? _products.length
+                                              : filter == _ProductVisibilityFilter.visible
+                                              ? _visibleCount
+                                              : _hiddenCount})',
+                                        ),
+                                        avatar: Icon(filter.icon, size: 16),
+                                        onSelected: (_) {
                                           if (!mounted) return;
-                                          setState(() {
-                                            _searchQuery = '';
-                                            _visibilityFilter =
-                                                _ProductVisibilityFilter.all;
-                                          });
+                                          setState(
+                                            () => _visibilityFilter = filter,
+                                          );
                                         },
                                       ),
-                                    ],
-                                  )
-                                : NotificationListener<ScrollNotification>(
-                                    onNotification: (notification) {
-                                      final next =
-                                          (notification.metrics.pixels / 170)
-                                              .clamp(0.0, 1.0);
-                                      if ((next - _headerCollapse).abs() >=
-                                              0.02 &&
-                                          mounted) {
-                                        setState(() => _headerCollapse = next);
-                                      }
-                                      if (notification.metrics.pixels >=
-                                          notification.metrics.maxScrollExtent -
-                                              180) {
-                                        _loadProducts();
-                                      }
-                                      return false;
-                                    },
-                                    child: hasSearch
-                                        ? ListView.builder(
-                                            controller: _scrollController,
-                                            physics:
-                                                const AlwaysScrollableScrollPhysics(),
-                                            padding: EdgeInsets.fromLTRB(
-                                              horizontalPadding,
-                                              8,
-                                              horizontalPadding,
-                                              126,
-                                            ),
-                                            itemCount: filteredProducts.length,
-                                            itemBuilder: (context, index) {
-                                              final product =
-                                                  filteredProducts[index];
-                                              return _ProductCard(
-                                                key: ValueKey(product.id),
-                                                product: product,
-                                                fallbackImageUrl:
-                                                    (_businessLogoUrl != null &&
-                                                        _businessLogoUrl!
-                                                            .trim()
-                                                            .isNotEmpty)
-                                                    ? _businessLogoUrl!.trim()
-                                                    : _defaultBrandLogoUrl,
-                                                isUpdatingImage:
-                                                    _updatingImageProductIds
-                                                        .contains(product.id),
-                                                onEditImage: () =>
-                                                    _openProductImageOptions(
-                                                      product,
-                                                    ),
-                                                onEdit: () => _openProductForm(
-                                                  product: product,
-                                                ),
-                                                onDelete: () =>
-                                                    _deleteProduct(product),
-                                                onToggleVisible: (value) =>
-                                                    _toggleVisibility(
-                                                      product,
-                                                      value,
-                                                    ),
-                                                dragHandle: Icon(
-                                                  Icons.drag_indicator,
-                                                  color: colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                              );
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                              Expanded(
+                                child: filteredProducts.isEmpty
+                                    ? ListView(
+                                        controller: _scrollController,
+                                        physics:
+                                            const AlwaysScrollableScrollPhysics(),
+                                        padding: EdgeInsets.fromLTRB(
+                                          horizontalPadding,
+                                          56,
+                                          horizontalPadding,
+                                          126,
+                                        ),
+                                        children: [
+                                          _EmptyProductsCard(
+                                            hasSearchOrFilter:
+                                                hasSearch ||
+                                                _visibilityFilter !=
+                                                    _ProductVisibilityFilter
+                                                        .all,
+                                            onClear: () {
+                                              _searchController.clear();
+                                              if (!mounted) return;
+                                              setState(() {
+                                                _searchQuery = '';
+                                                _visibilityFilter =
+                                                    _ProductVisibilityFilter
+                                                        .all;
+                                              });
                                             },
-                                          )
-                                        : ReorderableListView.builder(
-                                            padding: EdgeInsets.fromLTRB(
-                                              horizontalPadding,
-                                              8,
-                                              horizontalPadding,
-                                              126,
-                                            ),
-                                            itemCount: filteredProducts.length,
-                                            onReorder: _onReorder,
-                                            buildDefaultDragHandles: false,
-                                            itemBuilder: (context, index) {
-                                              final product =
-                                                  filteredProducts[index];
-                                              return TweenAnimationBuilder<
-                                                double
-                                              >(
-                                                key: ValueKey(product.id),
-                                                tween: Tween(begin: 0, end: 1),
-                                                duration: Duration(
-                                                  milliseconds:
-                                                      260 + (index * 18),
+                                          ),
+                                        ],
+                                      )
+                                    : NotificationListener<ScrollNotification>(
+                                        onNotification: (notification) {
+                                          final next =
+                                              (notification.metrics.pixels /
+                                                      170)
+                                                  .clamp(0.0, 1.0);
+                                          if ((next - _headerCollapse).abs() >=
+                                                  0.02 &&
+                                              mounted) {
+                                            setState(
+                                              () => _headerCollapse = next,
+                                            );
+                                          }
+                                          if (notification.metrics.pixels >=
+                                              notification
+                                                      .metrics
+                                                      .maxScrollExtent -
+                                                  180) {
+                                            _loadProducts();
+                                          }
+                                          return false;
+                                        },
+                                        child: hasSearch
+                                            ? ListView.builder(
+                                                controller: _scrollController,
+                                                physics:
+                                                    const AlwaysScrollableScrollPhysics(),
+                                                padding: EdgeInsets.fromLTRB(
+                                                  horizontalPadding,
+                                                  8,
+                                                  horizontalPadding,
+                                                  126,
                                                 ),
-                                                curve: Curves.easeOut,
-                                                builder:
-                                                    (context, value, child) {
+                                                itemCount:
+                                                    filteredProducts.length,
+                                                itemBuilder: (context, index) {
+                                                  final product =
+                                                      filteredProducts[index];
+                                                  return _ProductCard(
+                                                    key: ValueKey(product.id),
+                                                    product: product,
+                                                    fallbackImageUrl:
+                                                        (_businessLogoUrl !=
+                                                                null &&
+                                                            _businessLogoUrl!
+                                                                .trim()
+                                                                .isNotEmpty)
+                                                        ? _businessLogoUrl!
+                                                              .trim()
+                                                        : _defaultBrandLogoUrl,
+                                                    isUpdatingImage:
+                                                        _updatingImageProductIds
+                                                            .contains(
+                                                              product.id,
+                                                            ),
+                                                    onEditImage: () =>
+                                                        _openProductImageOptions(
+                                                          product,
+                                                        ),
+                                                    onEdit: () =>
+                                                        _openProductForm(
+                                                          product: product,
+                                                        ),
+                                                    onDelete: () =>
+                                                        _deleteProduct(product),
+                                                    onToggleVisible: (value) =>
+                                                        _toggleVisibility(
+                                                          product,
+                                                          value,
+                                                        ),
+                                                    dragHandle: Icon(
+                                                      Icons.drag_indicator,
+                                                      color: colorScheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  );
+                                                },
+                                              )
+                                            : ReorderableListView.builder(
+                                                padding: EdgeInsets.fromLTRB(
+                                                  horizontalPadding,
+                                                  8,
+                                                  horizontalPadding,
+                                                  126,
+                                                ),
+                                                itemCount:
+                                                    filteredProducts.length,
+                                                onReorder: _onReorder,
+                                                buildDefaultDragHandles: false,
+                                                itemBuilder: (context, index) {
+                                                  final product =
+                                                      filteredProducts[index];
+                                                  return TweenAnimationBuilder<
+                                                    double
+                                                  >(
+                                                    key: ValueKey(product.id),
+                                                    tween: Tween(
+                                                      begin: 0,
+                                                      end: 1,
+                                                    ),
+                                                    duration: Duration(
+                                                      milliseconds:
+                                                          260 + (index * 18),
+                                                    ),
+                                                    curve: Curves.easeOut,
+                                                    builder: (context, value, child) {
                                                       return Opacity(
                                                         opacity: value,
                                                         child:
@@ -854,83 +908,92 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                             ),
                                                       );
                                                     },
-                                                child: _ProductCard(
-                                                  product: product,
-                                                  fallbackImageUrl:
-                                                      (_businessLogoUrl !=
-                                                              null &&
-                                                          _businessLogoUrl!
-                                                              .trim()
-                                                              .isNotEmpty)
-                                                      ? _businessLogoUrl!.trim()
-                                                      : _defaultBrandLogoUrl,
-                                                  isUpdatingImage:
-                                                      _updatingImageProductIds
-                                                          .contains(product.id),
-                                                  onEditImage: () =>
-                                                      _openProductImageOptions(
-                                                        product,
-                                                      ),
-                                                  onEdit: () =>
-                                                      _openProductForm(
-                                                        product: product,
-                                                      ),
-                                                  onDelete: () =>
-                                                      _deleteProduct(product),
-                                                  onToggleVisible: (value) =>
-                                                      _toggleVisibility(
-                                                        product,
-                                                        value,
-                                                      ),
-                                                  dragHandle:
-                                                      ReorderableDragStartListener(
-                                                        index: index,
-                                                        child: Icon(
-                                                          Icons.drag_indicator,
-                                                          color: colorScheme
-                                                              .onSurfaceVariant,
-                                                        ),
-                                                      ),
-                                                ),
-                                              );
-                                            },
-                                          ),
-                                  ),
+                                                    child: _ProductCard(
+                                                      product: product,
+                                                      fallbackImageUrl:
+                                                          (_businessLogoUrl !=
+                                                                  null &&
+                                                              _businessLogoUrl!
+                                                                  .trim()
+                                                                  .isNotEmpty)
+                                                          ? _businessLogoUrl!
+                                                                .trim()
+                                                          : _defaultBrandLogoUrl,
+                                                      isUpdatingImage:
+                                                          _updatingImageProductIds
+                                                              .contains(
+                                                                product.id,
+                                                              ),
+                                                      onEditImage: () =>
+                                                          _openProductImageOptions(
+                                                            product,
+                                                          ),
+                                                      onEdit: () =>
+                                                          _openProductForm(
+                                                            product: product,
+                                                          ),
+                                                      onDelete: () =>
+                                                          _deleteProduct(
+                                                            product,
+                                                          ),
+                                                      onToggleVisible:
+                                                          (value) =>
+                                                              _toggleVisibility(
+                                                                product,
+                                                                value,
+                                                              ),
+                                                      dragHandle:
+                                                          ReorderableDragStartListener(
+                                                            index: index,
+                                                            child: Icon(
+                                                              Icons
+                                                                  .drag_indicator,
+                                                              color: colorScheme
+                                                                  .onSurfaceVariant,
+                                                            ),
+                                                          ),
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                      ),
+                              ),
+                              if (_isLoadingMore)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 10),
+                                  child: CircularProgressIndicator(),
+                                ),
+                            ],
                           ),
-                          if (_isLoadingMore)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 10),
-                              child: CircularProgressIndicator(),
+                          if (_isSavingOrder)
+                            Positioned.fill(
+                              child: Container(
+                                color: Colors.black.withValues(alpha: 0.12),
+                                alignment: Alignment.center,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircularProgressIndicator(),
+                                    SizedBox(height: 10),
+                                    Text(
+                                      'Guardando nuevo orden...',
+                                      style: TextStyle(
+                                        color: colorScheme.onSurface,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                         ],
                       ),
-                      if (_isSavingOrder)
-                        Positioned.fill(
-                          child: Container(
-                            color: Colors.black.withValues(alpha: 0.12),
-                            alignment: Alignment.center,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircularProgressIndicator(),
-                                SizedBox(height: 10),
-                                Text(
-                                  'Guardando nuevo orden...',
-                                  style: TextStyle(
-                                    color: colorScheme.onSurface,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              );
-            },
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -969,6 +1032,13 @@ class _ProductCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         color: colorScheme.surfaceContainerHigh,
         border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1A000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
