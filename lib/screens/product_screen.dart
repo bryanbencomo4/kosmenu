@@ -1,5 +1,9 @@
+import 'dart:io';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
@@ -23,6 +27,7 @@ class ProductListScreen extends StatefulWidget {
 
 class _ProductListScreenState extends State<ProductListScreen> {
   static const _pageSize = 12;
+  static const _bucketName = 'product-images';
   static const _defaultBrandLogoUrl =
       'https://elmenuxfa.com/branding/isotipo.png';
 
@@ -31,6 +36,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   bool _isLoadingMore = false;
   bool _hasMoreProducts = true;
   List<ProductModel> _products = <ProductModel>[];
+  final Set<String> _updatingImageProductIds = <String>{};
   String? _businessLogoUrl;
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -254,6 +260,183 @@ class _ProductListScreenState extends State<ProductListScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo eliminar producto: $error')),
       );
+    }
+  }
+
+  Future<void> _pickAndUpdateProductImage(
+    ProductModel product,
+    ImageSource source,
+  ) async {
+    final picker = ImagePicker();
+    final photo = await picker.pickImage(
+      source: source,
+      imageQuality: 82,
+      maxWidth: 1600,
+    );
+    if (photo == null) return;
+
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se encontró el comercio actual.')),
+      );
+      return;
+    }
+
+    setState(() => _updatingImageProductIds.add(product.id));
+
+    try {
+      final fileName =
+          '$comercioId/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
+
+      await Supabase.instance.client.storage
+          .from(_bucketName)
+          .upload(
+            fileName,
+            File(photo.path),
+            fileOptions: const FileOptions(upsert: true),
+          );
+
+      final publicUrl = Supabase.instance.client.storage
+          .from(_bucketName)
+          .getPublicUrl(fileName);
+
+      await Supabase.instance.client
+          .from('productos')
+          .update({'imagen_url': publicUrl})
+          .eq('id', product.id);
+
+      if (!mounted) return;
+      setState(() {
+        _products = _products
+            .map(
+              (item) => item.id == product.id
+                  ? ProductModel(
+                      id: item.id,
+                      comercioId: item.comercioId,
+                      categoriaId: item.categoriaId,
+                      nombre: item.nombre,
+                      precio: item.precio,
+                      descripcion: item.descripcion,
+                      orden: item.orden,
+                      disponible: item.disponible,
+                      imagenUrl: publicUrl,
+                      creadoPorIa: item.creadoPorIa,
+                      confianzaIa: item.confianzaIa,
+                    )
+                  : item,
+            )
+            .toList();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo actualizar la foto: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _updatingImageProductIds.remove(product.id));
+      }
+    }
+  }
+
+  Future<void> _removeProductImage(ProductModel product) async {
+    setState(() => _updatingImageProductIds.add(product.id));
+
+    try {
+      await Supabase.instance.client
+          .from('productos')
+          .update({'imagen_url': null})
+          .eq('id', product.id);
+
+      if (!mounted) return;
+      setState(() {
+        _products = _products
+            .map(
+              (item) => item.id == product.id
+                  ? ProductModel(
+                      id: item.id,
+                      comercioId: item.comercioId,
+                      categoriaId: item.categoriaId,
+                      nombre: item.nombre,
+                      precio: item.precio,
+                      descripcion: item.descripcion,
+                      orden: item.orden,
+                      disponible: item.disponible,
+                      imagenUrl: null,
+                      creadoPorIa: item.creadoPorIa,
+                      confianzaIa: item.confianzaIa,
+                    )
+                  : item,
+            )
+            .toList();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo eliminar la foto: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _updatingImageProductIds.remove(product.id));
+      }
+    }
+  }
+
+  Future<void> _openProductImageOptions(ProductModel product) async {
+    if (_updatingImageProductIds.contains(product.id)) return;
+
+    final hasOwnImage = (product.imagenUrl?.trim().isNotEmpty ?? false);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera_rounded),
+                title: const Text('Tomar nueva foto'),
+                onTap: () => Navigator.of(context).pop('camera'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded),
+                title: const Text('Cargar desde galería'),
+                onTap: () => Navigator.of(context).pop('gallery'),
+              ),
+              if (hasOwnImage)
+                ListTile(
+                  leading: Icon(
+                    Icons.delete_outline_rounded,
+                    color: colorScheme.error,
+                  ),
+                  title: Text(
+                    'Eliminar imagen',
+                    style: TextStyle(color: colorScheme.error),
+                  ),
+                  onTap: () => Navigator.of(context).pop('remove'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    switch (action) {
+      case 'camera':
+        await _pickAndUpdateProductImage(product, ImageSource.camera);
+        break;
+      case 'gallery':
+        await _pickAndUpdateProductImage(product, ImageSource.gallery);
+        break;
+      case 'remove':
+        await _removeProductImage(product);
+        break;
+      default:
+        break;
     }
   }
 
@@ -608,6 +791,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                             .isNotEmpty)
                                                     ? _businessLogoUrl!.trim()
                                                     : _defaultBrandLogoUrl,
+                                                isUpdatingImage:
+                                                    _updatingImageProductIds
+                                                        .contains(product.id),
+                                                onEditImage: () =>
+                                                    _openProductImageOptions(
+                                                      product,
+                                                    ),
                                                 onEdit: () => _openProductForm(
                                                   product: product,
                                                 ),
@@ -674,6 +864,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                               .isNotEmpty)
                                                       ? _businessLogoUrl!.trim()
                                                       : _defaultBrandLogoUrl,
+                                                  isUpdatingImage:
+                                                      _updatingImageProductIds
+                                                          .contains(product.id),
+                                                  onEditImage: () =>
+                                                      _openProductImageOptions(
+                                                        product,
+                                                      ),
                                                   onEdit: () =>
                                                       _openProductForm(
                                                         product: product,
@@ -744,6 +941,8 @@ class _ProductCard extends StatelessWidget {
     super.key,
     required this.product,
     required this.fallbackImageUrl,
+    required this.isUpdatingImage,
+    required this.onEditImage,
     required this.onEdit,
     required this.onDelete,
     required this.onToggleVisible,
@@ -752,6 +951,8 @@ class _ProductCard extends StatelessWidget {
 
   final ProductModel product;
   final String fallbackImageUrl;
+  final bool isUpdatingImage;
+  final VoidCallback onEditImage;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<bool> onToggleVisible;
@@ -775,10 +976,14 @@ class _ProductCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _ProductThumb(
-                imageUrl: product.imagenUrl,
-                fallbackImageUrl: fallbackImageUrl,
-                heroTag: 'hero-product-image-${product.id}',
+              GestureDetector(
+                onTap: isUpdatingImage ? null : onEditImage,
+                child: _ProductThumb(
+                  imageUrl: product.imagenUrl,
+                  fallbackImageUrl: fallbackImageUrl,
+                  heroTag: 'hero-product-image-${product.id}',
+                  isUpdating: isUpdatingImage,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -962,11 +1167,13 @@ class _ProductThumb extends StatelessWidget {
   const _ProductThumb({
     required this.imageUrl,
     required this.fallbackImageUrl,
+    this.isUpdating = false,
     this.heroTag,
   });
 
   final String? imageUrl;
   final String fallbackImageUrl;
+  final bool isUpdating;
   final String? heroTag;
 
   @override
@@ -1013,7 +1220,33 @@ class _ProductThumb extends StatelessWidget {
 
     final thumb = ClipRRect(
       borderRadius: BorderRadius.circular(12),
-      child: thumbChild,
+      child: Stack(
+        children: [
+          thumbChild,
+          Positioned(
+            right: 6,
+            bottom: 6,
+            child: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.62),
+                shape: BoxShape.circle,
+              ),
+              child: isUpdating
+                  ? const Padding(
+                      padding: EdgeInsets.all(5),
+                      child: CircularProgressIndicator(strokeWidth: 1.8),
+                    )
+                  : const Icon(
+                      Icons.camera_alt_rounded,
+                      size: 13,
+                      color: Colors.white,
+                    ),
+            ),
+          ),
+        ],
+      ),
     );
 
     if (heroTag == null || heroTag!.isEmpty) {
