@@ -764,9 +764,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     await _refreshDashboard();
   }
 
-  String _buildPublicUrlLabel(ComercioModel comercio) {
-    final url = getPublicMenuUrl(comercio);
-    return url.length <= 42 ? url : '${url.substring(0, 42)}...';
+  String _buildPublicUrl(ComercioModel comercio) {
+    return getPublicMenuUrl(comercio);
   }
 
   void _showInfo(String message) {
@@ -956,7 +955,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         businessOnline: _businessOnline,
                         onManageMenu: _goToMenuManagement,
                         onOpenWeb: _openPublicMenu,
-                        publicUrlLabel: _buildPublicUrlLabel(data.comercio),
+                        onCopyUrl: _copyPublicMenuUrl,
+                        publicUrl: _buildPublicUrl(data.comercio),
                       ),
                       const SizedBox(height: 14),
                       _SectionTitle(
@@ -1003,40 +1003,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         businessOnline: _businessOnline,
                       ),
                       const SizedBox(height: 16),
-                      _SectionTitle(title: 'Atajos de operación'),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          _QuickActionChip(
-                            icon: Icons.inventory_2_outlined,
-                            label: 'Administrar menú',
-                            onTap: _goToMenuManagement,
-                          ),
-                          _QuickActionChip(
-                            icon: Icons.camera_alt_rounded,
-                            label: 'Escanear con IA',
-                            onTap: _openMagicOnboarding,
-                          ),
-                          _QuickActionChip(
-                            icon: Icons.qr_code_2_rounded,
-                            label: 'Generar QR',
-                            onTap: _openQrGenerator,
-                          ),
-                          _QuickActionChip(
-                            icon: Icons.share_rounded,
-                            label: 'Compartir menú',
-                            onTap: _sharePublicMenu,
-                          ),
-                          _QuickActionChip(
-                            icon: Icons.copy_all_rounded,
-                            label: 'Copiar enlace',
-                            onTap: _copyPublicMenuUrl,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 6),
                       _BusinessSettingsCard(
                         comercio: data.comercio,
                         isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
@@ -1160,14 +1127,16 @@ class _BusinessHeroCard extends StatelessWidget {
     required this.businessOnline,
     required this.onManageMenu,
     required this.onOpenWeb,
-    required this.publicUrlLabel,
+    required this.onCopyUrl,
+    required this.publicUrl,
   });
 
   final ComercioModel comercio;
   final bool businessOnline;
   final VoidCallback onManageMenu;
   final VoidCallback onOpenWeb;
-  final String publicUrlLabel;
+  final VoidCallback onCopyUrl;
+  final String publicUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -1239,16 +1208,6 @@ class _BusinessHeroCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      publicUrlLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        color: palette.onSurfaceMuted,
-                        fontSize: 11.5,
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -1259,6 +1218,49 @@ class _BusinessHeroCard extends StatelessWidget {
                     : palette.warning,
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: palette.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: palette.accent.withValues(alpha: 0.45)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.link_rounded,
+                  size: 16,
+                  color: palette.onSurfaceMuted,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SelectableText(
+                      publicUrl,
+                      style: GoogleFonts.poppins(
+                        color: palette.onSurface,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'Copiar URL completa',
+                  onPressed: onCopyUrl,
+                  icon: Icon(
+                    Icons.copy_all_rounded,
+                    size: 18,
+                    color: palette.onSurface,
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 14),
           Row(
@@ -1666,27 +1668,6 @@ class _MiniInfoCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _QuickActionChip extends StatelessWidget {
-  const _QuickActionChip({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ActionChip(
-      avatar: Icon(icon, size: 16),
-      label: Text(label),
-      onPressed: onTap,
     );
   }
 }
