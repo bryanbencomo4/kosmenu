@@ -16,6 +16,7 @@ class PublicMenuView extends StatefulWidget {
 }
 
 class _PublicMenuViewState extends State<PublicMenuView> {
+  static const String _defaultBrandLogoAsset = 'assets/branding/logotipo.png';
   static const List<String> _paymentMethods = <String>[
     'Pago Movil',
     'Efectivo (USD/COP)',
@@ -25,6 +26,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   late Future<_PublicMenuData> _menuFuture;
   final Map<String, int> _cart = <String, int>{};
   String? _selectedCategoryId;
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -82,6 +84,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
     return _PublicMenuData(
       comercioNombre: comercioMap['nombre']?.toString() ?? 'Kosmenu',
+      comercioLogoUrl: _resolveComercioLogoUrl(comercioMap),
       whatsappNumber: _normalizePhone(comercioMap['whatsapp']?.toString()),
       tasaCambioPesos: _parseRate(comercioMap['tasa_cambio_pesos']),
       palette: _PublicMenuPalette.fromMenuPalette(
@@ -94,6 +97,24 @@ class _PublicMenuViewState extends State<PublicMenuView> {
       categories: categories,
       products: products,
     );
+  }
+
+  String? _resolveComercioLogoUrl(Map<String, dynamic> comercioMap) {
+    const logoKeys = <String>[
+      'logo_url',
+      'logo',
+      'imagen_logo',
+      'brand_logo_url',
+    ];
+
+    for (final key in logoKeys) {
+      final value = comercioMap[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+
+    return null;
   }
 
   int? _toInt(dynamic value) {
@@ -501,6 +522,13 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
   String _formatCop(double amount) => amount.toStringAsFixed(0);
 
+  String _normalizeSearchText(String value) {
+    return value.toLowerCase().trim().replaceAll(
+      RegExp(r'[\u0300-\u036f]'),
+      '',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -533,16 +561,6 @@ class _PublicMenuViewState extends State<PublicMenuView> {
             }
 
             final palette = data.palette;
-            final categoryProductCount = <String, int>{};
-            for (final product in data.products) {
-              final categoryId = product.categoryId.trim();
-              if (categoryId.isEmpty) continue;
-              categoryProductCount.update(
-                categoryId,
-                (value) => value + 1,
-                ifAbsent: () => 1,
-              );
-            }
 
             final cartItemCount = _cart.values.fold<int>(
               0,
@@ -561,6 +579,22 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                         (product) => product.categoryId == _selectedCategoryId,
                       )
                       .toList();
+            final categoryNameById = <String, String>{
+              for (final category in data.categories)
+                category.id.trim(): category.nombre,
+            };
+
+            final normalizedSearch = _normalizeSearchText(_searchQuery);
+            final visibleProducts = normalizedSearch.isEmpty
+                ? filteredProducts
+                : filteredProducts.where((product) {
+                    final categoryName =
+                        categoryNameById[product.categoryId.trim()] ?? '';
+                    final haystack = _normalizeSearchText(
+                      '${product.nombre} ${product.descripcion} $categoryName',
+                    );
+                    return haystack.contains(normalizedSearch);
+                  }).toList();
 
             return Container(
               decoration: BoxDecoration(
@@ -583,183 +617,100 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       setState(() => _menuFuture = future);
                       await future;
                     },
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 110),
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(28),
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                palette.surfaceStart,
-                                palette.surfaceEnd,
-                              ],
-                            ),
-                            border: Border.all(
-                              color: palette.primary.withValues(alpha: 0.4),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: palette.primary.withValues(alpha: 0.18),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
+                    child: CustomScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        SliverAppBar(
+                          pinned: true,
+                          floating: false,
+                          elevation: 0,
+                          expandedHeight: 172,
+                          backgroundColor: palette.surface.withValues(
+                            alpha: 0.96,
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Menu digital',
-                                style: GoogleFonts.manrope(
-                                  color: palette.onSurfaceMuted,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                data.comercioNombre,
-                                style: GoogleFonts.manrope(
-                                  color: palette.onSurface,
-                                  fontSize: 30,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-                          decoration: BoxDecoration(
-                            color: palette.surface.withValues(alpha: 0.92),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: palette.primary.withValues(alpha: 0.25),
+                          foregroundColor: palette.onSurface,
+                          title: Text(
+                            data.comercioNombre,
+                            style: GoogleFonts.manrope(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: palette.onSurface,
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.category_rounded,
-                                    size: 18,
-                                    color: palette.primary,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Categorías',
-                                    style: GoogleFonts.manrope(
-                                      color: palette.onSurface,
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ],
+                          flexibleSpace: FlexibleSpaceBar(
+                            collapseMode: CollapseMode.parallax,
+                            background: Container(
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                70,
+                                16,
+                                18,
                               ),
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                height: 42,
-                                child: ListView(
-                                  scrollDirection: Axis.horizontal,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.only(right: 8),
-                                      child: ChoiceChip(
-                                        label: Text(
-                                          'Todo (${data.products.length})',
-                                        ),
-                                        selected: _selectedCategoryId == null,
-                                        onSelected: (_) {
-                                          setState(
-                                            () => _selectedCategoryId = null,
-                                          );
-                                        },
-                                        selectedColor: palette.primary,
-                                        labelStyle: GoogleFonts.manrope(
-                                          color: _selectedCategoryId == null
-                                              ? palette.onPrimary
-                                              : palette.onSurface,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                        side: BorderSide(
-                                          color: palette.primary.withValues(
-                                            alpha: 0.22,
-                                          ),
-                                        ),
-                                        backgroundColor: palette.surfaceAlt,
-                                      ),
-                                    ),
-                                    ...data.categories.map((category) {
-                                      final productCount =
-                                          categoryProductCount[category.id] ??
-                                          0;
-                                      final selected =
-                                          _selectedCategoryId == category.id;
-                                      return Padding(
-                                        padding: const EdgeInsets.only(
-                                          right: 8,
-                                        ),
-                                        child: ChoiceChip(
-                                          label: Text(
-                                            '${category.nombre} ($productCount)',
-                                          ),
-                                          selected: selected,
-                                          onSelected: (_) {
-                                            setState(
-                                              () => _selectedCategoryId =
-                                                  category.id,
-                                            );
-                                          },
-                                          selectedColor: palette.primary,
-                                          labelStyle: GoogleFonts.manrope(
-                                            color: selected
-                                                ? palette.onPrimary
-                                                : palette.onSurface,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                          side: BorderSide(
-                                            color: palette.primary.withValues(
-                                              alpha: 0.22,
-                                            ),
-                                          ),
-                                          backgroundColor: palette.surfaceAlt,
-                                        ),
-                                      );
-                                    }),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    palette.surfaceStart,
+                                    palette.surfaceEnd,
                                   ],
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        if (filteredProducts.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: palette.surface,
-                              borderRadius: BorderRadius.circular(22),
-                              border: Border.all(
-                                color: palette.primary.withValues(alpha: 0.22),
+                              child: Align(
+                                alignment: Alignment.bottomLeft,
+                                child: Text(
+                                  data.comercioNombre,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.manrope(
+                                    color: palette.onSurface,
+                                    fontSize: 31,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
                               ),
                             ),
-                            child: Column(
-                              children: [
-                                Icon(
-                                  Icons.menu_book_rounded,
-                                  size: 42,
-                                  color: palette.onSurfaceMuted,
+                          ),
+                        ),
+                        SliverPersistentHeader(
+                          pinned: true,
+                          delegate: _SearchCategoryHeaderDelegate(
+                            minExtentValue: 130,
+                            maxExtentValue: 130,
+                            palette: palette,
+                            categories: data.categories,
+                            selectedCategoryId: _selectedCategoryId,
+                            searchQuery: _searchQuery,
+                            onSearchChanged: (value) {
+                              setState(() => _searchQuery = value);
+                            },
+                            onSelectAll: () {
+                              setState(() => _selectedCategoryId = null);
+                            },
+                            onSelectCategory: (categoryId) {
+                              setState(() => _selectedCategoryId = categoryId);
+                            },
+                          ),
+                        ),
+                        if (visibleProducts.isEmpty)
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                            sliver: SliverToBoxAdapter(
+                              child: Container(
+                                padding: const EdgeInsets.all(24),
+                                decoration: BoxDecoration(
+                                  color: palette.surface,
+                                  borderRadius: BorderRadius.circular(22),
+                                  border: Border.all(
+                                    color: palette.primary.withValues(
+                                      alpha: 0.22,
+                                    ),
+                                  ),
                                 ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'No hay productos disponibles en esta categoria.',
+                                child: Text(
+                                  _searchQuery.trim().isEmpty
+                                      ? 'No hay productos disponibles en esta categoria.'
+                                      : 'No encontramos productos con ese término.',
                                   textAlign: TextAlign.center,
                                   style: GoogleFonts.manrope(
                                     color: palette.onSurface,
@@ -767,24 +718,35 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                              ],
+                              ),
                             ),
                           )
                         else
-                          ...filteredProducts.map(
-                            (product) => _PublicProductCard(
-                              product: product,
-                              quantity: _cart[product.id] ?? 0,
-                              tasaCambioPesos: data.tasaCambioPesos,
-                              heading: palette.onSurface,
-                              muted: palette.onSurfaceMuted,
-                              surface: palette.surface,
-                              accent: palette.primary,
-                              surfaceAlt: palette.surfaceAlt,
-                              onIncrement: () => _incrementProduct(product.id),
-                              onDecrement: () => _decrementProduct(product.id),
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                            sliver: SliverList.builder(
+                              itemCount: visibleProducts.length,
+                              itemBuilder: (context, index) {
+                                final product = visibleProducts[index];
+                                return _PublicProductCard(
+                                  product: product,
+                                  quantity: _cart[product.id] ?? 0,
+                                  tasaCambioPesos: data.tasaCambioPesos,
+                                  heading: palette.onSurface,
+                                  muted: palette.onSurfaceMuted,
+                                  surface: palette.surface,
+                                  accent: palette.primary,
+                                  surfaceAlt: palette.surfaceAlt,
+                                  fallbackImageUrl: data.comercioLogoUrl,
+                                  onIncrement: () =>
+                                      _incrementProduct(product.id),
+                                  onDecrement: () =>
+                                      _decrementProduct(product.id),
+                                );
+                              },
                             ),
                           ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 110)),
                       ],
                     ),
                   ),
@@ -822,6 +784,143 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   }
 }
 
+class _SearchCategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _SearchCategoryHeaderDelegate({
+    required this.minExtentValue,
+    required this.maxExtentValue,
+    required this.palette,
+    required this.categories,
+    required this.selectedCategoryId,
+    required this.searchQuery,
+    required this.onSearchChanged,
+    required this.onSelectAll,
+    required this.onSelectCategory,
+  });
+
+  final double minExtentValue;
+  final double maxExtentValue;
+  final _PublicMenuPalette palette;
+  final List<_PublicCategory> categories;
+  final String? selectedCategoryId;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onSelectAll;
+  final ValueChanged<String> onSelectCategory;
+
+  @override
+  double get minExtent => minExtentValue;
+
+  @override
+  double get maxExtent => maxExtentValue;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Container(
+      color: palette.surface.withValues(alpha: 0.97),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Column(
+        children: [
+          TextFormField(
+            initialValue: searchQuery,
+            onChanged: onSearchChanged,
+            style: GoogleFonts.manrope(
+              color: palette.onSurface,
+              fontWeight: FontWeight.w600,
+            ),
+            decoration: InputDecoration(
+              hintText: 'Buscar producto...',
+              hintStyle: GoogleFonts.manrope(
+                color: palette.onSurfaceMuted,
+                fontWeight: FontWeight.w600,
+              ),
+              prefixIcon: Icon(
+                Icons.search_rounded,
+                color: palette.onSurfaceMuted,
+              ),
+              filled: true,
+              fillColor: palette.surface,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(
+                  color: palette.primary.withValues(alpha: 0.25),
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: palette.primary),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 42,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: const Text('Todo'),
+                    selected: selectedCategoryId == null,
+                    onSelected: (_) => onSelectAll(),
+                    selectedColor: palette.primary,
+                    labelStyle: GoogleFonts.manrope(
+                      color: selectedCategoryId == null
+                          ? palette.onPrimary
+                          : palette.onSurface,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    side: BorderSide(
+                      color: palette.primary.withValues(alpha: 0.22),
+                    ),
+                    backgroundColor: palette.surfaceAlt,
+                  ),
+                ),
+                ...categories.map((category) {
+                  final selected = selectedCategoryId == category.id;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(category.nombre),
+                      selected: selected,
+                      onSelected: (_) => onSelectCategory(category.id),
+                      selectedColor: palette.primary,
+                      labelStyle: GoogleFonts.manrope(
+                        color: selected ? palette.onPrimary : palette.onSurface,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      side: BorderSide(
+                        color: palette.primary.withValues(alpha: 0.22),
+                      ),
+                      backgroundColor: palette.surfaceAlt,
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _SearchCategoryHeaderDelegate oldDelegate) {
+    return oldDelegate.palette != palette ||
+        oldDelegate.categories != categories ||
+        oldDelegate.selectedCategoryId != selectedCategoryId ||
+        oldDelegate.searchQuery != searchQuery;
+  }
+}
+
 class _PublicProductCard extends StatelessWidget {
   const _PublicProductCard({
     required this.product,
@@ -832,6 +931,7 @@ class _PublicProductCard extends StatelessWidget {
     required this.surface,
     required this.accent,
     required this.surfaceAlt,
+    required this.fallbackImageUrl,
     required this.onIncrement,
     required this.onDecrement,
   });
@@ -844,6 +944,7 @@ class _PublicProductCard extends StatelessWidget {
   final Color surface;
   final Color accent;
   final Color surfaceAlt;
+  final String? fallbackImageUrl;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
 
@@ -866,32 +967,16 @@ class _PublicProductCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (product.imageUrl != null && product.imageUrl!.isNotEmpty)
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Image.network(
-                product.imageUrl!,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    color: surfaceAlt,
-                    alignment: Alignment.center,
-                    child: Icon(Icons.restaurant, size: 44, color: muted),
-                  );
-                },
-              ),
-            )
-          else
-            Container(
-              height: 108,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [surfaceAlt, accent.withValues(alpha: 0.42)],
-                ),
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.lunch_dining, size: 42, color: accent),
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: _ProductVisual(
+              productImageUrl: product.imageUrl,
+              fallbackImageUrl: fallbackImageUrl,
+              surfaceAlt: surfaceAlt,
+              muted: muted,
+              defaultAssetPath: _PublicMenuViewState._defaultBrandLogoAsset,
             ),
+          ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Row(
@@ -1000,6 +1085,7 @@ class _PublicProductCard extends StatelessWidget {
 class _PublicMenuData {
   const _PublicMenuData({
     required this.comercioNombre,
+    required this.comercioLogoUrl,
     required this.whatsappNumber,
     required this.tasaCambioPesos,
     required this.palette,
@@ -1008,11 +1094,74 @@ class _PublicMenuData {
   });
 
   final String comercioNombre;
+  final String? comercioLogoUrl;
   final String? whatsappNumber;
   final double tasaCambioPesos;
   final _PublicMenuPalette palette;
   final List<_PublicCategory> categories;
   final List<_PublicProduct> products;
+}
+
+class _ProductVisual extends StatelessWidget {
+  const _ProductVisual({
+    required this.productImageUrl,
+    required this.fallbackImageUrl,
+    required this.surfaceAlt,
+    required this.muted,
+    required this.defaultAssetPath,
+  });
+
+  final String? productImageUrl;
+  final String? fallbackImageUrl;
+  final Color surfaceAlt;
+  final Color muted;
+  final String defaultAssetPath;
+
+  @override
+  Widget build(BuildContext context) {
+    final productUrl = productImageUrl?.trim() ?? '';
+    final businessLogoUrl = fallbackImageUrl?.trim() ?? '';
+
+    if (productUrl.isNotEmpty) {
+      return Image.network(
+        productUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) {
+          return _buildLogoOrDefault(businessLogoUrl);
+        },
+      );
+    }
+
+    return _buildLogoOrDefault(businessLogoUrl);
+  }
+
+  Widget _buildLogoOrDefault(String businessLogoUrl) {
+    if (businessLogoUrl.isNotEmpty) {
+      return Image.network(
+        businessLogoUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _buildDefaultLogo(),
+      );
+    }
+
+    return _buildDefaultLogo();
+  }
+
+  Widget _buildDefaultLogo() {
+    return Container(
+      color: surfaceAlt,
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Image.asset(
+          defaultAssetPath,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) =>
+              Icon(Icons.storefront_rounded, size: 48, color: muted),
+        ),
+      ),
+    );
+  }
 }
 
 class _PublicMenuPalette {
