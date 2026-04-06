@@ -88,9 +88,15 @@ type MenuData = {
   metodosPago: MetodoPagoRow[];
 };
 
+type OrderDeliveryMode = 'pickup' | 'delivery';
+type DeliveryPoint = { lat: number; lng: number };
+type DeliveryPointSelectionSource = 'none' | 'business-default' | 'user';
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const publicBaseUrl = 'https://kosmenu.vercel.app';
+const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
+const preferLeafletMapPicker = false;
 const defaultProductImage =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
@@ -106,6 +112,132 @@ const defaultProductImage =
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+let googleMapsScriptPromise: Promise<any> | null = null;
+let leafletAssetsPromise: Promise<any> | null = null;
+
+function waitForGoogleMapsReady(timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      resolve(null);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const tick = () => {
+      if ((window as any).google?.maps) {
+        resolve((window as any).google);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error('Google Maps API no termino de cargar.'));
+        return;
+      }
+
+      window.setTimeout(tick, 60);
+    };
+
+    tick();
+  });
+}
+
+function loadGoogleMapsApi() {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  if ((window as any).google?.maps) return Promise.resolve((window as any).google);
+  if (!googleMapsJsApiKey) return Promise.resolve(null);
+  if (googleMapsScriptPromise) return googleMapsScriptPromise;
+
+  googleMapsScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-kosmenu-google-maps="1"]') as HTMLScriptElement | null;
+    if (existing) {
+      waitForGoogleMapsReady().then(resolve).catch(reject);
+      existing.addEventListener('load', () => {
+        waitForGoogleMapsReady().then(resolve).catch(reject);
+      });
+      existing.addEventListener('error', reject);
+      return;
+    }
+
+    const callbackName = '__kosmenuGoogleMapsReady';
+    (window as any)[callbackName] = () => {
+      waitForGoogleMapsReady()
+        .then((google) => {
+          delete (window as any)[callbackName];
+          resolve(google);
+        })
+        .catch((error) => {
+          delete (window as any)[callbackName];
+          reject(error);
+        });
+    };
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsJsApiKey)}&loading=async&callback=${callbackName}`;
+    script.async = true;
+    script.defer = true;
+    script.dataset.kosmenuGoogleMaps = '1';
+    script.onerror = (error) => {
+      delete (window as any)[callbackName];
+      reject(error);
+    };
+    document.head.appendChild(script);
+  });
+
+  return googleMapsScriptPromise;
+}
+
+function loadLeafletAssets() {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  if ((window as any).L) return Promise.resolve((window as any).L);
+  if (leafletAssetsPromise) return leafletAssetsPromise;
+
+  leafletAssetsPromise = new Promise((resolve, reject) => {
+    const existingCss = document.querySelector('link[data-kosmenu-leaflet="1"]') as HTMLLinkElement | null;
+    if (!existingCss) {
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      css.dataset.kosmenuLeaflet = '1';
+      document.head.appendChild(css);
+    }
+
+    const existingScript = document.querySelector('script[data-kosmenu-leaflet="1"]') as HTMLScriptElement | null;
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve((window as any).L));
+      existingScript.addEventListener('error', reject);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.defer = true;
+    script.dataset.kosmenuLeaflet = '1';
+    script.onload = () => resolve((window as any).L);
+    script.onerror = (error) => reject(error);
+    document.head.appendChild(script);
+  });
+
+  return leafletAssetsPromise;
+}
+
+async function reverseGeocodeWithNominatim(point: DeliveryPoint) {
+  try {
+    const url =
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${point.lat}&lon=${point.lng}&accept-language=es`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+    if (!response.ok) return '';
+    const payload = await response.json();
+    return (payload?.display_name ?? '').toString().trim();
+  } catch {
+    return '';
+  }
+}
 
 function isUuid(value: string) {
   return uuidRegex.test(value);
@@ -432,8 +564,29 @@ function normalizeSearchText(value: string) {
 
 function toNumberOrNull(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const parsed = Number((value ?? '').toString().trim());
+  const raw = (value ?? '').toString().trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getBrowserCurrentPoint() {
+  if (typeof window === 'undefined' || !navigator.geolocation) {
+    return Promise.resolve<DeliveryPoint | null>(null);
+  }
+
+  return new Promise<DeliveryPoint | null>((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 120000 },
+    );
+  });
 }
 
 export default function PublicMenuPage() {
@@ -451,6 +604,19 @@ export default function PublicMenuPage() {
   const [shareMessage, setShareMessage] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
+  const [deliveryMode, setDeliveryMode] = useState<OrderDeliveryMode>('pickup');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [deliveryReference, setDeliveryReference] = useState('');
+  const [deliveryInstructions, setDeliveryInstructions] = useState('');
+  const [deliveryPoint, setDeliveryPoint] = useState<DeliveryPoint | null>(null);
+  const [deliveryPointSource, setDeliveryPointSource] = useState<DeliveryPointSelectionSource>('none');
+  const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
+  const [mapPickerAddress, setMapPickerAddress] = useState('');
+  const [isMapPickerLoading, setIsMapPickerLoading] = useState(false);
+  const [isMapPickerDragging, setIsMapPickerDragging] = useState(false);
+  const [mapPickerError, setMapPickerError] = useState('');
+  const [mapPickerProvider, setMapPickerProvider] = useState<'google' | 'leaflet'>('google');
+  const [orderNotes, setOrderNotes] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [expandedProductImage, setExpandedProductImage] = useState<{
@@ -460,6 +626,13 @@ export default function PublicMenuPage() {
     description: string;
   } | null>(null);
   const categoryChipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const mapPickerContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapPickerSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const mapPickerMapRef = useRef<any>(null);
+  const mapPickerMarkerRef = useRef<any>(null);
+  const mapPickerGeocoderRef = useRef<any>(null);
+  const mapPickerAutocompleteRef = useRef<any>(null);
+  const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
   const [infoSections, setInfoSections] = useState({
     location: true,
     delivery: true,
@@ -753,6 +926,12 @@ export default function PublicMenuPage() {
   );
   const receivesOrdersOnWhatsapp = menuData?.comercio.recibe_pedidos_whatsapp !== false;
   const canOrderViaWhatsapp = receivesOrdersOnWhatsapp && whatsappNumber.length > 0;
+  const supportsDelivery = menuData?.comercio.permite_delivery === true;
+  const normalizedDeliveryAddress = deliveryAddress.trim();
+  const normalizedDeliveryReference = deliveryReference.trim();
+  const normalizedDeliveryInstructions = deliveryInstructions.trim();
+  const normalizedOrderNotes = orderNotes.trim();
+  const isDeliveryOrder = supportsDelivery && deliveryMode === 'delivery';
   const comercioAddress = [menuData?.comercio.direccion, menuData?.comercio.ciudad]
     .map((item) => (item ?? '').trim())
     .filter(Boolean)
@@ -775,6 +954,10 @@ export default function PublicMenuPage() {
   const publicMenuUrl = `${publicBaseUrl}/v/${encodeURIComponent(resolvedSlug)}`;
   const normalizedClientEmail = clientEmail.trim().toLowerCase();
   const isClientEmailValid = emailRegex.test(normalizedClientEmail);
+  const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
+  const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
+  const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint;
+  const canSubmitCheckout = isClientEmailValid && canOrderViaWhatsapp && isDeliveryReady;
 
   const paymentMethodsByCurrency = useMemo(() => {
     const grouped = new Map<string, MetodoPagoRow[]>();
@@ -788,13 +971,13 @@ export default function PublicMenuPage() {
   }, [menuData?.metodosPago]);
 
   useEffect(() => {
-    if (!isInfoOpen && !isConfirmOpen && !expandedProductImage) return;
+    if (!isInfoOpen && !isConfirmOpen && !expandedProductImage && !isMapPickerOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isInfoOpen, isConfirmOpen, expandedProductImage]);
+  }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
 
   useEffect(() => {
     if (!isInfoOpen) {
@@ -814,6 +997,258 @@ export default function PublicMenuPage() {
       setSelectedPaymentMethodId(menuData.metodosPago[0].id);
     }
   }, [menuData, selectedPaymentMethodId]);
+
+  useEffect(() => {
+    if (supportsDelivery) return;
+    setDeliveryMode('pickup');
+  }, [supportsDelivery]);
+
+  useEffect(() => {
+    if (!isMapPickerOpen) return;
+
+    let disposed = false;
+    let lastResolvedPoint: DeliveryPoint | null = null;
+
+    const shouldResolvePoint = (point: DeliveryPoint) => {
+      if (!lastResolvedPoint) return true;
+      const latDiff = Math.abs(lastResolvedPoint.lat - point.lat);
+      const lngDiff = Math.abs(lastResolvedPoint.lng - point.lng);
+      return latDiff > 0.00003 || lngDiff > 0.00003;
+    };
+
+    const markResolvedPoint = (point: DeliveryPoint) => {
+      lastResolvedPoint = point;
+    };
+
+    const cleanupMapRefs = () => {
+      if (mapPickerMapRef.current?.remove) {
+        mapPickerMapRef.current.remove();
+      }
+      mapPickerMapRef.current = null;
+      mapPickerMarkerRef.current = null;
+      mapPickerGeocoderRef.current = null;
+      mapPickerAutocompleteRef.current = null;
+      mapPickerResolveAddressRef.current = null;
+    };
+
+    const resolveInitialPoint = async () => {
+      if (deliveryPoint) return deliveryPoint;
+      const browserPoint = await getBrowserCurrentPoint();
+      if (browserPoint) return browserPoint;
+      if (hasBusinessCoords) return { lat: businessLat, lng: businessLng };
+      return { lat: 10.4806, lng: -66.9036 };
+    };
+
+    const attachLeaflet = async (initialPoint: DeliveryPoint) => {
+      try {
+        const L = await loadLeafletAssets();
+        if (disposed) return;
+
+        if (!L || !mapPickerContainerRef.current) {
+          setMapPickerError('No se pudo cargar el mapa en este dispositivo.');
+          setIsMapPickerLoading(false);
+          return;
+        }
+
+        setMapPickerProvider('leaflet');
+        mapPickerContainerRef.current.innerHTML = '';
+
+        const map = L.map(mapPickerContainerRef.current, {
+          zoomControl: false,
+          attributionControl: true,
+        }).setView([initialPoint.lat, initialPoint.lng], 16);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap',
+        }).addTo(map);
+
+        mapPickerMapRef.current = map;
+        mapPickerMarkerRef.current = null;
+        setDeliveryPoint(initialPoint);
+
+        const resolveAddress = async (point: DeliveryPoint) => {
+          if (!shouldResolvePoint(point)) {
+            setIsMapPickerLoading(false);
+            return;
+          }
+          const address = await reverseGeocodeWithNominatim(point);
+          if (disposed) return;
+          markResolvedPoint(point);
+          setMapPickerAddress(address);
+          setIsMapPickerLoading(false);
+        };
+
+        mapPickerResolveAddressRef.current = (point: DeliveryPoint) => {
+          setIsMapPickerLoading(true);
+          void resolveAddress(point);
+        };
+
+        const updateFromCenter = () => {
+          const center = map.getCenter();
+          if (!center) return;
+          const point = { lat: center.lat, lng: center.lng };
+          setDeliveryPoint(point);
+          mapPickerResolveAddressRef.current?.(point);
+        };
+
+        map.on('movestart', () => {
+          setIsMapPickerDragging(true);
+          setIsMapPickerLoading(true);
+        });
+        map.on('moveend', () => {
+          setIsMapPickerDragging(false);
+          updateFromCenter();
+        });
+
+        if (!normalizedDeliveryAddress) {
+          mapPickerResolveAddressRef.current(initialPoint);
+        } else {
+          setMapPickerAddress(normalizedDeliveryAddress);
+          setIsMapPickerLoading(false);
+        }
+      } catch {
+        if (!disposed) {
+          setMapPickerError('No se pudo inicializar el mapa de entrega.');
+          setIsMapPickerLoading(false);
+        }
+      }
+    };
+
+    async function setupMapPicker() {
+      setIsMapPickerLoading(true);
+      setMapPickerError('');
+
+      const initialPoint = await resolveInitialPoint();
+      if (disposed) return;
+
+      if (preferLeafletMapPicker) {
+        await attachLeaflet(initialPoint);
+        return;
+      }
+
+      try {
+        const google = await loadGoogleMapsApi();
+        if (disposed) return;
+
+        if (!google?.maps || !mapPickerContainerRef.current) {
+          setMapPickerError('Google Maps no disponible. Usando mapa alternativo.');
+          await attachLeaflet(initialPoint);
+          return;
+        }
+
+        setMapPickerProvider('google');
+
+        const map = new google.maps.Map(mapPickerContainerRef.current, {
+          center: initialPoint,
+          zoom: 16,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          gestureHandling: 'greedy',
+        });
+
+        const geocoder = new google.maps.Geocoder();
+
+        mapPickerMapRef.current = map;
+        mapPickerMarkerRef.current = null;
+        mapPickerGeocoderRef.current = geocoder;
+
+        const moveToPoint = (point: DeliveryPoint, knownAddress?: string) => {
+          setDeliveryPoint(point);
+          map.panTo(point);
+          map.setZoom(17);
+          if (knownAddress && knownAddress.trim().length > 0) {
+            setMapPickerAddress(knownAddress.trim());
+            setIsMapPickerLoading(false);
+            return;
+          }
+          mapPickerResolveAddressRef.current?.(point);
+        };
+
+        const resolveAddress = (point: DeliveryPoint) => {
+          if (!shouldResolvePoint(point)) {
+            setIsMapPickerLoading(false);
+            return;
+          }
+          geocoder.geocode({ location: point }, (results: any, status: string) => {
+            if (disposed) return;
+            markResolvedPoint(point);
+            if (status === 'OK' && results?.[0]?.formatted_address) {
+              setMapPickerAddress(results[0].formatted_address);
+            } else {
+              setMapPickerAddress('');
+            }
+            setIsMapPickerLoading(false);
+          });
+        };
+
+        mapPickerResolveAddressRef.current = (point: DeliveryPoint) => {
+          setIsMapPickerLoading(true);
+          resolveAddress(point);
+        };
+
+        const updateFromCenter = () => {
+          const center = map.getCenter();
+          if (!center) return;
+          const point = { lat: center.lat(), lng: center.lng() };
+          setDeliveryPoint(point);
+          mapPickerResolveAddressRef.current?.(point);
+        };
+
+        map.addListener('dragstart', () => {
+          setIsMapPickerDragging(true);
+          setIsMapPickerLoading(true);
+        });
+        map.addListener('idle', () => {
+          setIsMapPickerDragging(false);
+          updateFromCenter();
+        });
+
+        if (mapPickerSearchInputRef.current && google.maps.places?.Autocomplete) {
+          const autocomplete = new google.maps.places.Autocomplete(mapPickerSearchInputRef.current, {
+            fields: ['geometry', 'formatted_address', 'name'],
+          });
+          autocomplete.bindTo('bounds', map);
+          autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            const geometryLocation = place?.geometry?.location;
+            if (!geometryLocation) return;
+            const point = { lat: geometryLocation.lat(), lng: geometryLocation.lng() };
+            const bestAddress = (place.formatted_address ?? place.name ?? '').trim();
+            setIsMapPickerLoading(true);
+            moveToPoint(point, bestAddress);
+          });
+          mapPickerAutocompleteRef.current = autocomplete;
+        }
+
+        setDeliveryPoint(initialPoint);
+        if (!normalizedDeliveryAddress) {
+          mapPickerResolveAddressRef.current(initialPoint);
+        } else {
+          setMapPickerAddress(normalizedDeliveryAddress);
+          setIsMapPickerLoading(false);
+        }
+      } catch {
+        if (disposed) return;
+        setMapPickerError('Google Maps no disponible. Usando mapa alternativo.');
+        await attachLeaflet(initialPoint);
+      }
+    }
+
+    void setupMapPicker();
+
+    return () => {
+      disposed = true;
+      cleanupMapRefs();
+    };
+  }, [
+    isMapPickerOpen,
+    hasBusinessCoords,
+    businessLat,
+    businessLng,
+    normalizedDeliveryAddress,
+  ]);
 
   function selectedPaymentMethod() {
     if (!menuData) return null;
@@ -879,7 +1314,18 @@ export default function PublicMenuPage() {
     }));
   }
 
-  async function persistOrderOptional(orderId: string, email: string, paymentMethod: MetodoPagoRow | null) {
+  async function persistOrderOptional(
+    orderId: string,
+    email: string,
+    paymentMethod: MetodoPagoRow | null,
+    delivery: {
+      mode: OrderDeliveryMode;
+      address: string;
+      reference: string;
+      instructions: string;
+      coordinates: DeliveryPoint | null;
+    },
+  ) {
     if (!supabaseUrl || !supabaseAnonKey) return;
 
     try {
@@ -897,6 +1343,8 @@ export default function PublicMenuPage() {
               datos: paymentMethodDetails(paymentMethod),
             }
           : null,
+        delivery,
+        order_notes: normalizedOrderNotes,
         items: cartItems.map((item) => ({
           product_id: item.product.id,
           nombre: item.product.nombre,
@@ -936,19 +1384,48 @@ export default function PublicMenuPage() {
   }
 
   async function confirmOrder() {
-    if (!canOrderViaWhatsapp || cartItems.length === 0 || isSubmittingOrder || !isClientEmailValid) return;
+    if (!canOrderViaWhatsapp || cartItems.length === 0 || isSubmittingOrder || !isClientEmailValid || !isDeliveryReady) {
+      return;
+    }
 
     const selectedMethod = selectedPaymentMethod();
+    const deliveryPayload = {
+      mode: isDeliveryOrder ? 'delivery' : 'pickup',
+      address: isDeliveryOrder ? normalizedDeliveryAddress : '',
+      reference: isDeliveryOrder ? normalizedDeliveryReference : '',
+      instructions: isDeliveryOrder ? normalizedDeliveryInstructions : '',
+      coordinates: isDeliveryOrder ? deliveryPoint : null,
+    } satisfies {
+      mode: OrderDeliveryMode;
+      address: string;
+      reference: string;
+      instructions: string;
+      coordinates: DeliveryPoint | null;
+    };
 
     setIsSubmittingOrder(true);
     try {
       const orderId = orderIdFrom(resolvedComercioId);
-      await persistOrderOptional(orderId, normalizedClientEmail, selectedMethod);
+      await persistOrderOptional(orderId, normalizedClientEmail, selectedMethod, deliveryPayload);
 
       const orderUrl = `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`;
       const paymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : 'No especificado';
       const message =
         `Hola, quiero hacer este pedido.\n` +
+        `Tipo de entrega: ${deliveryPayload.mode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}.\n` +
+        (deliveryPayload.mode === 'delivery'
+          ? `Direccion de entrega: ${deliveryPayload.address}.\n`
+          : '') +
+        (deliveryPayload.mode === 'delivery' && deliveryPayload.reference
+          ? `Referencia: ${deliveryPayload.reference}.\n`
+          : '') +
+        (deliveryPayload.mode === 'delivery' && deliveryPayload.instructions
+          ? `Indicaciones: ${deliveryPayload.instructions}.\n`
+          : '') +
+        (deliveryPayload.mode === 'delivery' && deliveryPayload.coordinates
+          ? `Coordenadas: ${deliveryPayload.coordinates.lat.toFixed(6)}, ${deliveryPayload.coordinates.lng.toFixed(6)}.\n`
+          : '') +
+        (normalizedOrderNotes ? `Notas del pedido: ${normalizedOrderNotes}.\n` : '') +
         `Metodo de pago: ${paymentLabel}.\n` +
         `Correo del cliente: ${normalizedClientEmail}.\n` +
         `Adjunto el comprobante en este chat.\n` +
@@ -972,9 +1449,16 @@ export default function PublicMenuPage() {
         console.warn('No se pudo enviar email de respaldo:', sendEmailError);
       }
 
-      window.open(waUrl, '_blank', 'noopener,noreferrer');
+      window.location.assign(waUrl);
       setCart({});
       setClientEmail('');
+      setDeliveryAddress('');
+      setDeliveryReference('');
+      setDeliveryInstructions('');
+      setDeliveryPoint(null);
+      setDeliveryPointSource('none');
+      setOrderNotes('');
+      setDeliveryMode('pickup');
       setIsConfirmOpen(false);
     } finally {
       setIsSubmittingOrder(false);
@@ -1521,6 +2005,167 @@ export default function PublicMenuPage() {
           </section>
         ) : null}
 
+        {isMapPickerOpen ? (
+          <section className="fixed inset-0 z-[61] bg-white">
+            <div className="mx-auto flex h-full max-w-2xl flex-col bg-white">
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:px-6">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Mapa</p>
+                  <h3 className="text-xl font-black text-slate-900" style={titleFontStyle}>Selecciona punto de entrega</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsMapPickerOpen(false)}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600"
+                >
+                  Cerrar
+                </button>
+              </div>
+
+              <div className="relative flex-1">
+                <div className="absolute left-3 right-3 top-3 z-10 flex gap-2 sm:left-6 sm:right-6">
+                  <input
+                    ref={mapPickerSearchInputRef}
+                    type="text"
+                    placeholder="Buscar direccion o lugar"
+                    defaultValue={deliveryAddress}
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none"
+                    disabled={mapPickerProvider !== 'google'}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter') return;
+                      event.preventDefault();
+                      if (mapPickerProvider !== 'google') return;
+                      const query = mapPickerSearchInputRef.current?.value?.trim() ?? '';
+                      if (!query) return;
+                      const geocoder = mapPickerGeocoderRef.current;
+                      const map = mapPickerMapRef.current;
+                      if (!geocoder || !map) return;
+                      setIsMapPickerLoading(true);
+                      geocoder.geocode({ address: query }, (results: any, status: string) => {
+                        if (status !== 'OK' || !results?.[0]?.geometry?.location) {
+                          setIsMapPickerLoading(false);
+                          return;
+                        }
+                        const location = results[0].geometry.location;
+                        const point = { lat: location.lat(), lng: location.lng() };
+                        setDeliveryPoint(point);
+                        setDeliveryPointSource('user');
+                        map.panTo(point);
+                        map.setZoom(17);
+                        setMapPickerAddress(results[0].formatted_address ?? query);
+                        setIsMapPickerLoading(false);
+                      });
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={mapPickerProvider !== 'google'}
+                    onClick={() => {
+                      if (mapPickerProvider !== 'google') return;
+                      const query = mapPickerSearchInputRef.current?.value?.trim() ?? '';
+                      if (!query) return;
+                      const geocoder = mapPickerGeocoderRef.current;
+                      const map = mapPickerMapRef.current;
+                      if (!geocoder || !map) return;
+                      setIsMapPickerLoading(true);
+                      geocoder.geocode({ address: query }, (results: any, status: string) => {
+                        if (status !== 'OK' || !results?.[0]?.geometry?.location) {
+                          setIsMapPickerLoading(false);
+                          return;
+                        }
+                        const location = results[0].geometry.location;
+                        const point = { lat: location.lat(), lng: location.lng() };
+                        setDeliveryPoint(point);
+                        setDeliveryPointSource('user');
+                        map.panTo(point);
+                        map.setZoom(17);
+                        setMapPickerAddress(results[0].formatted_address ?? query);
+                        setIsMapPickerLoading(false);
+                      });
+                    }}
+                    className="rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold uppercase tracking-[0.08em] text-slate-700 disabled:opacity-50"
+                  >
+                    Buscar
+                  </button>
+                </div>
+                <div ref={mapPickerContainerRef} className="h-full w-full bg-slate-100" />
+                <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center">
+                  <div
+                    className={`-mt-6 text-4xl leading-none transition-all duration-200 ease-out ${
+                      isMapPickerDragging
+                        ? '-translate-y-3 scale-110 drop-shadow-[0_16px_14px_rgba(15,23,42,0.24)]'
+                        : 'translate-y-0 scale-100 drop-shadow-[0_8px_8px_rgba(15,23,42,0.22)]'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    📍
+                  </div>
+                </div>
+                {isMapPickerLoading ? (
+                  <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm">
+                    Buscando direccion...
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="space-y-2 border-t border-slate-200 bg-white px-4 py-3 sm:px-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Direccion detectada</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {mapPickerAddress || 'Mueve el mapa para colocar el pin en el punto exacto.'}
+                </p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Mapa: {mapPickerProvider === 'google' ? 'Google Maps' : 'OpenStreetMap'}
+                </p>
+                {mapPickerError ? (
+                  <p className="text-xs font-semibold text-rose-500">{mapPickerError}</p>
+                ) : null}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!navigator.geolocation) return;
+                      navigator.geolocation.getCurrentPosition((position) => {
+                        const point = {
+                          lat: position.coords.latitude,
+                          lng: position.coords.longitude,
+                        };
+                        setDeliveryPoint(point);
+                        setDeliveryPointSource('user');
+                        const map = mapPickerMapRef.current;
+                        if (mapPickerProvider === 'google') {
+                          if (map?.panTo) map.panTo(point);
+                        } else {
+                          if (map?.setView) map.setView([point.lat, point.lng], 16);
+                        }
+                        mapPickerResolveAddressRef.current?.(point);
+                      });
+                    }}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-[0.08em] text-slate-700"
+                  >
+                    Mi ubicacion
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (deliveryPoint) {
+                        setDeliveryPointSource('user');
+                      }
+                      if (mapPickerAddress.trim().length > 0) {
+                        setDeliveryAddress(mapPickerAddress.trim());
+                      }
+                      setIsMapPickerOpen(false);
+                    }}
+                    className="ml-auto rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.08em]"
+                    style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                  >
+                    Confirmar punto
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
         {isConfirmOpen ? (
           <section className="fixed inset-0 z-[60] bg-white">
             <div className="mx-auto h-full max-w-2xl bg-white">
@@ -1544,6 +2189,95 @@ export default function PublicMenuPage() {
                     ? 'Selecciona metodo de pago y confirma tu pedido por WhatsApp.'
                     : 'Este negocio tiene desactivados los pedidos por WhatsApp actualmente.'}
                 </p>
+
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Entrega</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryMode('pickup')}
+                      className="rounded-full px-3 py-1.5 text-xs font-bold"
+                      style={
+                        deliveryMode === 'pickup'
+                          ? {
+                              backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
+                              color: 'var(--primary-color)',
+                            }
+                          : { backgroundColor: '#E2E8F0', color: '#334155' }
+                      }
+                    >
+                      Retiro
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!supportsDelivery}
+                      onClick={() => setDeliveryMode('delivery')}
+                      className="rounded-full px-3 py-1.5 text-xs font-bold"
+                      style={
+                        !supportsDelivery
+                          ? { backgroundColor: '#E2E8F0', color: '#94A3B8' }
+                          : deliveryMode === 'delivery'
+                            ? {
+                                backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
+                                color: 'var(--primary-color)',
+                              }
+                            : { backgroundColor: '#E2E8F0', color: '#334155' }
+                      }
+                    >
+                      Delivery
+                    </button>
+                  </div>
+                  {!supportsDelivery ? (
+                    <p className="mt-2 text-xs font-semibold text-slate-500">Este negocio no tiene delivery habilitado.</p>
+                  ) : null}
+
+                  {isDeliveryOrder ? (
+                    <div className="mt-3 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsMapPickerOpen(true)}
+                        className="flex h-11 w-full items-center justify-between rounded-xl border bg-white px-3 text-left text-sm text-slate-900 outline-none"
+                        style={{ borderColor: isDeliveryAddressValid ? '#CBD5E1' : '#F43F5E' }}
+                      >
+                        <span className={`${normalizedDeliveryAddress ? 'text-slate-900' : 'text-slate-500'}`}>
+                          {normalizedDeliveryAddress || 'Direccion de entrega'}
+                        </span>
+                        <span className="text-[11px] font-black uppercase tracking-[0.08em] text-slate-600">Mapa</span>
+                      </button>
+                      {deliveryPoint ? (
+                        <p className="text-xs font-semibold text-slate-600">
+                          Punto seleccionado: {deliveryPoint.lat.toFixed(6)}, {deliveryPoint.lng.toFixed(6)}
+                        </p>
+                      ) : (
+                        <p className="text-xs font-semibold text-amber-700">
+                          Debes seleccionar el punto exacto en el mapa.
+                        </p>
+                      )}
+                      {deliveryPoint && deliveryPointSource !== 'user' ? (
+                        <p className="text-xs font-semibold text-amber-700">
+                          Confirma el punto desde el mapa para validar tu direccion de entrega.
+                        </p>
+                      ) : null}
+                      <input
+                        type="text"
+                        value={deliveryReference}
+                        onChange={(event) => setDeliveryReference(event.target.value)}
+                        placeholder="Referencia (opcional)"
+                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none"
+                      />
+                      <textarea
+                        value={deliveryInstructions}
+                        onChange={(event) => setDeliveryInstructions(event.target.value)}
+                        placeholder="Indicaciones para entregar (opcional)"
+                        rows={3}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none"
+                      />
+                      {(!isDeliveryAddressValid || !hasDeliveryPoint) ? (
+                        <p className="text-xs font-semibold text-rose-500">Ingresa direccion valida y selecciona el punto en el mapa.</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
 
                 <div className="mt-4 space-y-2">
                   {menuData.metodosPago.length > 0 ? (
@@ -1606,6 +2340,20 @@ export default function PublicMenuPage() {
                   ) : null}
                 </div>
 
+                <div className="mt-4">
+                  <label htmlFor="order-notes" className="mb-2 block text-sm font-semibold text-slate-700">
+                    Notas del pedido
+                  </label>
+                  <textarea
+                    id="order-notes"
+                    value={orderNotes}
+                    onChange={(event) => setOrderNotes(event.target.value)}
+                    placeholder="Ejemplo: sin cebolla, tocar timbre, entregar en porteria"
+                    rows={3}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                  />
+                </div>
+
                 <div className="mt-4 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                   <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total</span>
                   <strong className="text-xl font-black" style={titleFontStyle}>{formatCop(cartTotal)}</strong>
@@ -1640,10 +2388,10 @@ export default function PublicMenuPage() {
                 <button
                   type="button"
                   onClick={() => void confirmOrder()}
-                  disabled={isSubmittingOrder || !isClientEmailValid || !canOrderViaWhatsapp}
+                  disabled={isSubmittingOrder || !canSubmitCheckout}
                   className="w-full rounded-full px-5 py-3 text-sm font-black uppercase tracking-[0.08em]"
                   style={
-                    isSubmittingOrder || !isClientEmailValid || !canOrderViaWhatsapp
+                    isSubmittingOrder || !canSubmitCheckout
                       ? { backgroundColor: '#E2E8F0', color: '#64748B' }
                       : {
                           borderRadius: 'var(--border-radius)',

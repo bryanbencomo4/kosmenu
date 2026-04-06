@@ -1,7 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -27,6 +33,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   final Map<String, int> _cart = <String, int>{};
   String? _selectedCategoryId;
   String _searchQuery = '';
+
+  static const String _deliveryModePickup = 'pickup';
+  static const String _deliveryModeDelivery = 'delivery';
 
   @override
   void initState() {
@@ -86,6 +95,10 @@ class _PublicMenuViewState extends State<PublicMenuView> {
       comercioNombre: comercioMap['nombre']?.toString() ?? 'Kosmenu',
       comercioLogoUrl: _resolveComercioLogoUrl(comercioMap),
       whatsappNumber: _normalizePhone(comercioMap['whatsapp']?.toString()),
+      allowsDelivery: comercioMap['permite_delivery'] == true,
+      comercioAddress: (comercioMap['direccion']?.toString() ?? '').trim(),
+      businessLatitude: _toDoubleOrNull(comercioMap['latitud']),
+      businessLongitude: _toDoubleOrNull(comercioMap['longitud']),
       tasaCambioPesos: _parseRate(comercioMap['tasa_cambio_pesos']),
       palette: _PublicMenuPalette.fromMenuPalette(
         comercioMap['menu_palette']?.toString(),
@@ -138,6 +151,79 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     return double.tryParse(normalized.replaceAll(',', '.')) ?? 0.0;
   }
 
+  double? _toDoubleOrNull(dynamic value) {
+    if (value is num) return value.toDouble();
+    final raw = (value ?? '').toString().trim();
+    if (raw.isEmpty) return null;
+    return double.tryParse(raw.replaceAll(',', '.'));
+  }
+
+  Future<Map<String, dynamic>> _httpGetJson(Uri uri) async {
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+      return <String, dynamic>{};
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<String?> _reverseGeocodeFromLatLng(LatLng position) async {
+    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
+    if (apiKey.isEmpty) return null;
+
+    try {
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
+        'latlng': '${position.latitude},${position.longitude}',
+        'language': 'es',
+        'key': apiKey,
+      });
+      final payload = await _httpGetJson(uri);
+      final status = (payload['status']?.toString() ?? '').trim();
+      if (status != 'OK') return null;
+      final results = payload['results'] as List<dynamic>? ?? const <dynamic>[];
+      if (results.isEmpty) return null;
+      final first = results.first;
+      if (first is! Map) return null;
+      return first['formatted_address']?.toString().trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<LatLng> _defaultDeliveryMapPosition(_PublicMenuData data) async {
+    if (data.businessLatitude != null && data.businessLongitude != null) {
+      return LatLng(data.businessLatitude!, data.businessLongitude!);
+    }
+
+    try {
+      final permission = await Geolocator.checkPermission();
+      LocationPermission resolvedPermission = permission;
+      if (permission == LocationPermission.denied) {
+        resolvedPermission = await Geolocator.requestPermission();
+      }
+
+      if (resolvedPermission == LocationPermission.denied ||
+          resolvedPermission == LocationPermission.deniedForever) {
+        return const LatLng(10.4806, -66.9036);
+      }
+
+      final position = await Geolocator.getCurrentPosition();
+      return LatLng(position.latitude, position.longitude);
+    } catch (_) {
+      return const LatLng(10.4806, -66.9036);
+    }
+  }
+
   void _incrementProduct(String productId) {
     setState(() {
       _cart.update(productId, (value) => value + 1, ifAbsent: () => 1);
@@ -166,6 +252,13 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     required double totalUsd,
     required double tasaAplicada,
     required String selectedPaymentMethod,
+    required String deliveryMode,
+    required String deliveryAddress,
+    required String deliveryReference,
+    required String deliveryInstructions,
+    required double? deliveryLatitude,
+    required double? deliveryLongitude,
+    required String orderNotes,
   }) async {
     final carritoItems = items
         .map(
@@ -182,6 +275,15 @@ class _PublicMenuViewState extends State<PublicMenuView> {
       'tasa_aplicada': tasaAplicada,
       'codigo_orden': orderCode,
       'metodo_pago': selectedPaymentMethod,
+      'order_notes': orderNotes,
+      'delivery': <String, dynamic>{
+        'mode': deliveryMode,
+        'address': deliveryAddress,
+        'reference': deliveryReference,
+        'instructions': deliveryInstructions,
+        'lat': deliveryLatitude,
+        'lng': deliveryLongitude,
+      },
     };
 
     await Supabase.instance.client.from('pedidos').insert({
@@ -200,6 +302,11 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     required double totalCop,
     required double tasaCambioPesos,
     required String paymentMethod,
+    required String deliveryMode,
+    required String deliveryAddress,
+    required String deliveryReference,
+    required String deliveryInstructions,
+    required String orderNotes,
   }) {
     final buffer = StringBuffer(
       '$trackingCode\nHola $comercioNombre, quiero pedir:\n',
@@ -214,10 +321,235 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     final copSection = tasaCambioPesos > 0
         ? ' / ${_formatCop(totalCop)} COP'
         : '';
+    final isDelivery = deliveryMode == _deliveryModeDelivery;
+    buffer.writeln(
+      'Tipo de entrega: ${isDelivery ? 'Delivery' : 'Retiro en tienda'}',
+    );
+    if (isDelivery && deliveryAddress.trim().isNotEmpty) {
+      buffer.writeln('Direccion de entrega: ${deliveryAddress.trim()}');
+    }
+    if (isDelivery && deliveryReference.trim().isNotEmpty) {
+      buffer.writeln('Referencia: ${deliveryReference.trim()}');
+    }
+    if (isDelivery && deliveryInstructions.trim().isNotEmpty) {
+      buffer.writeln('Indicaciones: ${deliveryInstructions.trim()}');
+    }
+    if (orderNotes.trim().isNotEmpty) {
+      buffer.writeln('Notas del pedido: ${orderNotes.trim()}');
+    }
     buffer.writeln('Metodo de pago: $paymentMethod');
     buffer.write('Total: ${_formatUsd(totalUsd)}$copSection');
 
     return buffer.toString();
+  }
+
+  Future<_DeliveryMapPick?> _pickDeliveryOnMap({
+    required _PublicMenuData data,
+    required String currentAddress,
+    required double? currentLatitude,
+    required double? currentLongitude,
+  }) async {
+    final seedPosition = currentLatitude != null && currentLongitude != null
+        ? LatLng(currentLatitude, currentLongitude)
+        : null;
+    final initialPosition =
+        seedPosition ?? await _defaultDeliveryMapPosition(data);
+    if (!mounted) return null;
+    final fallbackAddress = currentAddress.trim().isNotEmpty
+        ? currentAddress.trim()
+        : data.comercioAddress.trim();
+
+    LatLng selectedPosition = initialPosition;
+    String resolvedAddress = fallbackAddress;
+    bool isResolvingAddress = false;
+    GoogleMapController? mapController;
+
+    return showModalBottomSheet<_DeliveryMapPick>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: data.palette.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (sheetContext) {
+        Future<void> resolveAddress(StateSetter setModalState) async {
+          setModalState(() => isResolvingAddress = true);
+          final geocoded = await _reverseGeocodeFromLatLng(selectedPosition);
+          if (!sheetContext.mounted) return;
+          setModalState(() {
+            isResolvingAddress = false;
+            if (geocoded != null && geocoded.trim().isNotEmpty) {
+              resolvedAddress = geocoded.trim();
+            }
+          });
+        }
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.78,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Seleccionar direccion de entrega',
+                              style: GoogleFonts.manrope(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                                color: data.palette.onSurface,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            icon: Icon(
+                              Icons.close_rounded,
+                              color: data.palette.onSurface,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          GoogleMap(
+                            initialCameraPosition: CameraPosition(
+                              target: initialPosition,
+                              zoom: 16,
+                            ),
+                            myLocationButtonEnabled: true,
+                            myLocationEnabled: true,
+                            zoomControlsEnabled: false,
+                            mapToolbarEnabled: false,
+                            onMapCreated: (controller) {
+                              mapController = controller;
+                              if (resolvedAddress.isEmpty) {
+                                unawaited(resolveAddress(setModalState));
+                              }
+                            },
+                            onCameraMove: (position) {
+                              selectedPosition = position.target;
+                            },
+                            onCameraIdle: () {
+                              unawaited(resolveAddress(setModalState));
+                            },
+                          ),
+                          IgnorePointer(
+                            child: Center(
+                              child: Icon(
+                                Icons.location_on_rounded,
+                                size: 42,
+                                color: data.palette.primary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      color: data.palette.surface,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.place_outlined,
+                                size: 18,
+                                color: data.palette.onSurfaceMuted,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                isResolvingAddress
+                                    ? 'Buscando direccion...'
+                                    : 'Direccion seleccionada',
+                                style: GoogleFonts.manrope(
+                                  color: data.palette.onSurfaceMuted,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            resolvedAddress.isNotEmpty
+                                ? resolvedAddress
+                                : '${selectedPosition.latitude.toStringAsFixed(6)}, ${selectedPosition.longitude.toStringAsFixed(6)}',
+                            style: GoogleFonts.manrope(
+                              color: data.palette.onSurface,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final target =
+                                        await _defaultDeliveryMapPosition(data);
+                                    selectedPosition = target;
+                                    await mapController?.animateCamera(
+                                      CameraUpdate.newCameraPosition(
+                                        CameraPosition(
+                                          target: target,
+                                          zoom: 16,
+                                        ),
+                                      ),
+                                    );
+                                    if (!sheetContext.mounted) return;
+                                    unawaited(resolveAddress(setModalState));
+                                  },
+                                  icon: const Icon(
+                                    Icons.my_location_rounded,
+                                    size: 16,
+                                  ),
+                                  label: const Text('Mi ubicacion'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: () {
+                                    Navigator.pop(
+                                      sheetContext,
+                                      _DeliveryMapPick(
+                                        address: resolvedAddress,
+                                        latitude: selectedPosition.latitude,
+                                        longitude: selectedPosition.longitude,
+                                      ),
+                                    );
+                                  },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: data.palette.primary,
+                                    foregroundColor: data.palette.onPrimary,
+                                  ),
+                                  child: const Text('Usar esta ubicacion'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _openOrderSheet(_PublicMenuData data) async {
@@ -242,280 +574,670 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
     var selectedPaymentMethod = _paymentMethods.first;
     var isSubmittingOrder = false;
+    var selectedDeliveryMode = _deliveryModePickup;
+    var deliveryLatitude = data.businessLatitude;
+    var deliveryLongitude = data.businessLongitude;
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: palette.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 44,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: palette.onSurfaceMuted.withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(999),
+    final deliveryAddressController = TextEditingController();
+    final deliveryReferenceController = TextEditingController();
+    final deliveryInstructionsController = TextEditingController();
+    final orderNotesController = TextEditingController();
+
+    deliveryAddressController.text = data.comercioAddress;
+
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: palette.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        builder: (sheetContext) {
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 44,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: palette.onSurfaceMuted.withValues(
+                              alpha: 0.45,
+                            ),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      'Tu pedido',
-                      style: GoogleFonts.manrope(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                        color: palette.onSurface,
+                      const SizedBox(height: 18),
+                      Text(
+                        'Tu pedido',
+                        style: GoogleFonts.manrope(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                          color: palette.onSurface,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      data.comercioNombre,
-                      style: GoogleFonts.manrope(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: palette.onSurfaceMuted,
+                      const SizedBox(height: 6),
+                      Text(
+                        data.comercioNombre,
+                        style: GoogleFonts.manrope(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: palette.onSurfaceMuted,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: cartItems.length,
-                        separatorBuilder: (_, _) => const Divider(height: 18),
-                        itemBuilder: (context, index) {
-                          final item = cartItems[index];
+                      const SizedBox(height: 16),
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: cartItems.length,
+                          separatorBuilder: (_, _) => const Divider(height: 18),
+                          itemBuilder: (context, index) {
+                            final item = cartItems[index];
 
-                          return Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  'x${item.quantity} ${item.product.nombre}',
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    'x${item.quantity} ${item.product.nombre}',
+                                    style: GoogleFonts.manrope(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: palette.onSurface,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  _formatUsd(item.lineTotalUsd),
                                   style: GoogleFonts.manrope(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w800,
-                                    color: palette.onSurface,
+                                    color: palette.primary,
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: palette.surfaceAlt,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Entrega',
+                              style: GoogleFonts.manrope(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: palette.onSurfaceMuted,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('Retiro'),
+                                  selected:
+                                      selectedDeliveryMode ==
+                                      _deliveryModePickup,
+                                  onSelected: isSubmittingOrder
+                                      ? null
+                                      : (_) {
+                                          setModalState(
+                                            () => selectedDeliveryMode =
+                                                _deliveryModePickup,
+                                          );
+                                        },
+                                  selectedColor: palette.primary,
+                                  backgroundColor: palette.surface,
+                                  side: BorderSide.none,
+                                  labelStyle: GoogleFonts.manrope(
+                                    color:
+                                        selectedDeliveryMode ==
+                                            _deliveryModePickup
+                                        ? palette.onPrimary
+                                        : palette.onSurface,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                ChoiceChip(
+                                  label: const Text('Delivery'),
+                                  selected:
+                                      selectedDeliveryMode ==
+                                      _deliveryModeDelivery,
+                                  onSelected:
+                                      isSubmittingOrder || !data.allowsDelivery
+                                      ? null
+                                      : (_) {
+                                          setModalState(
+                                            () => selectedDeliveryMode =
+                                                _deliveryModeDelivery,
+                                          );
+                                        },
+                                  selectedColor: palette.primary,
+                                  disabledColor: palette.surface,
+                                  backgroundColor: palette.surface,
+                                  side: BorderSide.none,
+                                  labelStyle: GoogleFonts.manrope(
+                                    color:
+                                        selectedDeliveryMode ==
+                                            _deliveryModeDelivery
+                                        ? palette.onPrimary
+                                        : data.allowsDelivery
+                                        ? palette.onSurface
+                                        : palette.onSurfaceMuted,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (!data.allowsDelivery)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  'Este comercio no tiene delivery habilitado.',
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: palette.onSurfaceMuted,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Text(
-                                _formatUsd(item.lineTotalUsd),
-                                style: GoogleFonts.manrope(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  color: palette.primary,
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      'Metodo de pago',
-                      style: GoogleFonts.manrope(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: palette.onSurfaceMuted,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: _paymentMethods
-                          .map(
-                            (method) => ChoiceChip(
-                              label: Text(method),
-                              selected: selectedPaymentMethod == method,
-                              onSelected: isSubmittingOrder
-                                  ? null
-                                  : (_) {
-                                      setModalState(
-                                        () => selectedPaymentMethod = method,
-                                      );
-                                    },
-                              selectedColor: palette.primary,
-                              backgroundColor: palette.surfaceAlt,
-                              side: BorderSide.none,
-                              labelStyle: GoogleFonts.manrope(
-                                color: selectedPaymentMethod == method
-                                    ? palette.onPrimary
-                                    : palette.onSurface,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: palette.surfaceAlt,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Column(
-                        children: [
-                          _SummaryRow(
-                            label: 'Total USD',
-                            value: _formatUsd(totalUsd),
-                            labelColor: palette.onSurfaceMuted,
-                            valueColor: palette.onSurface,
-                          ),
-                          if (data.tasaCambioPesos > 0)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: _SummaryRow(
-                                label: 'Total COP',
-                                value: '${_formatCop(totalCop)} COP',
-                                labelColor: palette.onSurfaceMuted,
-                                valueColor: palette.onSurface,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: isSubmittingOrder
-                            ? null
-                            : () async {
-                                final whatsappNumber = data.whatsappNumber;
-                                if (whatsappNumber == null ||
-                                    whatsappNumber.isEmpty) {
-                                  if (!mounted || !sheetContext.mounted) return;
-                                  Navigator.pop(sheetContext);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Este comercio no tiene WhatsApp configurado.',
+                            if (selectedDeliveryMode == _deliveryModeDelivery)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 10),
+                                child: Column(
+                                  children: [
+                                    TextFormField(
+                                      controller: deliveryAddressController,
+                                      style: GoogleFonts.manrope(
+                                        color: palette.onSurface,
+                                        fontWeight: FontWeight.w600,
                                       ),
-                                    ),
-                                  );
-                                  return;
-                                }
-
-                                setModalState(() => isSubmittingOrder = true);
-
-                                final orderCode = _generateTrackingCode();
-                                final localScaffoldMessenger =
-                                    ScaffoldMessenger.of(context);
-                                try {
-                                  await _registerShadowOrder(
-                                    orderCode: orderCode,
-                                    items: cartItems,
-                                    totalUsd: totalUsd,
-                                    tasaAplicada: data.tasaCambioPesos,
-                                    selectedPaymentMethod:
-                                        selectedPaymentMethod,
-                                  );
-
-                                  final message = _buildWhatsAppMessage(
-                                    comercioNombre: data.comercioNombre,
-                                    trackingCode: orderCode,
-                                    items: cartItems,
-                                    totalUsd: totalUsd,
-                                    totalCop: totalCop,
-                                    tasaCambioPesos: data.tasaCambioPesos,
-                                    paymentMethod: selectedPaymentMethod,
-                                  );
-                                  final uri = Uri.parse(
-                                    'https://wa.me/$whatsappNumber?text=${Uri.encodeComponent(message)}',
-                                  );
-
-                                  final launched = await launchUrl(uri);
-                                  if (!mounted) return;
-
-                                  if (launched) {
-                                    setState(() => _cart.clear());
-                                    if (sheetContext.mounted) {
-                                      Navigator.pop(sheetContext);
-                                    }
-                                  } else {
-                                    localScaffoldMessenger.showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Pedido registrado, pero no se pudo abrir WhatsApp.',
+                                      decoration: InputDecoration(
+                                        hintText: 'Direccion de entrega',
+                                        filled: true,
+                                        fillColor: palette.surface,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: palette.primary.withValues(
+                                              alpha: 0.16,
+                                            ),
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: palette.primary.withValues(
+                                              alpha: 0.16,
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                    );
-                                  }
-                                } catch (error) {
-                                  if (!mounted) return;
-                                  localScaffoldMessenger.showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'No se pudo registrar el pedido: $error',
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        onPressed: isSubmittingOrder
+                                            ? null
+                                            : () async {
+                                                final picked =
+                                                    await _pickDeliveryOnMap(
+                                                      data: data,
+                                                      currentAddress:
+                                                          deliveryAddressController
+                                                              .text,
+                                                      currentLatitude:
+                                                          deliveryLatitude,
+                                                      currentLongitude:
+                                                          deliveryLongitude,
+                                                    );
+                                                if (picked == null ||
+                                                    !mounted) {
+                                                  return;
+                                                }
+                                                setModalState(() {
+                                                  deliveryLatitude =
+                                                      picked.latitude;
+                                                  deliveryLongitude =
+                                                      picked.longitude;
+                                                  if (picked.address
+                                                      .trim()
+                                                      .isNotEmpty) {
+                                                    deliveryAddressController
+                                                        .text = picked.address
+                                                        .trim();
+                                                  }
+                                                });
+                                              },
+                                        icon: const Icon(
+                                          Icons.map_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const Text(
+                                          'Seleccionar en mapa de Google',
+                                        ),
                                       ),
                                     ),
-                                  );
-                                } finally {
-                                  if (mounted) {
-                                    setModalState(
-                                      () => isSubmittingOrder = false,
-                                    );
-                                  }
-                                }
-                              },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: palette.primary,
-                          foregroundColor: palette.onPrimary,
-                          padding: const EdgeInsets.symmetric(vertical: 18),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            if (isSubmittingOrder) ...[
-                              SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.2,
-                                  color: palette.onPrimary,
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      controller: deliveryReferenceController,
+                                      style: GoogleFonts.manrope(
+                                        color: palette.onSurface,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      decoration: InputDecoration(
+                                        hintText: 'Referencia (opcional)',
+                                        filled: true,
+                                        fillColor: palette.surface,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: palette.primary.withValues(
+                                              alpha: 0.16,
+                                            ),
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: palette.primary.withValues(
+                                              alpha: 0.16,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      controller:
+                                          deliveryInstructionsController,
+                                      minLines: 2,
+                                      maxLines: 3,
+                                      style: GoogleFonts.manrope(
+                                        color: palette.onSurface,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      decoration: InputDecoration(
+                                        hintText: 'Indicaciones (opcional)',
+                                        filled: true,
+                                        fillColor: palette.surface,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: palette.primary.withValues(
+                                              alpha: 0.16,
+                                            ),
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: palette.primary.withValues(
+                                              alpha: 0.16,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    if (deliveryAddressController.text
+                                            .trim()
+                                            .length <
+                                        6)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 8),
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Text(
+                                            'Ingresa una direccion valida para delivery.',
+                                            style: GoogleFonts.manrope(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: const Color(0xFFE11D48),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(width: 10),
-                            ],
-                            Text(
-                              isSubmittingOrder
-                                  ? 'Registrando pedido...'
-                                  : 'Confirmar por WhatsApp',
-                              style: GoogleFonts.manrope(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
                           ],
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 12),
+                      Text(
+                        'Metodo de pago',
+                        style: GoogleFonts.manrope(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: palette.onSurfaceMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: _paymentMethods
+                            .map(
+                              (method) => ChoiceChip(
+                                label: Text(method),
+                                selected: selectedPaymentMethod == method,
+                                onSelected: isSubmittingOrder
+                                    ? null
+                                    : (_) {
+                                        setModalState(
+                                          () => selectedPaymentMethod = method,
+                                        );
+                                      },
+                                selectedColor: palette.primary,
+                                backgroundColor: palette.surfaceAlt,
+                                side: BorderSide.none,
+                                labelStyle: GoogleFonts.manrope(
+                                  color: selectedPaymentMethod == method
+                                      ? palette.onPrimary
+                                      : palette.onSurface,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: palette.surfaceAlt,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Column(
+                          children: [
+                            _SummaryRow(
+                              label: 'Total USD',
+                              value: _formatUsd(totalUsd),
+                              labelColor: palette.onSurfaceMuted,
+                              valueColor: palette.onSurface,
+                            ),
+                            if (data.tasaCambioPesos > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: _SummaryRow(
+                                  label: 'Total COP',
+                                  value: '${_formatCop(totalCop)} COP',
+                                  labelColor: palette.onSurfaceMuted,
+                                  valueColor: palette.onSurface,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: orderNotesController,
+                        minLines: 2,
+                        maxLines: 3,
+                        style: GoogleFonts.manrope(
+                          color: palette.onSurface,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        decoration: InputDecoration(
+                          hintText:
+                              'Notas del pedido (sin cebolla, tocar timbre, etc.)',
+                          filled: true,
+                          fillColor: palette.surfaceAlt,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(
+                              color: palette.primary.withValues(alpha: 0.16),
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(
+                              color: palette.primary.withValues(alpha: 0.16),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: isSubmittingOrder
+                              ? null
+                              : () async {
+                                  final whatsappNumber = data.whatsappNumber;
+                                  if (whatsappNumber == null ||
+                                      whatsappNumber.isEmpty) {
+                                    if (!mounted || !sheetContext.mounted) {
+                                      return;
+                                    }
+                                    Navigator.pop(sheetContext);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Este comercio no tiene WhatsApp configurado.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  setModalState(() => isSubmittingOrder = true);
+                                  final localScaffoldMessenger =
+                                      ScaffoldMessenger.of(context);
+
+                                  final isDeliveryOrder =
+                                      selectedDeliveryMode ==
+                                      _deliveryModeDelivery;
+                                  final normalizedAddress =
+                                      deliveryAddressController.text.trim();
+                                  final normalizedReference =
+                                      deliveryReferenceController.text.trim();
+                                  final normalizedInstructions =
+                                      deliveryInstructionsController.text
+                                          .trim();
+                                  final normalizedOrderNotes =
+                                      orderNotesController.text.trim();
+
+                                  if (isDeliveryOrder &&
+                                      normalizedAddress.length < 6) {
+                                    if (!mounted) return;
+                                    setModalState(
+                                      () => isSubmittingOrder = false,
+                                    );
+                                    localScaffoldMessenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Ingresa una direccion valida para el delivery.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  final orderCode = _generateTrackingCode();
+                                  try {
+                                    await _registerShadowOrder(
+                                      orderCode: orderCode,
+                                      items: cartItems,
+                                      totalUsd: totalUsd,
+                                      tasaAplicada: data.tasaCambioPesos,
+                                      selectedPaymentMethod:
+                                          selectedPaymentMethod,
+                                      deliveryMode: selectedDeliveryMode,
+                                      deliveryAddress: isDeliveryOrder
+                                          ? normalizedAddress
+                                          : '',
+                                      deliveryReference: isDeliveryOrder
+                                          ? normalizedReference
+                                          : '',
+                                      deliveryInstructions: isDeliveryOrder
+                                          ? normalizedInstructions
+                                          : '',
+                                      deliveryLatitude: isDeliveryOrder
+                                          ? deliveryLatitude
+                                          : null,
+                                      deliveryLongitude: isDeliveryOrder
+                                          ? deliveryLongitude
+                                          : null,
+                                      orderNotes: normalizedOrderNotes,
+                                    );
+
+                                    final message = _buildWhatsAppMessage(
+                                      comercioNombre: data.comercioNombre,
+                                      trackingCode: orderCode,
+                                      items: cartItems,
+                                      totalUsd: totalUsd,
+                                      totalCop: totalCop,
+                                      tasaCambioPesos: data.tasaCambioPesos,
+                                      paymentMethod: selectedPaymentMethod,
+                                      deliveryMode: selectedDeliveryMode,
+                                      deliveryAddress: isDeliveryOrder
+                                          ? normalizedAddress
+                                          : '',
+                                      deliveryReference: isDeliveryOrder
+                                          ? normalizedReference
+                                          : '',
+                                      deliveryInstructions: isDeliveryOrder
+                                          ? normalizedInstructions
+                                          : '',
+                                      orderNotes: normalizedOrderNotes,
+                                    );
+                                    final uri = Uri.parse(
+                                      'https://wa.me/$whatsappNumber?text=${Uri.encodeComponent(message)}',
+                                    );
+
+                                    final launched = await launchUrl(uri);
+                                    if (!mounted) return;
+
+                                    if (launched) {
+                                      setState(() => _cart.clear());
+                                      if (sheetContext.mounted) {
+                                        Navigator.pop(sheetContext);
+                                      }
+                                    } else {
+                                      localScaffoldMessenger.showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Pedido registrado, pero no se pudo abrir WhatsApp.',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  } catch (error) {
+                                    if (!mounted) return;
+                                    localScaffoldMessenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'No se pudo registrar el pedido: $error',
+                                        ),
+                                      ),
+                                    );
+                                  } finally {
+                                    if (mounted) {
+                                      setModalState(
+                                        () => isSubmittingOrder = false,
+                                      );
+                                    }
+                                  }
+                                },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: palette.primary,
+                            foregroundColor: palette.onPrimary,
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (isSubmittingOrder) ...[
+                                SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.2,
+                                    color: palette.onPrimary,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                              ],
+                              Text(
+                                isSubmittingOrder
+                                    ? 'Registrando pedido...'
+                                    : 'Confirmar por WhatsApp',
+                                style: GoogleFonts.manrope(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          },
-        );
-      },
-    );
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      deliveryAddressController.dispose();
+      deliveryReferenceController.dispose();
+      deliveryInstructionsController.dispose();
+      orderNotesController.dispose();
+    }
   }
 
   String _formatUsd(double amount) => '\$${amount.toStringAsFixed(2)}';
@@ -1087,6 +1809,10 @@ class _PublicMenuData {
     required this.comercioNombre,
     required this.comercioLogoUrl,
     required this.whatsappNumber,
+    required this.allowsDelivery,
+    required this.comercioAddress,
+    required this.businessLatitude,
+    required this.businessLongitude,
     required this.tasaCambioPesos,
     required this.palette,
     required this.categories,
@@ -1096,10 +1822,26 @@ class _PublicMenuData {
   final String comercioNombre;
   final String? comercioLogoUrl;
   final String? whatsappNumber;
+  final bool allowsDelivery;
+  final String comercioAddress;
+  final double? businessLatitude;
+  final double? businessLongitude;
   final double tasaCambioPesos;
   final _PublicMenuPalette palette;
   final List<_PublicCategory> categories;
   final List<_PublicProduct> products;
+}
+
+class _DeliveryMapPick {
+  const _DeliveryMapPick({
+    required this.address,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  final String address;
+  final double latitude;
+  final double longitude;
 }
 
 class _ProductVisual extends StatelessWidget {
@@ -1126,7 +1868,7 @@ class _ProductVisual extends StatelessWidget {
       return Image.network(
         productUrl,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) {
+        errorBuilder: (context, error, stackTrace) {
           return _buildLogoOrDefault(businessLogoUrl);
         },
       );
@@ -1140,7 +1882,7 @@ class _ProductVisual extends StatelessWidget {
       return Image.network(
         businessLogoUrl,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _buildDefaultLogo(),
+        errorBuilder: (context, error, stackTrace) => _buildDefaultLogo(),
       );
     }
 
@@ -1156,7 +1898,7 @@ class _ProductVisual extends StatelessWidget {
         child: Image.asset(
           defaultAssetPath,
           fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) =>
+          errorBuilder: (context, error, stackTrace) =>
               Icon(Icons.storefront_rounded, size: 48, color: muted),
         ),
       ),
