@@ -2011,7 +2011,7 @@ export default function PublicMenuPage() {
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:px-6">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Mapa</p>
-                  <h3 className="text-xl font-black text-slate-900" style={titleFontStyle}>Selecciona punto de entrega</h3>
+                  <h3 className="text-xl font-black text-slate-900" style={titleFontStyle}>Punto de entrega</h3>
                 </div>
                 <button
                   type="button"

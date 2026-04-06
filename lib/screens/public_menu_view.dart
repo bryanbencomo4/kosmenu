@@ -266,6 +266,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
             'nombre': item.product.nombre,
             'cantidad': item.quantity,
             'precio': item.product.precio,
+            'imagen_url': item.product.imageUrl,
           },
         )
         .toList();
@@ -392,71 +393,164 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Center(
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 10),
+                        width: 52,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: data.palette.onSurfaceMuted.withValues(
+                            alpha: 0.45,
+                          ),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
+                      padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
                       child: Row(
                         children: [
-                          Expanded(
-                            child: Text(
-                              'Seleccionar direccion de entrega',
-                              style: GoogleFonts.manrope(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
-                                color: data.palette.onSurface,
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: data.palette.primary.withValues(
+                                alpha: 0.14,
                               ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.pin_drop_rounded,
+                              color: data.palette.primary,
+                              size: 19,
                             ),
                           ),
-                          IconButton(
-                            onPressed: () => Navigator.pop(sheetContext),
-                            icon: Icon(
-                              Icons.close_rounded,
-                              color: data.palette.onSurface,
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Seleccionar direccion de entrega',
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    color: data.palette.onSurface,
+                                  ),
+                                ),
+                                Text(
+                                  'Mueve el mapa y apunta el pin al lugar exacto.',
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: data.palette.onSurfaceMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: data.palette.surfaceAlt,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: IconButton(
+                              onPressed: () => Navigator.pop(sheetContext),
+                              icon: Icon(
+                                Icons.close_rounded,
+                                color: data.palette.onSurface,
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
                     Expanded(
-                      child: Stack(
-                        children: [
-                          GoogleMap(
-                            initialCameraPosition: CameraPosition(
-                              target: initialPosition,
-                              zoom: 16,
-                            ),
-                            myLocationButtonEnabled: true,
-                            myLocationEnabled: true,
-                            zoomControlsEnabled: false,
-                            mapToolbarEnabled: false,
-                            onMapCreated: (controller) {
-                              mapController = controller;
-                              if (resolvedAddress.isEmpty) {
-                                unawaited(resolveAddress(setModalState));
-                              }
-                            },
-                            onCameraMove: (position) {
-                              selectedPosition = position.target;
-                            },
-                            onCameraIdle: () {
-                              unawaited(resolveAddress(setModalState));
-                            },
-                          ),
-                          IgnorePointer(
-                            child: Center(
-                              child: Icon(
-                                Icons.location_on_rounded,
-                                size: 42,
-                                color: data.palette.primary,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(22),
+                          child: Stack(
+                            children: [
+                              GoogleMap(
+                                initialCameraPosition: CameraPosition(
+                                  target: initialPosition,
+                                  zoom: 16,
+                                ),
+                                myLocationButtonEnabled: true,
+                                myLocationEnabled: true,
+                                zoomControlsEnabled: false,
+                                mapToolbarEnabled: false,
+                                onMapCreated: (controller) {
+                                  mapController = controller;
+                                  if (resolvedAddress.isEmpty) {
+                                    unawaited(resolveAddress(setModalState));
+                                  }
+                                },
+                                onCameraMove: (position) {
+                                  selectedPosition = position.target;
+                                },
+                                onCameraIdle: () {
+                                  unawaited(resolveAddress(setModalState));
+                                },
                               ),
-                            ),
+                              IgnorePointer(
+                                child: Center(
+                                  child: Icon(
+                                    Icons.location_on_rounded,
+                                    size: 44,
+                                    color: data.palette.primary,
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                top: 12,
+                                left: 12,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: data.palette.surface.withValues(
+                                      alpha: 0.9,
+                                    ),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.touch_app_rounded,
+                                        size: 14,
+                                        color: data.palette.onSurfaceMuted,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Arrastra para ajustar',
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: data.palette.onSurfaceMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                      color: data.palette.surface,
+                      margin: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                      decoration: BoxDecoration(
+                        color: data.palette.surfaceAlt,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -619,26 +713,35 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       Text(
                         'Tu pedido',
                         style: GoogleFonts.manrope(
-                          fontSize: 24,
+                          fontSize: 22,
                           fontWeight: FontWeight.w800,
                           color: palette.onSurface,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Text(
                         data.comercioNombre,
                         style: GoogleFonts.manrope(
-                          fontSize: 14,
+                          fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: palette.onSurfaceMuted,
                         ),
                       ),
                       const SizedBox(height: 16),
-                      Flexible(
+                      Text(
+                        'Resumen (${cartItems.length})',
+                        style: GoogleFonts.manrope(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: palette.onSurfaceMuted,
+                        ),
+                      ),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 180),
                         child: ListView.separated(
                           shrinkWrap: true,
                           itemCount: cartItems.length,
-                          separatorBuilder: (_, _) => const Divider(height: 18),
+                          separatorBuilder: (_, _) => const Divider(height: 16),
                           itemBuilder: (context, index) {
                             final item = cartItems[index];
 
@@ -669,286 +772,192 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           },
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: palette.surfaceAlt,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Entrega',
-                              style: GoogleFonts.manrope(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: palette.onSurfaceMuted,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              children: [
-                                ChoiceChip(
-                                  label: const Text('Retiro'),
-                                  selected:
-                                      selectedDeliveryMode ==
-                                      _deliveryModePickup,
-                                  onSelected: isSubmittingOrder
-                                      ? null
-                                      : (_) {
-                                          setModalState(
-                                            () => selectedDeliveryMode =
-                                                _deliveryModePickup,
-                                          );
-                                        },
-                                  selectedColor: palette.primary,
-                                  backgroundColor: palette.surface,
-                                  side: BorderSide.none,
-                                  labelStyle: GoogleFonts.manrope(
-                                    color:
-                                        selectedDeliveryMode ==
-                                            _deliveryModePickup
-                                        ? palette.onPrimary
-                                        : palette.onSurface,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                ChoiceChip(
-                                  label: const Text('Delivery'),
-                                  selected:
-                                      selectedDeliveryMode ==
-                                      _deliveryModeDelivery,
-                                  onSelected:
-                                      isSubmittingOrder || !data.allowsDelivery
-                                      ? null
-                                      : (_) {
-                                          setModalState(
-                                            () => selectedDeliveryMode =
-                                                _deliveryModeDelivery,
-                                          );
-                                        },
-                                  selectedColor: palette.primary,
-                                  disabledColor: palette.surface,
-                                  backgroundColor: palette.surface,
-                                  side: BorderSide.none,
-                                  labelStyle: GoogleFonts.manrope(
-                                    color:
-                                        selectedDeliveryMode ==
-                                            _deliveryModeDelivery
-                                        ? palette.onPrimary
-                                        : data.allowsDelivery
-                                        ? palette.onSurface
-                                        : palette.onSurfaceMuted,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (!data.allowsDelivery)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Text(
-                                  'Este comercio no tiene delivery habilitado.',
-                                  style: GoogleFonts.manrope(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: palette.onSurfaceMuted,
-                                  ),
-                                ),
-                              ),
-                            if (selectedDeliveryMode == _deliveryModeDelivery)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 10),
-                                child: Column(
-                                  children: [
-                                    TextFormField(
-                                      controller: deliveryAddressController,
-                                      style: GoogleFonts.manrope(
-                                        color: palette.onSurface,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText: 'Direccion de entrega',
-                                        filled: true,
-                                        fillColor: palette.surface,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 10,
-                                            ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: palette.primary.withValues(
-                                              alpha: 0.16,
-                                            ),
-                                          ),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: palette.primary.withValues(
-                                              alpha: 0.16,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: OutlinedButton.icon(
-                                        onPressed: isSubmittingOrder
-                                            ? null
-                                            : () async {
-                                                final picked =
-                                                    await _pickDeliveryOnMap(
-                                                      data: data,
-                                                      currentAddress:
-                                                          deliveryAddressController
-                                                              .text,
-                                                      currentLatitude:
-                                                          deliveryLatitude,
-                                                      currentLongitude:
-                                                          deliveryLongitude,
-                                                    );
-                                                if (picked == null ||
-                                                    !mounted) {
-                                                  return;
-                                                }
-                                                setModalState(() {
-                                                  deliveryLatitude =
-                                                      picked.latitude;
-                                                  deliveryLongitude =
-                                                      picked.longitude;
-                                                  if (picked.address
-                                                      .trim()
-                                                      .isNotEmpty) {
-                                                    deliveryAddressController
-                                                        .text = picked.address
-                                                        .trim();
-                                                  }
-                                                });
-                                              },
-                                        icon: const Icon(
-                                          Icons.map_outlined,
-                                          size: 18,
-                                        ),
-                                        label: const Text(
-                                          'Seleccionar en mapa de Google',
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    TextFormField(
-                                      controller: deliveryReferenceController,
-                                      style: GoogleFonts.manrope(
-                                        color: palette.onSurface,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText: 'Referencia (opcional)',
-                                        filled: true,
-                                        fillColor: palette.surface,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 10,
-                                            ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: palette.primary.withValues(
-                                              alpha: 0.16,
-                                            ),
-                                          ),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: palette.primary.withValues(
-                                              alpha: 0.16,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    TextFormField(
-                                      controller:
-                                          deliveryInstructionsController,
-                                      minLines: 2,
-                                      maxLines: 3,
-                                      style: GoogleFonts.manrope(
-                                        color: palette.onSurface,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText: 'Indicaciones (opcional)',
-                                        filled: true,
-                                        fillColor: palette.surface,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 10,
-                                            ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: palette.primary.withValues(
-                                              alpha: 0.16,
-                                            ),
-                                          ),
-                                        ),
-                                        enabledBorder: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: palette.primary.withValues(
-                                              alpha: 0.16,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    if (deliveryAddressController.text
-                                            .trim()
-                                            .length <
-                                        6)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 8),
-                                        child: Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: Text(
-                                            'Ingresa una direccion valida para delivery.',
-                                            style: GoogleFonts.manrope(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700,
-                                              color: const Color(0xFFE11D48),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                          ],
+                      const SizedBox(height: 12),
+                      Text(
+                        'Entrega',
+                        style: GoogleFonts.manrope(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: palette.onSurfaceMuted,
                         ),
                       ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Retiro'),
+                            selected:
+                                selectedDeliveryMode == _deliveryModePickup,
+                            onSelected: isSubmittingOrder
+                                ? null
+                                : (_) {
+                                    setModalState(
+                                      () => selectedDeliveryMode =
+                                          _deliveryModePickup,
+                                    );
+                                  },
+                            selectedColor: palette.primary,
+                            backgroundColor: palette.surface,
+                            side: BorderSide.none,
+                            labelStyle: GoogleFonts.manrope(
+                              color: selectedDeliveryMode == _deliveryModePickup
+                                  ? palette.onPrimary
+                                  : palette.onSurface,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Delivery'),
+                            selected:
+                                selectedDeliveryMode == _deliveryModeDelivery,
+                            onSelected:
+                                isSubmittingOrder || !data.allowsDelivery
+                                ? null
+                                : (_) {
+                                    setModalState(
+                                      () => selectedDeliveryMode =
+                                          _deliveryModeDelivery,
+                                    );
+                                  },
+                            selectedColor: palette.primary,
+                            disabledColor: palette.surface,
+                            backgroundColor: palette.surface,
+                            side: BorderSide.none,
+                            labelStyle: GoogleFonts.manrope(
+                              color:
+                                  selectedDeliveryMode == _deliveryModeDelivery
+                                  ? palette.onPrimary
+                                  : data.allowsDelivery
+                                  ? palette.onSurface
+                                  : palette.onSurfaceMuted,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (!data.allowsDelivery)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            'Este comercio no tiene delivery habilitado.',
+                            style: GoogleFonts.manrope(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: palette.onSurfaceMuted,
+                            ),
+                          ),
+                        ),
+                      if (selectedDeliveryMode == _deliveryModeDelivery)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Column(
+                            children: [
+                              TextFormField(
+                                controller: deliveryAddressController,
+                                style: GoogleFonts.manrope(
+                                  color: palette.onSurface,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: 'Direccion de entrega',
+                                  filled: true,
+                                  fillColor: palette.surface,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton(
+                                  onPressed: isSubmittingOrder
+                                      ? null
+                                      : () async {
+                                          final picked =
+                                              await _pickDeliveryOnMap(
+                                                data: data,
+                                                currentAddress:
+                                                    deliveryAddressController
+                                                        .text,
+                                                currentLatitude:
+                                                    deliveryLatitude,
+                                                currentLongitude:
+                                                    deliveryLongitude,
+                                              );
+                                          if (picked == null || !mounted) {
+                                            return;
+                                          }
+                                          setModalState(() {
+                                            deliveryLatitude = picked.latitude;
+                                            deliveryLongitude =
+                                                picked.longitude;
+                                            if (picked.address
+                                                .trim()
+                                                .isNotEmpty) {
+                                              deliveryAddressController.text =
+                                                  picked.address.trim();
+                                            }
+                                          });
+                                        },
+                                  child: const Text('Seleccionar en mapa'),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                controller: deliveryReferenceController,
+                                style: GoogleFonts.manrope(
+                                  color: palette.onSurface,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: 'Referencia (opcional)',
+                                  filled: true,
+                                  fillColor: palette.surface,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                controller: deliveryInstructionsController,
+                                minLines: 2,
+                                maxLines: 3,
+                                style: GoogleFonts.manrope(
+                                  color: palette.onSurface,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: 'Indicaciones (opcional)',
+                                  filled: true,
+                                  fillColor: palette.surface,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                              if (deliveryAddressController.text.trim().length <
+                                  6)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(
+                                      'Ingresa una direccion valida para delivery.',
+                                      style: GoogleFonts.manrope(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFFE11D48),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       const SizedBox(height: 12),
                       Text(
                         'Metodo de pago',
@@ -959,61 +968,64 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        children: _paymentMethods
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedPaymentMethod,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: palette.surfaceAlt,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        dropdownColor: palette.surface,
+                        style: GoogleFonts.manrope(
+                          color: palette.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        items: _paymentMethods
                             .map(
-                              (method) => ChoiceChip(
-                                label: Text(method),
-                                selected: selectedPaymentMethod == method,
-                                onSelected: isSubmittingOrder
-                                    ? null
-                                    : (_) {
-                                        setModalState(
-                                          () => selectedPaymentMethod = method,
-                                        );
-                                      },
-                                selectedColor: palette.primary,
-                                backgroundColor: palette.surfaceAlt,
-                                side: BorderSide.none,
-                                labelStyle: GoogleFonts.manrope(
-                                  color: selectedPaymentMethod == method
-                                      ? palette.onPrimary
-                                      : palette.onSurface,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                              (method) => DropdownMenuItem<String>(
+                                value: method,
+                                child: Text(method),
                               ),
                             )
                             .toList(),
+                        onChanged: isSubmittingOrder
+                            ? null
+                            : (value) {
+                                if (value == null) return;
+                                setModalState(
+                                  () => selectedPaymentMethod = value,
+                                );
+                              },
                       ),
                       const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: palette.surfaceAlt,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Column(
-                          children: [
-                            _SummaryRow(
-                              label: 'Total USD',
-                              value: _formatUsd(totalUsd),
-                              labelColor: palette.onSurfaceMuted,
-                              valueColor: palette.onSurface,
-                            ),
-                            if (data.tasaCambioPesos > 0)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: _SummaryRow(
-                                  label: 'Total COP',
-                                  value: '${_formatCop(totalCop)} COP',
-                                  labelColor: palette.onSurfaceMuted,
-                                  valueColor: palette.onSurface,
-                                ),
-                              ),
-                          ],
-                        ),
+                      _SummaryRow(
+                        label: 'Total USD',
+                        value: _formatUsd(totalUsd),
+                        labelColor: palette.onSurfaceMuted,
+                        valueColor: palette.onSurface,
                       ),
+                      if (data.tasaCambioPesos > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: _SummaryRow(
+                            label: 'Total COP',
+                            value: '${_formatCop(totalCop)} COP',
+                            labelColor: palette.onSurfaceMuted,
+                            valueColor: palette.onSurface,
+                          ),
+                        ),
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: orderNotesController,
@@ -1027,22 +1039,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           hintText:
                               'Notas del pedido (sin cebolla, tocar timbre, etc.)',
                           filled: true,
-                          fillColor: palette.surfaceAlt,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
+                          fillColor: palette.surface,
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(
-                              color: palette.primary.withValues(alpha: 0.16),
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide(
-                              color: palette.primary.withValues(alpha: 0.16),
-                            ),
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
                       ),

@@ -1,6 +1,11 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -80,10 +85,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     if (foundPedido == null) return null;
 
     String comercioNombre = 'Kosmenu';
+    double? businessLatitude;
+    double? businessLongitude;
+    String? businessLogoUrl;
+    List<LatLng> routePoints = const <LatLng>[];
     if (foundPedido.comercioId.isNotEmpty) {
       final comercioRow = await client
           .from('comercios')
-          .select('id,nombre')
+          .select('*')
           .eq('id', foundPedido.comercioId)
           .maybeSingle();
 
@@ -92,11 +101,31 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if (nombre.isNotEmpty) {
         comercioNombre = nombre;
       }
+      businessLatitude = _toDoubleOrNull(comercioMap['latitud']);
+      businessLongitude = _toDoubleOrNull(comercioMap['longitud']);
+      businessLogoUrl = _resolveComercioLogoUrl(comercioMap);
+
+      if (businessLatitude != null &&
+          businessLongitude != null &&
+          foundPedido.deliveryLatitude != null &&
+          foundPedido.deliveryLongitude != null) {
+        routePoints = await _fetchDeliveryRoute(
+          origin: LatLng(businessLatitude, businessLongitude),
+          destination: LatLng(
+            foundPedido.deliveryLatitude!,
+            foundPedido.deliveryLongitude!,
+          ),
+        );
+      }
     }
 
     return _OrderViewData(
       pedido: foundPedido,
       comercioNombre: comercioNombre,
+      businessLatitude: businessLatitude,
+      businessLongitude: businessLongitude,
+      businessLogoUrl: businessLogoUrl,
+      routePoints: routePoints,
       history: _buildOrderHistory(
         pedidosRows,
         currentOrderId: widget.orderId,
@@ -240,12 +269,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     setState(() => _isCompleting = true);
 
     try {
-      final updatedRows = await Supabase.instance.client
+      var updatedRows = await Supabase.instance.client
           .from('pedidos')
           .update({'estado': 'completado'})
           .contains('detalles', {'order_id': widget.orderId})
           .select('*')
           .limit(1);
+
+      if ((updatedRows as List).isEmpty) {
+        updatedRows = await Supabase.instance.client
+            .from('pedidos')
+            .update({'estado': 'completado'})
+            .contains('detalles', {'codigo_orden': widget.orderId})
+            .select('*')
+            .limit(1);
+      }
 
       if (!mounted) return;
 
@@ -321,6 +359,131 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return <String, dynamic>{};
   }
 
+  String? _resolveComercioLogoUrl(Map<String, dynamic> comercioMap) {
+    const logoKeys = <String>[
+      'logo_url',
+      'logo',
+      'imagen_logo',
+      'brand_logo_url',
+    ];
+
+    for (final key in logoKeys) {
+      final value = comercioMap[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  Future<Map<String, dynamic>> _httpGetJson(Uri uri) async {
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      return <String, dynamic>{};
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  List<LatLng> _decodePolyline(String encoded) {
+    if (encoded.isEmpty) return const <LatLng>[];
+
+    final poly = <LatLng>[];
+    var index = 0;
+    var lat = 0;
+    var lng = 0;
+
+    while (index < encoded.length) {
+      var shift = 0;
+      var result = 0;
+      int byte;
+
+      do {
+        byte = encoded.codeUnitAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20);
+
+      final dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+
+      do {
+        byte = encoded.codeUnitAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20);
+
+      final dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+      lng += dlng;
+
+      poly.add(LatLng(lat / 1E5, lng / 1E5));
+    }
+
+    return poly;
+  }
+
+  Future<List<LatLng>> _fetchDeliveryRoute({
+    required LatLng origin,
+    required LatLng destination,
+  }) async {
+    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
+    if (apiKey.isEmpty) {
+      return <LatLng>[origin, destination];
+    }
+
+    try {
+      final uri =
+          Uri.https('maps.googleapis.com', '/maps/api/directions/json', {
+            'origin': '${origin.latitude},${origin.longitude}',
+            'destination': '${destination.latitude},${destination.longitude}',
+            'mode': 'driving',
+            'language': 'es',
+            'key': apiKey,
+          });
+      final payload = await _httpGetJson(uri);
+      final status = (payload['status']?.toString() ?? '').trim();
+      if (status != 'OK') {
+        return <LatLng>[origin, destination];
+      }
+
+      final routes = payload['routes'] as List<dynamic>? ?? const <dynamic>[];
+      if (routes.isEmpty || routes.first is! Map) {
+        return <LatLng>[origin, destination];
+      }
+
+      final first = Map<String, dynamic>.from(routes.first as Map);
+      final overview = _asMap(first['overview_polyline']);
+      final points = _decodePolyline(overview['points']?.toString() ?? '');
+      return points.length >= 2 ? points : <LatLng>[origin, destination];
+    } catch (_) {
+      return <LatLng>[origin, destination];
+    }
+  }
+
+  double? _toDoubleOrNull(dynamic value) {
+    if (value is num) return value.toDouble();
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+    return double.tryParse(raw.replaceAll(',', '.'));
+  }
+
+  LatLng _midpoint(LatLng a, LatLng b) {
+    return LatLng(
+      (a.latitude + b.latitude) / 2,
+      (a.longitude + b.longitude) / 2,
+    );
+  }
+
   String _formatAmount(double value) {
     final isWhole = value == value.roundToDouble();
     return isWhole
@@ -350,19 +513,57 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
+  String _deliveryModeLabel(String? mode) {
+    switch ((mode ?? '').trim().toLowerCase()) {
+      case 'delivery':
+        return 'Delivery';
+      case 'pickup':
+        return 'Retiro en tienda';
+      default:
+        return 'Sin especificar';
+    }
+  }
+
+  String _paymentMethodHint(String? method) {
+    final normalized = (method ?? '').trim().toLowerCase();
+    if (normalized.contains('pago movil')) {
+      return 'Recibido por Pago Movil. Verifica referencia y banco antes de marcar completado.';
+    }
+    if (normalized.contains('zelle')) {
+      return 'Pago por Zelle. Confirma titular/memo y monto en USD.';
+    }
+    if (normalized.contains('efectivo')) {
+      return 'Pago en efectivo al entregar o retirar. Confirma vuelto si aplica.';
+    }
+    if ((method ?? '').trim().isEmpty) {
+      return 'El cliente no especifico metodo de pago en el checkout.';
+    }
+    return 'Metodo de pago seleccionado por el cliente.';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    final bg = theme.scaffoldBackgroundColor;
+    final surface = theme.cardColor;
+    final surfaceAlt = colorScheme.surfaceContainerHighest;
+    final text = colorScheme.onSurface;
+    final muted = colorScheme.onSurfaceVariant;
+    final accent = colorScheme.primary;
+    const success = Color(0xFF16A34A);
+
     final overlayAnimation = CurvedAnimation(
       parent: _successController,
       curve: Curves.easeOutBack,
     );
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0D0B),
+      backgroundColor: bg,
       appBar: _showTopBar
           ? AppBar(
-              backgroundColor: const Color(0xFF0F0D0B),
-              foregroundColor: const Color(0xFFF9F3EB),
+              backgroundColor: bg,
+              foregroundColor: text,
               title: Text(
                 widget.readOnlyView
                     ? 'Estado de tu pedido'
@@ -372,487 +573,455 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           : null,
       body: Stack(
         children: [
-          FutureBuilder<_OrderViewData?>(
-            future: _orderFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                if (_showTopBar) {
+          SafeArea(
+            child: FutureBuilder<_OrderViewData?>(
+              future: _orderFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  if (_showTopBar) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      setState(() => _showTopBar = false);
+                    });
+                  }
+                  return const BrandedLoadingScreen();
+                }
+
+                if (!_showTopBar && !_checkingTrustedDevice) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted) return;
-                    setState(() => _showTopBar = false);
+                    setState(() => _showTopBar = true);
                   });
                 }
-                return const BrandedLoadingScreen();
-              }
 
-              if (!_showTopBar && !_checkingTrustedDevice) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!mounted) return;
-                  setState(() => _showTopBar = true);
-                });
-              }
-
-              if (snapshot.hasError) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      'Error cargando pedido: ${snapshot.error}',
-                      style: GoogleFonts.manrope(
-                        color: const Color(0xFFE7D5BF),
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'Error cargando pedido: ${snapshot.error}',
+                        style: GoogleFonts.manrope(color: muted),
+                        textAlign: TextAlign.center,
                       ),
-                      textAlign: TextAlign.center,
                     ),
-                  ),
-                );
-              }
+                  );
+                }
 
-              final data = snapshot.data;
-              if (data == null) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      'Tu pedido está en proceso. Intenta de nuevo en unos segundos.\n\nORDER_ID: ${widget.orderId}',
-                      style: GoogleFonts.manrope(
-                        color: const Color(0xFFE7D5BF),
+                final data = snapshot.data;
+                if (data == null) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'Tu pedido está en proceso. Intenta de nuevo en unos segundos.\n\nORDER_ID: ${widget.orderId}',
+                        style: GoogleFonts.manrope(color: muted),
+                        textAlign: TextAlign.center,
                       ),
-                      textAlign: TextAlign.center,
                     ),
-                  ),
-                );
-              }
+                  );
+                }
 
-              final pedido = data.pedido;
-              final total = pedido.total ?? 0.0;
-              final customerEmail = pedido.clienteEmail?.trim();
-              final paymentMethod = pedido.metodoPago?.trim();
-              final isReadOnly = widget.readOnlyView;
+                final pedido = data.pedido;
+                final total = pedido.total ?? 0.0;
+                final customerEmail = pedido.clienteEmail?.trim();
+                final paymentMethod = pedido.metodoPago?.trim();
+                final deliveryMode = pedido.deliveryMode?.trim();
+                final deliveryAddress = pedido.deliveryAddress?.trim();
+                final deliveryReference = pedido.deliveryReference?.trim();
+                final deliveryInstructions = pedido.deliveryInstructions
+                    ?.trim();
+                final deliveryLat = pedido.deliveryLatitude;
+                final deliveryLng = pedido.deliveryLongitude;
+                final orderNotes = pedido.orderNotes?.trim();
+                final businessLogoUrl = data.businessLogoUrl?.trim();
+                final hasDeliveryCoords =
+                    deliveryLat != null && deliveryLng != null;
+                final hasBusinessCoords =
+                    data.businessLatitude != null &&
+                    data.businessLongitude != null;
+                final isReadOnly = widget.readOnlyView;
 
-              if (isReadOnly &&
-                  !_emailVerified &&
-                  !_checkingTrustedDevice &&
-                  !_trustRestoreRequested) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _restoreTrustedAccess(data);
-                });
-              }
-
-              if (isReadOnly && _checkingTrustedDevice) {
-                if (_showTopBar) {
+                if (isReadOnly &&
+                    !_emailVerified &&
+                    !_checkingTrustedDevice &&
+                    !_trustRestoreRequested) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!mounted) return;
-                    setState(() => _showTopBar = false);
+                    _restoreTrustedAccess(data);
                   });
                 }
-                return const BrandedLoadingScreen();
-              }
 
-              if (isReadOnly && !_emailVerified) {
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(18),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1A140E),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: const Color(0x33D7A74D)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Confirma tu correo',
-                            style: GoogleFonts.playfairDisplay(
-                              color: const Color(0xFFFFF4E2),
-                              fontSize: 28,
-                              fontWeight: FontWeight.w700,
-                            ),
+                if (isReadOnly && _checkingTrustedDevice) {
+                  if (_showTopBar) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      setState(() => _showTopBar = false);
+                    });
+                  }
+                  return const BrandedLoadingScreen();
+                }
+
+                if (isReadOnly && !_emailVerified) {
+                  return ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: accent.withValues(alpha: 0.26),
                           ),
-                          const SizedBox(height: 10),
-                          Text(
-                            'Para ver este pedido necesitamos verificar el correo con el que hiciste la compra.',
-                            style: GoogleFonts.manrope(
-                              color: const Color(0xFFD8C6AE),
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF120D08),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Text(
-                              'Pista: ${_maskEmail(customerEmail)}',
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Confirma tu correo',
                               style: GoogleFonts.manrope(
-                                color: const Color(0xFFFFEACC),
+                                color: text,
+                                fontSize: 26,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 14),
-                          TextField(
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            autofillHints: const [AutofillHints.email],
-                            style: GoogleFonts.manrope(color: Colors.white),
-                            decoration: InputDecoration(
-                              labelText: 'Correo del cliente',
-                              labelStyle: GoogleFonts.manrope(
-                                color: const Color(0xFFCFAF85),
-                              ),
-                              filled: true,
-                              fillColor: const Color(0xFF120D08),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: BorderSide.none,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          CheckboxListTile(
-                            value: _rememberDevice,
-                            onChanged: (value) {
-                              setState(() => _rememberDevice = value ?? false);
-                            },
-                            contentPadding: EdgeInsets.zero,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(
-                              'Recordar este dispositivo por 24 horas',
-                              style: GoogleFonts.manrope(
-                                color: const Color(0xFFE7D5BF),
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                          if (_verificationError != null) ...[
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 10),
                             Text(
-                              _verificationError!,
+                              'Para ver este pedido necesitamos verificar el correo con el que hiciste la compra.',
                               style: GoogleFonts.manrope(
-                                color: const Color(0xFFFF9E8F),
-                                fontSize: 13,
+                                color: muted,
+                                fontSize: 14,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: surfaceAlt,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Text(
+                                'Pista: ${_maskEmail(customerEmail)}',
+                                style: GoogleFonts.manrope(
+                                  color: text,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            TextField(
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              autofillHints: const [AutofillHints.email],
+                              style: GoogleFonts.manrope(color: Colors.white),
+                              decoration: InputDecoration(
+                                labelText: 'Correo del cliente',
+                                labelStyle: GoogleFonts.manrope(color: muted),
+                                filled: true,
+                                fillColor: surfaceAlt,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide.none,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            CheckboxListTile(
+                              value: _rememberDevice,
+                              onChanged: (value) {
+                                setState(
+                                  () => _rememberDevice = value ?? false,
+                                );
+                              },
+                              contentPadding: EdgeInsets.zero,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              title: Text(
+                                'Recordar este dispositivo por 24 horas',
+                                style: GoogleFonts.manrope(
+                                  color: muted,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            if (_verificationError != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                _verificationError!,
+                                style: GoogleFonts.manrope(
+                                  color: const Color(0xFFFF9E8F),
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              height: 54,
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: () => _verifyCustomerEmail(data),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF1AB15E),
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: const Text('Ver mi pedido'),
                               ),
                             ),
                           ],
-                          const SizedBox(height: 14),
-                          SizedBox(
-                            height: 54,
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: () => _verifyCustomerEmail(data),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1AB15E),
-                                foregroundColor: Colors.white,
-                              ),
-                              child: const Text('Ver mi pedido'),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ],
-                );
-              }
+                    ],
+                  );
+                }
 
-              return ListView(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1A140E),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: const Color(0x33D7A74D)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          data.comercioNombre,
-                          style: GoogleFonts.playfairDisplay(
-                            color: const Color(0xFFFFF4E2),
-                            fontSize: 28,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'ORDER_ID: ${pedido.orderId ?? widget.orderId}',
-                          style: GoogleFonts.manrope(
-                            color: const Color(0xFFD8C6AE),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            _BadgeChip(
-                              label: _statusLabel(pedido.estado),
-                              color: _statusColor(pedido.estado),
-                              icon: Icons.flag_rounded,
-                            ),
-                            if (paymentMethod != null &&
-                                paymentMethod.isNotEmpty)
-                              _BadgeChip(
-                                label: paymentMethod,
-                                color: const Color(0xFF1AB15E),
-                                icon: Icons.payments_rounded,
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  if (!isReadOnly) ...[
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                  children: [
                     Container(
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF17120E),
-                        borderRadius: BorderRadius.circular(16),
+                        color: surface,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: accent.withValues(alpha: 0.26),
+                        ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Cliente',
+                            data.comercioNombre,
                             style: GoogleFonts.manrope(
-                              color: const Color(0xFFCFAF85),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
+                              color: text,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            customerEmail != null && customerEmail.isNotEmpty
-                                ? customerEmail
-                                : 'Sin correo registrado',
+                            'ORDER_ID: ${pedido.orderId ?? widget.orderId}',
                             style: GoogleFonts.manrope(
-                              color: const Color(0xFFFFEACC),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
+                              color: muted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if (customerEmail != null &&
-                              customerEmail.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: () => _copyEmail(customerEmail),
-                                    icon: const Icon(Icons.copy_rounded),
-                                    label: const Text('Copiar'),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: const Color(0xFFFFEACC),
-                                      side: const BorderSide(
-                                        color: Color(0x55D7A74D),
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                      ),
-                                    ),
-                                  ),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              _BadgeChip(
+                                label: _statusLabel(pedido.estado),
+                                color: _statusColor(pedido.estado),
+                                icon: Icons.flag_rounded,
+                              ),
+                              if (paymentMethod != null &&
+                                  paymentMethod.isNotEmpty)
+                                _BadgeChip(
+                                  label: paymentMethod,
+                                  color: success,
+                                  icon: Icons.payments_rounded,
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: () => _emailCustomer(
-                                      customerEmail,
-                                      data.comercioNombre,
-                                    ),
-                                    icon: const Icon(Icons.email_outlined),
-                                    label: const Text('Enviar Email'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF2A1F14),
-                                      foregroundColor: const Color(0xFFFFEACC),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                              _BadgeChip(
+                                label: _deliveryModeLabel(deliveryMode),
+                                color: accent,
+                                icon: Icons.local_shipping_rounded,
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 14),
-                  ],
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF17120E),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Resumen',
-                          style: GoogleFonts.manrope(
-                            color: const Color(0xFFFFEACC),
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        if (pedido.items.isEmpty)
-                          Text(
-                            'No hay items disponibles todavía.',
-                            style: GoogleFonts.manrope(
-                              color: const Color(0xFFD8C6AE),
-                            ),
-                          )
-                        else
-                          ...pedido.items.map(
-                            (item) => Container(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF21170F),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(0x22D7A74D),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      'x${item.cantidad} ${item.nombre}',
-                                      style: GoogleFonts.manrope(
-                                        color: const Color(0xFFFFEACC),
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                  Text(
-                                    _formatAmount(item.total),
-                                    style: GoogleFonts.manrope(
-                                      color: const Color(0xFF40D887),
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF120D08),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              Text(
-                                'Total de la orden',
-                                style: GoogleFonts.manrope(
-                                  color: const Color(0xFFE7D5BF),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                _formatAmount(total),
-                                style: GoogleFonts.manrope(
-                                  color: const Color(0xFFFFE8C6),
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (isReadOnly) ...[
-                    const SizedBox(height: 18),
-                    Text(
-                      'El estado de este pedido solo puede ser actualizado por el vendedor.',
-                      style: GoogleFonts.manrope(
-                        color: const Color(0xFFD8C6AE),
-                        fontSize: 13,
-                      ),
-                    ),
-                    if (data.history.isNotEmpty) ...[
-                      const SizedBox(height: 18),
+                    if (!isReadOnly) ...[
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF17120E),
+                          color: surface,
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Tu historial reciente',
+                              'Cliente',
                               style: GoogleFonts.manrope(
-                                color: const Color(0xFFFFEACC),
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
+                                color: muted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            ...data.history.map(
-                              (historyItem) => Container(
+                            const SizedBox(height: 8),
+                            Text(
+                              customerEmail != null && customerEmail.isNotEmpty
+                                  ? customerEmail
+                                  : 'Sin correo registrado',
+                              style: GoogleFonts.manrope(
+                                color: text,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (customerEmail != null &&
+                                customerEmail.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () =>
+                                          _copyEmail(customerEmail),
+                                      icon: const Icon(Icons.copy_rounded),
+                                      label: const Text('Copiar'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: text,
+                                        side: BorderSide(
+                                          color: accent.withValues(alpha: 0.35),
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => _emailCustomer(
+                                        customerEmail,
+                                        data.comercioNombre,
+                                      ),
+                                      icon: const Icon(Icons.email_outlined),
+                                      label: const Text('Enviar Email'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: surfaceAlt,
+                                        foregroundColor: text,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: surface,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Resumen',
+                            style: GoogleFonts.manrope(
+                              color: text,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (pedido.items.isEmpty)
+                            Text(
+                              'No hay items disponibles todavía.',
+                              style: GoogleFonts.manrope(color: muted),
+                            )
+                          else
+                            ...pedido.items.map(
+                              (item) => Container(
                                 margin: const EdgeInsets.only(bottom: 10),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 14,
                                   vertical: 12,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF21170F),
+                                  color: surfaceAlt,
                                   borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: const Color(0x22D7A74D),
-                                  ),
                                 ),
                                 child: Row(
                                   children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: SizedBox(
+                                        width: 44,
+                                        height: 44,
+                                        child:
+                                            (item.imageUrl?.trim().isNotEmpty ??
+                                                false)
+                                            ? Image.network(
+                                                item.imageUrl!.trim(),
+                                                fit: BoxFit.cover,
+                                                errorBuilder:
+                                                    (
+                                                      context,
+                                                      error,
+                                                      stackTrace,
+                                                    ) => Container(
+                                                      color: surface,
+                                                      alignment:
+                                                          Alignment.center,
+                                                      child: Icon(
+                                                        Icons
+                                                            .image_not_supported_rounded,
+                                                        size: 18,
+                                                        color: muted,
+                                                      ),
+                                                    ),
+                                              )
+                                            : (businessLogoUrl != null &&
+                                                  businessLogoUrl.isNotEmpty)
+                                            ? Image.network(
+                                                businessLogoUrl,
+                                                fit: BoxFit.cover,
+                                                errorBuilder:
+                                                    (
+                                                      context,
+                                                      error,
+                                                      stackTrace,
+                                                    ) => Container(
+                                                      color: surface,
+                                                      alignment:
+                                                          Alignment.center,
+                                                      child: Icon(
+                                                        Icons
+                                                            .storefront_rounded,
+                                                        size: 18,
+                                                        color: muted,
+                                                      ),
+                                                    ),
+                                              )
+                                            : Container(
+                                                color: surface,
+                                                alignment: Alignment.center,
+                                                child: Icon(
+                                                  Icons.storefront_rounded,
+                                                  size: 18,
+                                                  color: muted,
+                                                ),
+                                              ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
                                     Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            historyItem.orderId,
-                                            style: GoogleFonts.manrope(
-                                              color: const Color(0xFFFFEACC),
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            historyItem.estado,
-                                            style: GoogleFonts.manrope(
-                                              color: const Color(0xFFD8C6AE),
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
+                                      child: Text(
+                                        'x${item.cantidad} ${item.nombre}',
+                                        style: GoogleFonts.manrope(
+                                          color: text,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                     ),
                                     Text(
-                                      _formatAmount(historyItem.total),
+                                      _formatAmount(item.total),
                                       style: GoogleFonts.manrope(
-                                        color: const Color(0xFF40D887),
+                                        color: success,
                                         fontWeight: FontWeight.w700,
                                       ),
                                     ),
@@ -860,54 +1029,403 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                 ),
                               ),
                             ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Text(
+                                'Total de la orden',
+                                style: GoogleFonts.manrope(
+                                  color: muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                _formatAmount(total),
+                                style: GoogleFonts.manrope(
+                                  color: text,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: surface,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Metodo de pago',
+                            style: GoogleFonts.manrope(
+                              color: text,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            (paymentMethod != null && paymentMethod.isNotEmpty)
+                                ? paymentMethod
+                                : 'Sin especificar',
+                            style: GoogleFonts.manrope(
+                              color: text,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _paymentMethodHint(paymentMethod),
+                            style: GoogleFonts.manrope(
+                              color: muted,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: surface,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Entrega',
+                            style: GoogleFonts.manrope(
+                              color: text,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Tipo: ${_deliveryModeLabel(deliveryMode)}',
+                            style: GoogleFonts.manrope(
+                              color: muted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if ((deliveryAddress ?? '').isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                'Direccion: $deliveryAddress',
+                                style: GoogleFonts.manrope(
+                                  color: text,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          if ((deliveryReference ?? '').isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                'Referencia: $deliveryReference',
+                                style: GoogleFonts.manrope(
+                                  color: muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          if ((deliveryInstructions ?? '').isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                'Indicaciones: $deliveryInstructions',
+                                style: GoogleFonts.manrope(
+                                  color: muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          if (deliveryLat != null && deliveryLng != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                'Coordenadas: ${deliveryLat.toStringAsFixed(6)}, ${deliveryLng.toStringAsFixed(6)}',
+                                style: GoogleFonts.manrope(
+                                  color: muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (hasDeliveryCoords) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Mapa y ruta',
+                              style: GoogleFonts.manrope(
+                                color: text,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: SizedBox(
+                                height: 220,
+                                child: GoogleMap(
+                                  initialCameraPosition: CameraPosition(
+                                    target: hasBusinessCoords
+                                        ? _midpoint(
+                                            LatLng(
+                                              data.businessLatitude!,
+                                              data.businessLongitude!,
+                                            ),
+                                            LatLng(deliveryLat, deliveryLng),
+                                          )
+                                        : LatLng(deliveryLat, deliveryLng),
+                                    zoom: hasBusinessCoords ? 13.8 : 15.2,
+                                  ),
+                                  myLocationEnabled: false,
+                                  myLocationButtonEnabled: false,
+                                  zoomControlsEnabled: false,
+                                  mapToolbarEnabled: false,
+                                  markers: <Marker>{
+                                    if (hasBusinessCoords)
+                                      Marker(
+                                        markerId: const MarkerId('business'),
+                                        position: LatLng(
+                                          data.businessLatitude!,
+                                          data.businessLongitude!,
+                                        ),
+                                        infoWindow: const InfoWindow(
+                                          title: 'Negocio',
+                                        ),
+                                      ),
+                                    Marker(
+                                      markerId: const MarkerId('delivery'),
+                                      position: LatLng(
+                                        deliveryLat,
+                                        deliveryLng,
+                                      ),
+                                      infoWindow: const InfoWindow(
+                                        title: 'Destino',
+                                      ),
+                                    ),
+                                  },
+                                  polylines: hasBusinessCoords
+                                      ? <Polyline>{
+                                          Polyline(
+                                            polylineId: const PolylineId(
+                                              'route',
+                                            ),
+                                            color: accent,
+                                            width: 5,
+                                            points: data.routePoints.length >= 2
+                                                ? data.routePoints
+                                                : <LatLng>[
+                                                    LatLng(
+                                                      data.businessLatitude!,
+                                                      data.businessLongitude!,
+                                                    ),
+                                                    LatLng(
+                                                      deliveryLat,
+                                                      deliveryLng,
+                                                    ),
+                                                  ],
+                                          ),
+                                        }
+                                      : const <Polyline>{},
+                                ),
+                              ),
+                            ),
+                            if (!hasBusinessCoords)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 10),
+                                child: Text(
+                                  'Mostrando solo el destino. Configura latitud y longitud del negocio para visualizar la ruta completa.',
+                                  style: GoogleFonts.manrope(
+                                    color: muted,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
                     ],
-                  ] else ...[
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      height: 56,
-                      child: ElevatedButton.icon(
-                        onPressed:
-                            _isCompleting || pedido.estado == 'completado'
-                            ? null
-                            : _markAsCompleted,
-                        icon: _isCompleting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.white,
+                    if ((orderNotes ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Notas del pedido',
+                              style: GoogleFonts.manrope(
+                                color: text,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              orderNotes!,
+                              style: GoogleFonts.manrope(
+                                color: muted,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (isReadOnly) ...[
+                      const SizedBox(height: 18),
+                      Text(
+                        'El estado de este pedido solo puede ser actualizado por el vendedor.',
+                        style: GoogleFonts.manrope(color: muted, fontSize: 13),
+                      ),
+                      if (data.history.isNotEmpty) ...[
+                        const SizedBox(height: 18),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: surface,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Tu historial reciente',
+                                style: GoogleFonts.manrope(
+                                  color: text,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ...data.history.map(
+                                (historyItem) => Container(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: surfaceAlt,
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              historyItem.orderId,
+                                              style: GoogleFonts.manrope(
+                                                color: text,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              historyItem.estado,
+                                              style: GoogleFonts.manrope(
+                                                color: muted,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Text(
+                                        _formatAmount(historyItem.total),
+                                        style: GoogleFonts.manrope(
+                                          color: success,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              )
-                            : const Icon(Icons.check_circle_outline_rounded),
-                        label: Text(
-                          pedido.estado == 'completado'
-                              ? 'Pedido completado'
-                              : 'Marcar como Completado',
-                          style: GoogleFonts.manrope(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
+                              ),
+                            ],
                           ),
                         ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1AB15E),
-                          disabledBackgroundColor: const Color(0xFF5A4A38),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(999),
+                      ],
+                    ] else ...[
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        height: 56,
+                        child: ElevatedButton.icon(
+                          onPressed:
+                              _isCompleting || pedido.estado == 'completado'
+                              ? null
+                              : _markAsCompleted,
+                          icon: _isCompleting
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : const Icon(Icons.check_circle_outline_rounded),
+                          label: Text(
+                            pedido.estado == 'completado'
+                                ? 'Pedido completado'
+                                : 'Marcar como Completado',
+                            style: GoogleFonts.manrope(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: success,
+                            disabledBackgroundColor: muted.withValues(
+                              alpha: 0.4,
+                            ),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(999),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
-              );
-            },
+                );
+              },
+            ),
           ),
           if (_showSuccessOverlay)
             Positioned.fill(
@@ -971,11 +1489,19 @@ class _OrderViewData {
   const _OrderViewData({
     required this.pedido,
     required this.comercioNombre,
+    this.businessLatitude,
+    this.businessLongitude,
+    this.businessLogoUrl,
+    this.routePoints = const <LatLng>[],
     this.history = const <_HistoryOrderViewData>[],
   });
 
   final PedidoModel pedido;
   final String comercioNombre;
+  final double? businessLatitude;
+  final double? businessLongitude;
+  final String? businessLogoUrl;
+  final List<LatLng> routePoints;
   final List<_HistoryOrderViewData> history;
 }
 

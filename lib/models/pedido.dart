@@ -9,6 +9,13 @@ class PedidoModel {
   final bool? creadoPorIa;
   final double? confianzaIa;
   final String? metodoPago;
+  final String? deliveryMode;
+  final String? deliveryAddress;
+  final String? deliveryReference;
+  final String? deliveryInstructions;
+  final double? deliveryLatitude;
+  final double? deliveryLongitude;
+  final String? orderNotes;
   final List<PedidoItemModel> items;
   final Map<String, dynamic> detalles;
 
@@ -23,6 +30,13 @@ class PedidoModel {
     this.creadoPorIa,
     this.confianzaIa,
     this.metodoPago,
+    this.deliveryMode,
+    this.deliveryAddress,
+    this.deliveryReference,
+    this.deliveryInstructions,
+    this.deliveryLatitude,
+    this.deliveryLongitude,
+    this.orderNotes,
     this.items = const <PedidoItemModel>[],
     this.detalles = const <String, dynamic>{},
   });
@@ -32,13 +46,14 @@ class PedidoModel {
     final createdAtValue = map['created_at']?.toString();
     final confianzaValue = map['confianza_ia'];
     final detallesMap = _asMap(map['detalles']);
+    final deliveryMap = _asMap(detallesMap['delivery']);
     final orderItems = _asItems(detallesMap['items']);
     final paymentMethod = _resolveMetodoPago(detallesMap['metodo_pago']);
 
     return PedidoModel(
       id: map['id']?.toString() ?? '',
       comercioId: map['comercio_id']?.toString() ?? '',
-      orderId: detallesMap['order_id']?.toString(),
+      orderId: _resolveOrderId(detallesMap),
       clienteEmail:
           map['cliente_email']?.toString() ??
           detallesMap['cliente_email']?.toString(),
@@ -56,6 +71,13 @@ class PedidoModel {
           ? confianzaValue.toDouble()
           : double.tryParse('${map['confianza_ia']}'),
       metodoPago: paymentMethod,
+      deliveryMode: _asTrimmedString(deliveryMap['mode']),
+      deliveryAddress: _asTrimmedString(deliveryMap['address']),
+      deliveryReference: _asTrimmedString(deliveryMap['reference']),
+      deliveryInstructions: _asTrimmedString(deliveryMap['instructions']),
+      deliveryLatitude: _toDoubleOrNull(deliveryMap['lat']),
+      deliveryLongitude: _toDoubleOrNull(deliveryMap['lng']),
+      orderNotes: _asTrimmedString(detallesMap['order_notes']),
       items: orderItems,
       detalles: detallesMap,
     );
@@ -76,10 +98,48 @@ class PedidoModel {
         'order_id': orderId,
         'cliente_email': clienteEmail,
         'metodo_pago': metodoPago,
+        'order_notes': orderNotes,
+        'delivery': {
+          'mode': deliveryMode,
+          'address': deliveryAddress,
+          'reference': deliveryReference,
+          'instructions': deliveryInstructions,
+          'lat': deliveryLatitude,
+          'lng': deliveryLongitude,
+        },
         'items': items.map((item) => item.toMap()).toList(),
         'total': total,
       },
     };
+  }
+
+  static String? _resolveOrderId(Map<String, dynamic> detallesMap) {
+    final candidates = <dynamic>[
+      detallesMap['order_id'],
+      detallesMap['codigo_orden'],
+      detallesMap['orderId'],
+      detallesMap['codigoOrden'],
+    ];
+
+    for (final candidate in candidates) {
+      final resolved = _asTrimmedString(candidate);
+      if (resolved != null) return resolved;
+    }
+
+    return null;
+  }
+
+  static String? _asTrimmedString(dynamic value) {
+    if (value == null) return null;
+    final trimmed = value.toString().trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  static double? _toDoubleOrNull(dynamic value) {
+    if (value is num) return value.toDouble();
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+    return double.tryParse(raw);
   }
 
   static Map<String, dynamic> _asMap(dynamic value) {
@@ -91,13 +151,7 @@ class PedidoModel {
   static List<PedidoItemModel> _asItems(dynamic value) {
     if (value is! List) return const <PedidoItemModel>[];
 
-    return value
-        .map(
-          (item) => PedidoItemModel.fromMap(
-            _asMap(item),
-          ),
-        )
-        .toList();
+    return value.map((item) => PedidoItemModel.fromMap(_asMap(item))).toList();
   }
 
   static String? _resolveMetodoPago(dynamic value) {
@@ -133,11 +187,13 @@ class PedidoItemModel {
   final String nombre;
   final int cantidad;
   final double precio;
+  final String? imageUrl;
 
   const PedidoItemModel({
     required this.nombre,
     required this.cantidad,
     required this.precio,
+    this.imageUrl,
   });
 
   double get total => cantidad * precio;
@@ -156,7 +212,27 @@ class PedidoItemModel {
       precio: rawPrecio is num
           ? rawPrecio.toDouble()
           : double.tryParse(rawPrecio?.toString() ?? '') ?? 0.0,
+      imageUrl: _resolveImageUrl(map),
     );
+  }
+
+  static String? _resolveImageUrl(Map<String, dynamic> map) {
+    const keys = <String>[
+      'imagen_url',
+      'image_url',
+      'foto_url',
+      'imagen',
+      'foto',
+    ];
+
+    for (final key in keys) {
+      final value = map[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+
+    return null;
   }
 
   Map<String, dynamic> toMap() {
@@ -164,6 +240,7 @@ class PedidoItemModel {
       'nombre': nombre,
       'cantidad': cantidad,
       'precio': precio,
+      'imagen_url': imageUrl,
     };
   }
 }
