@@ -284,15 +284,42 @@ class _PublicMenuViewState extends State<PublicMenuView> {
         'instructions': deliveryInstructions,
         'lat': deliveryLatitude,
         'lng': deliveryLongitude,
+        'latitude': deliveryLatitude,
+        'longitude': deliveryLongitude,
+        'latitud': deliveryLatitude,
+        'longitud': deliveryLongitude,
+        'coordinates': <String, dynamic>{
+          'lat': deliveryLatitude,
+          'lng': deliveryLongitude,
+        },
       },
     };
 
-    await Supabase.instance.client.from('pedidos').insert({
-      'comercio_id': widget.comercioId,
-      'detalles': details,
-      'total': totalUsd,
-      'estado': 'pendiente',
-    });
+    debugPrint(
+      'DEBUG: Checkout payload coords -> lat=$deliveryLatitude, lng=$deliveryLongitude, mode=$deliveryMode',
+    );
+
+    final insertedRows = await Supabase.instance.client
+        .from('pedidos')
+        .insert({
+          'comercio_id': widget.comercioId,
+          'detalles': details,
+          'delivery_latitude': deliveryLatitude,
+          'delivery_longitude': deliveryLongitude,
+          'total': totalUsd,
+          'estado': 'pendiente',
+        })
+        .select('id, detalles, delivery_latitude, delivery_longitude');
+
+    final inserted = (insertedRows as List<dynamic>).isNotEmpty
+        ? Map<String, dynamic>.from(insertedRows.first as Map)
+        : <String, dynamic>{};
+    final insertedDelivery = inserted['detalles'] is Map
+        ? (inserted['detalles'] as Map)['delivery']
+        : null;
+    debugPrint(
+      'DEBUG: Inserted pedido -> id=${inserted['id']}, topLat=${inserted['delivery_latitude']}, topLng=${inserted['delivery_longitude']}, nestedDelivery=$insertedDelivery',
+    );
   }
 
   String _buildWhatsAppMessage({
@@ -1096,6 +1123,23 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                       const SnackBar(
                                         content: Text(
                                           'Ingresa una direccion valida para el delivery.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  if (isDeliveryOrder &&
+                                      (deliveryLatitude == null ||
+                                          deliveryLongitude == null)) {
+                                    if (!mounted) return;
+                                    setModalState(
+                                      () => isSubmittingOrder = false,
+                                    );
+                                    localScaffoldMessenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Selecciona la ubicacion exacta en el mapa para continuar con el delivery.',
                                         ),
                                       ),
                                     );

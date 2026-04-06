@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:developer' as developer;
+
 class PedidoModel {
   final String id;
   final String comercioId;
@@ -42,6 +45,10 @@ class PedidoModel {
   });
 
   factory PedidoModel.fromMap(Map<String, dynamic> map) {
+    developer.log(
+      'DEBUG: Llaves encontradas en el mapa: ${map.keys.toList()}',
+      name: 'PedidoModel',
+    );
     final totalValue = map['total'];
     final createdAtValue = map['created_at']?.toString();
     final confianzaValue = map['confianza_ia'];
@@ -49,6 +56,26 @@ class PedidoModel {
     final deliveryMap = _asMap(detallesMap['delivery']);
     final orderItems = _asItems(detallesMap['items']);
     final paymentMethod = _resolveMetodoPago(detallesMap['metodo_pago']);
+    double? deliveryLatitude;
+    double? deliveryLongitude;
+    try {
+      deliveryLatitude = _resolveDeliveryLatitude(
+        map: map,
+        detallesMap: detallesMap,
+        deliveryMap: deliveryMap,
+      );
+      deliveryLongitude = _resolveDeliveryLongitude(
+        map: map,
+        detallesMap: detallesMap,
+        deliveryMap: deliveryMap,
+      );
+    } catch (error) {
+      developer.log(
+        'DEBUG: Error parseando coordenadas de pedido: $error',
+        name: 'PedidoModel',
+      );
+      developer.log('DEBUG: JSON Crudo de Supabase: $map', name: 'PedidoModel');
+    }
 
     return PedidoModel(
       id: map['id']?.toString() ?? '',
@@ -75,8 +102,8 @@ class PedidoModel {
       deliveryAddress: _asTrimmedString(deliveryMap['address']),
       deliveryReference: _asTrimmedString(deliveryMap['reference']),
       deliveryInstructions: _asTrimmedString(deliveryMap['instructions']),
-      deliveryLatitude: _toDoubleOrNull(deliveryMap['lat']),
-      deliveryLongitude: _toDoubleOrNull(deliveryMap['lng']),
+      deliveryLatitude: deliveryLatitude,
+      deliveryLongitude: deliveryLongitude,
       orderNotes: _asTrimmedString(detallesMap['order_notes']),
       items: orderItems,
       detalles: detallesMap,
@@ -93,12 +120,16 @@ class PedidoModel {
       'created_at': createdAt?.toIso8601String(),
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,
+      'delivery_latitude': deliveryLatitude,
+      'delivery_longitude': deliveryLongitude,
       'detalles': {
         ...detalles,
         'order_id': orderId,
         'cliente_email': clienteEmail,
         'metodo_pago': metodoPago,
         'order_notes': orderNotes,
+        'delivery_latitude': deliveryLatitude,
+        'delivery_longitude': deliveryLongitude,
         'delivery': {
           'mode': deliveryMode,
           'address': deliveryAddress,
@@ -106,6 +137,9 @@ class PedidoModel {
           'instructions': deliveryInstructions,
           'lat': deliveryLatitude,
           'lng': deliveryLongitude,
+          'latitude': deliveryLatitude,
+          'longitude': deliveryLongitude,
+          'coordinates': {'lat': deliveryLatitude, 'lng': deliveryLongitude},
         },
         'items': items.map((item) => item.toMap()).toList(),
         'total': total,
@@ -139,12 +173,23 @@ class PedidoModel {
     if (value is num) return value.toDouble();
     final raw = value?.toString().trim() ?? '';
     if (raw.isEmpty) return null;
-    return double.tryParse(raw);
+    return double.tryParse(raw.replaceAll(',', '.'));
   }
 
   static Map<String, dynamic> _asMap(dynamic value) {
     if (value is Map<String, dynamic>) return value;
     if (value is Map) return Map<String, dynamic>.from(value);
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return <String, dynamic>{};
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        return <String, dynamic>{};
+      }
+    }
     return <String, dynamic>{};
   }
 
@@ -152,6 +197,72 @@ class PedidoModel {
     if (value is! List) return const <PedidoItemModel>[];
 
     return value.map((item) => PedidoItemModel.fromMap(_asMap(item))).toList();
+  }
+
+  static double? _resolveDeliveryLatitude({
+    required Map<String, dynamic> map,
+    required Map<String, dynamic> detallesMap,
+    required Map<String, dynamic> deliveryMap,
+  }) {
+    final coordinatesMap = _asMap(deliveryMap['coordinates']);
+    final candidates = <dynamic>[
+      map['delivery_latitude'],
+      map['delivery_lat'],
+      map['latitud_delivery'],
+      map['delivery_latitud'],
+      map['latitude'],
+      map['latitud'],
+      detallesMap['delivery_latitude'],
+      detallesMap['delivery_lat'],
+      detallesMap['latitud_delivery'],
+      detallesMap['delivery_latitud'],
+      deliveryMap['lat'],
+      deliveryMap['latitude'],
+      deliveryMap['latitud'],
+      coordinatesMap['lat'],
+      coordinatesMap['latitude'],
+      coordinatesMap['latitud'],
+    ];
+
+    for (final candidate in candidates) {
+      final parsed = _toDoubleOrNull(candidate);
+      if (parsed != null) return parsed;
+    }
+
+    return null;
+  }
+
+  static double? _resolveDeliveryLongitude({
+    required Map<String, dynamic> map,
+    required Map<String, dynamic> detallesMap,
+    required Map<String, dynamic> deliveryMap,
+  }) {
+    final coordinatesMap = _asMap(deliveryMap['coordinates']);
+    final candidates = <dynamic>[
+      map['delivery_longitude'],
+      map['delivery_lng'],
+      map['longitud_delivery'],
+      map['delivery_longitud'],
+      map['longitude'],
+      map['longitud'],
+      detallesMap['delivery_longitude'],
+      detallesMap['delivery_lng'],
+      detallesMap['longitud_delivery'],
+      detallesMap['delivery_longitud'],
+      deliveryMap['lng'],
+      deliveryMap['longitude'],
+      deliveryMap['longitud'],
+      coordinatesMap['lng'],
+      coordinatesMap['longitude'],
+      coordinatesMap['longitud'],
+    ];
+
+    for (final candidate in candidates) {
+      final parsed = _toDoubleOrNull(candidate);
+      if (parsed != null) return parsed;
+    }
+
+    return null;
   }
 
   static String? _resolveMetodoPago(dynamic value) {

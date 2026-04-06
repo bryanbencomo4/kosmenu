@@ -1,5 +1,4 @@
-import 'dart:convert';
-import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -72,23 +71,35 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     final pedidosRows = await query
         .order('created_at', ascending: false)
         .limit(200);
+    final response = (data: pedidosRows as List<dynamic>);
+    debugPrint('DEBUG: JSON CRUDO DE SUPABASE: ${response.data}');
 
     PedidoModel? foundPedido;
-    for (final row in pedidosRows as List<dynamic>) {
-      final pedido = PedidoModel.fromMap(Map<String, dynamic>.from(row as Map));
+    Map<String, dynamic>? foundPedidoRaw;
+    for (final row in response.data) {
+      final rawMap = Map<String, dynamic>.from(row as Map);
+      final pedido = PedidoModel.fromMap(rawMap);
       if (pedido.orderId == widget.orderId) {
         foundPedido = pedido;
+        foundPedidoRaw = rawMap;
         break;
       }
     }
 
     if (foundPedido == null) return null;
 
+    debugPrint(
+      'DEBUG: Pedido Coords: ${foundPedido.deliveryLatitude}, ${foundPedido.deliveryLongitude}',
+    );
+    if (foundPedido.deliveryLatitude == null ||
+        foundPedido.deliveryLongitude == null) {
+      debugPrint('DEBUG: JSON Crudo de Supabase: $foundPedidoRaw');
+    }
+
     String comercioNombre = 'Kosmenu';
     double? businessLatitude;
     double? businessLongitude;
     String? businessLogoUrl;
-    List<LatLng> routePoints = const <LatLng>[];
     if (foundPedido.comercioId.isNotEmpty) {
       final comercioRow = await client
           .from('comercios')
@@ -104,19 +115,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       businessLatitude = _toDoubleOrNull(comercioMap['latitud']);
       businessLongitude = _toDoubleOrNull(comercioMap['longitud']);
       businessLogoUrl = _resolveComercioLogoUrl(comercioMap);
-
-      if (businessLatitude != null &&
-          businessLongitude != null &&
-          foundPedido.deliveryLatitude != null &&
-          foundPedido.deliveryLongitude != null) {
-        routePoints = await _fetchDeliveryRoute(
-          origin: LatLng(businessLatitude, businessLongitude),
-          destination: LatLng(
-            foundPedido.deliveryLatitude!,
-            foundPedido.deliveryLongitude!,
-          ),
-        );
-      }
     }
 
     return _OrderViewData(
@@ -125,7 +123,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       businessLatitude: businessLatitude,
       businessLongitude: businessLongitude,
       businessLogoUrl: businessLogoUrl,
-      routePoints: routePoints,
       history: _buildOrderHistory(
         pedidosRows,
         currentOrderId: widget.orderId,
@@ -377,99 +374,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return null;
   }
 
-  Future<Map<String, dynamic>> _httpGetJson(Uri uri) async {
-    final client = HttpClient();
-    try {
-      final request = await client.getUrl(uri);
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      final decoded = jsonDecode(body);
-      if (decoded is Map<String, dynamic>) return decoded;
-      if (decoded is Map) return Map<String, dynamic>.from(decoded);
-      return <String, dynamic>{};
-    } finally {
-      client.close(force: true);
-    }
-  }
-
-  List<LatLng> _decodePolyline(String encoded) {
-    if (encoded.isEmpty) return const <LatLng>[];
-
-    final poly = <LatLng>[];
-    var index = 0;
-    var lat = 0;
-    var lng = 0;
-
-    while (index < encoded.length) {
-      var shift = 0;
-      var result = 0;
-      int byte;
-
-      do {
-        byte = encoded.codeUnitAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-
-      final dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-
-      do {
-        byte = encoded.codeUnitAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-
-      final dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
-      lng += dlng;
-
-      poly.add(LatLng(lat / 1E5, lng / 1E5));
-    }
-
-    return poly;
-  }
-
-  Future<List<LatLng>> _fetchDeliveryRoute({
-    required LatLng origin,
-    required LatLng destination,
-  }) async {
-    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
-    if (apiKey.isEmpty) {
-      return <LatLng>[origin, destination];
-    }
-
-    try {
-      final uri =
-          Uri.https('maps.googleapis.com', '/maps/api/directions/json', {
-            'origin': '${origin.latitude},${origin.longitude}',
-            'destination': '${destination.latitude},${destination.longitude}',
-            'mode': 'driving',
-            'language': 'es',
-            'key': apiKey,
-          });
-      final payload = await _httpGetJson(uri);
-      final status = (payload['status']?.toString() ?? '').trim();
-      if (status != 'OK') {
-        return <LatLng>[origin, destination];
-      }
-
-      final routes = payload['routes'] as List<dynamic>? ?? const <dynamic>[];
-      if (routes.isEmpty || routes.first is! Map) {
-        return <LatLng>[origin, destination];
-      }
-
-      final first = Map<String, dynamic>.from(routes.first as Map);
-      final overview = _asMap(first['overview_polyline']);
-      final points = _decodePolyline(overview['points']?.toString() ?? '');
-      return points.length >= 2 ? points : <LatLng>[origin, destination];
-    } catch (_) {
-      return <LatLng>[origin, destination];
-    }
-  }
-
   double? _toDoubleOrNull(dynamic value) {
     if (value is num) return value.toDouble();
     final raw = value?.toString().trim() ?? '';
@@ -482,6 +386,104 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       (a.latitude + b.latitude) / 2,
       (a.longitude + b.longitude) / 2,
     );
+  }
+
+  LatLngBounds _buildBounds(List<LatLng> points) {
+    var minLat = points.first.latitude;
+    var maxLat = points.first.latitude;
+    var minLng = points.first.longitude;
+    var maxLng = points.first.longitude;
+
+    for (final point in points.skip(1)) {
+      if (point.latitude < minLat) minLat = point.latitude;
+      if (point.latitude > maxLat) maxLat = point.latitude;
+      if (point.longitude < minLng) minLng = point.longitude;
+      if (point.longitude > maxLng) maxLng = point.longitude;
+    }
+
+    final latPadding = (maxLat - minLat).abs() < 0.0008 ? 0.0012 : 0.0;
+    final lngPadding = (maxLng - minLng).abs() < 0.0008 ? 0.0012 : 0.0;
+
+    return LatLngBounds(
+      southwest: LatLng(minLat - latPadding, minLng - lngPadding),
+      northeast: LatLng(maxLat + latPadding, maxLng + lngPadding),
+    );
+  }
+
+  List<LatLng> _generateArcPath({
+    required LatLng origin,
+    required LatLng destination,
+    int pointCount = 100,
+    double lateralOffset = 0.02,
+  }) {
+    if (pointCount < 2) {
+      return <LatLng>[origin, destination];
+    }
+
+    final control = _buildPerpendicularArcControlPoint(
+      origin: origin,
+      destination: destination,
+      lateralOffset: lateralOffset,
+    );
+
+    final points = <LatLng>[];
+    for (var i = 0; i < pointCount; i++) {
+      final t = i / (pointCount - 1);
+      final oneMinusT = 1 - t;
+      final lat =
+          (oneMinusT * oneMinusT * origin.latitude) +
+          (2 * oneMinusT * t * control.latitude) +
+          (t * t * destination.latitude);
+      final lng =
+          (oneMinusT * oneMinusT * origin.longitude) +
+          (2 * oneMinusT * t * control.longitude) +
+          (t * t * destination.longitude);
+      points.add(LatLng(lat, lng));
+    }
+
+    return points;
+  }
+
+  LatLng _buildPerpendicularArcControlPoint({
+    required LatLng origin,
+    required LatLng destination,
+    double lateralOffset = 0.02,
+  }) {
+    final mid = _midpoint(origin, destination);
+    final deltaLng = destination.longitude - origin.longitude;
+    final deltaLat = destination.latitude - origin.latitude;
+    final length = math.sqrt((deltaLng * deltaLng) + (deltaLat * deltaLat));
+
+    if (length == 0) {
+      return mid;
+    }
+
+    final unitPerpLat = deltaLng / length;
+    final unitPerpLng = -deltaLat / length;
+
+    return LatLng(
+      mid.latitude + (unitPerpLat * lateralOffset),
+      mid.longitude + (unitPerpLng * lateralOffset),
+    );
+  }
+
+  Future<void> _openExternalGoogleMapsNavigation({
+    required LatLng origin,
+    required LatLng destination,
+  }) async {
+    final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1'
+      '&origin=${origin.latitude},${origin.longitude}'
+      '&destination=${destination.latitude},${destination.longitude}'
+      '&travelmode=driving',
+    );
+
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir Google Maps.')),
+      );
+    }
   }
 
   String _formatAmount(double value) {
@@ -640,6 +642,77 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     data.businessLatitude != null &&
                     data.businessLongitude != null;
                 final isReadOnly = widget.readOnlyView;
+                final LatLng? deliveryPoint = hasDeliveryCoords
+                    ? LatLng(deliveryLat, deliveryLng)
+                    : null;
+                final LatLng? businessPoint = hasBusinessCoords
+                    ? LatLng(data.businessLatitude!, data.businessLongitude!)
+                    : null;
+                final LatLng? arcControlPoint =
+                    hasBusinessCoords && hasDeliveryCoords
+                    ? _buildPerpendicularArcControlPoint(
+                        origin: businessPoint!,
+                        destination: deliveryPoint!,
+                      )
+                    : null;
+                final List<LatLng> arcRoutePoints =
+                    hasBusinessCoords && hasDeliveryCoords
+                    ? _generateArcPath(
+                        origin: businessPoint!,
+                        destination: deliveryPoint!,
+                      )
+                    : const <LatLng>[];
+                final List<LatLng> arcShadowPoints =
+                    hasBusinessCoords && hasDeliveryCoords
+                    ? <LatLng>[businessPoint!, deliveryPoint!]
+                    : const <LatLng>[];
+                final LatLng? arcPeakPoint = arcRoutePoints.isNotEmpty
+                    ? arcRoutePoints[arcRoutePoints.length ~/ 2]
+                    : null;
+                final Set<Marker> deliveryMarkers = <Marker>{
+                  if (businessPoint != null)
+                    Marker(
+                      markerId: const MarkerId('business'),
+                      position: businessPoint,
+                      icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueOrange,
+                      ),
+                      infoWindow: const InfoWindow(title: 'World Burger'),
+                    ),
+                  if (deliveryPoint != null)
+                    Marker(
+                      markerId: const MarkerId('delivery'),
+                      position: deliveryPoint,
+                      icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueRed,
+                      ),
+                      infoWindow: const InfoWindow(title: 'Destino de Entrega'),
+                    ),
+                };
+                final Set<Polyline> deliveryPolylines =
+                    hasBusinessCoords && hasDeliveryCoords
+                    ? <Polyline>{
+                        Polyline(
+                          polylineId: const PolylineId('route_shadow'),
+                          color: Colors.grey.withOpacity(0.3),
+                          width: 2,
+                          zIndex: 1,
+                          points: arcShadowPoints,
+                        ),
+                        Polyline(
+                          polylineId: const PolylineId('route_arc'),
+                          color: Colors.purple,
+                          width: 4,
+                          zIndex: 2,
+                          points: arcRoutePoints,
+                        ),
+                      }
+                    : const <Polyline>{};
+                final List<LatLng> cameraPoints = <LatLng?>[
+                  businessPoint,
+                  deliveryPoint,
+                  arcPeakPoint ?? arcControlPoint,
+                ].whereType<LatLng>().toList();
 
                 if (isReadOnly &&
                     !_emailVerified &&
@@ -833,6 +906,98 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       ),
                     ),
                     const SizedBox(height: 14),
+                    if (hasDeliveryCoords) ...[
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Mapa y ruta',
+                              style: GoogleFonts.manrope(
+                                color: text,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: SizedBox(
+                                height: 250,
+                                child: GoogleMap(
+                                  initialCameraPosition: CameraPosition(
+                                    target: hasBusinessCoords
+                                        ? _midpoint(
+                                            businessPoint!,
+                                            deliveryPoint!,
+                                          )
+                                        : deliveryPoint!,
+                                    zoom: hasBusinessCoords ? 13.8 : 15.2,
+                                  ),
+                                  onMapCreated: (controller) async {
+                                    if (cameraPoints.length < 2) {
+                                      return;
+                                    }
+                                    await controller.animateCamera(
+                                      CameraUpdate.newLatLngBounds(
+                                        _buildBounds(cameraPoints),
+                                        60,
+                                      ),
+                                    );
+                                  },
+                                  myLocationEnabled: false,
+                                  myLocationButtonEnabled: false,
+                                  zoomControlsEnabled: false,
+                                  mapToolbarEnabled: false,
+                                  markers: deliveryMarkers,
+                                  polylines: deliveryPolylines,
+                                ),
+                              ),
+                            ),
+                            if (hasBusinessCoords) ...[
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _openExternalGoogleMapsNavigation(
+                                        origin: businessPoint!,
+                                        destination: deliveryPoint,
+                                      ),
+                                  icon: const Icon(Icons.navigation_rounded),
+                                  label: const Text('Navegar en Google Maps'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: text,
+                                    side: BorderSide(
+                                      color: accent.withValues(alpha: 0.35),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ] else ...[
+                              const SizedBox(height: 10),
+                              Text(
+                                'Mostrando solo el destino. Configura latitud y longitud del comercio para visualizar la ruta y navegar.',
+                                style: GoogleFonts.manrope(
+                                  color: muted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
                     if (!isReadOnly) ...[
                       Container(
                         padding: const EdgeInsets.all(14),
@@ -1165,112 +1330,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                         ],
                       ),
                     ),
-                    if (hasDeliveryCoords) ...[
-                      const SizedBox(height: 14),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: surface,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Mapa y ruta',
-                              style: GoogleFonts.manrope(
-                                color: text,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(14),
-                              child: SizedBox(
-                                height: 220,
-                                child: GoogleMap(
-                                  initialCameraPosition: CameraPosition(
-                                    target: hasBusinessCoords
-                                        ? _midpoint(
-                                            LatLng(
-                                              data.businessLatitude!,
-                                              data.businessLongitude!,
-                                            ),
-                                            LatLng(deliveryLat, deliveryLng),
-                                          )
-                                        : LatLng(deliveryLat, deliveryLng),
-                                    zoom: hasBusinessCoords ? 13.8 : 15.2,
-                                  ),
-                                  myLocationEnabled: false,
-                                  myLocationButtonEnabled: false,
-                                  zoomControlsEnabled: false,
-                                  mapToolbarEnabled: false,
-                                  markers: <Marker>{
-                                    if (hasBusinessCoords)
-                                      Marker(
-                                        markerId: const MarkerId('business'),
-                                        position: LatLng(
-                                          data.businessLatitude!,
-                                          data.businessLongitude!,
-                                        ),
-                                        infoWindow: const InfoWindow(
-                                          title: 'Negocio',
-                                        ),
-                                      ),
-                                    Marker(
-                                      markerId: const MarkerId('delivery'),
-                                      position: LatLng(
-                                        deliveryLat,
-                                        deliveryLng,
-                                      ),
-                                      infoWindow: const InfoWindow(
-                                        title: 'Destino',
-                                      ),
-                                    ),
-                                  },
-                                  polylines: hasBusinessCoords
-                                      ? <Polyline>{
-                                          Polyline(
-                                            polylineId: const PolylineId(
-                                              'route',
-                                            ),
-                                            color: accent,
-                                            width: 5,
-                                            points: data.routePoints.length >= 2
-                                                ? data.routePoints
-                                                : <LatLng>[
-                                                    LatLng(
-                                                      data.businessLatitude!,
-                                                      data.businessLongitude!,
-                                                    ),
-                                                    LatLng(
-                                                      deliveryLat,
-                                                      deliveryLng,
-                                                    ),
-                                                  ],
-                                          ),
-                                        }
-                                      : const <Polyline>{},
-                                ),
-                              ),
-                            ),
-                            if (!hasBusinessCoords)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 10),
-                                child: Text(
-                                  'Mostrando solo el destino. Configura latitud y longitud del negocio para visualizar la ruta completa.',
-                                  style: GoogleFonts.manrope(
-                                    color: muted,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
                     if ((orderNotes ?? '').isNotEmpty) ...[
                       const SizedBox(height: 14),
                       Container(
@@ -1492,7 +1551,6 @@ class _OrderViewData {
     this.businessLatitude,
     this.businessLongitude,
     this.businessLogoUrl,
-    this.routePoints = const <LatLng>[],
     this.history = const <_HistoryOrderViewData>[],
   });
 
@@ -1501,7 +1559,6 @@ class _OrderViewData {
   final double? businessLatitude;
   final double? businessLongitude;
   final String? businessLogoUrl;
-  final List<LatLng> routePoints;
   final List<_HistoryOrderViewData> history;
 }
 
