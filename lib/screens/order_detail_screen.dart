@@ -1,4 +1,7 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +31,8 @@ class OrderDetailScreen extends StatefulWidget {
 class _OrderDetailScreenState extends State<OrderDetailScreen>
     with SingleTickerProviderStateMixin {
   static const Duration _rememberDeviceTtl = Duration(hours: 24);
+  static const String _fallbackBusinessLogoAsset =
+      'assets/branding/logotipo.png';
 
   late Future<_OrderViewData?> _orderFuture;
   late final AnimationController _successController;
@@ -40,6 +45,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   bool _trustRestoreRequested = false;
   bool _showTopBar = false;
   String? _verificationError;
+  bool _loadingMarkerIcons = false;
+  String? _markerIconsKey;
+  BitmapDescriptor? _businessMarkerIcon;
+  BitmapDescriptor? _deliveryMarkerIcon;
 
   @override
   void initState() {
@@ -543,6 +552,218 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return 'Metodo de pago seleccionado por el cliente.';
   }
 
+  Future<void> _prepareMarkerIconsIfNeeded({String? businessLogoUrl}) async {
+    final normalizedLogoUrl = (businessLogoUrl ?? '').trim();
+    final key = normalizedLogoUrl;
+
+    if (_markerIconsKey == key &&
+        _businessMarkerIcon != null &&
+        _deliveryMarkerIcon != null) {
+      return;
+    }
+
+    if (_loadingMarkerIcons && _markerIconsKey == key) {
+      return;
+    }
+
+    _loadingMarkerIcons = true;
+    _markerIconsKey = key;
+
+    try {
+      final businessIcon = await _buildBusinessMarkerIcon(
+        businessLogoUrl: normalizedLogoUrl,
+      );
+      final deliveryIcon = await _buildDeliveryMarkerIcon();
+
+      if (!mounted || _markerIconsKey != key) {
+        return;
+      }
+
+      setState(() {
+        _businessMarkerIcon = businessIcon;
+        _deliveryMarkerIcon = deliveryIcon;
+      });
+    } catch (_) {
+      // If custom generation fails, map falls back to default marker hues.
+    } finally {
+      if (_markerIconsKey == key) {
+        _loadingMarkerIcons = false;
+      }
+    }
+  }
+
+  Future<BitmapDescriptor> _buildBusinessMarkerIcon({
+    required String businessLogoUrl,
+  }) async {
+    final logoBytes = await _resolveBusinessLogoBytes(businessLogoUrl);
+    if (logoBytes == null) {
+      return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+    }
+
+    final logo = await _decodeUiImage(logoBytes, size: 116);
+    if (logo == null) {
+      return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+    }
+
+    const double width = 118;
+    const double height = 146;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    final pinPaint = Paint()..color = Colors.white;
+    final borderPaint = Paint()
+      ..color = const Color(0xFF1C2431)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
+
+    final outer = Rect.fromLTWH(11, 10, 96, 96);
+    canvas.drawOval(outer, pinPaint);
+    canvas.drawOval(outer, borderPaint);
+
+    final clipPath = Path()..addOval(Rect.fromLTWH(17, 16, 84, 84));
+    canvas.save();
+    canvas.clipPath(clipPath);
+    paintImage(
+      canvas: canvas,
+      rect: const Rect.fromLTWH(17, 16, 84, 84),
+      image: logo,
+      fit: BoxFit.cover,
+      filterQuality: FilterQuality.high,
+    );
+    canvas.restore();
+
+    final pointerPath = Path()
+      ..moveTo(59, 141)
+      ..lineTo(44, 94)
+      ..lineTo(74, 94)
+      ..close();
+    canvas.drawPath(pointerPath, pinPaint);
+    canvas.drawPath(pointerPath, borderPaint);
+
+    final image = await recorder.endRecording().toImage(
+      width.toInt(),
+      height.toInt(),
+    );
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+  }
+
+  Future<BitmapDescriptor> _buildDeliveryMarkerIcon() async {
+    const double size = 118;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    final shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.16)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    canvas.drawCircle(const Offset(59, 102), 15, shadowPaint);
+
+    final outerPaint = Paint()..color = const Color(0xFFEF4444);
+    final outerBorderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
+    final innerPaint = Paint()..color = Colors.white;
+    final innerBorderPaint = Paint()
+      ..color = const Color(0xFFEF4444)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5;
+
+    canvas.drawCircle(const Offset(59, 48), 28, outerPaint);
+    canvas.drawCircle(const Offset(59, 48), 28, outerBorderPaint);
+    canvas.drawCircle(const Offset(59, 48), 15, innerPaint);
+    canvas.drawCircle(const Offset(59, 48), 15, innerBorderPaint);
+
+    final pointerPath = Path()
+      ..moveTo(59, 104)
+      ..lineTo(45, 72)
+      ..lineTo(73, 72)
+      ..close();
+    canvas.drawPath(pointerPath, outerPaint);
+    canvas.drawPath(pointerPath, outerBorderPaint);
+
+    final textPainter = TextPainter(
+      textDirection: TextDirection.ltr,
+      text: TextSpan(
+        text: String.fromCharCode(Icons.flag_rounded.codePoint),
+        style: TextStyle(
+          fontSize: 24,
+          color: const Color(0xFFB91C1C),
+          fontFamily: Icons.flag_rounded.fontFamily,
+          package: Icons.flag_rounded.fontPackage,
+        ),
+      ),
+    )..layout();
+
+    final offset = Offset((size - textPainter.width) / 2, 36);
+    textPainter.paint(canvas, offset);
+
+    final image = await recorder.endRecording().toImage(
+      size.toInt(),
+      size.toInt(),
+    );
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+  }
+
+  Future<ui.Image?> _decodeUiImage(Uint8List bytes, {int size = 116}) async {
+    try {
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: size,
+        targetHeight: size,
+      );
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Uint8List?> _resolveBusinessLogoBytes(String businessLogoUrl) async {
+    if (businessLogoUrl.isNotEmpty) {
+      final downloaded = await _downloadBytes(businessLogoUrl);
+      if (downloaded != null && downloaded.isNotEmpty) {
+        return downloaded;
+      }
+    }
+
+    try {
+      final data = await rootBundle.load(_fallbackBusinessLogoAsset);
+      return data.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Uint8List?> _downloadBytes(String url) async {
+    try {
+      final uri = Uri.tryParse(url);
+      if (uri == null || (!uri.isScheme('https') && !uri.isScheme('http'))) {
+        return null;
+      }
+
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(uri);
+        final response = await request.close();
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return null;
+        }
+
+        final bytesBuilder = BytesBuilder(copy: false);
+        await for (final chunk in response) {
+          bytesBuilder.add(chunk);
+        }
+        return bytesBuilder.takeBytes();
+      } finally {
+        client.close(force: true);
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -636,6 +857,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 final deliveryLng = pedido.deliveryLongitude;
                 final orderNotes = pedido.orderNotes?.trim();
                 final businessLogoUrl = data.businessLogoUrl?.trim();
+                _prepareMarkerIconsIfNeeded(businessLogoUrl: businessLogoUrl);
                 final hasDeliveryCoords =
                     deliveryLat != null && deliveryLng != null;
                 final hasBusinessCoords =
@@ -674,18 +896,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     Marker(
                       markerId: const MarkerId('business'),
                       position: businessPoint,
-                      icon: BitmapDescriptor.defaultMarkerWithHue(
-                        BitmapDescriptor.hueOrange,
-                      ),
-                      infoWindow: const InfoWindow(title: 'World Burger'),
+                      icon:
+                          _businessMarkerIcon ??
+                          BitmapDescriptor.defaultMarkerWithHue(
+                            BitmapDescriptor.hueOrange,
+                          ),
+                      infoWindow: InfoWindow(title: data.comercioNombre),
                     ),
                   if (deliveryPoint != null)
                     Marker(
                       markerId: const MarkerId('delivery'),
                       position: deliveryPoint,
-                      icon: BitmapDescriptor.defaultMarkerWithHue(
-                        BitmapDescriptor.hueRed,
-                      ),
+                      icon:
+                          _deliveryMarkerIcon ??
+                          BitmapDescriptor.defaultMarkerWithHue(
+                            BitmapDescriptor.hueRed,
+                          ),
                       infoWindow: const InfoWindow(title: 'Destino de Entrega'),
                     ),
                 };
