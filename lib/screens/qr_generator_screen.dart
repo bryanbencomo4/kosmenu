@@ -199,7 +199,7 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
               crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
                 pw.Text(
-                  '¡Escanea y pide tu pizza!',
+                  '¡Escanea y mira nuestro menú!',
                   textAlign: pw.TextAlign.center,
                   style: pw.TextStyle(
                     fontSize: 26,
@@ -303,62 +303,75 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
 
   Widget _buildActionButton({
     required IconData icon,
-    required String label,
+    required String tooltip,
     required VoidCallback onPressed,
-    required bool filled,
+    bool primary = false,
   }) {
-    final child = Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, size: 18),
-        const SizedBox(width: 8),
-        Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
-      ],
-    );
+    // Paleta elmenuxfa.com
+    const accent = Color(0xFFFF7A00); // naranja
+    const cardBg = Color(0xFF231942); // morado
+    const white = Color(0xFFFFFFFF);
+    const gray = Color(0xFFB8B8B8);
 
-    if (filled) {
-      return FilledButton(
-        onPressed: _isProcessing ? null : onPressed,
-        style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFFFF6B00),
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-        child: child,
-      );
-    }
+    final button = primary
+        ? IconButton.filled(
+            onPressed: _isProcessing ? null : onPressed,
+            style: IconButton.styleFrom(
+              backgroundColor: accent,
+              foregroundColor: white,
+              minimumSize: const Size(48, 48),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              shadowColor: accent.withOpacity(0.18),
+              elevation: 2,
+            ),
+            icon: Icon(icon, size: 21),
+          )
+        : IconButton.filledTonal(
+            onPressed: _isProcessing ? null : onPressed,
+            style: IconButton.styleFrom(
+              backgroundColor: cardBg,
+              foregroundColor: gray,
+              minimumSize: const Size(48, 48),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              shadowColor: Colors.black.withOpacity(0.10),
+              elevation: 1,
+            ),
+            icon: Icon(icon, size: 21),
+          );
 
-    return OutlinedButton(
-      onPressed: _isProcessing ? null : onPressed,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFFFFE4BD),
-        side: const BorderSide(color: Color(0x44FFB04A)),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      child: child,
-    );
+    return Tooltip(message: tooltip, child: button);
   }
 
   @override
   Widget build(BuildContext context) {
+    const pageBg = Color(0xFF0A0A0A);
+    const cardBg = Color(0xFF1A1A1A);
+
     return FutureBuilder<Uint8List>(
       future: _logoBytesFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Scaffold(
-            backgroundColor: const Color(0xFF0F0D0B),
-            appBar: AppBar(title: const Text('QR profesional')),
+            backgroundColor: pageBg,
+            appBar: AppBar(
+              backgroundColor: pageBg,
+              foregroundColor: Colors.white,
+              title: Text(
+                'QR profesional',
+                style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+              ),
+            ),
             body: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
                   'No se pudo cargar el logo para generar el QR.',
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.manrope(color: Colors.white),
+                  style: GoogleFonts.manrope(color: const Color(0xFFE5E7EB)),
                 ),
               ),
             ),
@@ -372,338 +385,206 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
         final embeddedLogo = MemoryImage(snapshot.data!);
 
         return Scaffold(
-          backgroundColor: const Color(0xFF0F0D0B),
+          backgroundColor: pageBg,
           appBar: AppBar(
-            backgroundColor: const Color(0xFF17120E),
+            backgroundColor: pageBg,
             foregroundColor: Colors.white,
             elevation: 0,
-            title: const Text('QR profesional'),
+            title: Text(
+              'QR profesional',
+              style: GoogleFonts.manrope(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
           body: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(28),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF2A1C12), Color(0xFF15100C)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    border: Border.all(color: const Color(0x44FFB04A)),
-                  ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Listo para mesa, vitrina y redes',
-                        style: GoogleFonts.playfairDisplay(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700,
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+                        decoration: BoxDecoration(
+                          color: cardBg,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(color: const Color(0xFF2A2A2A)),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Genera un QR vibrante, fácil de escanear y con tu marca al centro. También puedes exportar un kit de impresión en PDF.',
-                        style: GoogleFonts.manrope(
-                          color: const Color(0xFFE5CFB1),
-                          fontSize: 14,
-                          height: 1.45,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                RepaintBoundary(
-                  key: _posterKey,
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(30),
-                      gradient: const LinearGradient(
-                        colors: [
-                          Color(0xFFFF8A1F),
-                          Color(0xFFFF5A1F),
-                          Color(0xFFFACC15),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x33160000),
-                          blurRadius: 24,
-                          offset: Offset(0, 14),
-                        ),
-                      ],
-                    ),
-                    child: Container(
-                      padding: const EdgeInsets.all(22),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF8EC),
-                        borderRadius: BorderRadius.circular(26),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 7,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF111827),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              'ESCANEA Y PIDE',
-                              style: GoogleFonts.manrope(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 1.1,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          Text(
-                            _businessName,
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(
-                              color: const Color(0xFF111827),
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                              height: 1.05,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Escanéalo con cualquier cámara y abre el menú al instante.',
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.manrope(
-                              color: const Color(0xFF5B4631),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          Container(
-                            padding: const EdgeInsets.all(18),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(28),
-                              border: Border.all(
-                                color: const Color(0xFFF6C486),
-                                width: 2,
-                              ),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color(0x1AF97316),
-                                  blurRadius: 18,
-                                  offset: Offset(0, 8),
-                                ),
-                              ],
-                            ),
-                            child: SizedBox(
-                              width: 268,
-                              height: 268,
-                              child: PrettyQrView.data(
-                                data: _menuUrl,
-                                errorCorrectLevel: QrErrorCorrectLevel.H,
-                                decoration: PrettyQrDecoration(
-                                  background: Colors.white,
-                                  shape: const PrettyQrSmoothSymbol(
-                                    color: Color(0xFF111111),
-                                    roundFactor: 1,
-                                  ),
-                                  image: PrettyQrDecorationImage(
-                                    image: embeddedLogo,
-                                    scale: 0.2,
-                                    padding: const EdgeInsets.all(12),
-                                    position: PrettyQrDecorationImagePosition
-                                        .embedded,
-                                    clipper: const PrettyQrCircleClipper(),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF111827),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Text(
-                              _menuUrl,
+                        child: Column(
+                          children: [
+                            Text(
+                              _businessName,
                               textAlign: TextAlign.center,
                               style: GoogleFonts.manrope(
                                 color: Colors.white,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
+                                fontSize: 24,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  'Exportaciones',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    SizedBox(
-                      width: 220,
-                      child: _buildActionButton(
-                        icon: Icons.share_rounded,
-                        label: _busyAction == 'share-image'
-                            ? 'Compartiendo...'
-                            : 'Compartir imagen',
-                        onPressed: () async {
-                          try {
-                            await _shareQr();
-                          } catch (error) {
-                            _showError(error, 'No se pudo compartir la imagen');
-                          }
-                        },
-                        filled: true,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 220,
-                      child: _buildActionButton(
-                        icon: Icons.download_rounded,
-                        label: _busyAction == 'save-image'
-                            ? 'Guardando...'
-                            : 'Guardar en galería',
-                        onPressed: () async {
-                          try {
-                            await _downloadQr();
-                          } catch (error) {
-                            _showError(error, 'No se pudo guardar la imagen');
-                          }
-                        },
-                        filled: false,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 220,
-                      child: _buildActionButton(
-                        icon: Icons.link_rounded,
-                        label: _busyAction == 'copy-link'
-                            ? 'Copiando...'
-                            : 'Copiar enlace',
-                        onPressed: () async {
-                          try {
-                            await _copyLink();
-                          } catch (error) {
-                            _showError(error, 'No se pudo copiar el enlace');
-                          }
-                        },
-                        filled: false,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF17120E),
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: const Color(0x33FFB04A)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Kit de impresión',
-                        style: GoogleFonts.poppins(
-                          color: const Color(0xFFFFE2BF),
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Genera una tarjeta imprimible en PDF con el mensaje “¡Escanea y pide tu pizza!” y el QR listo para mesa, caja o vitrina.',
-                        style: GoogleFonts.manrope(
-                          color: const Color(0xFFE5CFB1),
-                          fontSize: 14,
-                          height: 1.45,
+                            const SizedBox(height: 6),
+                            Text(
+                              'QR de menú digital',
+                              style: GoogleFonts.manrope(
+                                color: const Color(0xFF9CA3AF),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            RepaintBoundary(
+                              key: _posterKey,
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(18),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 270,
+                                      height: 270,
+                                      child: PrettyQrView.data(
+                                        data: _menuUrl,
+                                        errorCorrectLevel:
+                                            QrErrorCorrectLevel.H,
+                                        decoration: PrettyQrDecoration(
+                                          background: Colors.white,
+                                          shape: const PrettyQrSmoothSymbol(
+                                            color: Color(0xFF121212),
+                                            roundFactor: 1,
+                                          ),
+                                          image: PrettyQrDecorationImage(
+                                            image: embeddedLogo,
+                                            scale: 0.2,
+                                            padding: const EdgeInsets.all(12),
+                                            position:
+                                                PrettyQrDecorationImagePosition
+                                                    .embedded,
+                                            clipper:
+                                                const PrettyQrCircleClipper(),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF5F5F5),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        _menuUrl,
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.manrope(
+                                          color: const Color(0xFF111827),
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 14),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          SizedBox(
-                            width: 220,
-                            child: _buildActionButton(
-                              icon: Icons.picture_as_pdf_rounded,
-                              label: _busyAction == 'share-pdf'
-                                  ? 'Generando PDF...'
-                                  : 'Compartir kit PDF',
-                              onPressed: () async {
-                                try {
-                                  await _sharePrintKit();
-                                } catch (error) {
-                                  _showError(
-                                    error,
-                                    'No se pudo compartir el PDF',
-                                  );
-                                }
-                              },
-                              filled: true,
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: cardBg,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: const Color(0xFF2A2A2A)),
+                        ),
+                        child: Center(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _buildActionButton(
+                                  icon: Icons.download_rounded,
+                                  tooltip: 'Descargar',
+                                  onPressed: () async {
+                                    try {
+                                      await _downloadQr();
+                                    } catch (error) {
+                                      _showError(
+                                        error,
+                                        'No se pudo guardar la imagen',
+                                      );
+                                    }
+                                  },
+                                  primary: true,
+                                ),
+                                const SizedBox(width: 10),
+                                _buildActionButton(
+                                  icon: Icons.share_rounded,
+                                  tooltip: 'Compartir',
+                                  onPressed: () async {
+                                    try {
+                                      await _shareQr();
+                                    } catch (error) {
+                                      _showError(
+                                        error,
+                                        'No se pudo compartir la imagen',
+                                      );
+                                    }
+                                  },
+                                ),
+                                const SizedBox(width: 10),
+                                _buildActionButton(
+                                  icon: Icons.print_rounded,
+                                  tooltip: 'Imprimir PDF',
+                                  onPressed: () async {
+                                    try {
+                                      await _printKit();
+                                    } catch (error) {
+                                      _showError(
+                                        error,
+                                        'No se pudo abrir la impresión',
+                                      );
+                                    }
+                                  },
+                                ),
+                                const SizedBox(width: 10),
+                                _buildActionButton(
+                                  icon: Icons.link_rounded,
+                                  tooltip: 'Copiar enlace',
+                                  onPressed: () async {
+                                    try {
+                                      await _copyLink();
+                                    } catch (error) {
+                                      _showError(
+                                        error,
+                                        'No se pudo copiar el enlace',
+                                      );
+                                    }
+                                  },
+                                ),
+                              ],
                             ),
                           ),
-                          SizedBox(
-                            width: 220,
-                            child: _buildActionButton(
-                              icon: Icons.print_rounded,
-                              label: _busyAction == 'print-pdf'
-                                  ? 'Preparando impresión...'
-                                  : 'Imprimir kit',
-                              onPressed: () async {
-                                try {
-                                  await _printKit();
-                                } catch (error) {
-                                  _showError(
-                                    error,
-                                    'No se pudo abrir la impresión',
-                                  );
-                                }
-                              },
-                              filled: false,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         );
