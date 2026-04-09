@@ -4,7 +4,7 @@
 import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 
 type CategoriaRow = {
   id: string;
@@ -52,6 +52,7 @@ type ComercioRow = {
   id: string;
   slug?: string | null;
   nombre?: string | null;
+  costo_envio?: number | string | null;
   logo_url?: string | null;
   latitud?: number | string | null;
   longitud?: number | string | null;
@@ -95,6 +96,7 @@ type DeliveryPointSelectionSource = 'none' | 'business-default' | 'user';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const publicBaseUrl = 'https://kosmenu.vercel.app';
+const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
 const preferLeafletMapPicker = false;
 const defaultProductImage =
@@ -245,6 +247,42 @@ function isUuid(value: string) {
 
 function normalizePhone(value: string | null | undefined) {
   return (value ?? '').replace(/\D/g, '');
+}
+
+function formatPhoneInput(digits: string, countryCode: '+58' | '+57' | '+1') {
+  const onlyDigits = normalizePhone(digits).slice(0, 10);
+  if (!onlyDigits) return '';
+
+  if (countryCode === '+1') {
+    const p1 = onlyDigits.slice(0, 3);
+    const p2 = onlyDigits.slice(3, 6);
+    const p3 = onlyDigits.slice(6, 10);
+    if (onlyDigits.length <= 3) return `(${p1}`;
+    if (onlyDigits.length <= 6) return `(${p1}) ${p2}`;
+    return `(${p1}) ${p2}-${p3}`;
+  }
+
+  const p1 = onlyDigits.slice(0, 3);
+  const p2 = onlyDigits.slice(3, 6);
+  const p3 = onlyDigits.slice(6, 10);
+  if (onlyDigits.length <= 3) return p1;
+  if (onlyDigits.length <= 6) return `${p1} ${p2}`;
+  return `${p1} ${p2} ${p3}`;
+}
+
+function formatAmountByCurrency(value: number, currency: string) {
+  const safe = Number.isFinite(value) ? value : 0;
+  const code = (currency || 'COP').trim().toUpperCase();
+  const normalized = code === 'SIN MONEDA' ? 'COP' : code;
+  try {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: normalized,
+      maximumFractionDigits: normalized === 'COP' ? 0 : 2,
+    }).format(safe);
+  } catch {
+    return `${safe.toFixed(2)} ${normalized}`;
+  }
 }
 
 function formatCop(value: number | null | undefined) {
@@ -591,6 +629,7 @@ function getBrowserCurrentPoint() {
 
 export default function PublicMenuPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const commerceIdentifier = (params?.id ?? '').trim();
 
   const [loading, setLoading] = useState(true);
@@ -602,8 +641,17 @@ export default function PublicMenuPage() {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isInfoPanelReady, setIsInfoPanelReady] = useState(false);
   const [shareMessage, setShareMessage] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [clientWhatsappCountry, setClientWhatsappCountry] = useState<'+58' | '+57' | '+1'>('+58');
+  const [clientWhatsapp, setClientWhatsapp] = useState('');
   const [clientEmail, setClientEmail] = useState('');
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutStep, setCheckoutStep] = useState(0);
+  const [cashPaymentInput, setCashPaymentInput] = useState('');
+  const [selectedCurrency, setSelectedCurrency] = useState<string>('');
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
+  const [digitalPaymentReference, setDigitalPaymentReference] = useState('');
+  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
   const [deliveryMode, setDeliveryMode] = useState<OrderDeliveryMode>('pickup');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryReference, setDeliveryReference] = useState('');
@@ -925,7 +973,6 @@ export default function PublicMenuPage() {
       menuData?.comercio.whatsapp,
   );
   const receivesOrdersOnWhatsapp = menuData?.comercio.recibe_pedidos_whatsapp !== false;
-  const canOrderViaWhatsapp = receivesOrdersOnWhatsapp && whatsappNumber.length > 0;
   const supportsDelivery = menuData?.comercio.permite_delivery === true;
   const normalizedDeliveryAddress = deliveryAddress.trim();
   const normalizedDeliveryReference = deliveryReference.trim();
@@ -952,13 +999,18 @@ export default function PublicMenuPage() {
       ? 'No disponible actualmente'
       : 'Consulta disponibilidad por WhatsApp';
   const publicMenuUrl = `${publicBaseUrl}/v/${encodeURIComponent(resolvedSlug)}`;
+  const normalizedClientName = clientName.trim();
+  const normalizedClientWhatsappDigits = normalizePhone(clientWhatsapp);
+  const normalizedClientWhatsapp = `${clientWhatsappCountry}${normalizedClientWhatsappDigits}`;
+  const maskedClientWhatsapp = formatPhoneInput(normalizedClientWhatsappDigits, clientWhatsappCountry);
   const normalizedClientEmail = clientEmail.trim().toLowerCase();
+  const isClientNameValid = normalizedClientName.length >= 3;
+  const isClientWhatsappValid = normalizedClientWhatsapp.length >= 10;
   const isClientEmailValid = emailRegex.test(normalizedClientEmail);
-  const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
-  const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
-  const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint;
-  const canSubmitCheckout = isClientEmailValid && canOrderViaWhatsapp && isDeliveryReady;
-
+  const deliveryCostBase = toNumberOrNull(menuData?.comercio.costo_envio) ?? 0;
+  const deliveryCost = isDeliveryOrder ? Math.max(0, deliveryCostBase) : 0;
+  const orderSubtotal = cartTotal;
+  const orderGrandTotal = orderSubtotal + deliveryCost;
   const paymentMethodsByCurrency = useMemo(() => {
     const grouped = new Map<string, MetodoPagoRow[]>();
     for (const method of menuData?.metodosPago ?? []) {
@@ -969,6 +1021,91 @@ export default function PublicMenuPage() {
     }
     return Array.from(grouped.entries()).map(([currency, methods]) => ({ currency, methods }));
   }, [menuData?.metodosPago]);
+  const selectedCurrencyGroup = paymentMethodsByCurrency.find((group) => group.currency === selectedCurrency) ?? null;
+  const checkoutStepTitles = ['Cliente', 'Logistica', 'Pago'];
+  const selectedMethod = selectedPaymentMethod();
+  const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
+  const isCashPayment = selectedPaymentLabel.toLowerCase().includes('efectivo');
+  const isDigitalPayment = Boolean(selectedMethod) && !isCashPayment;
+  const paymentReferenceLast4 = normalizePhone(digitalPaymentReference).slice(-4);
+  const isPaymentReferenceValid = !isDigitalPayment || /^\d{4}$/.test(paymentReferenceLast4);
+  const hasPaymentProof = !isDigitalPayment || paymentProofFile !== null;
+  const paymentWithAmount = toNumberOrNull(cashPaymentInput);
+  const changeAmount =
+    isCashPayment && paymentWithAmount !== null && paymentWithAmount > orderGrandTotal
+      ? paymentWithAmount - orderGrandTotal
+      : 0;
+  const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
+  const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
+  const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint;
+  const canGoNextFromStep1 = isClientNameValid && isClientWhatsappValid && isClientEmailValid;
+  const canGoNextFromStep2 = isDeliveryReady;
+  const canSubmitStep3 =
+    (menuData?.metodosPago.length ?? 0) === 0 ||
+    (selectedPaymentMethodId !== null && isPaymentReferenceValid && hasPaymentProof);
+  const canSubmitCheckout =
+    canGoNextFromStep1 &&
+    canGoNextFromStep2 &&
+    canSubmitStep3;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const raw = window.localStorage.getItem(checkoutDraftStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        clientName?: string;
+        clientWhatsapp?: string;
+        clientEmail?: string;
+      };
+
+      const savedName = (parsed.clientName ?? '').trim();
+      const savedEmail = (parsed.clientEmail ?? '').trim();
+      const savedWhatsapp = (parsed.clientWhatsapp ?? '').trim();
+
+      if (savedName) setClientName(savedName);
+      if (savedEmail) setClientEmail(savedEmail);
+
+      if (savedWhatsapp) {
+        const knownCodes = ['+58', '+57', '+1'];
+        const matchedCode = knownCodes.find((code) => savedWhatsapp.startsWith(code));
+        if (matchedCode) {
+          setClientWhatsappCountry(matchedCode as '+58' | '+57' | '+1');
+          setClientWhatsapp(savedWhatsapp.slice(matchedCode.length));
+        } else {
+          setClientWhatsapp(normalizePhone(savedWhatsapp));
+        }
+      }
+    } catch {
+      // Ignore malformed stored checkout draft.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isCashPayment) {
+      setCashPaymentInput('');
+    }
+  }, [isCashPayment]);
+
+  useEffect(() => {
+    if (!isDigitalPayment) {
+      setDigitalPaymentReference('');
+      setPaymentProofFile(null);
+    }
+  }, [isDigitalPayment]);
+
+  useEffect(() => {
+    if (paymentMethodsByCurrency.length === 0) {
+      setSelectedCurrency('');
+      return;
+    }
+
+    const hasSelected = paymentMethodsByCurrency.some((group) => group.currency === selectedCurrency);
+    if (!hasSelected) {
+      setSelectedCurrency(paymentMethodsByCurrency[0].currency);
+    }
+  }, [paymentMethodsByCurrency, selectedCurrency]);
 
   useEffect(() => {
     if (!isInfoOpen && !isConfirmOpen && !expandedProductImage && !isMapPickerOpen) return;
@@ -991,12 +1128,22 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (!menuData) return;
-    if (selectedPaymentMethodId) return;
-
-    if (menuData.metodosPago.length > 0) {
+    if (!selectedPaymentMethodId && menuData.metodosPago.length > 0) {
       setSelectedPaymentMethodId(menuData.metodosPago[0].id);
     }
   }, [menuData, selectedPaymentMethodId]);
+
+  useEffect(() => {
+    if (!selectedCurrencyGroup || selectedCurrencyGroup.methods.length === 0) return;
+    if (!selectedPaymentMethodId) {
+      setSelectedPaymentMethodId(selectedCurrencyGroup.methods[0].id);
+      return;
+    }
+    const stillAvailable = selectedCurrencyGroup.methods.some((method) => method.id === selectedPaymentMethodId);
+    if (!stillAvailable) {
+      setSelectedPaymentMethodId(selectedCurrencyGroup.methods[0].id);
+    }
+  }, [selectedCurrencyGroup, selectedPaymentMethodId]);
 
   useEffect(() => {
     if (supportsDelivery) return;
@@ -1314,10 +1461,17 @@ export default function PublicMenuPage() {
     }));
   }
 
-  async function persistOrderOptional(
+  async function persistOrderRequired(
     orderId: string,
     email: string,
+    customerName: string,
+    customerWhatsapp: string,
     paymentMethod: MetodoPagoRow | null,
+    paymentMeta: {
+      currency: string;
+      referenceLast4: string;
+      proofFile: File | null;
+    },
     delivery: {
       mode: OrderDeliveryMode;
       address: string;
@@ -1326,69 +1480,136 @@ export default function PublicMenuPage() {
       coordinates: DeliveryPoint | null;
     },
   ) {
-    if (!supabaseUrl || !supabaseAnonKey) return;
-
-    try {
-      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: { persistSession: false },
-      });
-
-      const detalles = {
-        order_id: orderId,
-        cliente_email: email,
-        metodo_pago: paymentMethod
-          ? {
-              id: paymentMethod.id,
-              nombre: paymentMethodLabel(paymentMethod),
-              datos: paymentMethodDetails(paymentMethod),
-            }
-          : null,
-        delivery,
-        order_notes: normalizedOrderNotes,
-        items: cartItems.map((item) => ({
-          product_id: item.product.id,
-          nombre: item.product.nombre,
-          cantidad: item.quantity,
-          precio: item.product.precio ?? 0,
-        })),
-        total: cartTotal,
-      };
-
-      const payload = {
-        comercio_id: resolvedComercioId,
-        estado: 'pendiente',
-        total: cartTotal,
-        detalles,
-        cliente_email: email,
-      };
-
-      let { error: insertError } = await supabase.from('pedidos').insert(payload);
-
-      if (insertError?.message?.toLowerCase().includes('cliente_email')) {
-        const fallbackPayload = {
-          comercio_id: resolvedComercioId,
-          estado: 'pendiente',
-          total: cartTotal,
-          detalles,
-        };
-        const fallbackResult = await supabase.from('pedidos').insert(fallbackPayload);
-        insertError = fallbackResult.error;
-      }
-
-      if (insertError) {
-        console.warn('No se pudo guardar pedido en Supabase (opcional):', insertError.message);
-      }
-    } catch (persistError) {
-      console.warn('Persistencia opcional de pedido fallo:', persistError);
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error('Faltan variables de entorno para guardar tu pedido.');
     }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false },
+    });
+
+    const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : 'No especificado';
+    const orderUrl = `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`;
+    let paymentProofUrl = '';
+
+    if (paymentMeta.proofFile) {
+      const sanitizedFileName = paymentMeta.proofFile.name
+        .replace(/\s+/g, '-')
+        .replace(/[^a-zA-Z0-9._-]/g, '')
+        .toLowerCase();
+      const storagePath = `${resolvedComercioId}/${orderId}/${Date.now()}-${sanitizedFileName || 'comprobante.jpg'}`;
+      const { error: uploadError } = await supabase.storage
+        .from('comprobantes')
+        .upload(storagePath, paymentMeta.proofFile, {
+          upsert: false,
+          contentType: paymentMeta.proofFile.type || undefined,
+        });
+      if (uploadError) {
+        throw new Error(uploadError.message || 'No se pudo subir el comprobante de pago.');
+      }
+      const { data: proofPublicData } = supabase.storage.from('comprobantes').getPublicUrl(storagePath);
+      paymentProofUrl = proofPublicData?.publicUrl ?? '';
+    }
+
+    const detalles = {
+      order_id: orderId,
+      cliente_nombre: customerName,
+      cliente_email: email,
+      telefono_cliente: customerWhatsapp,
+      moneda_checkout: paymentMeta.currency,
+      metodo_pago: paymentMethod
+        ? {
+            id: paymentMethod.id,
+            nombre: paymentLabel,
+            datos: paymentMethodDetails(paymentMethod),
+          }
+        : null,
+      referencia_pago: paymentMeta.referenceLast4 || null,
+      comprobante_url: paymentProofUrl || null,
+      delivery,
+      order_notes: normalizedOrderNotes,
+      pago_con: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
+      cambio_de: isCashPayment && changeAmount > 0 ? changeAmount : 0,
+      subtotal: orderSubtotal,
+      costo_delivery: deliveryCost,
+      total: orderGrandTotal,
+      items: cartItems.map((item) => ({
+        product_id: item.product.id,
+        nombre: item.product.nombre,
+        cantidad: item.quantity,
+        precio: item.product.precio ?? 0,
+      })),
+    };
+
+    const payload = {
+      comercio_id: resolvedComercioId,
+      estado: 'pendiente',
+      total: orderGrandTotal,
+      costo_delivery: deliveryCost,
+      nombre_cliente: customerName,
+      telefono_cliente: customerWhatsapp,
+      detalles,
+      cliente_email: email,
+    };
+
+    const { error: insertError } = await supabase.from('pedidos').insert(payload);
+    if (insertError) {
+      throw new Error(insertError.message || 'No se pudo guardar el pedido.');
+    }
+
+    const message =
+      `Hola, quiero confirmar este pedido.\n` +
+      `Pedido: ${orderId}.\n` +
+      `Cliente: ${customerName}.\n` +
+      `Telefono: +${customerWhatsapp}.\n` +
+      `Tipo de entrega: ${delivery.mode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}.\n` +
+      (delivery.mode === 'delivery' ? `Direccion de entrega: ${delivery.address}.\n` : '') +
+      (delivery.mode === 'delivery' && delivery.reference
+        ? `Referencia: ${delivery.reference}.\n`
+        : '') +
+      (delivery.mode === 'delivery' && delivery.instructions
+        ? `Indicaciones: ${delivery.instructions}.\n`
+        : '') +
+      (delivery.mode === 'delivery' && delivery.coordinates
+        ? `Coordenadas: ${delivery.coordinates.lat.toFixed(6)}, ${delivery.coordinates.lng.toFixed(6)}.\n`
+        : '') +
+      (normalizedOrderNotes ? `Notas del pedido: ${normalizedOrderNotes}.\n` : '') +
+      `Metodo de pago: ${paymentLabel}.\n` +
+      `Correo del cliente: ${email}.\n` +
+      (paymentMeta.referenceLast4 ? `Referencia digital: ****${paymentMeta.referenceLast4}.\n` : '') +
+      (paymentProofUrl ? `Comprobante: ${paymentProofUrl}.\n` : '') +
+      `Subtotal: ${formatCop(orderSubtotal)}.\n` +
+      (deliveryCost > 0 ? `Delivery: ${formatCop(deliveryCost)}.\n` : '') +
+      (isCashPayment && paymentWithAmount !== null
+        ? `Pago con: ${formatCop(paymentWithAmount)}.\n`
+        : '') +
+      (isCashPayment && changeAmount > 0
+        ? `Cambio: ${formatCop(changeAmount)}.\n`
+        : '') +
+      `Total: ${formatCop(orderGrandTotal)}.\n` +
+      `Seguimiento: ${orderUrl}`;
+
+    return {
+      orderUrl,
+      waUrl: whatsappNumber
+        ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
+        : '',
+    };
   }
 
   async function confirmOrder() {
-    if (!canOrderViaWhatsapp || cartItems.length === 0 || isSubmittingOrder || !isClientEmailValid || !isDeliveryReady) {
+    if (
+      cartItems.length === 0 ||
+      isSubmittingOrder ||
+      !isClientNameValid ||
+      !isClientWhatsappValid ||
+      !isClientEmailValid ||
+      !isDeliveryReady ||
+      !canSubmitStep3
+    ) {
       return;
     }
 
-    const selectedMethod = selectedPaymentMethod();
     const deliveryPayload = {
       mode: isDeliveryOrder ? 'delivery' : 'pickup',
       address: isDeliveryOrder ? normalizedDeliveryAddress : '',
@@ -1404,54 +1625,44 @@ export default function PublicMenuPage() {
     };
 
     setIsSubmittingOrder(true);
+    setCheckoutError(null);
     try {
       const orderId = orderIdFrom(resolvedComercioId);
-      await persistOrderOptional(orderId, normalizedClientEmail, selectedMethod, deliveryPayload);
+      const persisted = await persistOrderRequired(
+        orderId,
+        normalizedClientEmail,
+        normalizedClientName,
+        normalizedClientWhatsapp,
+        selectedMethod,
+        {
+          currency: selectedCurrency || 'COP',
+          referenceLast4: paymentReferenceLast4,
+          proofFile: paymentProofFile,
+        },
+        deliveryPayload,
+      );
 
-      const orderUrl = `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`;
-      const paymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : 'No especificado';
-      const message =
-        `Hola, quiero hacer este pedido.\n` +
-        `Tipo de entrega: ${deliveryPayload.mode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}.\n` +
-        (deliveryPayload.mode === 'delivery'
-          ? `Direccion de entrega: ${deliveryPayload.address}.\n`
-          : '') +
-        (deliveryPayload.mode === 'delivery' && deliveryPayload.reference
-          ? `Referencia: ${deliveryPayload.reference}.\n`
-          : '') +
-        (deliveryPayload.mode === 'delivery' && deliveryPayload.instructions
-          ? `Indicaciones: ${deliveryPayload.instructions}.\n`
-          : '') +
-        (deliveryPayload.mode === 'delivery' && deliveryPayload.coordinates
-          ? `Coordenadas: ${deliveryPayload.coordinates.lat.toFixed(6)}, ${deliveryPayload.coordinates.lng.toFixed(6)}.\n`
-          : '') +
-        (normalizedOrderNotes ? `Notas del pedido: ${normalizedOrderNotes}.\n` : '') +
-        `Metodo de pago: ${paymentLabel}.\n` +
-        `Correo del cliente: ${normalizedClientEmail}.\n` +
-        `Adjunto el comprobante en este chat.\n` +
-        `Detalle del pedido: ${orderUrl}`;
-      const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
-
-      try {
-        await fetch('/api/send-order', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
+      if (typeof window !== 'undefined') {
+        if (persisted.waUrl) {
+          window.sessionStorage.setItem(`order-wa:${orderId}`, persisted.waUrl);
+        }
+        window.sessionStorage.setItem(`order-tracking:${orderId}`, persisted.orderUrl);
+        window.localStorage.setItem(
+          checkoutDraftStorageKey,
+          JSON.stringify({
+            clientName: normalizedClientName,
+            clientWhatsapp: normalizedClientWhatsapp,
             clientEmail: normalizedClientEmail,
-            comercioNombre,
-            orderId,
-            orderTrackingUrl: orderUrl,
           }),
-        });
-      } catch (sendEmailError) {
-        console.warn('No se pudo enviar email de respaldo:', sendEmailError);
+        );
       }
 
-      window.location.assign(waUrl);
       setCart({});
+      setClientName('');
+      setClientWhatsapp('');
       setClientEmail('');
+      setDigitalPaymentReference('');
+      setPaymentProofFile(null);
       setDeliveryAddress('');
       setDeliveryReference('');
       setDeliveryInstructions('');
@@ -1459,10 +1670,36 @@ export default function PublicMenuPage() {
       setDeliveryPointSource('none');
       setOrderNotes('');
       setDeliveryMode('pickup');
+      setCheckoutStep(0);
       setIsConfirmOpen(false);
+      router.push(`/orders/${encodeURIComponent(orderId)}`);
+    } catch (persistError) {
+      const message =
+        persistError instanceof Error
+          ? persistError.message
+          : 'No se pudo guardar tu pedido. Intentalo nuevamente.';
+      setCheckoutError(message);
     } finally {
       setIsSubmittingOrder(false);
     }
+  }
+
+  function goToNextStep() {
+    if (checkoutStep === 0 && !canGoNextFromStep1) {
+      setCheckoutError('Completa nombre, telefono y correo para continuar.');
+      return;
+    }
+    if (checkoutStep === 1 && !canGoNextFromStep2) {
+      setCheckoutError('Completa la direccion y el punto en el mapa para continuar con delivery.');
+      return;
+    }
+    setCheckoutError(null);
+    setCheckoutStep((prev) => Math.min(2, prev + 1));
+  }
+
+  function goToPreviousStep() {
+    setCheckoutError(null);
+    setCheckoutStep((prev) => Math.max(0, prev - 1));
   }
 
   if (loading) {
@@ -1757,11 +1994,15 @@ export default function PublicMenuPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setIsConfirmOpen(true)}
-                disabled={!canOrderViaWhatsapp || isSubmittingOrder}
+                onClick={() => {
+                  setCheckoutError(null);
+                  setCheckoutStep(0);
+                  setIsConfirmOpen(true);
+                }}
+                disabled={isSubmittingOrder}
                 className="rounded-full px-6 py-3 text-sm font-black uppercase tracking-[0.08em]"
                 style={
-                  !canOrderViaWhatsapp || isSubmittingOrder
+                  isSubmittingOrder
                     ? { backgroundColor: '#E2E8F0', color: '#64748B' }
                     : {
                         borderRadius: 'var(--border-radius)',
@@ -1772,9 +2013,7 @@ export default function PublicMenuPage() {
               >
                 {isSubmittingOrder
                   ? 'Procesando...'
-                  : !receivesOrdersOnWhatsapp
-                    ? 'Pedidos por WhatsApp desactivados'
-                    : 'Confirmar pedido'}
+                  : 'Confirmar pedido'}
               </button>
             </div>
           </section>
@@ -2183,232 +2422,422 @@ export default function PublicMenuPage() {
                 </button>
               </div>
 
-              <div className="h-[calc(100%-132px)] overflow-y-auto px-4 py-4 sm:px-6">
-                <p className="text-sm text-slate-600">
-                  {receivesOrdersOnWhatsapp
-                    ? 'Selecciona metodo de pago y confirma tu pedido por WhatsApp.'
-                    : 'Este negocio tiene desactivados los pedidos por WhatsApp actualmente.'}
-                </p>
-
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Entrega</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setDeliveryMode('pickup')}
-                      className="rounded-full px-3 py-1.5 text-xs font-bold"
-                      style={
-                        deliveryMode === 'pickup'
-                          ? {
-                              backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
-                              color: 'var(--primary-color)',
-                            }
-                          : { backgroundColor: '#E2E8F0', color: '#334155' }
-                      }
-                    >
-                      Retiro
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!supportsDelivery}
-                      onClick={() => setDeliveryMode('delivery')}
-                      className="rounded-full px-3 py-1.5 text-xs font-bold"
-                      style={
-                        !supportsDelivery
-                          ? { backgroundColor: '#E2E8F0', color: '#94A3B8' }
-                          : deliveryMode === 'delivery'
+              <div className="h-[calc(100%-132px)] overflow-hidden px-4 py-4 sm:px-6">
+                <div className="grid grid-cols-3 gap-2">
+                  {checkoutStepTitles.map((title, index) => {
+                    const state = checkoutStep === index ? 'active' : checkoutStep > index ? 'done' : 'pending';
+                    return (
+                      <div
+                        key={`checkout-step-${title}`}
+                        className="rounded-2xl border px-3 py-2"
+                        style={
+                          state === 'active'
                             ? {
-                                backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
-                                color: 'var(--primary-color)',
+                                borderColor: 'color-mix(in srgb, var(--primary-color) 40%, white)',
+                                backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, white)',
                               }
-                            : { backgroundColor: '#E2E8F0', color: '#334155' }
-                      }
-                    >
-                      Delivery
-                    </button>
-                  </div>
-                  {!supportsDelivery ? (
-                    <p className="mt-2 text-xs font-semibold text-slate-500">Este negocio no tiene delivery habilitado.</p>
-                  ) : null}
-
-                  {isDeliveryOrder ? (
-                    <div className="mt-3 space-y-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsMapPickerOpen(true)}
-                        className="flex h-11 w-full items-center justify-between rounded-xl border bg-white px-3 text-left text-sm text-slate-900 outline-none"
-                        style={{ borderColor: isDeliveryAddressValid ? '#CBD5E1' : '#F43F5E' }}
+                            : state === 'done'
+                              ? { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }
+                              : { borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' }
+                        }
                       >
-                        <span className={`${normalizedDeliveryAddress ? 'text-slate-900' : 'text-slate-500'}`}>
-                          {normalizedDeliveryAddress || 'Direccion de entrega'}
-                        </span>
-                        <span className="text-[11px] font-black uppercase tracking-[0.08em] text-slate-600">Mapa</span>
-                      </button>
-                      {deliveryPoint ? (
-                        <p className="text-xs font-semibold text-slate-600">
-                          Punto seleccionado: {deliveryPoint.lat.toFixed(6)}, {deliveryPoint.lng.toFixed(6)}
-                        </p>
-                      ) : (
-                        <p className="text-xs font-semibold text-amber-700">
-                          Debes seleccionar el punto exacto en el mapa.
-                        </p>
-                      )}
-                      {deliveryPoint && deliveryPointSource !== 'user' ? (
-                        <p className="text-xs font-semibold text-amber-700">
-                          Confirma el punto desde el mapa para validar tu direccion de entrega.
-                        </p>
-                      ) : null}
-                      <input
-                        type="text"
-                        value={deliveryReference}
-                        onChange={(event) => setDeliveryReference(event.target.value)}
-                        placeholder="Referencia (opcional)"
-                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none"
-                      />
-                      <textarea
-                        value={deliveryInstructions}
-                        onChange={(event) => setDeliveryInstructions(event.target.value)}
-                        placeholder="Indicaciones para entregar (opcional)"
-                        rows={3}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none"
-                      />
-                      {(!isDeliveryAddressValid || !hasDeliveryPoint) ? (
-                        <p className="text-xs font-semibold text-rose-500">Ingresa direccion valida y selecciona el punto en el mapa.</p>
-                      ) : null}
-                    </div>
-                  ) : null}
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Paso {index + 1}</p>
+                        <p className="mt-0.5 text-sm font-bold text-slate-900">{title}</p>
+                      </div>
+                    );
+                  })}
                 </div>
 
-                <div className="mt-4 space-y-2">
-                  {menuData.metodosPago.length > 0 ? (
-                    paymentMethodsByCurrency.map((group) => (
-                      <div key={`checkout-currency-${group.currency}`} className="space-y-2">
-                        <p className="px-1 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{group.currency}</p>
-                        {group.methods.map((method) => {
-                          const isSelected = selectedPaymentMethodId === method.id;
-                          const details = paymentMethodDetails(method);
+                <div className="mt-4 h-[calc(100%-164px)] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  {checkoutStep === 0 ? (
+                    <div className="space-y-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Datos del cliente</p>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                          Nombre completo
+                        </span>
+                        <input
+                          type="text"
+                          value={clientName}
+                          onChange={(event) => setClientName(event.target.value)}
+                          placeholder="Ejemplo: Maria Fernanda Lopez"
+                          className="h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                          style={{
+                            borderColor: isClientNameValid || clientName.trim().length === 0 ? '#CBD5E1' : '#F43F5E',
+                          }}
+                          required
+                        />
+                      </label>
 
-                          return (
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                          Telefono WhatsApp
+                        </span>
+                        <div
+                          className="flex h-12 overflow-hidden rounded-xl border bg-white"
+                          style={{
+                            borderColor:
+                              isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? '#CBD5E1' : '#F43F5E',
+                          }}
+                        >
+                          <select
+                            value={clientWhatsappCountry}
+                            onChange={(event) => setClientWhatsappCountry(event.target.value as '+58' | '+57' | '+1')}
+                            className="w-28 border-r border-slate-200 bg-slate-50 px-2 text-sm font-semibold text-slate-800 outline-none"
+                            aria-label="Codigo de pais"
+                          >
+                            <option value="+58">🇻🇪 VE +58</option>
+                            <option value="+57">🇨🇴 CO +57</option>
+                            <option value="+1">🇺🇸 US +1</option>
+                          </select>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            value={maskedClientWhatsapp}
+                            onChange={(event) => setClientWhatsapp(normalizePhone(event.target.value).slice(0, 10))}
+                            placeholder={clientWhatsappCountry === '+1' ? '(305) 555-1212' : '412 123 4567'}
+                            className="h-full w-full px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                            required
+                          />
+                        </div>
+                        <p className="mt-1 text-[11px] font-medium text-slate-500">
+                          Numero final: {normalizedClientWhatsapp || 'Sin completar'}
+                        </p>
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                          Correo del cliente
+                        </span>
+                        <input
+                          id="client-email"
+                          type="email"
+                          inputMode="email"
+                          autoComplete="email"
+                          placeholder="tucorreo@ejemplo.com"
+                          value={clientEmail}
+                          onChange={(event) => setClientEmail(event.target.value)}
+                          className="h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                          style={{
+                            borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? '#CBD5E1' : '#F43F5E',
+                          }}
+                          required
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {checkoutStep === 1 ? (
+                    <div className="space-y-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Logistica y entrega</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDeliveryMode('pickup')}
+                          className="rounded-full px-3 py-1.5 text-xs font-bold"
+                          style={
+                            deliveryMode === 'pickup'
+                              ? {
+                                  backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
+                                  color: 'var(--primary-color)',
+                                }
+                              : { backgroundColor: '#E2E8F0', color: '#334155' }
+                          }
+                        >
+                          Retiro
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!supportsDelivery}
+                          onClick={() => setDeliveryMode('delivery')}
+                          className="rounded-full px-3 py-1.5 text-xs font-bold"
+                          style={
+                            !supportsDelivery
+                              ? { backgroundColor: '#E2E8F0', color: '#94A3B8' }
+                              : deliveryMode === 'delivery'
+                                ? {
+                                    backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
+                                    color: 'var(--primary-color)',
+                                  }
+                                : { backgroundColor: '#E2E8F0', color: '#334155' }
+                          }
+                        >
+                          Delivery
+                        </button>
+                      </div>
+
+                      {isDeliveryOrder ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setIsMapPickerOpen(true)}
+                            className="flex h-11 w-full items-center justify-between rounded-xl border bg-white px-3 text-left text-sm text-slate-900 outline-none"
+                            style={{ borderColor: isDeliveryAddressValid ? '#CBD5E1' : '#F43F5E' }}
+                          >
+                            <span className={`${normalizedDeliveryAddress ? 'text-slate-900' : 'text-slate-500'}`}>
+                              {normalizedDeliveryAddress || 'Direccion de entrega'}
+                            </span>
+                            <span className="text-[11px] font-black uppercase tracking-[0.08em] text-slate-600">Mapa</span>
+                          </button>
+                          <input
+                            type="text"
+                            value={deliveryReference}
+                            onChange={(event) => setDeliveryReference(event.target.value)}
+                            placeholder="Referencia (opcional)"
+                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none"
+                          />
+                          <textarea
+                            value={deliveryInstructions}
+                            onChange={(event) => setDeliveryInstructions(event.target.value)}
+                            placeholder="Indicaciones para entregar (opcional)"
+                            rows={2}
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none"
+                          />
+                          {(!isDeliveryAddressValid || !hasDeliveryPoint) ? (
+                            <p className="text-xs font-semibold text-rose-500">Ingresa direccion valida y selecciona el punto en el mapa.</p>
+                          ) : (
+                            <p className="text-xs font-semibold text-emerald-700">Direccion y punto de mapa validados.</p>
+                          )}
+                        </>
+                      ) : (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                          Pedido para retiro en el local.
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {checkoutStep === 2 ? (
+                    <div className="space-y-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Pago y total final</p>
+
+                      {paymentMethodsByCurrency.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {paymentMethodsByCurrency.map((group) => (
                             <button
-                              key={method.id}
+                              key={`currency-chip-${group.currency}`}
                               type="button"
-                              onClick={() => setSelectedPaymentMethodId(method.id)}
-                              className="w-full rounded-2xl border p-3 text-left"
+                              onClick={() => setSelectedCurrency(group.currency)}
+                              className="rounded-full px-3 py-1.5 text-xs font-bold"
                               style={
-                                isSelected
+                                selectedCurrency === group.currency
                                   ? {
-                                      borderColor: 'color-mix(in srgb, var(--primary-color) 42%, white)',
-                                      backgroundColor: 'color-mix(in srgb, var(--primary-color) 10%, white)',
+                                      backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
+                                      color: 'var(--primary-color)',
                                     }
-                                  : { borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' }
+                                  : { backgroundColor: '#E2E8F0', color: '#334155' }
                               }
                             >
-                              <p className="text-sm font-bold text-slate-900">{paymentMethodLabel(method)}</p>
-                              {details.length > 0 ? (
-                                <div className="mt-1 space-y-1">
-                                  {details.slice(0, 3).map((detail, index) => (
-                                    <p key={`${method.id}-${index}`} className="text-xs text-slate-600">{detail}</p>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="mt-1 text-xs text-slate-500">Sin datos adicionales.</p>
-                              )}
+                              {group.currency}
                             </button>
-                          );
-                        })}
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {selectedCurrencyGroup?.methods.length ? (
+                        <div className="space-y-2">
+                          {selectedCurrencyGroup.methods.map((method) => {
+                            const isSelected = selectedPaymentMethodId === method.id;
+                            const details = paymentMethodDetails(method);
+                            return (
+                              <button
+                                key={method.id}
+                                type="button"
+                                onClick={() => setSelectedPaymentMethodId(method.id)}
+                                className="w-full rounded-2xl border p-3 text-left"
+                                style={
+                                  isSelected
+                                    ? {
+                                        borderColor: 'color-mix(in srgb, var(--primary-color) 42%, white)',
+                                        backgroundColor: 'color-mix(in srgb, var(--primary-color) 10%, white)',
+                                      }
+                                    : { borderColor: '#E2E8F0', backgroundColor: '#FFFFFF' }
+                                }
+                              >
+                                <p className="text-sm font-bold text-slate-900">{paymentMethodLabel(method)}</p>
+                                {details.length > 0 ? (
+                                  <p className="mt-1 text-xs text-slate-600">{details.slice(0, 2).join(' · ')}</p>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
+                          Este comercio no tiene metodos de pago configurados.
+                        </div>
+                      )}
+
+                      {isCashPayment ? (
+                        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                              ¿Con cuanto pagaras? (Opcional)
+                            </span>
+                            <input
+                              type="number"
+                              min={0}
+                              step="100"
+                              value={cashPaymentInput}
+                              onChange={(event) => setCashPaymentInput(event.target.value)}
+                              placeholder="Ejemplo: 100000"
+                              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none"
+                            />
+                          </label>
+                          {changeAmount > 0 ? (
+                            <p className="mt-2 text-xs font-semibold text-emerald-700">
+                              Tu cambio sera de: {formatCop(changeAmount)}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {isDigitalPayment ? (
+                        <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3">
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                              Referencia (ultimos 4 digitos)
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={4}
+                              value={paymentReferenceLast4}
+                              onChange={(event) => setDigitalPaymentReference(normalizePhone(event.target.value).slice(0, 4))}
+                              placeholder="1234"
+                              className="h-11 w-full rounded-xl border bg-white px-4 text-sm text-slate-900 outline-none"
+                              style={{ borderColor: isPaymentReferenceValid || !digitalPaymentReference ? '#CBD5E1' : '#F43F5E' }}
+                              required
+                            />
+                          </label>
+
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                              Cargar comprobante
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              id="payment-proof-upload"
+                              onChange={(event) => {
+                                const selected = event.target.files?.[0] ?? null;
+                                setPaymentProofFile(selected);
+                              }}
+                            />
+                            <label
+                              htmlFor="payment-proof-upload"
+                              className="inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700"
+                            >
+                              {paymentProofFile ? `Comprobante: ${paymentProofFile.name}` : 'Seleccionar captura'}
+                            </label>
+                          </label>
+                        </div>
+                      ) : null}
+
+                      <div>
+                        <label htmlFor="order-notes" className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                          Notas del pedido
+                        </label>
+                        <textarea
+                          id="order-notes"
+                          value={orderNotes}
+                          onChange={(event) => setOrderNotes(event.target.value)}
+                          placeholder="Ejemplo: sin cebolla, tocar timbre"
+                          rows={2}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 outline-none"
+                        />
                       </div>
-                    ))
-                  ) : (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                      Este comercio no tiene metodos de pago configurados. El pedido se enviara sin metodo seleccionado.
+
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p className="flex items-center justify-between text-sm text-slate-700">
+                          <span>Subtotal</span>
+                          <span className="font-semibold">{formatCop(orderSubtotal)}</span>
+                        </p>
+                        {isDeliveryOrder ? (
+                          <p className="mt-1 flex items-center justify-between text-sm text-slate-700">
+                            <span>Costo de envio</span>
+                            <span className="font-semibold">{formatCop(deliveryCost)}</span>
+                          </p>
+                        ) : null}
+                        <p className="mt-2 flex items-center justify-between border-t border-slate-200 pt-2 text-sm font-semibold text-slate-900">
+                          <span>Total en {selectedCurrency || 'COP'}</span>
+                          <span style={titleFontStyle}>{formatAmountByCurrency(orderGrandTotal, selectedCurrency || 'COP')}</span>
+                        </p>
+                      </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Resumen</p>
-                  <div className="mt-2 space-y-1">
-                    {cartItems.slice(0, 4).map((item) => (
-                      <p key={item.product.id} className="flex items-center justify-between gap-2 text-sm text-slate-700">
-                        <span className="truncate">{item.quantity} x {item.product.nombre}</span>
-                        <span className="font-semibold">{formatCop((item.product.precio ?? 0) * item.quantity)}</span>
-                      </p>
-                    ))}
+                {checkoutError ? (
+                  <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                    {checkoutError}
                   </div>
-                  {cartItems.length > 4 ? (
-                    <p className="mt-1 text-xs text-slate-500">+ {cartItems.length - 4} productos adicionales</p>
-                  ) : null}
-                </div>
-
-                <div className="mt-4">
-                  <label htmlFor="order-notes" className="mb-2 block text-sm font-semibold text-slate-700">
-                    Notas del pedido
-                  </label>
-                  <textarea
-                    id="order-notes"
-                    value={orderNotes}
-                    onChange={(event) => setOrderNotes(event.target.value)}
-                    placeholder="Ejemplo: sin cebolla, tocar timbre, entregar en porteria"
-                    rows={3}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                  />
-                </div>
-
-                <div className="mt-4 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total</span>
-                  <strong className="text-xl font-black" style={titleFontStyle}>{formatCop(cartTotal)}</strong>
-                </div>
-
-                <div className="mt-4">
-                  <label htmlFor="client-email" className="mb-2 block text-sm font-semibold text-slate-700">
-                    Correo del cliente
-                  </label>
-                  <input
-                    id="client-email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    placeholder="tucorreo@ejemplo.com"
-                    value={clientEmail}
-                    onChange={(event) => setClientEmail(event.target.value)}
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none placeholder:text-slate-400 focus:ring-2"
-                    style={{
-                      borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? '#CBD5E1' : '#F43F5E',
-                      boxShadow: 'none',
-                    }}
-                  />
-                  <p className="mt-2 text-xs text-slate-500">Recibiras por correo el enlace de seguimiento del pedido.</p>
-                  {clientEmail.trim().length > 0 && !isClientEmailValid ? (
-                    <p className="mt-1 text-xs font-semibold text-rose-500">Ingresa un correo valido para continuar.</p>
-                  ) : null}
-                </div>
+                ) : null}
               </div>
 
               <div className="border-t border-slate-200 bg-white px-4 py-3 sm:px-6">
-                <button
-                  type="button"
-                  onClick={() => void confirmOrder()}
-                  disabled={isSubmittingOrder || !canSubmitCheckout}
-                  className="w-full rounded-full px-5 py-3 text-sm font-black uppercase tracking-[0.08em]"
-                  style={
-                    isSubmittingOrder || !canSubmitCheckout
-                      ? { backgroundColor: '#E2E8F0', color: '#64748B' }
-                      : {
-                          borderRadius: 'var(--border-radius)',
-                          backgroundColor: 'var(--primary-color)',
-                          color: 'var(--text-on-primary)',
-                        }
-                  }
-                >
-                  {isSubmittingOrder
-                    ? 'Procesando...'
-                    : !receivesOrdersOnWhatsapp
-                      ? 'Pedidos por WhatsApp desactivados'
-                      : 'Enviar pedido por WhatsApp'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={goToPreviousStep}
+                    disabled={checkoutStep === 0 || isSubmittingOrder}
+                    className="h-11 min-w-28 rounded-full border border-slate-300 px-4 text-sm font-bold text-slate-700 disabled:opacity-45"
+                  >
+                    Anterior
+                  </button>
+
+                  {checkoutStep < 2 ? (
+                    <button
+                      type="button"
+                      onClick={goToNextStep}
+                      disabled={isSubmittingOrder}
+                      className="h-11 flex-1 rounded-full px-5 text-sm font-black uppercase tracking-[0.08em]"
+                      style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                    >
+                      Siguiente
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void confirmOrder()}
+                      disabled={isSubmittingOrder || !canSubmitCheckout}
+                      className="h-11 flex-1 rounded-full px-5 text-sm font-black uppercase tracking-[0.08em]"
+                      style={
+                        isSubmittingOrder || !canSubmitCheckout
+                          ? { backgroundColor: '#E2E8F0', color: '#64748B' }
+                          : { backgroundColor: '#FF7A00', color: '#FFFFFF' }
+                      }
+                    >
+                      {isSubmittingOrder ? 'Procesando...' : 'Confirmar pedido'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </section>
+        ) : null}
+
+        {whatsappNumber ? (
+          <a
+            href={`https://wa.me/${whatsappNumber}?text=${encodeURIComponent('Hola, estoy viendo su menú y tengo una duda...')}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="fixed bottom-24 right-4 z-[58] inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-lg shadow-[#25D366]/35 transition hover:scale-[1.03] sm:bottom-6 sm:right-6"
+            aria-label="Soporte por WhatsApp"
+            title="Soporte por WhatsApp"
+          >
+            <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden="true" focusable="false">
+              <path
+                fill="#FFFFFF"
+                d="M19.11 17.21c-.28-.14-1.65-.82-1.9-.91-.26-.1-.44-.14-.63.14-.19.28-.72.91-.89 1.1-.17.19-.33.21-.61.07-.28-.14-1.17-.43-2.23-1.36-.82-.73-1.37-1.63-1.53-1.91-.16-.28-.02-.44.12-.58.12-.12.28-.33.42-.49.14-.17.19-.28.28-.47.09-.19.05-.35-.02-.49-.07-.14-.63-1.51-.86-2.07-.23-.55-.46-.47-.63-.48h-.53c-.19 0-.49.07-.75.35-.26.28-.98.96-.98 2.35 0 1.39 1 2.74 1.14 2.93.14.19 1.96 3 4.74 4.2.66.29 1.18.46 1.58.59.67.21 1.28.18 1.76.11.54-.08 1.65-.67 1.89-1.32.23-.66.23-1.22.16-1.33-.07-.12-.25-.19-.53-.33z"
+              />
+              <path
+                fill="#FFFFFF"
+                d="M16 3C8.82 3 3 8.82 3 16c0 2.29.6 4.54 1.74 6.52L3 29l6.65-1.73A12.95 12.95 0 0 0 16 29c7.18 0 13-5.82 13-13S23.18 3 16 3zm0 23.6c-2.03 0-4.03-.55-5.77-1.58l-.41-.24-3.95 1.03 1.06-3.86-.27-.4A10.62 10.62 0 0 1 5.4 16C5.4 10.14 10.14 5.4 16 5.4S26.6 10.14 26.6 16 21.86 26.6 16 26.6z"
+              />
+            </svg>
+          </a>
         ) : null}
       </main>
     </>

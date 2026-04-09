@@ -18,8 +18,24 @@ function isUuid(value: string) {
 type CreateOrderPayload = {
   comercioId?: string;
   clientEmail?: string;
+  clientName?: string;
+  clientWhatsapp?: string;
   comercioNombre?: string;
   items?: unknown;
+  costoDelivery?: number;
+  delivery?: {
+    mode?: 'pickup' | 'delivery';
+    address?: string;
+    reference?: string;
+    instructions?: string;
+    coordinates?: { lat?: number; lng?: number } | null;
+  };
+  paymentMethod?: {
+    id?: string;
+    nombre?: string;
+    datos?: string[];
+  } | null;
+  orderNotes?: string;
 };
 
 export async function POST(request: Request) {
@@ -28,7 +44,13 @@ export async function POST(request: Request) {
 
     const comercioId = decodeURIComponent(body.comercioId ?? '').trim();
     const clientEmail = (body.clientEmail ?? '').trim().toLowerCase();
+    const clientName = (body.clientName ?? '').trim();
+    const clientWhatsapp = (body.clientWhatsapp ?? '').trim();
     const comercioNombre = (body.comercioNombre ?? 'Kosmenu').trim() || 'Kosmenu';
+    const costoDelivery = Number(body.costoDelivery ?? 0);
+    const delivery = body.delivery ?? { mode: 'pickup' as const };
+    const paymentMethod = body.paymentMethod ?? null;
+    const orderNotes = (body.orderNotes ?? '').trim();
 
     if (!comercioId) {
       return NextResponse.json({ error: 'Invalid comercioId.' }, { status: 400 });
@@ -39,7 +61,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Order items are required.' }, { status: 400 });
     }
 
-    const total = calculateTotal(items);
+    if (clientName.length < 3) {
+      return NextResponse.json({ error: 'Client name is required.' }, { status: 400 });
+    }
+
+    if (clientWhatsapp.replace(/\D/g, '').length < 10) {
+      return NextResponse.json({ error: 'Client WhatsApp is required.' }, { status: 400 });
+    }
+
+    const subtotal = calculateTotal(items);
+    const total = subtotal + (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
     const supabase = getServerSupabaseClient();
 
     const comercioQuery = supabase
@@ -63,7 +94,14 @@ export async function POST(request: Request) {
 
     const detalles = {
       order_id: orderId,
+      cliente_nombre: clientName,
       cliente_email: clientEmail,
+      telefono_cliente: clientWhatsapp,
+      metodo_pago: paymentMethod,
+      delivery,
+      order_notes: orderNotes,
+      subtotal,
+      costo_delivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
       items,
       total,
     };
@@ -72,23 +110,15 @@ export async function POST(request: Request) {
       comercio_id: resolvedComercioId,
       estado: 'pendiente',
       total,
+      costo_delivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
+      nombre_cliente: clientName,
+      telefono_cliente: clientWhatsapp,
       detalles,
       cliente_email: clientEmail,
     };
 
-    let insertError: any = null;
     const insertResult = await supabase.from('pedidos').insert(payload);
-    insertError = insertResult.error;
-
-    if (insertError?.message?.toLowerCase().includes('cliente_email')) {
-      const fallbackResult = await supabase.from('pedidos').insert({
-        comercio_id: resolvedComercioId,
-        estado: 'pendiente',
-        total,
-        detalles,
-      });
-      insertError = fallbackResult.error;
-    }
+    const insertError = insertResult.error;
 
     if (insertError) {
       throw new Error(insertError.message ?? 'Failed to create order.');
@@ -117,6 +147,8 @@ export async function POST(request: Request) {
         data: {
           orderId,
           comercioId: resolvedComercioId,
+          subtotal,
+          costoDelivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
           total,
           trackingUrl,
           emailStatus,

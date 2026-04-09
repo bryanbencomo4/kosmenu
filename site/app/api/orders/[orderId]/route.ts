@@ -44,7 +44,7 @@ export async function GET(_: Request, { params }: Params) {
     if (order.comercio_id) {
       const comercioResult = await supabase
         .from('comercios')
-        .select('id,nombre')
+        .select('id,nombre,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular')
         .eq('id', order.comercio_id)
         .maybeSingle();
 
