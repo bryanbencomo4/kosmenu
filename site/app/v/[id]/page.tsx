@@ -355,11 +355,6 @@ function comercioInitial(name: string | null | undefined) {
   return clean.length > 0 ? clean.slice(0, 1).toUpperCase() : 'K';
 }
 
-function orderIdFrom(comercioId: string) {
-  const safeComercioId = comercioId.trim() || 'kosmenu';
-  return `${safeComercioId}-${Date.now()}`;
-}
-
 function paymentMethodLabel(method: MetodoPagoRow) {
   return method.nombre?.trim() || method.tipo?.trim() || method.banco?.trim() || 'Metodo de pago';
 }
@@ -412,6 +407,52 @@ function paymentMethodCurrency(method: MetodoPagoRow) {
   }
 
   return 'SIN MONEDA';
+}
+
+function parseExchangeRate(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  const raw = (value ?? '').toString().trim().replace(',', '.');
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function paymentMethodExchangeRate(method: MetodoPagoRow) {
+  const directRate =
+    parseExchangeRate((method as any).exchange_rate) ??
+    parseExchangeRate((method as any).tasa_cambio) ??
+    parseExchangeRate((method as any).rate);
+  if (directRate) return directRate;
+
+  const detalles = (method.detalles ?? '').toString().trim();
+  if (detalles.startsWith('{') && detalles.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(detalles) as Record<string, unknown>;
+      return (
+        parseExchangeRate(parsed.exchange_rate) ??
+        parseExchangeRate(parsed.tasa_cambio) ??
+        parseExchangeRate(parsed.rate)
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function normalizeCurrencyCode(value: string | null | undefined) {
+  const code = (value ?? '').trim().toUpperCase();
+  if (!code || code === 'SIN MONEDA') return 'COP';
+  return code;
+}
+
+function convertFromCop(amountInCop: number, currency: string, exchangeRate: number) {
+  const safeAmount = Number.isFinite(amountInCop) ? amountInCop : 0;
+  const normalizedCurrency = normalizeCurrencyCode(currency);
+  const safeRate = Number.isFinite(exchangeRate) && exchangeRate > 0 ? exchangeRate : 1;
+  if (normalizedCurrency === 'COP') return safeAmount;
+  return safeAmount / safeRate;
 }
 
 function menuGridClass(layoutType: 'list' | 'grid' | 'compact', itemsPerRow: number) {
@@ -1006,22 +1047,41 @@ export default function PublicMenuPage() {
   const normalizedClientEmail = clientEmail.trim().toLowerCase();
   const isClientNameValid = normalizedClientName.length >= 3;
   const isClientWhatsappValid = normalizedClientWhatsapp.length >= 10;
-  const isClientEmailValid = emailRegex.test(normalizedClientEmail);
+  const isClientEmailValid = normalizedClientEmail.length === 0 || emailRegex.test(normalizedClientEmail);
   const deliveryCostBase = toNumberOrNull(menuData?.comercio.costo_envio) ?? 0;
   const deliveryCost = isDeliveryOrder ? Math.max(0, deliveryCostBase) : 0;
   const orderSubtotal = cartTotal;
   const orderGrandTotal = orderSubtotal + deliveryCost;
   const paymentMethodsByCurrency = useMemo(() => {
-    const grouped = new Map<string, MetodoPagoRow[]>();
+    const grouped = new Map<string, { methods: MetodoPagoRow[]; exchangeRate: number | null }>();
     for (const method of menuData?.metodosPago ?? []) {
-      const currency = paymentMethodCurrency(method);
-      const list = grouped.get(currency) ?? [];
-      list.push(method);
-      grouped.set(currency, list);
+      const currency = normalizeCurrencyCode(paymentMethodCurrency(method));
+      const entry = grouped.get(currency) ?? { methods: [], exchangeRate: null };
+      entry.methods.push(method);
+      if (entry.exchangeRate === null) {
+        entry.exchangeRate = paymentMethodExchangeRate(method);
+      }
+      grouped.set(currency, entry);
     }
-    return Array.from(grouped.entries()).map(([currency, methods]) => ({ currency, methods }));
+    return Array.from(grouped.entries()).map(([currency, value]) => ({
+      currency,
+      methods: value.methods,
+      exchangeRate: value.exchangeRate ?? 1,
+    }));
   }, [menuData?.metodosPago]);
-  const selectedCurrencyGroup = paymentMethodsByCurrency.find((group) => group.currency === selectedCurrency) ?? null;
+  const selectedCurrencyGroup =
+    paymentMethodsByCurrency.find((group) => group.currency === normalizeCurrencyCode(selectedCurrency)) ?? null;
+  const selectedCurrencyCode = normalizeCurrencyCode(selectedCurrency || selectedCurrencyGroup?.currency || 'COP');
+  const selectedExchangeRate =
+    selectedCurrencyCode === 'COP'
+      ? 1
+      : Number.isFinite(selectedCurrencyGroup?.exchangeRate)
+        ? Math.max(1, Number(selectedCurrencyGroup?.exchangeRate))
+        : 1;
+  const orderSubtotalConverted = convertFromCop(orderSubtotal, selectedCurrencyCode, selectedExchangeRate);
+  const deliveryCostConverted = convertFromCop(deliveryCost, selectedCurrencyCode, selectedExchangeRate);
+  const orderGrandTotalConverted = convertFromCop(orderGrandTotal, selectedCurrencyCode, selectedExchangeRate);
+  const cartTotalConverted = convertFromCop(cartTotal, selectedCurrencyCode, selectedExchangeRate);
   const checkoutStepTitles = ['Cliente', 'Logistica', 'Pago'];
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
@@ -1032,8 +1092,8 @@ export default function PublicMenuPage() {
   const hasPaymentProof = !isDigitalPayment || paymentProofFile !== null;
   const paymentWithAmount = toNumberOrNull(cashPaymentInput);
   const changeAmount =
-    isCashPayment && paymentWithAmount !== null && paymentWithAmount > orderGrandTotal
-      ? paymentWithAmount - orderGrandTotal
+    isCashPayment && paymentWithAmount !== null && paymentWithAmount > orderGrandTotalConverted
+      ? paymentWithAmount - orderGrandTotalConverted
       : 0;
   const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
   const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
@@ -1462,13 +1522,13 @@ export default function PublicMenuPage() {
   }
 
   async function persistOrderRequired(
-    orderId: string,
     email: string,
     customerName: string,
     customerWhatsapp: string,
     paymentMethod: MetodoPagoRow | null,
     paymentMeta: {
       currency: string;
+      exchangeRate: number;
       referenceLast4: string;
       proofFile: File | null;
     },
@@ -1489,7 +1549,6 @@ export default function PublicMenuPage() {
     });
 
     const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : 'No especificado';
-    const orderUrl = `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`;
     let paymentProofUrl = '';
 
     if (paymentMeta.proofFile) {
@@ -1511,12 +1570,22 @@ export default function PublicMenuPage() {
       paymentProofUrl = proofPublicData?.publicUrl ?? '';
     }
 
+    const subtotalConverted = convertFromCop(orderSubtotal, paymentMeta.currency, paymentMeta.exchangeRate);
+    const deliveryConverted = convertFromCop(deliveryCost, paymentMeta.currency, paymentMeta.exchangeRate);
+    const totalConverted = convertFromCop(orderGrandTotal, paymentMeta.currency, paymentMeta.exchangeRate);
+    const orderItems = cartItems.map((item) => ({
+      product_id: item.product.id,
+      nombre: item.product.nombre,
+      cantidad: item.quantity,
+      precio: item.product.precio ?? 0,
+    }));
+
     const detalles = {
-      order_id: orderId,
       cliente_nombre: customerName,
-      cliente_email: email,
+      cliente_email: email || null,
       telefono_cliente: customerWhatsapp,
-      moneda_checkout: paymentMeta.currency,
+      moneda_checkout: normalizeCurrencyCode(paymentMeta.currency),
+      tasa_cambio_snapshot: paymentMeta.exchangeRate,
       metodo_pago: paymentMethod
         ? {
             id: paymentMethod.id,
@@ -1531,31 +1600,86 @@ export default function PublicMenuPage() {
       pago_con: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
       cambio_de: isCashPayment && changeAmount > 0 ? changeAmount : 0,
       subtotal: orderSubtotal,
+      subtotal_moneda_checkout: subtotalConverted,
       costo_delivery: deliveryCost,
+      costo_delivery_moneda_checkout: deliveryConverted,
       total: orderGrandTotal,
-      items: cartItems.map((item) => ({
-        product_id: item.product.id,
-        nombre: item.product.nombre,
-        cantidad: item.quantity,
-        precio: item.product.precio ?? 0,
-      })),
+      total_moneda_checkout: totalConverted,
+      items: orderItems,
     };
 
-    const payload = {
-      comercio_id: resolvedComercioId,
-      estado: 'pendiente',
-      total: orderGrandTotal,
-      costo_delivery: deliveryCost,
-      nombre_cliente: customerName,
-      telefono_cliente: customerWhatsapp,
-      detalles,
-      cliente_email: email,
-    };
+    const response = await fetch('/api/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        comercioId: resolvedComercioId,
+        comercioNombre,
+        clientName: customerName,
+        clientWhatsapp: customerWhatsapp,
+        clientEmail: email,
+        currency: normalizeCurrencyCode(paymentMeta.currency),
+        exchangeRate: paymentMeta.exchangeRate,
+        costoDelivery: deliveryCost,
+        items: orderItems,
+        delivery,
+        paymentMethod: paymentMethod
+          ? {
+              id: paymentMethod.id,
+              nombre: paymentLabel,
+              datos: paymentMethodDetails(paymentMethod),
+            }
+          : null,
+        paymentReferenceLast4: paymentMeta.referenceLast4 || null,
+        paymentProofUrl: paymentProofUrl || null,
+        cashPaymentAmount: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
+        cashChangeAmount: isCashPayment && changeAmount > 0 ? changeAmount : 0,
+        orderNotes: normalizedOrderNotes,
+        detalles,
+      }),
+    });
 
-    const { error: insertError } = await supabase.from('pedidos').insert(payload);
-    if (insertError) {
-      throw new Error(insertError.message || 'No se pudo guardar el pedido.');
+    const responsePayload = await response.json().catch(() => ({}));
+    if (!response.ok || !responsePayload?.ok || !responsePayload?.data?.orderId) {
+      const validationDetails = Array.isArray(responsePayload?.details)
+        ? responsePayload.details
+        : [];
+
+      let message = responsePayload?.error ?? 'No se pudo guardar el pedido.';
+      if (response.status === 400 && validationDetails.length > 0) {
+        const fieldMessages = validationDetails.map((detail: any) => {
+          const path = (detail?.path ?? '').toString();
+          if (path.includes('telefono_cliente')) {
+            return 'Por favor verifica tu numero de telefono/WhatsApp.';
+          }
+          if (path.includes('delivery.address')) {
+            return 'La direccion de entrega es obligatoria para pedidos delivery.';
+          }
+          if (path.includes('delivery.coordinates')) {
+            return 'Debes seleccionar el punto de entrega en el mapa.';
+          }
+          if (path.includes('items')) {
+            return 'Tu carrito tiene productos invalidos. Vuelve a revisar el pedido.';
+          }
+          if (path.includes('moneda_checkout') || path.includes('tasa_cambio_snapshot')) {
+            return 'Hubo un problema con la moneda seleccionada. Intenta nuevamente.';
+          }
+          return (detail?.message ?? '').toString().trim();
+        }).filter(Boolean);
+
+        if (fieldMessages.length > 0) {
+          message = Array.from(new Set(fieldMessages)).join(' ');
+        }
+      }
+      throw new Error(message);
     }
+
+    const orderId = responsePayload.data.orderId.toString().trim();
+    const orderUrl =
+      (responsePayload?.data?.trackingUrl ?? `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`)
+        .toString()
+        .trim();
 
     const message =
       `Hola, quiero confirmar este pedido.\n` +
@@ -1575,21 +1699,24 @@ export default function PublicMenuPage() {
         : '') +
       (normalizedOrderNotes ? `Notas del pedido: ${normalizedOrderNotes}.\n` : '') +
       `Metodo de pago: ${paymentLabel}.\n` +
-      `Correo del cliente: ${email}.\n` +
+      (email ? `Correo del cliente: ${email}.\n` : '') +
+      `Moneda seleccionada: ${normalizeCurrencyCode(paymentMeta.currency)}.\n` +
+      (paymentMeta.exchangeRate > 1 ? `Tasa aplicada: ${paymentMeta.exchangeRate}.\n` : '') +
       (paymentMeta.referenceLast4 ? `Referencia digital: ****${paymentMeta.referenceLast4}.\n` : '') +
       (paymentProofUrl ? `Comprobante: ${paymentProofUrl}.\n` : '') +
-      `Subtotal: ${formatCop(orderSubtotal)}.\n` +
-      (deliveryCost > 0 ? `Delivery: ${formatCop(deliveryCost)}.\n` : '') +
+      `Subtotal: ${formatAmountByCurrency(subtotalConverted, paymentMeta.currency)}.\n` +
+      (deliveryCost > 0 ? `Delivery: ${formatAmountByCurrency(deliveryConverted, paymentMeta.currency)}.\n` : '') +
       (isCashPayment && paymentWithAmount !== null
-        ? `Pago con: ${formatCop(paymentWithAmount)}.\n`
+        ? `Pago con: ${formatAmountByCurrency(paymentWithAmount, paymentMeta.currency)}.\n`
         : '') +
       (isCashPayment && changeAmount > 0
-        ? `Cambio: ${formatCop(changeAmount)}.\n`
+        ? `Cambio: ${formatAmountByCurrency(changeAmount, paymentMeta.currency)}.\n`
         : '') +
-      `Total: ${formatCop(orderGrandTotal)}.\n` +
+      `Total: ${formatAmountByCurrency(totalConverted, paymentMeta.currency)}.\n` +
       `Seguimiento: ${orderUrl}`;
 
     return {
+      orderId,
       orderUrl,
       waUrl: whatsappNumber
         ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
@@ -1627,15 +1754,14 @@ export default function PublicMenuPage() {
     setIsSubmittingOrder(true);
     setCheckoutError(null);
     try {
-      const orderId = orderIdFrom(resolvedComercioId);
       const persisted = await persistOrderRequired(
-        orderId,
         normalizedClientEmail,
         normalizedClientName,
         normalizedClientWhatsapp,
         selectedMethod,
         {
-          currency: selectedCurrency || 'COP',
+          currency: selectedCurrencyCode,
+          exchangeRate: selectedExchangeRate,
           referenceLast4: paymentReferenceLast4,
           proofFile: paymentProofFile,
         },
@@ -1644,9 +1770,9 @@ export default function PublicMenuPage() {
 
       if (typeof window !== 'undefined') {
         if (persisted.waUrl) {
-          window.sessionStorage.setItem(`order-wa:${orderId}`, persisted.waUrl);
+          window.sessionStorage.setItem(`order-wa:${persisted.orderId}`, persisted.waUrl);
         }
-        window.sessionStorage.setItem(`order-tracking:${orderId}`, persisted.orderUrl);
+        window.sessionStorage.setItem(`order-tracking:${persisted.orderId}`, persisted.orderUrl);
         window.localStorage.setItem(
           checkoutDraftStorageKey,
           JSON.stringify({
@@ -1672,7 +1798,7 @@ export default function PublicMenuPage() {
       setDeliveryMode('pickup');
       setCheckoutStep(0);
       setIsConfirmOpen(false);
-      router.push(`/orders/${encodeURIComponent(orderId)}`);
+      router.push(`/orders/${encodeURIComponent(persisted.orderId)}`);
     } catch (persistError) {
       const message =
         persistError instanceof Error
@@ -1686,7 +1812,7 @@ export default function PublicMenuPage() {
 
   function goToNextStep() {
     if (checkoutStep === 0 && !canGoNextFromStep1) {
-      setCheckoutError('Completa nombre, telefono y correo para continuar.');
+      setCheckoutError('Completa nombre y telefono. Si agregas correo, valida el formato para continuar.');
       return;
     }
     if (checkoutStep === 1 && !canGoNextFromStep2) {
@@ -1864,6 +1990,24 @@ export default function PublicMenuPage() {
                 ))}
               </div>
             </div>
+
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Moneda global</p>
+              <select
+                value={selectedCurrencyCode}
+                onChange={(event) => setSelectedCurrency(normalizeCurrencyCode(event.target.value))}
+                className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none"
+              >
+                {(paymentMethodsByCurrency.length > 0
+                  ? paymentMethodsByCurrency.map((group) => group.currency)
+                  : ['COP']
+                ).map((currency) => (
+                  <option key={`global-currency-${currency}`} value={currency}>
+                    {currency}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="mt-5 pb-40">
@@ -1946,7 +2090,10 @@ export default function PublicMenuPage() {
                                       color: 'var(--primary-color)',
                                     }}
                                   >
-                                    {formatCop(producto.precio)}
+                                    {formatAmountByCurrency(
+                                      convertFromCop(producto.precio ?? 0, selectedCurrencyCode, selectedExchangeRate),
+                                      selectedCurrencyCode,
+                                    )}
                                   </span>
 
                                   <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white p-1">
@@ -1989,7 +2136,7 @@ export default function PublicMenuPage() {
                   {cartCount} producto{cartCount === 1 ? '' : 's'}
                 </p>
                 <p className="text-2xl font-black" style={titleFontStyle}>
-                  {formatCop(cartTotal)}
+                  {formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
                 </p>
               </div>
               <button
@@ -2507,7 +2654,7 @@ export default function PublicMenuPage() {
 
                       <label className="block">
                         <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Correo del cliente
+                          Correo del cliente (opcional)
                         </span>
                         <input
                           id="client-email"
@@ -2521,8 +2668,10 @@ export default function PublicMenuPage() {
                           style={{
                             borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? '#CBD5E1' : '#F43F5E',
                           }}
-                          required
                         />
+                        {clientEmail.trim().length > 0 && !isClientEmailValid ? (
+                          <p className="mt-1 text-[11px] font-medium text-rose-500">Ingresa un correo valido o deja el campo vacio.</p>
+                        ) : null}
                       </label>
                     </div>
                   ) : null}
@@ -2629,6 +2778,7 @@ export default function PublicMenuPage() {
                               }
                             >
                               {group.currency}
+                              {group.currency !== 'COP' && group.exchangeRate > 1 ? ` (1 ${group.currency} = ${group.exchangeRate} COP)` : ''}
                             </button>
                           ))}
                         </div>
@@ -2686,7 +2836,7 @@ export default function PublicMenuPage() {
                           </label>
                           {changeAmount > 0 ? (
                             <p className="mt-2 text-xs font-semibold text-emerald-700">
-                              Tu cambio sera de: {formatCop(changeAmount)}
+                              Tu cambio sera de: {formatAmountByCurrency(changeAmount, selectedCurrencyCode)}
                             </p>
                           ) : null}
                         </div>
@@ -2752,18 +2902,23 @@ export default function PublicMenuPage() {
                       <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
                         <p className="flex items-center justify-between text-sm text-slate-700">
                           <span>Subtotal</span>
-                          <span className="font-semibold">{formatCop(orderSubtotal)}</span>
+                          <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
                         </p>
                         {isDeliveryOrder ? (
                           <p className="mt-1 flex items-center justify-between text-sm text-slate-700">
                             <span>Costo de envio</span>
-                            <span className="font-semibold">{formatCop(deliveryCost)}</span>
+                            <span className="font-semibold">{formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}</span>
                           </p>
                         ) : null}
                         <p className="mt-2 flex items-center justify-between border-t border-slate-200 pt-2 text-sm font-semibold text-slate-900">
-                          <span>Total en {selectedCurrency || 'COP'}</span>
-                          <span style={titleFontStyle}>{formatAmountByCurrency(orderGrandTotal, selectedCurrency || 'COP')}</span>
+                          <span>Total en {selectedCurrencyCode}</span>
+                          <span style={titleFontStyle}>{formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}</span>
                         </p>
+                        {selectedCurrencyCode !== 'COP' ? (
+                          <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                            Tasa snapshot usada: {selectedExchangeRate} COP por 1 {selectedCurrencyCode}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   ) : null}
@@ -2809,10 +2964,13 @@ export default function PublicMenuPage() {
                           : { backgroundColor: '#FF7A00', color: '#FFFFFF' }
                       }
                     >
-                      {isSubmittingOrder ? 'Procesando...' : 'Confirmar pedido'}
+                      {isSubmittingOrder ? 'Guardando pedido...' : 'Confirmar pedido'}
                     </button>
                   )}
                 </div>
+                {isSubmittingOrder ? (
+                  <p className="mt-2 text-center text-xs font-semibold text-slate-500">Estamos guardando tu pedido. No cierres esta ventana.</p>
+                ) : null}
               </div>
             </div>
           </section>

@@ -2,11 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Flutter (ABR LX3)",
+      "name": "Flutter (Selected Device)",
       "request": "launch",
       "type": "dart",
       "program": "lib/main.dart",
-      "deviceId": "A76XUT5423002846",
       "toolArgs": [
         "--dart-define=SUPABASE_ANON_KEY=${env:SUPABASE_ANON_KEY}"
       ],
@@ -16,6 +15,26 @@
         "ANDROID_HOME": "${env:LOCALAPPDATA}/Android/Sdk",
         "PATH": "C:/Program Files/Android/Android Studio/jbr/bin;${env:LOCALAPPDATA}/Android/Sdk/platform-tools;${env:LOCALAPPDATA}/Android/Sdk/cmdline-tools/latest/bin;${env:PATH}"
       }
+    },
+    {
+      "name": "Flutter (ABR LX3)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "A76XUT5423002846",
+      "toolArgs": [
+        "--dart-define=SUPABASE_ANON_KEY=${env:SUPABASE_ANON_KEY}"
+      ]
+    },
+    {
+      "name": "Flutter (Android Emulator)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "emulator-5554",
+      "toolArgs": [
+        "--dart-define=SUPABASE_ANON_KEY=${env:SUPABASE_ANON_KEY}"
+      ]
     }
   ]
 }

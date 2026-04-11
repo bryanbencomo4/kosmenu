@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -645,7 +644,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       height.toInt(),
     );
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+    return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
   }
 
   Future<BitmapDescriptor> _buildDeliveryMarkerIcon() async {
@@ -703,7 +702,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       size.toInt(),
     );
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+    return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
   }
 
   Future<ui.Image?> _decodeUiImage(Uint8List bytes, {int size = 116}) async {
@@ -920,7 +919,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     ? <Polyline>{
                         Polyline(
                           polylineId: const PolylineId('route_shadow'),
-                          color: Colors.grey.withOpacity(0.3),
+                          color: Colors.grey.withValues(alpha: 0.3),
                           width: 2,
                           zIndex: 1,
                           points: arcShadowPoints,

@@ -42,9 +42,24 @@ type PedidoRow = {
     cliente_nombre?: string;
     cliente_email?: string;
     telefono_cliente?: string;
+    moneda_checkout?: string;
+    tasa_cambio_snapshot?: number;
     subtotal?: number;
+    subtotal_moneda_checkout?: number;
     costo_delivery?: number;
+    costo_delivery_moneda_checkout?: number;
     total?: number;
+    total_moneda_checkout?: number;
+    referencia_pago?: string;
+    comprobante_url?: string;
+    order_notes?: string;
+    pago_con?: number;
+    cambio_de?: number;
+    metodo_pago?: {
+      id?: string;
+      nombre?: string;
+      datos?: string[];
+    } | null;
     items?: Array<{
       nombre?: string;
       cantidad?: number;
@@ -114,6 +129,34 @@ function formatCop(value: number | null | undefined) {
     currency: 'COP',
     maximumFractionDigits: 0,
   }).format(safeValue);
+}
+
+function normalizeCurrencyCode(value: string | null | undefined) {
+  const code = (value ?? '').toString().trim().toUpperCase();
+  if (!code || code === 'SIN MONEDA') return 'COP';
+  return code;
+}
+
+function formatAmountByCurrency(value: number | null | undefined, currency: string) {
+  const safeValue = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  const normalized = normalizeCurrencyCode(currency);
+  try {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: normalized,
+      maximumFractionDigits: normalized === 'COP' ? 0 : 2,
+    }).format(safeValue);
+  } catch {
+    return `${safeValue.toFixed(2)} ${normalized}`;
+  }
+}
+
+function convertFromCop(amountInCop: number, currency: string, exchangeRate: number) {
+  const safeAmount = Number.isFinite(amountInCop) ? amountInCop : 0;
+  const normalizedCurrency = normalizeCurrencyCode(currency);
+  const safeRate = Number.isFinite(exchangeRate) && exchangeRate > 0 ? exchangeRate : 1;
+  if (normalizedCurrency === 'COP') return safeAmount;
+  return safeAmount / safeRate;
 }
 
 function resolveOrderIdFromRow(row: PedidoRow | null | undefined) {
@@ -324,6 +367,42 @@ export default function OrderTrackingPage() {
   const subtotal = toNumberOrNull(order?.detalles?.subtotal) ?? toNumberOrNull(order?.total) ?? 0;
   const costoDelivery = toNumberOrNull(order?.costo_delivery) ?? toNumberOrNull(order?.detalles?.costo_delivery) ?? 0;
   const total = toNumberOrNull(order?.detalles?.total) ?? (subtotal + costoDelivery);
+  const checkoutCurrency = normalizeCurrencyCode(order?.detalles?.moneda_checkout ?? 'COP');
+  const exchangeRate = toNumberOrNull(order?.detalles?.tasa_cambio_snapshot) ?? 1;
+  const subtotalCheckout =
+    toNumberOrNull(order?.detalles?.subtotal_moneda_checkout) ??
+    convertFromCop(subtotal, checkoutCurrency, exchangeRate);
+  const deliveryCheckout =
+    toNumberOrNull(order?.detalles?.costo_delivery_moneda_checkout) ??
+    convertFromCop(costoDelivery, checkoutCurrency, exchangeRate);
+  const totalCheckout =
+    toNumberOrNull(order?.detalles?.total_moneda_checkout) ??
+    convertFromCop(total, checkoutCurrency, exchangeRate);
+
+  const paymentReference = (order?.detalles?.referencia_pago ?? '').toString().trim();
+  const paymentProofUrl = (order?.detalles?.comprobante_url ?? '').toString().trim();
+  const cashPaymentAmount = toNumberOrNull(order?.detalles?.pago_con);
+  const cashChangeAmount = toNumberOrNull(order?.detalles?.cambio_de) ?? 0;
+  const orderNotes = (order?.detalles?.order_notes ?? '').toString().trim();
+  const paymentMethodName = (order?.detalles?.metodo_pago?.nombre ?? '').toString().trim();
+  const paymentMethodDetails = Array.isArray(order?.detalles?.metodo_pago?.datos)
+    ? order?.detalles?.metodo_pago?.datos ?? []
+    : [];
+  const orderItems = (order?.detalles?.items ?? []).map((item) => {
+    const quantity = toNumberOrNull(item?.cantidad) ?? 0;
+    const unitPriceCop = toNumberOrNull(item?.precio) ?? 0;
+    const unitPriceCheckout = convertFromCop(unitPriceCop, checkoutCurrency, exchangeRate);
+    const subtotalCop = quantity * unitPriceCop;
+    const subtotalCheckoutValue = convertFromCop(subtotalCop, checkoutCurrency, exchangeRate);
+    return {
+      nombre: (item?.nombre ?? 'Producto').toString().trim() || 'Producto',
+      cantidad: quantity,
+      precioUnitario: unitPriceCheckout,
+      subtotal: subtotalCheckoutValue,
+    };
+  }).filter((item) => item.cantidad > 0);
+  const deliveryReference = (delivery?.reference ?? '').toString().trim();
+  const deliveryInstructions = (delivery?.instructions ?? '').toString().trim();
 
   const contactName = (order?.nombre_cliente ?? order?.detalles?.cliente_nombre ?? '').toString().trim();
   const contactPhone = (order?.telefono_cliente ?? order?.detalles?.telefono_cliente ?? '').toString().trim();
@@ -440,17 +519,102 @@ export default function OrderTrackingPage() {
             <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Resumen</p>
             <p className="mt-2 flex items-center justify-between text-sm text-[#D8C6AE]">
               <span>Subtotal</span>
-              <span>{formatCop(subtotal)}</span>
+              <span>{formatAmountByCurrency(subtotalCheckout, checkoutCurrency)}</span>
             </p>
             <p className="mt-1 flex items-center justify-between text-sm text-[#D8C6AE]">
               <span>Delivery</span>
-              <span>{formatCop(costoDelivery)}</span>
+              <span>{formatAmountByCurrency(deliveryCheckout, checkoutCurrency)}</span>
             </p>
             <p className="mt-2 flex items-center justify-between border-t border-[#D7A74D]/15 pt-2 text-base font-black text-[#FFEACC]">
-              <span>Total</span>
-              <span>{formatCop(total)}</span>
+              <span>Total ({checkoutCurrency})</span>
+              <span>{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</span>
             </p>
+            {checkoutCurrency !== 'COP' ? (
+              <p className="mt-2 text-[11px] text-[#BFA88B]">Tasa snapshot: 1 {checkoutCurrency} = {exchangeRate} COP</p>
+            ) : null}
+            <p className="mt-1 text-[11px] text-[#9E886D]">Base COP: {formatCop(total)}</p>
           </div>
+        </div>
+
+        {orderNotes ? (
+          <div className="mt-5 rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
+            <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Notas del pedido</p>
+            <p className="mt-2 text-sm text-[#F4E6D2]">{orderNotes}</p>
+          </div>
+        ) : null}
+
+        {orderItems.length > 0 ? (
+          <div className="mt-5 rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
+            <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Productos</p>
+            <div className="mt-3 overflow-hidden rounded-xl border border-[#D7A74D]/15">
+              <table className="w-full text-left text-sm text-[#D8C6AE]">
+                <thead className="bg-[#1B140D] text-[11px] uppercase tracking-[0.12em] text-[#C9AB83]">
+                  <tr>
+                    <th className="px-3 py-2">Cant.</th>
+                    <th className="px-3 py-2">Producto</th>
+                    <th className="px-3 py-2 text-right">P. Unitario</th>
+                    <th className="px-3 py-2 text-right">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderItems.map((item, index) => (
+                    <tr key={`order-item-${index}`} className="border-t border-[#D7A74D]/10">
+                      <td className="px-3 py-2 font-semibold">{item.cantidad}</td>
+                      <td className="px-3 py-2">{item.nombre}</td>
+                      <td className="px-3 py-2 text-right font-semibold">
+                        {formatAmountByCurrency(item.precioUnitario, checkoutCurrency)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold">
+                        {formatAmountByCurrency(item.subtotal, checkoutCurrency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-5 rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Pago</p>
+          <p className="mt-2 text-sm text-[#D8C6AE]">
+            Metodo: {paymentMethodName || 'No especificado'}
+          </p>
+          {paymentMethodDetails.length > 0 ? (
+            <p className="mt-1 text-xs text-[#BFA88B]">{paymentMethodDetails.slice(0, 2).join(' · ')}</p>
+          ) : null}
+          <p className="mt-2 text-sm text-[#D8C6AE]">
+            Referencia: {paymentReference ? `****${paymentReference.slice(-4)}` : 'No registrada'}
+          </p>
+          <p className="mt-1 text-sm text-[#D8C6AE]">
+            Comprobante: {paymentProofUrl ? 'Cargado correctamente' : 'No cargado'}
+          </p>
+          <p className="mt-1 text-sm text-[#D8C6AE]">
+            Total pagado ({checkoutCurrency}): {formatAmountByCurrency(totalCheckout, checkoutCurrency)}
+          </p>
+          <p className="mt-1 text-xs text-[#BFA88B]">
+            Tasa aplicada: 1 {checkoutCurrency} = {exchangeRate} COP
+          </p>
+          {cashPaymentAmount !== null ? (
+            <p className="mt-1 text-sm text-[#D8C6AE]">
+              Pago en efectivo con: {formatAmountByCurrency(cashPaymentAmount, checkoutCurrency)}
+            </p>
+          ) : null}
+          {cashChangeAmount > 0 ? (
+            <p className="mt-1 text-sm text-[#D8C6AE]">
+              Cambio: {formatAmountByCurrency(cashChangeAmount, checkoutCurrency)}
+            </p>
+          ) : null}
+          {paymentProofUrl ? (
+            <a
+              href={paymentProofUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex rounded-full border border-[#D7A74D]/30 px-4 py-2 text-xs font-semibold text-[#FFEACC]"
+            >
+              Ver comprobante
+            </a>
+          ) : null}
         </div>
 
         {isDelivery ? (
@@ -458,6 +622,12 @@ export default function OrderTrackingPage() {
             <div className="rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Direccion de entrega</p>
               <p className="mt-2 text-sm text-[#F4E6D2]">{deliveryAddress || 'Direccion no disponible'}</p>
+              {deliveryReference ? (
+                <p className="mt-2 text-sm text-[#D8C6AE]">Referencia: {deliveryReference}</p>
+              ) : null}
+              {deliveryInstructions ? (
+                <p className="mt-1 text-sm text-[#D8C6AE]">Indicaciones: {deliveryInstructions}</p>
+              ) : null}
               <div className="mt-3 overflow-hidden rounded-xl border border-[#D7A74D]/15">
                 <iframe
                   src={deliveryMapSrc}

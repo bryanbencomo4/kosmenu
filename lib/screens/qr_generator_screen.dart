@@ -4,9 +4,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
-import 'package:kosmenu_app/core/constants.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
+import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:path_provider/path_provider.dart';
@@ -67,16 +67,6 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
   }
 
   Future<Uint8List> _loadLogoBytes() async {
-    final logoUrl = widget.comercio.logoUrl?.trim() ?? '';
-    if (logoUrl.isNotEmpty) {
-      try {
-        final data = await NetworkAssetBundle(Uri.parse(logoUrl)).load(logoUrl);
-        return data.buffer.asUint8List();
-      } catch (_) {
-        // Use the bundled fallback when the business logo cannot be fetched.
-      }
-    }
-
     final data = await rootBundle.load(_fallbackLogoAsset);
     return data.buffer.asUint8List();
   }
@@ -268,19 +258,6 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
     return document.save();
   }
 
-  Future<void> _sharePrintKit() async {
-    await _runAction('share-pdf', () async {
-      final pdfBytes = await _buildPrintKitPdf(await _capturePosterBytes());
-      await Printing.sharePdf(
-        bytes: pdfBytes,
-        filename:
-            'kit_impresion_${_fileSafeBusinessName.isEmpty ? widget.comercio.id : _fileSafeBusinessName}.pdf',
-        subject: 'Kit de impresión de $_businessName',
-        body: 'Tarjeta imprimible con QR y enlace de $_businessName.',
-      );
-    });
-  }
-
   Future<void> _printKit() async {
     await _runAction('print-pdf', () async {
       final pdfBytes = await _buildPrintKitPdf(await _capturePosterBytes());
@@ -323,7 +300,7 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
-              shadowColor: accent.withOpacity(0.18),
+              shadowColor: accent.withValues(alpha: 0.18),
               elevation: 2,
             ),
             icon: Icon(icon, size: 21),
@@ -337,7 +314,7 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
-              shadowColor: Colors.black.withOpacity(0.10),
+              shadowColor: Colors.black.withValues(alpha: 0.10),
               elevation: 1,
             ),
             icon: Icon(icon, size: 21),
