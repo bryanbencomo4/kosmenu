@@ -7,6 +7,7 @@ import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -20,6 +21,7 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
+  static const String _setupDraftKeyPrefix = 'business_setup_draft_v2';
   Future<_PostAuthTarget>? _targetFuture;
   String _targetUserId = '';
 
@@ -41,6 +43,24 @@ class _AuthGateState extends State<AuthGate> {
       final comercioSlug = row['slug']?.toString().trim();
       if (comercioId.isEmpty) {
         SupabaseConfig.clearCurrentComercioId();
+        return _PostAuthTarget.setup;
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final draftRaw = prefs.getString('$_setupDraftKeyPrefix:$userId');
+      if ((draftRaw ?? '').trim().isNotEmpty) {
+        SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
+        return _PostAuthTarget.setup;
+      }
+
+      final firstCatalog = await Supabase.instance.client
+          .from('catalogos')
+          .select('id')
+          .eq('comercio_id', comercioId)
+          .limit(1)
+          .maybeSingle();
+      if (firstCatalog == null) {
+        SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
         return _PostAuthTarget.setup;
       }
 
