@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
@@ -746,142 +747,155 @@ class _AuthScreenState extends State<AuthScreen> {
     final mediaQuery = MediaQuery.of(context);
     final isKeyboardVisible = mediaQuery.viewInsets.bottom > 0;
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        resizeToAvoidBottomInset: true,
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF2B1455), Color(0xFF5B21B6), Color(0xFF2B1455)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ),
+      child: DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          resizeToAvoidBottomInset: true,
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFF2B1455),
+                  Color(0xFF5B21B6),
+                  Color(0xFF2B1455),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
             ),
-          ),
-          child: SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final cardHorizontalPadding = constraints.maxWidth < 560
-                    ? 16.0
-                    : 24.0;
-                final cardVerticalPadding = isKeyboardVisible ? 12.0 : 20.0;
-                final headerSpacing = isKeyboardVisible ? 10.0 : 18.0;
+            child: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final cardHorizontalPadding = constraints.maxWidth < 560
+                      ? 16.0
+                      : 24.0;
+                  final cardVerticalPadding = isKeyboardVisible ? 12.0 : 20.0;
+                  final headerSpacing = isKeyboardVisible ? 10.0 : 18.0;
 
-                return Center(
-                  child: AnimatedPadding(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOut,
-                    padding: EdgeInsets.fromLTRB(
-                      cardHorizontalPadding,
-                      cardVerticalPadding,
-                      cardHorizontalPadding,
-                      cardVerticalPadding,
-                    ),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: 460,
-                        maxHeight: constraints.maxHeight,
+                  return Center(
+                    child: AnimatedPadding(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOut,
+                      padding: EdgeInsets.fromLTRB(
+                        cardHorizontalPadding,
+                        cardVerticalPadding,
+                        cardHorizontalPadding,
+                        cardVerticalPadding,
                       ),
-                      child: Container(
-                        padding: EdgeInsets.fromLTRB(
-                          20,
-                          isKeyboardVisible ? 16 : 22,
-                          20,
-                          isKeyboardVisible ? 16 : 22,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: 460,
+                          maxHeight: constraints.maxHeight,
                         ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xF8FFFFFF),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: const Color(0xFFDDD6FE)),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x33000000),
-                              blurRadius: 30,
-                              offset: Offset(0, 14),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 180),
-                              child: isKeyboardVisible
-                                  ? const SizedBox.shrink()
-                                  : Column(
-                                      key: const ValueKey('auth-header-full'),
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Center(
-                                          child: Image.asset(
-                                            _fullLogoAsset,
-                                            height: 52,
-                                            fit: BoxFit.contain,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 14),
-                                        Text(
-                                          'Bienvenido a elmenuxfa.com',
-                                          style: GoogleFonts.manrope(
-                                            color: AppColors.textStrong,
-                                            fontSize: 30,
-                                            fontWeight: FontWeight.w800,
-                                            height: 1,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Crea, publica y vende con tu menu digital en minutos.',
-                                          style: GoogleFonts.poppins(
-                                            color: AppColors.textSoft,
-                                            fontSize: 13.5,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                            ),
-                            SizedBox(height: headerSpacing),
-                            Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF1EAFE),
-                                borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          padding: EdgeInsets.fromLTRB(
+                            20,
+                            isKeyboardVisible ? 16 : 22,
+                            20,
+                            isKeyboardVisible ? 16 : 22,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xF8FFFFFF),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: const Color(0xFFDDD6FE)),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x33000000),
+                                blurRadius: 30,
+                                offset: Offset(0, 14),
                               ),
-                              child: const TabBar(
-                                dividerColor: Colors.transparent,
-                                indicatorSize: TabBarIndicatorSize.tab,
-                                indicator: BoxDecoration(
-                                  color: AppColors.accent,
-                                  borderRadius: BorderRadius.all(
-                                    Radius.circular(12),
-                                  ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 180),
+                                child: isKeyboardVisible
+                                    ? const SizedBox.shrink()
+                                    : Column(
+                                        key: const ValueKey('auth-header-full'),
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Center(
+                                            child: Image.asset(
+                                              _fullLogoAsset,
+                                              height: 52,
+                                              fit: BoxFit.contain,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 14),
+                                          Text(
+                                            'Bienvenido a elmenuxfa.com',
+                                            style: GoogleFonts.manrope(
+                                              color: AppColors.textStrong,
+                                              fontSize: 30,
+                                              fontWeight: FontWeight.w800,
+                                              height: 1,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            'Crea, publica y vende con tu menu digital en minutos.',
+                                            style: GoogleFonts.poppins(
+                                              color: AppColors.textSoft,
+                                              fontSize: 13.5,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                              SizedBox(height: headerSpacing),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1EAFE),
+                                  borderRadius: BorderRadius.circular(14),
                                 ),
-                                labelColor: Colors.white,
-                                unselectedLabelColor: AppColors.textSoft,
-                                tabs: [
-                                  Tab(text: 'Iniciar Sesión'),
-                                  Tab(text: 'Registrarse'),
-                                ],
+                                child: const TabBar(
+                                  dividerColor: Colors.transparent,
+                                  indicatorSize: TabBarIndicatorSize.tab,
+                                  indicator: BoxDecoration(
+                                    color: AppColors.accent,
+                                    borderRadius: BorderRadius.all(
+                                      Radius.circular(12),
+                                    ),
+                                  ),
+                                  labelColor: Colors.white,
+                                  unselectedLabelColor: AppColors.textSoft,
+                                  tabs: [
+                                    Tab(text: 'Iniciar Sesión'),
+                                    Tab(text: 'Registrarse'),
+                                  ],
+                                ),
                               ),
-                            ),
-                            SizedBox(height: isKeyboardVisible ? 12 : 18),
-                            Expanded(
-                              child: TabBarView(
-                                children: [
-                                  _buildLoginTab(compact: isKeyboardVisible),
-                                  _buildRegisterTab(compact: isKeyboardVisible),
-                                ],
+                              SizedBox(height: isKeyboardVisible ? 12 : 18),
+                              Expanded(
+                                child: TabBarView(
+                                  children: [
+                                    _buildLoginTab(compact: isKeyboardVisible),
+                                    _buildRegisterTab(
+                                      compact: isKeyboardVisible,
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                            SizedBox(height: isKeyboardVisible ? 10 : 12),
-                            _buildOAuthSection(compact: isKeyboardVisible),
-                          ],
+                              SizedBox(height: isKeyboardVisible ? 10 : 12),
+                              _buildOAuthSection(compact: isKeyboardVisible),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ),
