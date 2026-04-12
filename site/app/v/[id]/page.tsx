@@ -112,8 +112,6 @@ const defaultProductImage =
   );
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const uuidRegex =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let googleMapsScriptPromise: Promise<any> | null = null;
 let leafletAssetsPromise: Promise<any> | null = null;
@@ -239,10 +237,6 @@ async function reverseGeocodeWithNominatim(point: DeliveryPoint) {
   } catch {
     return '';
   }
-}
-
-function isUuid(value: string) {
-  return uuidRegex.test(value);
 }
 
 function normalizePhone(value: string | null | undefined) {
@@ -675,6 +669,7 @@ export default function PublicMenuPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDraftMode, setIsDraftMode] = useState(false);
   const [menuData, setMenuData] = useState<MenuData | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
@@ -749,67 +744,40 @@ export default function PublicMenuPage() {
         setLoading(true);
         setError(null);
 
-        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-          auth: { persistSession: false },
-          global: {
-            fetch: (input, init) =>
-              fetch(input, {
-                ...init,
-                cache: 'no-store',
-              }),
-          },
+        const encodedIdentifier = encodeURIComponent(commerceIdentifier);
+        const response = await fetch(`/api/menu/${encodedIdentifier}`, {
+          method: 'GET',
+          cache: 'no-store',
         });
 
-        const comercioQuery = supabase.from('comercios').select('*').limit(1);
-        const { data: comercios, error: comercioError } = isUuid(commerceIdentifier)
-          ? await comercioQuery.eq('id', commerceIdentifier).returns<ComercioRow[]>()
-          : await comercioQuery.eq('slug', commerceIdentifier).returns<ComercioRow[]>();
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          code?: string;
+          data?: MenuData;
+        };
 
-        if (comercioError) throw new Error(comercioError.message);
+        if (!response.ok) {
+          if (response.status === 403) {
+            const code = (payload.code ?? '').trim();
+            if (code === 'MENU_DRAFT_MODE' || code === 'OWNER_EMAIL_NOT_VERIFIED') {
+              if (!cancelled) {
+                setIsDraftMode(true);
+                setMenuData(null);
+              }
+              return;
+            }
+          }
+          throw new Error(payload.error ?? 'No se pudo cargar el menu.');
+        }
 
-        const comercio = (comercios ?? [])[0] ?? null;
-        if (!comercio) {
+        const data = payload.data;
+        if (!data?.comercio) {
           throw new Error('No se encontro el comercio para esta URL.');
         }
 
-        const resolvedComercioId = comercio.id;
-
-        const [categoriasResult, productosResult, metodosPagoResult] = await Promise.all([
-          supabase
-            .from('categorias')
-            .select('*')
-            .eq('comercio_id', resolvedComercioId)
-            .order('orden', { ascending: true })
-            .returns<CategoriaRow[]>(),
-          supabase
-            .from('productos')
-            .select('*')
-            .eq('comercio_id', resolvedComercioId)
-            .order('nombre', { ascending: true })
-            .returns<ProductoRow[]>(),
-          supabase
-            .from('metodos_pago')
-            .select('*')
-            .eq('comercio_id', resolvedComercioId)
-            .returns<MetodoPagoRow[]>(),
-        ]);
-
-        if (categoriasResult.error) throw new Error(categoriasResult.error.message);
-        if (productosResult.error) throw new Error(productosResult.error.message);
-        if (metodosPagoResult.error) throw new Error(metodosPagoResult.error.message);
-
-        const productos = (productosResult.data ?? []).filter((producto) => {
-          if (typeof producto.disponible === 'boolean') return producto.disponible;
-          return true;
-        });
-
         if (!cancelled) {
-          setMenuData({
-            comercio,
-            categorias: categoriasResult.data ?? [],
-            productos,
-            metodosPago: metodosPagoResult.data ?? [],
-          });
+          setIsDraftMode(false);
+          setMenuData(data);
         }
       } catch (err) {
         if (!cancelled) {
@@ -1834,6 +1802,20 @@ export default function PublicMenuPage() {
         <div className="text-center">
           <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
           <p className="mt-4 text-sm tracking-[0.14em] text-slate-300">CARGANDO MENU PUBLICO</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (isDraftMode) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-slate-950 px-6 text-slate-50">
+        <div className="w-full max-w-2xl rounded-3xl border border-amber-300/35 bg-amber-100/10 p-7 text-center backdrop-blur-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Sitio en mantenimiento</p>
+          <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">Estamos terminando de activar este menu</h1>
+          <p className="mt-3 text-sm text-slate-200 sm:text-base">
+            El menu publico estara disponible cuando la cuenta propietaria confirme su correo y complete la activacion.
+          </p>
         </div>
       </main>
     );

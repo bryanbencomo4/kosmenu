@@ -52,6 +52,10 @@ const Color _defaultPalettePrimary = Color(0xFF6D28D9);
 const Color _defaultPaletteAccent = Color(0xFF8B5CF6);
 const Color _defaultPaletteSurface = Color(0xFF1B1238);
 const Color _defaultPaletteText = Color(0xFFF3E8FF);
+const Color _rescuePaletteSurface = Color(0xFF000000);
+const Color _rescuePalettePrimary = Color(0xFFE63946);
+const Color _rescuePaletteAccent = Color(0xFFC12834);
+const Color _rescuePaletteText = Color(0xFFFFFFFF);
 
 const Map<String, List<String>>
 _fontSuggestionsByCategory = <String, List<String>>{
@@ -1387,10 +1391,33 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
 
       _isGeminiPaletteLoading = false;
+      if (geminiAnalysis == null) {
+        final canApplyRescuePalette =
+            !_paletteManuallyEdited || _lastPaletteLogoPath != logoPath;
+        if (canApplyRescuePalette) {
+          _paletteSuggestion = const _PaletteOption(
+            id: 'rescue-premium',
+            name: 'Premium de respaldo',
+            primary: _rescuePalettePrimary,
+            accent: _rescuePaletteAccent,
+            surface: _rescuePaletteSurface,
+            text: _rescuePaletteText,
+          );
+          _selectedPaletteId = 'rescue-premium';
+          _lastPaletteLogoPath = logoPath;
+        }
+        _logoDetectedColors = const <Color>[
+          _rescuePalettePrimary,
+          _rescuePaletteAccent,
+          _rescuePaletteSurface,
+          _rescuePaletteText,
+        ];
+      }
+
       _paletteStatusMessage = geminiAnalysis == null
-          ? 'No pudimos generar la paleta con IA. Igual dejamos una base para que la ajustes manualmente a tu gusto.'
+          ? 'Hemos seleccionado una paleta Premium para ti. Puedes personalizarla ahora o mas tarde.'
           : null;
-      _paletteStatusIsError = geminiAnalysis == null;
+      _paletteStatusIsError = false;
 
       final suggestedFont = geminiAnalysis?.suggestedHeadingFont?.trim() ?? '';
       final canApplySuggestedFont =
@@ -1423,11 +1450,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         return null;
       }
 
-      final response = await _brandingAiService.generateBranding(
-        comercioId: comercioId,
-        promptUsuario: _paletteAiPrompt,
-        imageUrl: imageUrl,
-      );
+      final response = await _brandingAiService
+          .generateBranding(
+            comercioId: comercioId,
+            promptUsuario: _paletteAiPrompt,
+            imageUrl: imageUrl,
+          )
+          .timeout(const Duration(seconds: 12));
 
       final branding = _toStringDynamicMap(response['branding_ia']);
       if (branding.isEmpty) {

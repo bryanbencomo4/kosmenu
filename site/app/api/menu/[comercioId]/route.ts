@@ -13,6 +13,23 @@ type Params = {
   params: Promise<{ comercioId: string }>;
 };
 
+async function isOwnerEmailVerified(
+  supabase: ReturnType<typeof getServerSupabaseClient>,
+  ownerId: string,
+) {
+  const safeOwnerId = ownerId.trim();
+  if (!safeOwnerId) {
+    return false;
+  }
+
+  const { data, error } = await supabase.auth.admin.getUserById(safeOwnerId);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return Boolean(data.user?.email_confirmed_at);
+}
+
 export async function GET(_: Request, { params }: Params) {
   try {
     const { comercioId: rawComercioId } = await params;
@@ -39,6 +56,35 @@ export async function GET(_: Request, { params }: Params) {
     }
 
     const resolvedComercioId = comercio.id;
+    const ownerId = (comercio.owner_id ?? '').toString().trim();
+    const isOnline = comercio.en_linea !== false;
+
+    if (!isOnline) {
+      return NextResponse.json(
+        {
+          error: 'El menu esta temporalmente en mantenimiento.',
+          code: 'MENU_DRAFT_MODE',
+        },
+        { status: 403 },
+      );
+    }
+
+    if (ownerId) {
+      try {
+        const ownerVerified = await isOwnerEmailVerified(supabase, ownerId);
+        if (!ownerVerified) {
+          return NextResponse.json(
+            {
+              error: 'La cuenta propietaria aun no confirma su correo.',
+              code: 'OWNER_EMAIL_NOT_VERIFIED',
+            },
+            { status: 403 },
+          );
+        }
+      } catch {
+        // If admin auth is not available, keep serving the menu to avoid false blocks.
+      }
+    }
 
     const [categoriasResult, productosResult, metodosPagoResult] = await Promise.all([
       supabase

@@ -7,6 +7,7 @@ import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 enum _PostAuthTarget { dashboard, setup }
 
@@ -131,6 +132,10 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   static const String _mobileOAuthRedirect = 'com.kosmenu.app://login-callback';
   static const String _fullLogoAsset = 'assets/branding/full_logo.png';
+  static const String _registerEmailRedirect =
+      '${AppLinks.productionUrl}/?source=email-confirmation';
+  static const String _termsUrl = '${AppLinks.productionUrl}/terminos';
+  static const String _privacyUrl = '${AppLinks.productionUrl}/privacidad';
 
   final _loginFormKey = GlobalKey<FormState>();
   final _registerFormKey = GlobalKey<FormState>();
@@ -144,6 +149,10 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isRegisterLoading = false;
   bool _isGoogleLoading = false;
   bool _isAppleLoading = false;
+  bool _obscureLoginPassword = true;
+  bool _obscureRegisterPassword = true;
+  bool _acceptedTerms = false;
+  bool _acceptedPrivacy = false;
 
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
@@ -194,6 +203,40 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
+  String _translateAuthError(String message) {
+    final normalized = message.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return 'No se pudo completar la solicitud. Intentalo nuevamente.';
+    }
+    if (normalized.contains('invalid login credentials')) {
+      return 'Correo o contraseña incorrectos.';
+    }
+    if (normalized.contains('email not confirmed')) {
+      return 'Tu correo aun no esta confirmado. Revisa tu bandeja de entrada.';
+    }
+    if (normalized.contains('user already registered')) {
+      return 'Este correo ya esta registrado. Intenta iniciar sesion.';
+    }
+    if (normalized.contains('password should be at least')) {
+      return 'La contraseña debe tener al menos 6 caracteres.';
+    }
+    if (normalized.contains('network')) {
+      return 'Problema de red. Verifica tu conexion e intentalo otra vez.';
+    }
+    if (normalized.contains('too many requests')) {
+      return 'Demasiados intentos. Espera un momento e intentalo de nuevo.';
+    }
+    return message;
+  }
+
+  Future<void> _openLegalLink(String rawUrl) async {
+    final uri = Uri.parse(rawUrl);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened) {
+      _showSnack('No se pudo abrir el enlace.', isError: true);
+    }
+  }
+
   Future<void> _signIn() async {
     if (!_loginFormKey.currentState!.validate() || _isLoginLoading) return;
 
@@ -204,7 +247,7 @@ class _AuthScreenState extends State<AuthScreen> {
         password: _loginPasswordController.text,
       );
     } on AuthException catch (error) {
-      _showSnack(error.message, isError: true);
+      _showSnack(_translateAuthError(error.message), isError: true);
     } catch (_) {
       _showSnack(
         'No se pudo iniciar sesión. Inténtalo nuevamente.',
@@ -222,16 +265,27 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
+    if (!_acceptedTerms || !_acceptedPrivacy) {
+      _showSnack(
+        'Debes aceptar terminos y privacidad para crear tu cuenta.',
+        isError: true,
+      );
+      return;
+    }
+
     setState(() => _isRegisterLoading = true);
     try {
       await Supabase.instance.client.auth.signUp(
         email: _registerEmailController.text.trim(),
         password: _registerPasswordController.text,
+        emailRedirectTo: _registerEmailRedirect,
       );
 
-      _showSnack('Cuenta creada. Revisa tu correo para confirmar tu acceso.');
+      _showSnack(
+        'Cuenta creada. Revisa tu correo de elmenuxfa.com para confirmar tu acceso.',
+      );
     } on AuthException catch (error) {
-      _showSnack(error.message, isError: true);
+      _showSnack(_translateAuthError(error.message), isError: true);
     } catch (_) {
       _showSnack(
         'No se pudo registrar tu cuenta. Inténtalo nuevamente.',
@@ -260,7 +314,7 @@ class _AuthScreenState extends State<AuthScreen> {
       await Supabase.instance.client.auth.resetPasswordForEmail(email);
       _showSnack('Te enviamos un correo para restablecer la contraseña.');
     } on AuthException catch (error) {
-      _showSnack(error.message, isError: true);
+      _showSnack(_translateAuthError(error.message), isError: true);
     } catch (_) {
       _showSnack('No se pudo enviar el correo de recuperación.', isError: true);
     }
@@ -276,7 +330,7 @@ class _AuthScreenState extends State<AuthScreen> {
         redirectTo: kIsWeb ? Uri.base.origin : _mobileOAuthRedirect,
       );
     } on AuthException catch (error) {
-      _showSnack(error.message, isError: true);
+      _showSnack(_translateAuthError(error.message), isError: true);
     } catch (_) {
       _showSnack('No se pudo iniciar con Google.', isError: true);
     } finally {
@@ -296,7 +350,7 @@ class _AuthScreenState extends State<AuthScreen> {
         redirectTo: kIsWeb ? Uri.base.origin : _mobileOAuthRedirect,
       );
     } on AuthException catch (error) {
-      _showSnack(error.message, isError: true);
+      _showSnack(_translateAuthError(error.message), isError: true);
     } catch (_) {
       _showSnack('No se pudo iniciar con Apple.', isError: true);
     } finally {
@@ -309,11 +363,16 @@ class _AuthScreenState extends State<AuthScreen> {
   InputDecoration _inputDecoration({
     required String label,
     required IconData icon,
+    Widget? suffixIcon,
   }) {
     return InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(color: AppColors.textSoft),
+      hintText: label,
+      hintStyle: const TextStyle(color: AppColors.textSoft),
+      floatingLabelBehavior: FloatingLabelBehavior.never,
       prefixIcon: Icon(icon, color: AppColors.accent),
+      suffixIcon: suffixIcon,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       filled: true,
       fillColor: Colors.white,
       border: OutlineInputBorder(
@@ -351,18 +410,32 @@ class _AuthScreenState extends State<AuthScreen> {
             style: const TextStyle(color: AppColors.textStrong),
             decoration: _inputDecoration(
               label: 'Correo electrónico',
-              icon: Icons.mail_outline,
+              icon: Icons.alternate_email,
             ),
           ),
           const SizedBox(height: 14),
           TextFormField(
             controller: _loginPasswordController,
-            obscureText: true,
+            obscureText: _obscureLoginPassword,
             validator: _validatePassword,
             style: const TextStyle(color: AppColors.textStrong),
             decoration: _inputDecoration(
               label: 'Contraseña',
-              icon: Icons.lock_outline,
+              icon: Icons.lock_reset,
+              suffixIcon: IconButton(
+                tooltip: _obscureLoginPassword
+                    ? 'Mostrar contraseña'
+                    : 'Ocultar contraseña',
+                onPressed: () => setState(
+                  () => _obscureLoginPassword = !_obscureLoginPassword,
+                ),
+                icon: Icon(
+                  _obscureLoginPassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  color: AppColors.textSoft,
+                ),
+              ),
             ),
           ),
           Align(
@@ -419,12 +492,89 @@ class _AuthScreenState extends State<AuthScreen> {
           const SizedBox(height: 14),
           TextFormField(
             controller: _registerPasswordController,
-            obscureText: true,
+            obscureText: _obscureRegisterPassword,
             validator: _validatePassword,
             style: const TextStyle(color: AppColors.textStrong),
             decoration: _inputDecoration(
               label: 'Contraseña (mínimo 6)',
               icon: Icons.lock_reset,
+              suffixIcon: IconButton(
+                tooltip: _obscureRegisterPassword
+                    ? 'Mostrar contraseña'
+                    : 'Ocultar contraseña',
+                onPressed: () => setState(
+                  () => _obscureRegisterPassword = !_obscureRegisterPassword,
+                ),
+                icon: Icon(
+                  _obscureRegisterPassword
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  color: AppColors.textSoft,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          CheckboxListTile(
+            value: _acceptedTerms,
+            dense: true,
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+            onChanged: (value) =>
+                setState(() => _acceptedTerms = value ?? false),
+            title: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 4,
+              runSpacing: 2,
+              children: [
+                const Text(
+                  'Acepto los',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.textSoft),
+                ),
+                InkWell(
+                  onTap: () => _openLegalLink(_termsUrl),
+                  child: const Text(
+                    'terminos y condiciones',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          CheckboxListTile(
+            value: _acceptedPrivacy,
+            dense: true,
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+            onChanged: (value) =>
+                setState(() => _acceptedPrivacy = value ?? false),
+            title: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 4,
+              runSpacing: 2,
+              children: [
+                const Text(
+                  'Acepto la',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.textSoft),
+                ),
+                InkWell(
+                  onTap: () => _openLegalLink(_privacyUrl),
+                  child: const Text(
+                    'politica de privacidad',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 18),
@@ -584,7 +734,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Gestiona tu menú digital con una experiencia premium.',
+                          'Crea, publica y vende con tu menu digital en minutos.',
                           style: GoogleFonts.poppins(
                             color: AppColors.textSoft,
                             fontSize: 13.5,
@@ -615,7 +765,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                         const SizedBox(height: 18),
                         SizedBox(
-                          height: 300,
+                          height: 410,
                           child: TabBarView(
                             children: [_buildLoginTab(), _buildRegisterTab()],
                           ),
