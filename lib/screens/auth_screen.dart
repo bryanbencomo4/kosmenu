@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
@@ -424,231 +424,267 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  Widget _buildLoginTab() {
+  Widget _buildPrimaryButton({
+    required VoidCallback? onPressed,
+    required bool isLoading,
+    required String text,
+    Color? backgroundColor,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor: backgroundColor ?? AppColors.accent,
+          minimumSize: const Size.fromHeight(52),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        child: isLoading
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  color: Colors.white,
+                ),
+              )
+            : Text(text),
+      ),
+    );
+  }
+
+  Widget _buildLoginTab({required bool compact}) {
     return Form(
       key: _loginFormKey,
       child: Column(
         children: [
-          TextFormField(
-            controller: _loginEmailController,
-            keyboardType: TextInputType.emailAddress,
-            validator: _validateEmail,
-            style: const TextStyle(color: AppColors.textStrong),
-            decoration: _inputDecoration(
-              label: 'Correo electrónico',
-              icon: Icons.alternate_email,
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: _loginPasswordController,
-            obscureText: _obscureLoginPassword,
-            validator: _validatePassword,
-            style: const TextStyle(color: AppColors.textStrong),
-            decoration: _inputDecoration(
-              label: 'Contraseña',
-              icon: Icons.lock_reset,
-              suffixIcon: IconButton(
-                tooltip: _obscureLoginPassword
-                    ? 'Mostrar contraseña'
-                    : 'Ocultar contraseña',
-                onPressed: () => setState(
-                  () => _obscureLoginPassword = !_obscureLoginPassword,
-                ),
-                icon: Icon(
-                  _obscureLoginPassword
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined,
-                  color: AppColors.textSoft,
-                ),
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: _resetPassword,
-              child: const Text('Olvidé mi contraseña'),
-            ),
-          ),
-          const SizedBox(height: 6),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _isLoginLoading ? null : _signIn,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                minimumSize: const Size.fromHeight(52),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: _isLoginLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: Colors.white,
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(bottom: compact ? 12 : 20),
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _loginEmailController,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    validator: _validateEmail,
+                    style: const TextStyle(color: AppColors.textStrong),
+                    decoration: _inputDecoration(
+                      label: 'Correo electrónico',
+                      icon: Icons.alternate_email,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _loginPasswordController,
+                    obscureText: _obscureLoginPassword,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _signIn(),
+                    validator: _validatePassword,
+                    style: const TextStyle(color: AppColors.textStrong),
+                    decoration: _inputDecoration(
+                      label: 'Contraseña',
+                      icon: Icons.lock_reset,
+                      suffixIcon: IconButton(
+                        tooltip: _obscureLoginPassword
+                            ? 'Mostrar contraseña'
+                            : 'Ocultar contraseña',
+                        onPressed: () => setState(
+                          () => _obscureLoginPassword = !_obscureLoginPassword,
+                        ),
+                        icon: Icon(
+                          _obscureLoginPassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          color: AppColors.textSoft,
+                        ),
                       ),
-                    )
-                  : const Text('Iniciar Sesión'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRegisterTab() {
-    return Form(
-      key: _registerFormKey,
-      child: Column(
-        children: [
-          TextFormField(
-            controller: _registerEmailController,
-            keyboardType: TextInputType.emailAddress,
-            validator: _validateEmail,
-            style: const TextStyle(color: AppColors.textStrong),
-            decoration: _inputDecoration(
-              label: 'Correo electrónico',
-              icon: Icons.alternate_email,
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: _registerPasswordController,
-            obscureText: _obscureRegisterPassword,
-            validator: _validatePassword,
-            style: const TextStyle(color: AppColors.textStrong),
-            decoration: _inputDecoration(
-              label: 'Contraseña (mínimo 6)',
-              icon: Icons.lock_reset,
-              suffixIcon: IconButton(
-                tooltip: _obscureRegisterPassword
-                    ? 'Mostrar contraseña'
-                    : 'Ocultar contraseña',
-                onPressed: () => setState(
-                  () => _obscureRegisterPassword = !_obscureRegisterPassword,
-                ),
-                icon: Icon(
-                  _obscureRegisterPassword
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined,
-                  color: AppColors.textSoft,
-                ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _resetPassword,
+                      child: const Text('Olvidé mi contraseña'),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
           const SizedBox(height: 8),
-          CheckboxListTile(
-            value: _acceptedTerms,
-            dense: true,
-            controlAffinity: ListTileControlAffinity.leading,
-            contentPadding: EdgeInsets.zero,
-            visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
-            onChanged: (value) =>
-                setState(() => _acceptedTerms = value ?? false),
-            title: Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 4,
-              runSpacing: 2,
-              children: [
-                const Text(
-                  'Acepto los',
-                  style: TextStyle(fontSize: 12.5, color: AppColors.textSoft),
-                ),
-                InkWell(
-                  onTap: () => _openLegalLink(_termsUrl),
-                  child: const Text(
-                    'terminos y condiciones',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: AppColors.accent,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          CheckboxListTile(
-            value: _acceptedPrivacy,
-            dense: true,
-            controlAffinity: ListTileControlAffinity.leading,
-            contentPadding: EdgeInsets.zero,
-            visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
-            onChanged: (value) =>
-                setState(() => _acceptedPrivacy = value ?? false),
-            title: Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 4,
-              runSpacing: 2,
-              children: [
-                const Text(
-                  'Acepto la',
-                  style: TextStyle(fontSize: 12.5, color: AppColors.textSoft),
-                ),
-                InkWell(
-                  onTap: () => _openLegalLink(_privacyUrl),
-                  child: const Text(
-                    'politica de privacidad',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: AppColors.accent,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _isRegisterLoading ? null : _register,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF6D28D9),
-                minimumSize: const Size.fromHeight(52),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: _isRegisterLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text('Registrarme'),
-            ),
+          _buildPrimaryButton(
+            onPressed: _isLoginLoading ? null : _signIn,
+            isLoading: _isLoginLoading,
+            text: 'Iniciar Sesión',
           ),
         ],
       ),
     );
   }
 
-  Widget _buildOAuthSection() {
-    return Column(
-      children: [
-        Row(
-          children: const [
-            Expanded(child: Divider(color: Color(0x22FFFFFF))),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Text(
-                'o continuar con',
-                style: TextStyle(color: AppColors.textSoft),
+  Widget _buildRegisterTab({required bool compact}) {
+    return Form(
+      key: _registerFormKey,
+      child: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(bottom: compact ? 12 : 20),
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _registerEmailController,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    validator: _validateEmail,
+                    style: const TextStyle(color: AppColors.textStrong),
+                    decoration: _inputDecoration(
+                      label: 'Correo electrónico',
+                      icon: Icons.alternate_email,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _registerPasswordController,
+                    obscureText: _obscureRegisterPassword,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _register(),
+                    validator: _validatePassword,
+                    style: const TextStyle(color: AppColors.textStrong),
+                    decoration: _inputDecoration(
+                      label: 'Contraseña (mínimo 6)',
+                      icon: Icons.lock_reset,
+                      suffixIcon: IconButton(
+                        tooltip: _obscureRegisterPassword
+                            ? 'Mostrar contraseña'
+                            : 'Ocultar contraseña',
+                        onPressed: () => setState(
+                          () => _obscureRegisterPassword =
+                              !_obscureRegisterPassword,
+                        ),
+                        icon: Icon(
+                          _obscureRegisterPassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          color: AppColors.textSoft,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    value: _acceptedTerms,
+                    dense: true,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                    visualDensity: const VisualDensity(
+                      horizontal: -4,
+                      vertical: -4,
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _acceptedTerms = value ?? false),
+                    title: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 4,
+                      runSpacing: 2,
+                      children: [
+                        const Text(
+                          'Acepto los',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.textSoft,
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _openLegalLink(_termsUrl),
+                          child: const Text(
+                            'terminos y condiciones',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: AppColors.accent,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  CheckboxListTile(
+                    value: _acceptedPrivacy,
+                    dense: true,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                    visualDensity: const VisualDensity(
+                      horizontal: -4,
+                      vertical: -4,
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _acceptedPrivacy = value ?? false),
+                    title: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 4,
+                      runSpacing: 2,
+                      children: [
+                        const Text(
+                          'Acepto la',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.textSoft,
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _openLegalLink(_privacyUrl),
+                          child: const Text(
+                            'politica de privacidad',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: AppColors.accent,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-            Expanded(child: Divider(color: Color(0x22FFFFFF))),
-          ],
-        ),
-        const SizedBox(height: 12),
+          ),
+          const SizedBox(height: 8),
+          _buildPrimaryButton(
+            onPressed: _isRegisterLoading ? null : _register,
+            isLoading: _isRegisterLoading,
+            text: 'Registrarme',
+            backgroundColor: const Color(0xFF6D28D9),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOAuthSection({required bool compact}) {
+    return Column(
+      children: [
+        if (!compact) ...[
+          Row(
+            children: const [
+              Expanded(child: Divider(color: Color(0x22FFFFFF))),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10),
+                child: Text(
+                  'o continuar con',
+                  style: TextStyle(color: AppColors.textSoft),
+                ),
+              ),
+              Expanded(child: Divider(color: Color(0x22FFFFFF))),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
@@ -656,11 +692,11 @@ class _AuthScreenState extends State<AuthScreen> {
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.textStrong,
               side: const BorderSide(color: AppColors.borderSubtle),
-              minimumSize: const Size.fromHeight(50),
+              minimumSize: Size.fromHeight(compact ? 46 : 50),
+              backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
-              backgroundColor: Colors.white,
             ),
             icon: _isGoogleLoading
                 ? const SizedBox(
@@ -672,7 +708,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     'G',
                     style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
                   ),
-            label: const Text('Continuar con Google'),
+            label: Text(compact ? 'Google' : 'Continuar con Google'),
           ),
         ),
         if (_isIOS) ...[
@@ -684,11 +720,11 @@ class _AuthScreenState extends State<AuthScreen> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.textStrong,
                 side: const BorderSide(color: AppColors.borderSubtle),
-                minimumSize: const Size.fromHeight(50),
+                minimumSize: Size.fromHeight(compact ? 46 : 50),
+                backgroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
-                backgroundColor: Colors.white,
               ),
               icon: _isAppleLoading
                   ? const SizedBox(
@@ -697,7 +733,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.apple, size: 20),
-              label: const Text('Continuar con Apple'),
+              label: Text(compact ? 'Apple' : 'Continuar con Apple'),
             ),
           ),
         ],
@@ -707,9 +743,13 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final isKeyboardVisible = mediaQuery.viewInsets.bottom > 0;
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         body: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -719,90 +759,129 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
           ),
           child: SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 460),
-                  child: Container(
-                    padding: const EdgeInsets.all(22),
-                    decoration: BoxDecoration(
-                      color: const Color(0xF8FFFFFF),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: const Color(0xFFDDD6FE)),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x33000000),
-                          blurRadius: 30,
-                          offset: Offset(0, 14),
-                        ),
-                      ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final cardHorizontalPadding = constraints.maxWidth < 560
+                    ? 16.0
+                    : 24.0;
+                final cardVerticalPadding = isKeyboardVisible ? 12.0 : 20.0;
+                final headerSpacing = isKeyboardVisible ? 10.0 : 18.0;
+
+                return Center(
+                  child: AnimatedPadding(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOut,
+                    padding: EdgeInsets.fromLTRB(
+                      cardHorizontalPadding,
+                      cardVerticalPadding,
+                      cardHorizontalPadding,
+                      cardVerticalPadding,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Center(
-                          child: Image.asset(
-                            _fullLogoAsset,
-                            height: 52,
-                            fit: BoxFit.contain,
-                          ),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: 460,
+                        maxHeight: constraints.maxHeight,
+                      ),
+                      child: Container(
+                        padding: EdgeInsets.fromLTRB(
+                          20,
+                          isKeyboardVisible ? 16 : 22,
+                          20,
+                          isKeyboardVisible ? 16 : 22,
                         ),
-                        const SizedBox(height: 14),
-                        Text(
-                          'Bienvenido a elmenuxfa.com',
-                          style: GoogleFonts.manrope(
-                            color: AppColors.textStrong,
-                            fontSize: 30,
-                            fontWeight: FontWeight.w800,
-                            height: 1,
-                          ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xF8FFFFFF),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: const Color(0xFFDDD6FE)),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x33000000),
+                              blurRadius: 30,
+                              offset: Offset(0, 14),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Crea, publica y vende con tu menu digital en minutos.',
-                          style: GoogleFonts.poppins(
-                            color: AppColors.textSoft,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF1EAFE),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const TabBar(
-                            dividerColor: Colors.transparent,
-                            indicatorSize: TabBarIndicatorSize.tab,
-                            indicator: BoxDecoration(
-                              color: AppColors.accent,
-                              borderRadius: BorderRadius.all(
-                                Radius.circular(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              child: isKeyboardVisible
+                                  ? const SizedBox.shrink()
+                                  : Column(
+                                      key: const ValueKey('auth-header-full'),
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Center(
+                                          child: Image.asset(
+                                            _fullLogoAsset,
+                                            height: 52,
+                                            fit: BoxFit.contain,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 14),
+                                        Text(
+                                          'Bienvenido a elmenuxfa.com',
+                                          style: GoogleFonts.manrope(
+                                            color: AppColors.textStrong,
+                                            fontSize: 30,
+                                            fontWeight: FontWeight.w800,
+                                            height: 1,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Crea, publica y vende con tu menu digital en minutos.',
+                                          style: GoogleFonts.poppins(
+                                            color: AppColors.textSoft,
+                                            fontSize: 13.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                            SizedBox(height: headerSpacing),
+                            Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF1EAFE),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const TabBar(
+                                dividerColor: Colors.transparent,
+                                indicatorSize: TabBarIndicatorSize.tab,
+                                indicator: BoxDecoration(
+                                  color: AppColors.accent,
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(12),
+                                  ),
+                                ),
+                                labelColor: Colors.white,
+                                unselectedLabelColor: AppColors.textSoft,
+                                tabs: [
+                                  Tab(text: 'Iniciar Sesión'),
+                                  Tab(text: 'Registrarse'),
+                                ],
                               ),
                             ),
-                            labelColor: Colors.white,
-                            unselectedLabelColor: AppColors.textSoft,
-                            tabs: [
-                              Tab(text: 'Iniciar Sesión'),
-                              Tab(text: 'Registrarse'),
-                            ],
-                          ),
+                            SizedBox(height: isKeyboardVisible ? 12 : 18),
+                            Expanded(
+                              child: TabBarView(
+                                children: [
+                                  _buildLoginTab(compact: isKeyboardVisible),
+                                  _buildRegisterTab(compact: isKeyboardVisible),
+                                ],
+                              ),
+                            ),
+                            SizedBox(height: isKeyboardVisible ? 10 : 12),
+                            _buildOAuthSection(compact: isKeyboardVisible),
+                          ],
                         ),
-                        const SizedBox(height: 18),
-                        SizedBox(
-                          height: 410,
-                          child: TabBarView(
-                            children: [_buildLoginTab(), _buildRegisterTab()],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        _buildOAuthSection(),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         ),
