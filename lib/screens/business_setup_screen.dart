@@ -356,6 +356,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   bool get _showBackControls => widget.businessConfigOnly || _isEditing;
 
+  bool get _showStepBackButton => _currentStepFlowIndex > 0;
+
   List<String> get _sortedSectors {
     final values = <String>{..._sectors}.toList()
       ..sort((a, b) => a.compareTo(b));
@@ -1217,64 +1219,67 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           backgroundColor: const Color(0xFF17122E),
           showDragHandle: true,
           builder: (context) {
-            return Theme(
-              data: Theme.of(context).copyWith(
-                listTileTheme: const ListTileThemeData(
-                  iconColor: Color(0xFFEDE9FE),
-                  textColor: Color(0xFFF8F5FF),
+            return SafeArea(
+              top: false,
+              child: Theme(
+                data: Theme.of(context).copyWith(
+                  listTileTheme: const ListTileThemeData(
+                    iconColor: Color(0xFFEDE9FE),
+                    textColor: Color(0xFFF8F5FF),
+                  ),
                 ),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 2, 16, 6),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Selecciona una opcion',
-                        style: TextStyle(
-                          color: Color(0xFFD8B4FE),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 2, 16, 6),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Selecciona una opcion',
+                          style: TextStyle(
+                            color: Color(0xFFD8B4FE),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.photo_library_rounded),
-                    title: const Text('Elegir de galeria'),
-                    onTap: () =>
-                        Navigator.of(context).pop(_LogoPickAction.gallery),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.photo_camera_rounded),
-                    title: const Text('Tomar foto'),
-                    onTap: () =>
-                        Navigator.of(context).pop(_LogoPickAction.camera),
-                  ),
-                  if (_selectedLogo != null)
                     ListTile(
-                      leading: const Icon(Icons.crop_rounded),
-                      title: const Text('Editar foto actual'),
-                      onTap: () => Navigator.of(
-                        context,
-                      ).pop(_LogoPickAction.editCurrent),
+                      leading: const Icon(Icons.photo_library_rounded),
+                      title: const Text('Elegir de galeria'),
+                      onTap: () =>
+                          Navigator.of(context).pop(_LogoPickAction.gallery),
                     ),
-                  if (_selectedLogo != null)
                     ListTile(
-                      leading: const Icon(Icons.delete_outline_rounded),
-                      title: const Text('Eliminar logo'),
-                      onTap: () => Navigator.of(
-                        context,
-                      ).pop(_LogoPickAction.removeCurrent),
+                      leading: const Icon(Icons.photo_camera_rounded),
+                      title: const Text('Tomar foto'),
+                      onTap: () =>
+                          Navigator.of(context).pop(_LogoPickAction.camera),
                     ),
-                  ListTile(
-                    leading: const Icon(Icons.close_rounded),
-                    title: const Text('Cancelar'),
-                    onTap: () => Navigator.of(context).pop(),
-                  ),
-                ],
+                    if (_selectedLogo != null)
+                      ListTile(
+                        leading: const Icon(Icons.crop_rounded),
+                        title: const Text('Editar foto actual'),
+                        onTap: () => Navigator.of(
+                          context,
+                        ).pop(_LogoPickAction.editCurrent),
+                      ),
+                    if (_selectedLogo != null)
+                      ListTile(
+                        leading: const Icon(Icons.delete_outline_rounded),
+                        title: const Text('Eliminar logo'),
+                        onTap: () => Navigator.of(
+                          context,
+                        ).pop(_LogoPickAction.removeCurrent),
+                      ),
+                    ListTile(
+                      leading: const Icon(Icons.close_rounded),
+                      title: const Text('Cancelar'),
+                      onTap: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
               ),
             );
           },
@@ -1407,89 +1412,92 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       showDragHandle: true,
       builder: (sheetContext) {
         final controller = TextEditingController();
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final filtered = sectors
-                .where(
-                  (item) =>
-                      item.toLowerCase().contains(query.toLowerCase().trim()),
-                )
-                .toList();
-            final visibleCount = filtered.length < limit
-                ? filtered.length
-                : limit;
+        return SafeArea(
+          top: false,
+          child: StatefulBuilder(
+            builder: (context, setSheetState) {
+              final filtered = sectors
+                  .where(
+                    (item) =>
+                        item.toLowerCase().contains(query.toLowerCase().trim()),
+                  )
+                  .toList();
+              final visibleCount = filtered.length < limit
+                  ? filtered.length
+                  : limit;
 
-            return SizedBox(
-              height: MediaQuery.of(context).size.height * 0.78,
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
-                    child: TextField(
-                      controller: controller,
-                      style: const TextStyle(color: _setupTextHigh),
-                      decoration: InputDecoration(
-                        hintText: 'Buscar sector',
-                        hintStyle: const TextStyle(color: _setupTextLow),
-                        prefixIcon: const Icon(Icons.search_rounded),
-                        filled: true,
-                        fillColor: const Color(0xFF120E25),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(
-                            color: Color(0xFF3B2F63),
+              return SizedBox(
+                height: MediaQuery.of(context).size.height * 0.78,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+                      child: TextField(
+                        controller: controller,
+                        style: const TextStyle(color: _setupTextHigh),
+                        decoration: InputDecoration(
+                          hintText: 'Buscar sector',
+                          hintStyle: const TextStyle(color: _setupTextLow),
+                          prefixIcon: const Icon(Icons.search_rounded),
+                          filled: true,
+                          fillColor: const Color(0xFF120E25),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF3B2F63),
+                            ),
                           ),
                         ),
-                      ),
-                      onChanged: (value) {
-                        setSheetState(() {
-                          query = value;
-                          limit = pageSize;
-                        });
-                      },
-                    ),
-                  ),
-                  Expanded(
-                    child: NotificationListener<ScrollNotification>(
-                      onNotification: (notification) {
-                        if (notification.metrics.pixels >=
-                                notification.metrics.maxScrollExtent - 80 &&
-                            limit < filtered.length) {
+                        onChanged: (value) {
                           setSheetState(() {
-                            limit = (limit + pageSize).clamp(
-                              0,
-                              filtered.length,
-                            );
+                            query = value;
+                            limit = pageSize;
                           });
-                        }
-                        return false;
-                      },
-                      child: ListView.builder(
-                        itemCount: visibleCount,
-                        itemBuilder: (context, index) {
-                          final sector = filtered[index];
-                          final active = sector == _selectedCategory;
-                          return ListTile(
-                            title: Text(
-                              sector,
-                              style: const TextStyle(color: _setupTextHigh),
-                            ),
-                            trailing: active
-                                ? const Icon(
-                                    Icons.check_circle_rounded,
-                                    color: Color(0xFFA78BFA),
-                                  )
-                                : null,
-                            onTap: () => Navigator.of(context).pop(sector),
-                          );
                         },
                       ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          },
+                    Expanded(
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          if (notification.metrics.pixels >=
+                                  notification.metrics.maxScrollExtent - 80 &&
+                              limit < filtered.length) {
+                            setSheetState(() {
+                              limit = (limit + pageSize).clamp(
+                                0,
+                                filtered.length,
+                              );
+                            });
+                          }
+                          return false;
+                        },
+                        child: ListView.builder(
+                          itemCount: visibleCount,
+                          itemBuilder: (context, index) {
+                            final sector = filtered[index];
+                            final active = sector == _selectedCategory;
+                            return ListTile(
+                              title: Text(
+                                sector,
+                                style: const TextStyle(color: _setupTextHigh),
+                              ),
+                              trailing: active
+                                  ? const Icon(
+                                      Icons.check_circle_rounded,
+                                      color: Color(0xFFA78BFA),
+                                    )
+                                  : null,
+                              onTap: () => Navigator.of(context).pop(sector),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         );
       },
     );
@@ -4840,12 +4848,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     padding: const EdgeInsets.fromLTRB(14, 6, 14, 14),
                     child: Row(
                       children: [
-                        if (_showBackControls)
+                        if (_showStepBackButton)
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: _currentStepFlowIndex == 0
-                                  ? null
-                                  : _previousStep,
+                              onPressed: _previousStep,
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.white,
                                 disabledForegroundColor: const Color(
@@ -4859,9 +4865,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               child: const Text('Atras'),
                             ),
                           ),
-                        if (_showBackControls) const SizedBox(width: 10),
+                        if (_showStepBackButton) const SizedBox(width: 10),
                         Expanded(
-                          flex: _showBackControls ? (compact ? 1 : 2) : 1,
+                          flex: _showStepBackButton ? (compact ? 1 : 2) : 1,
                           child: FilledButton(
                             onPressed: _saving ? null : _nextStep,
                             style: FilledButton.styleFrom(
@@ -6738,8 +6744,7 @@ class _LogoPreview extends StatelessWidget {
   const _LogoPreview({required this.file});
 
   final XFile? file;
-  static const String _defaultBrandLogoUrl =
-      'https://elmenuxfa.com/branding/isotipo.png';
+  static const String _defaultBrandLogoAsset = 'assets/branding/isotipo.png';
 
   @override
   Widget build(BuildContext context) {
@@ -6753,8 +6758,8 @@ class _LogoPreview extends StatelessWidget {
           border: Border.all(color: const Color(0xFFD8B4FE), width: 1.5),
         ),
         child: ClipOval(
-          child: Image.network(
-            _defaultBrandLogoUrl,
+          child: Image.asset(
+            _defaultBrandLogoAsset,
             width: 56,
             height: 56,
             fit: BoxFit.cover,
