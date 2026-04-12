@@ -105,15 +105,77 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'Analiza exclusivamente el logo y propon una paleta fiel a sus tonos dominantes. '
       'Evita reinterpretaciones fuertes y conserva los colores reales de la marca.';
 
-  static const List<String> _categories = <String>[
-    'Restaurante',
-    'Cafe',
+  static const List<String> _sectors = <String>[
+    'Abastos y minimarket',
+    'Abogado',
+    'Academia de idiomas',
+    'Agencia de marketing',
+    'Agencia de viajes',
+    'Agricola',
+    'Arquitectura',
+    'Arte y diseno',
+    'Asesoria contable',
+    'Autolavado',
+    'Automotriz',
     'Bar',
-    'Pizzeria',
-    'Panaderia',
-    'Comida Rapida',
+    'Barberia',
+    'Belleza',
+    'Bienes raices',
+    'Boutique',
+    'Cafe',
+    'Carniceria',
+    'Centro educativo',
+    'Cerrajeria',
+    'Clinica',
+    'Cocteleria',
+    'Comida rapida',
+    'Consultoria',
+    'Construccion',
+    'Cuidado personal',
+    'Delivery y logistica',
+    'Deportes',
+    'Discoteca',
+    'Diseno grafico',
+    'E-commerce',
+    'Electricidad',
+    'Eventos',
+    'Farmacia',
+    'Ferreteria',
+    'Finanzas',
+    'Floristeria',
+    'Fotografia',
+    'Gimnasio',
     'Heladeria',
-    'Otro',
+    'Hospedaje',
+    'Imprenta',
+    'Informatica y tecnologia',
+    'Joyeria',
+    'Laboratorio',
+    'Lavanderia',
+    'Licoreria',
+    'Libreria',
+    'Mecanica',
+    'Medicina',
+    'Moda',
+    'Muebles y decoracion',
+    'Panaderia',
+    'Papeleria',
+    'Peluqueria',
+    'Pizzeria',
+    'Pollera',
+    'Reparaciones',
+    'Reposteria',
+    'Restaurante',
+    'Salud',
+    'Servicios legales',
+    'Spa',
+    'Supermercado',
+    'Taller de motos',
+    'Tienda de mascotas',
+    'Tienda de ropa',
+    'Veterinaria',
+    'Videojuegos',
+    'Otros',
   ];
 
   static const List<String> _currencies = <String>['USD', 'VES', 'COP', 'EUR'];
@@ -134,16 +196,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       id: 'cards',
       name: 'Tarjetas',
       icon: Icons.view_agenda_rounded,
-    ),
-    _LayoutOption(
-      id: 'grid',
-      name: 'Cuadricula',
-      icon: Icons.grid_view_rounded,
-    ),
-    _LayoutOption(
-      id: 'compact',
-      name: 'Compacto',
-      icon: Icons.view_list_rounded,
     ),
   ];
 
@@ -193,10 +245,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final TextEditingController _exchangeRateController = TextEditingController();
   final TextEditingController _whatsappController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _locationNoteController = TextEditingController();
   final BrandingAiService _brandingAiService = const BrandingAiService();
 
   _SetupStep _step = _SetupStep.identity;
-  String _selectedCategory = _categories.first;
+  String _selectedCategory = 'Restaurante';
   final Set<String> _selectedCurrencies = <String>{'USD'};
   String _activeCheckoutCurrency = 'USD';
   String _selectedLayoutId = 'cards';
@@ -261,6 +314,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _checkingSlug = false;
   bool _isSlugAvailable = false;
   String? _slugAvailabilityMessage;
+  bool _slugManuallyEdited = false;
   bool _showDraftRecoveredHint = false;
 
   bool get _isEditing => _editingComercioId != null;
@@ -295,8 +349,21 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   _PaletteOption get _palette => _paletteSuggestion;
 
   List<String> get _fontSuggestions =>
-      _fontSuggestionsByCategory[_selectedCategory] ??
+      _fontSuggestionsByCategory[_fontSuggestionGroupForSector(
+        _selectedCategory,
+      )] ??
       _fontSuggestionsByCategory['Otro']!;
+
+  bool get _showBackControls => widget.businessConfigOnly || _isEditing;
+
+  List<String> get _sortedSectors {
+    final values = <String>{..._sectors}.toList()
+      ..sort((a, b) => a.compareTo(b));
+    if (!values.contains('Otros')) {
+      values.add('Otros');
+    }
+    return values;
+  }
 
   @override
   void initState() {
@@ -321,6 +388,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _exchangeRateController.dispose();
     _whatsappController.dispose();
     _addressController.dispose();
+    _locationNoteController.dispose();
     _slugDebounce?.cancel();
     super.dispose();
   }
@@ -400,9 +468,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _editingComercioId = comercio.id.trim().isEmpty ? null : comercio.id.trim();
     _nameController.text = comercio.nombre.trim();
     _slugController.text = (comercio.slug ?? '').trim();
+    _slugManuallyEdited = _slugController.text.trim().isNotEmpty;
 
     final category = (raw?['categoria']?.toString().trim() ?? '');
-    if (_categories.contains(category)) {
+    if (_sectors.contains(category)) {
       _selectedCategory = category;
     }
 
@@ -414,7 +483,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
     _selectedPhoneCountryIso = parsedPhone.countryIso;
     _whatsappController.text = parsedPhone.nationalNumber;
-    _addressController.text = (raw?['direccion']?.toString() ?? '').trim();
+    final seedAddress = (raw?['direccion']?.toString() ?? '').trim();
+    _addressController.text = _extractAddressLine(seedAddress);
+    _locationNoteController.text = _extractAddressNote(seedAddress);
     _businessLatitude = _toDoubleOrNull(
       raw?['latitud'] ?? raw?['direccion_lat'] ?? raw?['latitude'],
     );
@@ -666,9 +737,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
       _nameController.text = (map['name'] as String? ?? '').trim();
       _slugController.text = (map['slug'] as String? ?? '').trim();
+      _slugManuallyEdited =
+          map['slugManuallyEdited'] as bool? ??
+          _slugController.text.trim().isNotEmpty;
 
       final category = (map['category'] as String? ?? '').trim();
-      if (_categories.contains(category)) {
+      if (_sectors.contains(category)) {
         _selectedCategory = category;
       }
 
@@ -772,6 +846,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _selectedPhoneCountryIso = parsedPhone.countryIso;
       _whatsappController.text = parsedPhone.nationalNumber;
       _addressController.text = (map['address'] as String? ?? '').trim();
+      _locationNoteController.text = (map['locationNote'] as String? ?? '')
+          .trim();
       _businessLatitude = _toDoubleOrNull(map['businessLatitude']);
       _businessLongitude = _toDoubleOrNull(map['businessLongitude']);
       _allowDelivery = map['allowDelivery'] as bool? ?? false;
@@ -892,6 +968,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'step': _step.index,
       'name': _nameController.text.trim(),
       'slug': _normalizeSlug(_slugController.text),
+      'slugManuallyEdited': _slugManuallyEdited,
       'category': _selectedCategory,
       'currency': _currentCurrency,
       'currencies': _selectedCurrencies.toList(),
@@ -913,6 +990,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'whatsapp': _whatsappE164,
       'whatsappCountryIso': _selectedPhoneCountryIso,
       'address': _addressController.text.trim(),
+      'locationNote': _locationNoteController.text.trim(),
       'businessLatitude': _businessLatitude,
       'businessLongitude': _businessLongitude,
       'allowDelivery': _allowDelivery,
@@ -958,22 +1036,99 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   String _normalizeSlug(String value) {
-    return value
+    var normalized = value
         .trim()
         .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('ã', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('õ', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n')
         .replaceAll(RegExp(r'\s+'), '-')
         .replaceAll(RegExp(r'[^a-z0-9-]'), '')
         .replaceAll(RegExp(r'-+'), '-')
         .replaceAll(RegExp(r'^-|-$'), '');
+    return normalized;
+  }
+
+  void _onNameChanged(String value) {
+    if (!_slugManuallyEdited) {
+      final generated = _normalizeSlug(value);
+      if (_slugController.text != generated) {
+        _onSlugChanged(generated, markManualEdit: false);
+      }
+    }
+    unawaited(_saveDraft());
+  }
+
+  String _fontSuggestionGroupForSector(String sector) {
+    final normalized = sector.toLowerCase();
+    if (normalized.contains('cafe')) return 'Cafe';
+    if (normalized.contains('bar')) return 'Bar';
+    if (normalized.contains('pizzer')) return 'Pizzeria';
+    if (normalized.contains('panader')) return 'Panaderia';
+    if (normalized.contains('rapida')) return 'Comida Rapida';
+    if (normalized.contains('helader')) return 'Heladeria';
+    if (normalized.contains('restaurant')) return 'Restaurante';
+    return 'Otro';
+  }
+
+  String _extractAddressLine(String rawAddress) {
+    final markerIndex = rawAddress.indexOf('\nReferencia:');
+    if (markerIndex <= 0) {
+      return rawAddress;
+    }
+    return rawAddress.substring(0, markerIndex).trim();
+  }
+
+  String _extractAddressNote(String rawAddress) {
+    final markerIndex = rawAddress.indexOf('\nReferencia:');
+    if (markerIndex < 0) {
+      return '';
+    }
+    return rawAddress.substring(markerIndex + '\nReferencia:'.length).trim();
+  }
+
+  String _composeAddressWithNote() {
+    final address = _addressController.text.trim();
+    final note = _locationNoteController.text.trim();
+    if (address.isEmpty) {
+      return '';
+    }
+    if (note.isEmpty) {
+      return address;
+    }
+    return '$address\nReferencia: $note';
   }
 
   bool _isSlugFormatValid(String value) {
     return RegExp(r'^[a-z0-9]+(?:-[a-z0-9]+)*$').hasMatch(value);
   }
 
-  void _onSlugChanged(String value) {
+  void _onSlugChanged(String value, {bool markManualEdit = true}) {
     final normalized = _normalizeSlug(value);
-    if (normalized != value) {
+    if (markManualEdit) {
+      _slugManuallyEdited = normalized.isNotEmpty;
+    }
+    if (_slugController.text != normalized) {
       _slugController.value = TextEditingValue(
         text: normalized,
         selection: TextSelection.collapsed(offset: normalized.length),
@@ -1058,7 +1213,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
         final action = await showModalBottomSheet<_LogoPickAction>(
           context: context,
-          useSafeArea: false,
+          useSafeArea: true,
           backgroundColor: const Color(0xFF17122E),
           showDragHandle: true,
           builder: (context) {
@@ -1236,6 +1391,141 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         const SnackBar(content: Text('No se pudo seleccionar la imagen.')),
       );
     }
+  }
+
+  Future<void> _openSectorPicker() async {
+    final sectors = _sortedSectors;
+    var query = '';
+    const pageSize = 20;
+    var limit = pageSize;
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF17122E),
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final controller = TextEditingController();
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final filtered = sectors
+                .where(
+                  (item) =>
+                      item.toLowerCase().contains(query.toLowerCase().trim()),
+                )
+                .toList();
+            final visibleCount = filtered.length < limit
+                ? filtered.length
+                : limit;
+
+            return SizedBox(
+              height: MediaQuery.of(context).size.height * 0.78,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+                    child: TextField(
+                      controller: controller,
+                      style: const TextStyle(color: _setupTextHigh),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar sector',
+                        hintStyle: const TextStyle(color: _setupTextLow),
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        filled: true,
+                        fillColor: const Color(0xFF120E25),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF3B2F63),
+                          ),
+                        ),
+                      ),
+                      onChanged: (value) {
+                        setSheetState(() {
+                          query = value;
+                          limit = pageSize;
+                        });
+                      },
+                    ),
+                  ),
+                  Expanded(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification.metrics.pixels >=
+                                notification.metrics.maxScrollExtent - 80 &&
+                            limit < filtered.length) {
+                          setSheetState(() {
+                            limit = (limit + pageSize).clamp(
+                              0,
+                              filtered.length,
+                            );
+                          });
+                        }
+                        return false;
+                      },
+                      child: ListView.builder(
+                        itemCount: visibleCount,
+                        itemBuilder: (context, index) {
+                          final sector = filtered[index];
+                          final active = sector == _selectedCategory;
+                          return ListTile(
+                            title: Text(
+                              sector,
+                              style: const TextStyle(color: _setupTextHigh),
+                            ),
+                            trailing: active
+                                ? const Icon(
+                                    Icons.check_circle_rounded,
+                                    color: Color(0xFFA78BFA),
+                                  )
+                                : null,
+                            onTap: () => Navigator.of(context).pop(sector),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted || selected == null || selected == _selectedCategory) {
+      return;
+    }
+
+    setState(() {
+      _selectedCategory = selected;
+      _showAllFontSuggestions = false;
+      if (!_fontSuggestions.contains(_selectedHeadingFont)) {
+        _selectedHeadingFont = _fontSuggestions.first;
+      }
+    });
+    await _saveDraft();
+  }
+
+  void _showComingSoonImport() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Importar archivo con IA (PDF, imagenes, CSV) estara disponible pronto.',
+        ),
+      ),
+    );
+  }
+
+  void _showComingSoonPrompt() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Crear menu desde un prompt de texto estara disponible pronto.',
+        ),
+      ),
+    );
   }
 
   Future<String?> _openManualLogoEditor(String sourcePath) async {
@@ -2055,7 +2345,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       '',
     );
 
-    if (_allowDelivery || _receiveOrdersOnWhatsapp) {
+    if (_receiveOrdersOnWhatsapp) {
       if (whatsapp.isEmpty) {
         return 'Agrega un numero de telefono valido para WhatsApp.';
       }
@@ -3464,7 +3754,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final updated = await showModalBottomSheet<_PaymentMethodDraft>(
       context: context,
       isScrollControlled: true,
-      useSafeArea: false,
+      useSafeArea: true,
       backgroundColor: const Color(0xFF17122E),
       showDragHandle: true,
       builder: (context) {
@@ -3627,7 +3917,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final updatedAccount = await showModalBottomSheet<_TransferAccountDraft>(
       context: context,
       isScrollControlled: true,
-      useSafeArea: false,
+      useSafeArea: true,
       backgroundColor: const Color(0xFF17122E),
       showDragHandle: true,
       builder: (context) {
@@ -4182,8 +4472,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'slug': _normalizeSlug(_slugController.text),
       'categoria': _selectedCategory,
       if (_whatsappE164.isNotEmpty) 'whatsapp': _whatsappE164,
-      if (_addressController.text.trim().isNotEmpty)
-        'direccion': _addressController.text.trim(),
+      if (_composeAddressWithNote().isNotEmpty)
+        'direccion': _composeAddressWithNote(),
       if (_businessLatitude != null) 'latitud': _businessLatitude,
       if (_businessLongitude != null) 'longitud': _businessLongitude,
       'permite_delivery': _allowDelivery,
@@ -4195,7 +4485,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           : null,
       'metodo_pago_predeterminado': defaultMethod,
       'metodos_pago': allMethods.toList(),
-      'menu_layout': _selectedLayoutId,
+      'menu_layout': 'cards',
       'menu_palette': _selectedPaletteId,
       'menu_palette_primary': _paletteSuggestion.primary.toARGB32(),
       'menu_palette_accent': _paletteSuggestion.accent.toARGB32(),
@@ -4475,6 +4765,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFF0F0B1D),
         appBar: AppBar(
+          automaticallyImplyLeading: _showBackControls,
           backgroundColor: const Color(0xFF16102A),
           foregroundColor: _setupTextHigh,
           iconTheme: const IconThemeData(color: _setupTextHigh),
@@ -4483,11 +4774,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             fontSize: 28,
             fontWeight: FontWeight.w700,
           ),
-          title: Text(
-            widget.businessConfigOnly
-                ? 'Configuración del negocio'
-                : (_isEditing ? 'Editar menu' : 'Crear menu'),
-          ),
+          title: const Text('Mi Negocio'),
         ),
         body: SafeArea(
           child: LayoutBuilder(
@@ -4553,23 +4840,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     padding: const EdgeInsets.fromLTRB(14, 6, 14, 14),
                     child: Row(
                       children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _currentStepFlowIndex == 0
-                                ? null
-                                : _previousStep,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              disabledForegroundColor: const Color(0xFFB6A9D7),
-                              side: const BorderSide(color: Color(0xFF5F4B93)),
-                              minimumSize: const Size.fromHeight(50),
+                        if (_showBackControls)
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _currentStepFlowIndex == 0
+                                  ? null
+                                  : _previousStep,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                disabledForegroundColor: const Color(
+                                  0xFFB6A9D7,
+                                ),
+                                side: const BorderSide(
+                                  color: Color(0xFF5F4B93),
+                                ),
+                                minimumSize: const Size.fromHeight(50),
+                              ),
+                              child: const Text('Atras'),
                             ),
-                            child: const Text('Atras'),
                           ),
-                        ),
-                        const SizedBox(width: 10),
+                        if (_showBackControls) const SizedBox(width: 10),
                         Expanded(
-                          flex: compact ? 1 : 2,
+                          flex: _showBackControls ? (compact ? 1 : 2) : 1,
                           child: FilledButton(
                             onPressed: _saving ? null : _nextStep,
                             style: FilledButton.styleFrom(
@@ -4621,6 +4913,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _MenuPreviewNavbar(
+          compact: compact,
+          nameController: _nameController,
+          category: _selectedCategory,
+          onNameChanged: _onNameChanged,
+          onPickLogo: _pickLogo,
+          selectedLogo: _selectedLogo,
+        ),
+        const SizedBox(height: 12),
         _UrlBar(
           slugController: _slugController,
           onChanged: _onSlugChanged,
@@ -4629,41 +4930,20 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           slugMessage: _slugAvailabilityMessage,
         ),
         const SizedBox(height: 12),
-        _MenuPreviewNavbar(
-          compact: compact,
-          nameController: _nameController,
-          category: _selectedCategory,
-          onNameChanged: (_) => unawaited(_saveDraft()),
-          onPickLogo: _pickLogo,
-          selectedLogo: _selectedLogo,
-        ),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          key: ValueKey<String>('category-$_selectedCategory'),
+        TextFormField(
+          key: ValueKey<String>('sector-$_selectedCategory'),
+          readOnly: true,
+          onTap: _openSectorPicker,
           initialValue: _selectedCategory,
           decoration: _fieldDecoration(
-            'Tipo de menu',
+            'Sector',
             Icons.storefront_rounded,
-          ),
-          dropdownColor: const Color(0xFF1A1432),
-          style: const TextStyle(color: Colors.white),
-          items: _categories
-              .map(
-                (value) =>
-                    DropdownMenuItem<String>(value: value, child: Text(value)),
-              )
-              .toList(),
-          onChanged: (value) {
-            if (value == null) return;
-            setState(() {
-              _selectedCategory = value;
-              _showAllFontSuggestions = false;
-              if (!_fontSuggestions.contains(_selectedHeadingFont)) {
-                _selectedHeadingFont = _fontSuggestions.first;
-              }
-            });
-            unawaited(_saveDraft());
-          },
+          ).copyWith(suffixIcon: const Icon(Icons.keyboard_arrow_down_rounded)),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Selecciona el sector de tu negocio. Incluye gastronomia y otros rubros.',
+          style: TextStyle(color: _setupTextLow, fontSize: 12),
         ),
       ],
     );
@@ -4860,9 +5140,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           businessName: _nameController.text.trim().isEmpty
               ? 'Tu menu'
               : _nameController.text.trim(),
-          layoutName: _layouts
-              .firstWhere((item) => item.id == _selectedLayoutId)
-              .name,
+          layoutName: 'Tarjetas',
           headingStyleBuilder: _headingFontStyle,
         ),
       ],
@@ -5514,24 +5792,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           style: TextStyle(color: _setupTextMedium, fontSize: 12),
         ),
         const SizedBox(height: 12),
-        SwitchListTile.adaptive(
-          value: _allowDelivery,
-          onChanged: (value) {
-            setState(() => _allowDelivery = value);
-            unawaited(_saveDraft());
-          },
-          activeThumbColor: _palette.primary,
-          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
-          inactiveThumbColor: const Color(0xFFE7E0F9),
-          inactiveTrackColor: const Color(0xFF3A305A),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: const Text('Permitir delivery'),
-          subtitle: const Text(
-            'Activa entregas a domicilio para tus clientes.',
-            style: TextStyle(color: _setupTextMedium, fontSize: 12),
-          ),
-        ),
-        const SizedBox(height: 8),
         IntlPhoneField(
           controller: _whatsappController,
           initialCountryCode: _selectedPhoneCountryIso.trim().isEmpty
@@ -5612,12 +5872,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           },
           onChanged: (phone) {
             _selectedPhoneCountryIso = phone.countryISOCode;
+            if (_whatsappE164.isEmpty && _receiveOrdersOnWhatsapp) {
+              setState(() => _receiveOrdersOnWhatsapp = false);
+            }
             unawaited(_saveDraft());
           },
           validator: (phone) {
             final number = phone?.number.trim() ?? '';
-            if ((_allowDelivery || _receiveOrdersOnWhatsapp) &&
-                number.isEmpty) {
+            if (_receiveOrdersOnWhatsapp && number.isEmpty) {
               return 'Ingresa un numero de WhatsApp.';
             }
             return null;
@@ -5683,14 +5945,41 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _locationNoteController,
+                onChanged: (_) => unawaited(_saveDraft()),
+                style: const TextStyle(color: _setupTextHigh),
+                maxLines: 2,
+                decoration: InputDecoration(
+                  labelText: 'Referencia (opcional)',
+                  hintText: 'Ej. Frente a la plaza, local esquina, piso 2',
+                  labelStyle: const TextStyle(color: _setupTextLow),
+                  hintStyle: const TextStyle(color: _setupTextLow),
+                  filled: true,
+                  fillColor: const Color(0xFF120E25),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: _palette.primary, width: 1.2),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
         const SizedBox(height: 8),
         SwitchListTile.adaptive(
-          value: _receiveOrdersOnWhatsapp,
+          value: _allowDelivery,
           onChanged: (value) {
-            setState(() => _receiveOrdersOnWhatsapp = value);
+            setState(() => _allowDelivery = value);
             unawaited(_saveDraft());
           },
           activeThumbColor: _palette.primary,
@@ -5698,10 +5987,32 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           inactiveThumbColor: const Color(0xFFE7E0F9),
           inactiveTrackColor: const Color(0xFF3A305A),
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: const Text('Recibir pedidos por WhatsApp'),
+          title: const Text('Permitir delivery'),
           subtitle: const Text(
-            'Muestra WhatsApp como canal principal para tomar pedidos.',
+            'Activa entregas a domicilio para tus clientes.',
             style: TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          value: _receiveOrdersOnWhatsapp,
+          onChanged: _whatsappE164.isEmpty
+              ? null
+              : (value) {
+                  setState(() => _receiveOrdersOnWhatsapp = value);
+                  unawaited(_saveDraft());
+                },
+          activeThumbColor: _palette.primary,
+          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+          inactiveThumbColor: const Color(0xFFE7E0F9),
+          inactiveTrackColor: const Color(0xFF3A305A),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: const Text('Mostrar boton de contacto por WhatsApp'),
+          subtitle: Text(
+            _whatsappE164.isEmpty
+                ? 'Agrega un numero para habilitar esta opcion.'
+                : 'Muestra un boton para que el cliente te contacte por WhatsApp.',
+            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
       ],
@@ -5716,7 +6027,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Escaneo del menu',
+            'Menu',
             style: GoogleFonts.poppins(
               color: _setupTextHigh,
               fontSize: 19,
@@ -5725,44 +6036,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Digitaliza tu menu o crea manualmente. Debes completar una de las dos opciones para continuar.',
+            'Digitaliza tu menu o crea manualmente. Debes completar una opcion para continuar.',
             style: TextStyle(color: _setupTextMedium, fontSize: 12),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Layout',
-            style: GoogleFonts.poppins(
-              color: _setupTextHigh,
-              fontSize: 19,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _layouts.map((layout) {
-              final selected = _selectedLayoutId == layout.id;
-              return ChoiceChip(
-                label: Text(layout.name),
-                selected: selected,
-                avatar: Icon(layout.icon, size: 18),
-                onSelected: (_) {
-                  setState(() => _selectedLayoutId = layout.id);
-                  unawaited(_saveDraft());
-                },
-                selectedColor: const Color(0xFF2D2152),
-                backgroundColor: const Color(0xFF1A1432),
-                labelStyle: const TextStyle(
-                  color: _setupTextHigh,
-                  fontSize: 14,
-                ),
-                side: BorderSide(
-                  color: selected ? _palette.primary : const Color(0xFF3B2F63),
-                ),
-                showCheckmark: false,
-              );
-            }).toList(),
           ),
           const SizedBox(height: 14),
           Container(
@@ -5794,10 +6069,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     Expanded(
                       child: Text(
                         _menuScanCompleted
-                            ? 'Escaneo completado'
+                            ? 'Menu creado con IA'
                             : _menuCatalogCount > 0
                             ? 'Creacion manual completada'
-                            : 'Escaneo pendiente',
+                            : 'Menu pendiente',
                         style: const TextStyle(
                           color: _setupTextHigh,
                           fontSize: 14,
@@ -5815,7 +6090,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       ? _menuCatalogCount == 1
                             ? 'Creacion manual lista: 1 menu detectado.'
                             : 'Creacion manual lista: $_menuCatalogCount menus detectados.'
-                      : 'Abre el escaneo y toma una foto clara para procesar tu menu.',
+                      : 'Usa IA o crealo manualmente para completar este paso.',
                   style: const TextStyle(color: _setupTextMedium, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
@@ -5824,12 +6099,34 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   children: [
                     FilledButton.icon(
                       onPressed: _openMenuScan,
-                      icon: const Icon(Icons.document_scanner_rounded),
+                      icon: const Icon(Icons.auto_awesome_rounded),
                       label: Text(
                         _menuScanCompleted
-                            ? 'Reescanear menu'
-                            : 'Escanear menu',
+                            ? 'Reescanear con IA'
+                            : 'Escanear con IA',
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _showComingSoonImport,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _setupTextHigh,
+                        side: const BorderSide(color: Color(0xFF6B5A9A)),
+                      ),
+                      icon: const Icon(Icons.upload_file_rounded),
+                      label: const Text(
+                        'Importar archivo (PDF, imagen, CSV, etc.)',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _showComingSoonPrompt,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _setupTextHigh,
+                        side: const BorderSide(color: Color(0xFF6B5A9A)),
+                      ),
+                      icon: const Icon(Icons.chat_rounded),
+                      label: const Text('Crear desde prompt de texto'),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
@@ -5915,11 +6212,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               runSpacing: 8,
               children: [
                 _SummaryTag(label: _selectedCategory),
-                _SummaryTag(
-                  label: _layouts
-                      .firstWhere((item) => item.id == _selectedLayoutId)
-                      .name,
-                ),
+                _SummaryTag(label: 'Tarjetas'),
                 _SummaryTag(label: _selectedCurrencies.join(' + ')),
                 _SummaryTag(
                   label: _allowDelivery ? 'Delivery activo' : 'Sin delivery',
@@ -5967,6 +6260,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       fontSize: 12,
                     ),
                   ),
+                  if (_locationNoteController.text.trim().isNotEmpty)
+                    Text(
+                      'Referencia: ${_locationNoteController.text.trim()}',
+                      style: const TextStyle(
+                        color: _setupTextMedium,
+                        fontSize: 12,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -6043,11 +6344,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               textColor: previewTextColor,
                             ),
                             _PreviewChip(
-                              label: _layouts
-                                  .firstWhere(
-                                    (item) => item.id == _selectedLayoutId,
-                                  )
-                                  .name,
+                              label: 'Tarjetas',
                               textColor: previewTextColor,
                             ),
                             _PreviewChip(
@@ -6358,7 +6655,7 @@ class _StepPills extends StatelessWidget {
     'Estilo',
     'Pagos',
     'Operacion',
-    'Escaneo',
+    'Menu',
     'Final',
   ];
 
@@ -6441,6 +6738,8 @@ class _LogoPreview extends StatelessWidget {
   const _LogoPreview({required this.file});
 
   final XFile? file;
+  static const String _defaultBrandLogoUrl =
+      'https://elmenuxfa.com/branding/isotipo.png';
 
   @override
   Widget build(BuildContext context) {
@@ -6453,9 +6752,19 @@ class _LogoPreview extends StatelessWidget {
           color: const Color(0xFF241B42),
           border: Border.all(color: const Color(0xFFD8B4FE), width: 1.5),
         ),
-        child: const Icon(
-          Icons.person_outline_rounded,
-          color: Color(0xFFD8B4FE),
+        child: ClipOval(
+          child: Image.network(
+            _defaultBrandLogoUrl,
+            width: 56,
+            height: 56,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) {
+              return const Icon(
+                Icons.storefront_rounded,
+                color: Color(0xFFD8B4FE),
+              );
+            },
+          ),
         ),
       );
     }

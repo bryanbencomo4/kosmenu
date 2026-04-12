@@ -142,9 +142,7 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
 
   Future<void> _createFirstCatalog() async {
     if (_isCreating) return;
-
-    final name = await _showNameDialog();
-    if (!mounted || name == null || name.isEmpty) return;
+    const name = 'Menu principal';
 
     setState(() => _isCreating = true);
     try {
@@ -227,7 +225,7 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Por ahora trabajamos con un solo menú. Créalo para continuar con categorías y productos.',
+                      'Por ahora trabajamos con un solo menú. Se creará automáticamente como "Menu principal".',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: colorScheme.onSurfaceVariant),
                     ),
@@ -237,7 +235,9 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
                       child: FilledButton.icon(
                         onPressed: _isCreating ? null : _createFirstCatalog,
                         icon: const Icon(Icons.add_rounded),
-                        label: Text(_isCreating ? 'Creando...' : 'Crear menú'),
+                        label: Text(
+                          _isCreating ? 'Creando...' : 'Crear menú principal',
+                        ),
                       ),
                     ),
                   ],

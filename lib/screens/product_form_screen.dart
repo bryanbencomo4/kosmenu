@@ -44,6 +44,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _remoteImageUrl;
   String? _businessLogoUrl;
   XFile? _pickedImage;
+  bool _isLoadingPricingConfig = false;
+  String _baseCurrency = 'USD';
+  String _selectedPriceCurrency = 'USD';
+  double _usdCopRate = 0;
+  Set<String> _availablePriceCurrencies = <String>{'USD'};
   bool _isSaving = false;
   bool _isUploadingImage = false;
 
@@ -63,6 +68,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         (widget.categories.isNotEmpty ? widget.categories.first.id : null);
     _remoteImageUrl = product?.imagenUrl;
     _loadBusinessLogo();
+    _loadPricingConfig();
   }
 
   @override
@@ -102,6 +108,105 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     } catch (_) {
       // Keep default fallback image when logo lookup fails.
     }
+  }
+
+  Future<void> _loadPricingConfig() async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) return;
+
+    setState(() => _isLoadingPricingConfig = true);
+    try {
+      final comercio = await Supabase.instance.client
+          .from('comercios')
+          .select('moneda, tasa_cambio_pesos')
+          .eq('id', comercioId)
+          .maybeSingle();
+
+      final methods = await Supabase.instance.client
+          .from('metodos_pago')
+          .select('tipo')
+          .eq('comercio_id', comercioId);
+
+      final currencies = <String>{};
+      final dbBase =
+          (comercio?['moneda']?.toString().trim().toUpperCase() ?? 'USD');
+      currencies.add(dbBase.isEmpty ? 'USD' : dbBase);
+
+      for (final row in methods as List<dynamic>) {
+        final tipo = (row['tipo']?.toString().trim().toLowerCase() ?? '');
+        final parts = tipo.split('__');
+        if (parts.length > 1) {
+          final currency = parts.last.toUpperCase();
+          if (currency.length == 3) {
+            currencies.add(currency);
+          }
+        }
+      }
+
+      final rateRaw = comercio?['tasa_cambio_pesos'];
+      final rate = rateRaw is num
+          ? rateRaw.toDouble()
+          : double.tryParse(
+                  (rateRaw ?? '').toString().trim().replaceAll(',', '.'),
+                ) ??
+                0;
+
+      if (currencies.isEmpty) {
+        currencies.add('USD');
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _baseCurrency = dbBase.isEmpty ? 'USD' : dbBase;
+        _usdCopRate = rate;
+        _availablePriceCurrencies = currencies;
+        if (!_availablePriceCurrencies.contains(_selectedPriceCurrency)) {
+          _selectedPriceCurrency = _baseCurrency;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _baseCurrency = 'USD';
+        _availablePriceCurrencies = <String>{'USD'};
+        _selectedPriceCurrency = 'USD';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingPricingConfig = false);
+      }
+    }
+  }
+
+  double _convertToBaseCurrency({
+    required double value,
+    required String fromCurrency,
+  }) {
+    if (fromCurrency == _baseCurrency) {
+      return value;
+    }
+
+    if (fromCurrency == 'COP' && _baseCurrency == 'USD' && _usdCopRate > 0) {
+      return value / _usdCopRate;
+    }
+    if (fromCurrency == 'USD' && _baseCurrency == 'COP' && _usdCopRate > 0) {
+      return value * _usdCopRate;
+    }
+
+    return value;
+  }
+
+  double? _previewBasePrice() {
+    final parsed = double.tryParse(
+      _priceController.text.trim().replaceAll(',', '.'),
+    );
+    if (parsed == null) {
+      return null;
+    }
+    return _convertToBaseCurrency(
+      value: parsed,
+      fromCurrency: _selectedPriceCurrency,
+    );
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -280,7 +385,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         'categoria_id': _selectedCategoryId,
         'nombre': _nameController.text.trim(),
         'descripcion': _descriptionController.text.trim(),
-        'precio': _parsePrice(),
+        'precio': _convertToBaseCurrency(
+          value: _parsePrice(),
+          fromCurrency: _selectedPriceCurrency,
+        ),
         'imagen_url': finalImageUrl,
       };
 
@@ -454,6 +562,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   categories: widget.categories,
                   selectedCategoryId: _selectedCategoryId,
                   isSaving: _isSaving,
+                  isLoadingPricingConfig: _isLoadingPricingConfig,
+                  availablePriceCurrencies: _availablePriceCurrencies,
+                  selectedPriceCurrency: _selectedPriceCurrency,
+                  priceHelperText: () {
+                    final converted = _previewBasePrice();
+                    if (converted == null) {
+                      return 'El precio se guardara en $_baseCurrency.';
+                    }
+                    return 'Se guardara como ${converted.toStringAsFixed(2)} $_baseCurrency.';
+                  }(),
                   nameController: _nameController,
                   descriptionController: _descriptionController,
                   priceController: _priceController,
@@ -463,6 +581,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   validatePrice: _validatePrice,
                   onCategoryChanged: (value) =>
                       setState(() => _selectedCategoryId = value),
+                  onPriceCurrencyChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _selectedPriceCurrency = value);
+                  },
                   onSave: _save,
                 );
 
@@ -721,6 +843,10 @@ class _FormPanel extends StatelessWidget {
     required this.categories,
     required this.selectedCategoryId,
     required this.isSaving,
+    required this.isLoadingPricingConfig,
+    required this.availablePriceCurrencies,
+    required this.selectedPriceCurrency,
+    required this.priceHelperText,
     required this.nameController,
     required this.descriptionController,
     required this.priceController,
@@ -729,6 +855,7 @@ class _FormPanel extends StatelessWidget {
     required this.validateName,
     required this.validatePrice,
     required this.onCategoryChanged,
+    required this.onPriceCurrencyChanged,
     required this.onSave,
   });
 
@@ -736,6 +863,10 @@ class _FormPanel extends StatelessWidget {
   final List<CategoryModel> categories;
   final String? selectedCategoryId;
   final bool isSaving;
+  final bool isLoadingPricingConfig;
+  final Set<String> availablePriceCurrencies;
+  final String selectedPriceCurrency;
+  final String priceHelperText;
   final TextEditingController nameController;
   final TextEditingController descriptionController;
   final TextEditingController priceController;
@@ -744,6 +875,7 @@ class _FormPanel extends StatelessWidget {
   final FormFieldValidator<String> validateName;
   final FormFieldValidator<String> validatePrice;
   final ValueChanged<String?> onCategoryChanged;
+  final ValueChanged<String?> onPriceCurrencyChanged;
   final VoidCallback onSave;
 
   @override
@@ -913,6 +1045,42 @@ class _FormPanel extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               fieldLabel('Precio'),
+              if (isLoadingPricingConfig)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+              DropdownButtonFormField<String>(
+                initialValue: selectedPriceCurrency,
+                isExpanded: true,
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+                dropdownColor: colorScheme.surfaceContainerHigh,
+                items:
+                    (availablePriceCurrencies.toList()
+                          ..sort((a, b) => a.compareTo(b)))
+                        .map(
+                          (currency) => DropdownMenuItem<String>(
+                            value: currency,
+                            child: Text(
+                              currency,
+                              style: GoogleFonts.manrope(
+                                fontWeight: FontWeight.w700,
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                onChanged: isSaving ? null : onPriceCurrencyChanged,
+                decoration: const InputDecoration(
+                  labelText: 'Moneda del precio',
+                  hintText: 'Seleccionar',
+                ),
+              ),
+              const SizedBox(height: 10),
               TextFormField(
                 controller: priceController,
                 enabled: !isSaving,
@@ -931,13 +1099,17 @@ class _FormPanel extends StatelessWidget {
                 validator: validatePrice,
               ),
               const SizedBox(height: 18),
-              Text(
-                'Verifica que el precio esté en la moneda de tu negocio.',
-                style: GoogleFonts.manrope(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w500,
-                ),
+              Builder(
+                builder: (context) {
+                  return Text(
+                    priceHelperText,
+                    style: GoogleFonts.manrope(
+                      color: colorScheme.onSurfaceVariant,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 16),
               SizedBox(
