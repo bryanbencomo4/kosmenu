@@ -118,7 +118,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     try {
       final comercio = await Supabase.instance.client
           .from('comercios')
-          .select('moneda, tasa_cambio_pesos')
+          .select('moneda, exchange_rate_value, tasa_cambio_pesos')
           .eq('id', comercioId)
           .maybeSingle();
 
@@ -143,7 +143,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         }
       }
 
-      final rateRaw = comercio?['tasa_cambio_pesos'];
+      final rateRaw =
+          comercio?['exchange_rate_value'] ?? comercio?['tasa_cambio_pesos'];
       final rate = rateRaw is num
           ? rateRaw.toDouble()
           : double.tryParse(

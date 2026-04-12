@@ -99,7 +99,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
       comercioAddress: (comercioMap['direccion']?.toString() ?? '').trim(),
       businessLatitude: _toDoubleOrNull(comercioMap['latitud']),
       businessLongitude: _toDoubleOrNull(comercioMap['longitud']),
-      tasaCambioPesos: _parseRate(comercioMap['tasa_cambio_pesos']),
+      tasaCambioPesos: _parseRate(
+        comercioMap['exchange_rate_value'] ?? comercioMap['tasa_cambio_pesos'],
+      ),
       palette: _PublicMenuPalette.fromMenuPalette(
         comercioMap['menu_palette']?.toString(),
         primaryArgb: _toInt(comercioMap['menu_palette_primary']),
@@ -274,6 +276,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     final details = <String, dynamic>{
       'items': carritoItems,
       'tasa_aplicada': tasaAplicada,
+      'tasa_cambio_snapshot': tasaAplicada,
       'codigo_orden': orderCode,
       'metodo_pago': selectedPaymentMethod,
       'order_notes': orderNotes,

@@ -101,6 +101,10 @@ _fontSuggestionsByCategory = <String, List<String>>{
 
 class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   static const String _draftKeyPrefix = 'business_setup_draft_v2';
+  static const String _exchangeModeAuto = 'auto';
+  static const String _exchangeModeManual = 'manual';
+  static const String _exchangeSourceBcv = 'bcv';
+  static const String _exchangeSourceP2pBinance = 'p2p_binance';
   static const String _paletteAiPrompt =
       'Analiza exclusivamente el logo y propon una paleta fiel a sus tonos dominantes. '
       'Evita reinterpretaciones fuertes y conserva los colores reales de la marca.';
@@ -274,6 +278,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _isExchangeRateLoading = false;
   String? _exchangeRateMessage;
   bool _exchangeRateIsError = false;
+  String _exchangeRateMode = _exchangeModeAuto;
+  String _exchangeRateSource = _exchangeSourceBcv;
+  final Map<String, double> _marketRates = <String, double>{
+    _exchangeSourceBcv: 477.1488,
+    _exchangeSourceP2pBinance: 630.6,
+  };
   String _lastSuggestedRateCurrency = 'USD';
   bool _exchangeRateManuallyEdited = false;
   final Map<String, String> _exchangeRateByCurrency = <String, String>{
@@ -308,6 +318,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   Timer? _slugDebounce;
   Timer? _autosaveTimer;
   Timer? _draftRecoveredHintTimer;
+  RealtimeChannel? _marketRatesChannel;
 
   bool _saving = false;
   bool _loadingExisting = true;
@@ -370,8 +381,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   @override
   void initState() {
     super.initState();
+    _exchangeRateController.addListener(_forceExchangeRateCursorAtEnd);
     _ensureCurrencyConfig('USD');
     _loadActiveCurrencyIntoController();
+    _subscribeToMarketRatesRealtime();
     _loadInitialData();
     _autosaveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_loadingExisting) {
@@ -384,7 +397,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   void dispose() {
     _autosaveTimer?.cancel();
     _draftRecoveredHintTimer?.cancel();
+    if (_marketRatesChannel != null) {
+      unawaited(Supabase.instance.client.removeChannel(_marketRatesChannel!));
+      _marketRatesChannel = null;
+    }
     unawaited(_saveDraft());
+    _exchangeRateController.removeListener(_forceExchangeRateCursorAtEnd);
     _nameController.dispose();
     _slugController.dispose();
     _exchangeRateController.dispose();
@@ -423,7 +441,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final row = await Supabase.instance.client
           .from('comercios')
           .select(
-            'id, slug, nombre, logo_url, whatsapp, en_linea, categoria, moneda, tasa_cambio_pesos',
+            'id, slug, nombre, logo_url, whatsapp, en_linea, categoria, moneda, tasa_cambio_pesos, exchange_rate_mode, exchange_rate_source, exchange_rate_value, last_rate_update',
           )
           .eq('owner_id', user.id)
           .limit(1)
@@ -453,7 +471,46 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           !_isExchangeRateConfigured()) {
         unawaited(_suggestExchangeRate());
       }
+      if (_step.index >= _SetupStep.checkout.index) {
+        unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
+      }
     }
+  }
+
+  void _forceExchangeRateCursorAtEnd() {
+    final textLength = _exchangeRateController.text.length;
+    final selection = _exchangeRateController.selection;
+    if (selection.baseOffset == textLength &&
+        selection.extentOffset == textLength) {
+      return;
+    }
+
+    _exchangeRateController.value = _exchangeRateController.value.copyWith(
+      selection: TextSelection.collapsed(offset: textLength),
+      composing: TextRange.empty,
+    );
+  }
+
+  void _subscribeToMarketRatesRealtime() {
+    final client = Supabase.instance.client;
+    if (_marketRatesChannel != null) {
+      unawaited(client.removeChannel(_marketRatesChannel!));
+      _marketRatesChannel = null;
+    }
+
+    final channel = client
+        .channel('public:global_market_rates:business_setup')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'global_market_rates',
+          callback: (_) {
+            unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
+          },
+        )
+        .subscribe();
+
+    _marketRatesChannel = channel;
   }
 
   void _scheduleDraftRecoveredHintHide() {
@@ -507,12 +564,29 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     final rate = _parseExchangeRate(raw?['tasa_cambio_pesos']);
-    if (rate > 0) {
+    final dynamicRate = _parseExchangeRate(raw?['exchange_rate_value']);
+    final effectiveRate = dynamicRate > 0 ? dynamicRate : rate;
+    if (effectiveRate > 0) {
       _exchangeRateByCurrency[_activeCheckoutCurrency] = _formatExchangeRate(
-        rate,
+        effectiveRate,
       );
       _loadActiveCurrencyIntoController();
       _lastSuggestedRateCurrency = _activeCheckoutCurrency;
+    }
+
+    final mode =
+        (raw?['exchange_rate_mode']?.toString().trim().toLowerCase() ?? '');
+    if (mode == _exchangeModeAuto || mode == _exchangeModeManual) {
+      _exchangeRateMode = mode;
+    }
+    final source =
+        (raw?['exchange_rate_source']?.toString().trim().toLowerCase() ?? '');
+    if (source == _exchangeSourceBcv || source == _exchangeSourceP2pBinance) {
+      _exchangeRateSource = source;
+    }
+
+    if (dynamicRate > 0) {
+      _marketRates[_exchangeRateSource] = dynamicRate;
     }
   }
 
@@ -814,6 +888,29 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         );
       }
 
+      final draftMode = (map['exchangeRateMode'] as String? ?? '')
+          .trim()
+          .toLowerCase();
+      if (draftMode == _exchangeModeAuto || draftMode == _exchangeModeManual) {
+        _exchangeRateMode = draftMode;
+      }
+      final draftSource = (map['exchangeRateSource'] as String? ?? '')
+          .trim()
+          .toLowerCase();
+      if (draftSource == _exchangeSourceBcv ||
+          draftSource == _exchangeSourceP2pBinance) {
+        _exchangeRateSource = draftSource;
+      }
+
+      final draftBcv = _parseExchangeRate(map['marketRateBcv']);
+      if (draftBcv > 0) {
+        _marketRates[_exchangeSourceBcv] = draftBcv;
+      }
+      final draftP2p = _parseExchangeRate(map['marketRateP2p']);
+      if (draftP2p > 0) {
+        _marketRates[_exchangeSourceP2pBinance] = draftP2p;
+      }
+
       final exchangeRates = _toStringDynamicMap(map['exchangeRates']);
       if (exchangeRates.isNotEmpty) {
         for (final entry in exchangeRates.entries) {
@@ -986,6 +1083,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           _exchangeRateByCurrency[_currentCurrency] ??
           _exchangeRateController.text.trim(),
       'exchangeRates': _exchangeRateByCurrency,
+      'exchangeRateMode': _exchangeRateMode,
+      'exchangeRateSource': _exchangeRateSource,
+      'marketRateBcv': _marketRates[_exchangeSourceBcv],
+      'marketRateP2p': _marketRates[_exchangeSourceP2pBinance],
       'lastSuggestedRateCurrency': _lastSuggestedRateCurrency,
       'exchangeRateManuallyEdited': _exchangeRateManuallyEdited,
       'editingComercioId': _editingComercioId ?? '',
@@ -3393,6 +3494,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     await _saveDraft();
 
     if (nextStep == _SetupStep.checkout) {
+      unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
       unawaited(_suggestExchangeRate());
     }
   }
@@ -3463,19 +3565,49 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return 0;
     }
 
-    return double.tryParse(raw.replaceAll(',', '.')) ?? 0;
+    final cleaned = raw.replaceAll(RegExp(r'[^0-9,.-]'), '');
+    if (cleaned.isEmpty) {
+      return 0;
+    }
+
+    final lastComma = cleaned.lastIndexOf(',');
+    final lastDot = cleaned.lastIndexOf('.');
+    final decimalIndex = lastComma > lastDot ? lastComma : lastDot;
+
+    if (decimalIndex >= 0) {
+      final integerPart = cleaned
+          .substring(0, decimalIndex)
+          .replaceAll(RegExp(r'[,.]'), '');
+      final fractionalPart = cleaned
+          .substring(decimalIndex + 1)
+          .replaceAll(RegExp(r'[,.]'), '');
+      final normalized =
+          '${integerPart.isEmpty ? '0' : integerPart}.${fractionalPart.isEmpty ? '0' : fractionalPart}';
+      return double.tryParse(normalized) ?? 0;
+    }
+
+    return double.tryParse(cleaned.replaceAll(RegExp(r'[,.]'), '')) ?? 0;
   }
 
   String _formatExchangeRate(double value) {
     if (value <= 0) {
       return '';
     }
-    final text = value.toStringAsFixed(
-      value.truncateToDouble() == value ? 0 : 2,
+    final isInteger = value.truncateToDouble() == value;
+    return isInteger ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
+  }
+
+  String _formatExchangeRateMasked(double value) {
+    if (value <= 0) {
+      return '';
+    }
+    final fixed = value.toStringAsFixed(2);
+    final parts = fixed.split('.');
+    final integerPart = parts[0].replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (_) => ',',
     );
-    return text
-        .replaceAll(RegExp(r'\.0+$'), '')
-        .replaceAll(RegExp(r'(\.\d*?)0+$'), r'$1');
+    return '$integerPart.${parts[1]}';
   }
 
   String _currencyLabel(String code) {
@@ -3505,11 +3637,199 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   double _defaultExchangeRateFor(String currency) {
     return switch (currency) {
-      'VES' => 110,
+      'VES' => 477.1488,
       'COP' => 4000,
       'EUR' => 0.92,
       _ => 1,
     };
+  }
+
+  String _exchangeSourceLabel(String source) {
+    return switch (source) {
+      _exchangeSourceBcv => 'Tasa Oficial (BCV)',
+      _exchangeSourceP2pBinance => 'Tasa Mercado (Paralelo/P2P)',
+      _ => source.toUpperCase(),
+    };
+  }
+
+  double _rateForSource(String source) {
+    final value = _marketRates[source] ?? 0;
+    if (value > 0) {
+      return value;
+    }
+    final fallback = _defaultExchangeRateFor(_currentCurrency);
+    return fallback > 0 ? fallback : 0;
+  }
+
+  String _rateBadgeText(String source) {
+    final rate = _rateForSource(source);
+    if (rate <= 0) {
+      return '--';
+    }
+    return _formatExchangeRate(rate);
+  }
+
+  Future<void> _loadMarketRates({bool applyToCurrentAutoRate = false}) async {
+    try {
+      final row = await Supabase.instance.client
+          .from('global_market_rates')
+          .select('bcv_rate, p2p_binance_rate')
+          .order('updated_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (row == null || !mounted) {
+        return;
+      }
+
+      final bcvRate = _parseExchangeRate(row['bcv_rate']);
+      final p2pRate = _parseExchangeRate(row['p2p_binance_rate']);
+      setState(() {
+        if (bcvRate > 0) {
+          _marketRates[_exchangeSourceBcv] = bcvRate;
+        }
+        if (p2pRate > 0) {
+          _marketRates[_exchangeSourceP2pBinance] = p2pRate;
+        }
+
+        final shouldApplyAutoRate =
+            applyToCurrentAutoRate &&
+            _exchangeRateMode == _exchangeModeAuto &&
+            _currentCurrency != 'USD';
+        if (shouldApplyAutoRate) {
+          final synced = _rateForSource(_exchangeRateSource);
+          if (synced > 0) {
+            final formatted = _formatExchangeRateMasked(synced);
+            _exchangeRateByCurrency[_currentCurrency] = formatted;
+            _exchangeRateController.text = formatted;
+            _exchangeRateMessage =
+                'Tasa sincronizada automaticamente desde ${_exchangeSourceLabel(_exchangeRateSource)}.';
+            _exchangeRateIsError = false;
+            _lastSuggestedRateCurrency = _currentCurrency;
+          }
+        }
+      });
+
+      if (applyToCurrentAutoRate) {
+        await _saveDraft();
+      }
+    } catch (_) {
+      // Ignore market rates fetch failures to keep setup usable.
+    }
+  }
+
+  Future<void> _showExchangeRateHistory() async {
+    final comercioId = (_editingComercioId ?? '').trim();
+    if (comercioId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Guarda el negocio para ver el historial.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      final rows = await Supabase.instance.client
+          .from('comercio_exchange_rate_history')
+          .select('exchange_rate_value, exchange_rate_source, created_at')
+          .eq('comercio_id', comercioId)
+          .order('created_at', ascending: false)
+          .limit(20);
+      if (!mounted) {
+        return;
+      }
+
+      final entries = (rows as List<dynamic>)
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: const Color(0xFF17122E),
+        showDragHandle: true,
+        builder: (context) {
+          return SafeArea(
+            top: false,
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.72,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Historial de cambios',
+                      style: GoogleFonts.poppins(
+                        color: _setupTextHigh,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    if (entries.isEmpty)
+                      const Text(
+                        'Aun no hay registros de tasa.',
+                        style: TextStyle(color: _setupTextMedium, fontSize: 13),
+                      )
+                    else
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: entries.length,
+                          separatorBuilder: (_, _) => const Divider(
+                            color: Color(0xFF3B2F63),
+                            height: 16,
+                          ),
+                          itemBuilder: (context, index) {
+                            final row = entries[index];
+                            final value = _parseExchangeRate(
+                              row['exchange_rate_value'],
+                            );
+                            final source =
+                                row['exchange_rate_source']
+                                    ?.toString()
+                                    .trim()
+                                    .toLowerCase() ??
+                                _exchangeSourceBcv;
+                            final at = row['created_at']?.toString() ?? '';
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(
+                                '${_exchangeSourceLabel(source)}: ${_formatExchangeRate(value)}',
+                                style: const TextStyle(
+                                  color: _setupTextHigh,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              subtitle: Text(
+                                at.replaceFirst('T', ' ').replaceFirst('Z', ''),
+                                style: const TextStyle(
+                                  color: _setupTextLow,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo cargar el historial de tasas.'),
+        ),
+      );
+    }
   }
 
   bool _isValidEmail(String value) {
@@ -4378,10 +4698,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    final fallback = _defaultExchangeRateFor(currency);
+    final fallback = _exchangeRateMode == _exchangeModeAuto
+        ? _rateForSource(_exchangeRateSource)
+        : _defaultExchangeRateFor(currency);
+    final formattedFallback = _exchangeRateMode == _exchangeModeAuto
+        ? _formatExchangeRateMasked(fallback)
+        : _formatExchangeRate(fallback);
     setState(() {
       if (_exchangeRateController.text.trim().isEmpty || force) {
-        _exchangeRateController.text = _formatExchangeRate(fallback);
+        _exchangeRateController.text = formattedFallback;
       }
       _isExchangeRateLoading = true;
       _exchangeRateIsError = false;
@@ -4397,13 +4722,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (!_exchangeRateManuallyEdited ||
           force ||
           _lastSuggestedRateCurrency != currency) {
-        _exchangeRateController.text = _formatExchangeRate(fallback);
+        _exchangeRateController.text = formattedFallback;
       }
       _exchangeRateByCurrency[currency] = _exchangeRateController.text.trim();
       _lastSuggestedRateCurrency = currency;
       _exchangeRateIsError = false;
-      _exchangeRateMessage =
-          'Tasa base sugerida. Puedes ajustarla a tu medida.';
+      _exchangeRateMessage = _exchangeRateMode == _exchangeModeAuto
+          ? 'Tasa sincronizada automaticamente desde ${_exchangeSourceLabel(_exchangeRateSource)}.'
+          : 'Tasa manual configurada para tu negocio.';
       _isExchangeRateLoading = false;
     });
     await _saveDraft();
@@ -4467,9 +4793,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     required String? logoUrl,
   }) async {
     final primaryCurrency = _currentCurrency;
-    final primaryExchangeRate = _parseExchangeRate(
+    final manualRate = _parseExchangeRate(
       _exchangeRateByCurrency[primaryCurrency],
     );
+    final autoRate = _rateForSource(_exchangeRateSource);
+    final primaryExchangeRate = _exchangeRateMode == _exchangeModeAuto
+        ? autoRate
+        : manualRate;
     final allMethods = _selectedCurrencies
         .expand((currency) => _selectedPaymentsForCurrency(currency))
         .toSet();
@@ -4490,6 +4820,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'moneda': primaryCurrency,
       'tasa_cambio_pesos': primaryCurrency == 'COP' && primaryExchangeRate > 0
           ? primaryExchangeRate
+          : null,
+      'exchange_rate_mode': _exchangeRateMode,
+      'exchange_rate_source': _exchangeRateSource,
+      'exchange_rate_value': primaryExchangeRate > 0
+          ? primaryExchangeRate
+          : null,
+      'last_rate_update': primaryExchangeRate > 0
+          ? DateTime.now().toUtc().toIso8601String()
           : null,
       'metodo_pago_predeterminado': defaultMethod,
       'metodos_pago': allMethods.toList(),
@@ -4515,6 +4853,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'logo_url',
       'moneda',
       'tasa_cambio_pesos',
+      'exchange_rate_mode',
+      'exchange_rate_source',
+      'exchange_rate_value',
+      'last_rate_update',
       'metodo_pago_predeterminado',
       'metodos_pago',
       'menu_layout',
@@ -5162,6 +5504,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _ensureCurrencyConfig(currentCurrency);
     final currentPayments = _selectedPaymentsForCurrency(currentCurrency);
     final currentDrafts = _paymentDraftsForCurrency(currentCurrency);
+    final isExchangeRateEditable =
+        currentCurrency != 'USD' && _exchangeRateMode == _exchangeModeManual;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -5371,59 +5715,191 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               Text(
                 currentCurrency == 'USD'
                     ? 'Tu moneda base es USD. Puedes cobrar sin conversion.'
-                    : 'Usa una tasa base sugerida y luego ajustala libremente.',
+                    : 'Tu menu se ajustara en tiempo real segun la fluctuacion del mercado para proteger tus margenes.',
                 style: const TextStyle(color: _setupTextMedium, fontSize: 12),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _exchangeRateController,
-                      enabled: currentCurrency != 'USD',
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: <TextInputFormatter>[
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                      ],
-                      style: const TextStyle(color: _setupTextHigh),
-                      decoration: InputDecoration(
-                        labelText: currentCurrency == 'USD'
-                            ? '1 USD = 1 USD'
-                            : '1 USD = ? $currentCurrency',
-                        hintText: currentCurrency == 'USD'
-                            ? '1'
-                            : _formatExchangeRate(
-                                _defaultExchangeRateFor(currentCurrency),
-                              ),
-                        filled: true,
-                        fillColor: const Color(0xFF120E25),
-                        labelStyle: const TextStyle(color: _setupTextLow),
-                        hintStyle: const TextStyle(color: _setupTextLow),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(
-                            color: Color(0xFF3B2F63),
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(
-                            color: Color(0xFF3B2F63),
-                          ),
-                        ),
-                      ),
-                      onChanged: (_) {
-                        _exchangeRateManuallyEdited = true;
-                        _exchangeRateByCurrency[currentCurrency] =
-                            _exchangeRateController.text.trim();
-                        unawaited(_saveDraft());
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _exchangeRateMode == _exchangeModeAuto,
+                onChanged: currentCurrency == 'USD'
+                    ? null
+                    : (enabled) async {
+                        setState(() {
+                          _exchangeRateMode = enabled
+                              ? _exchangeModeAuto
+                              : _exchangeModeManual;
+                          if (enabled) {
+                            final synced = _rateForSource(_exchangeRateSource);
+                            if (synced > 0) {
+                              final masked = _formatExchangeRateMasked(synced);
+                              _exchangeRateByCurrency[currentCurrency] = masked;
+                              _exchangeRateController.text = masked;
+                              _exchangeRateManuallyEdited = false;
+                            }
+                          }
+                        });
+                        await _saveDraft();
                       },
-                    ),
-                  ),
-                ],
+                activeThumbColor: _palette.primary,
+                activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+                inactiveThumbColor: const Color(0xFFE7E0F9),
+                inactiveTrackColor: const Color(0xFF3A305A),
+                title: const Text('Actualizar tasa automaticamente'),
+                subtitle: Text(
+                  _exchangeRateMode == _exchangeModeAuto
+                      ? 'El sistema sincroniza la tasa segun la fuente seleccionada.'
+                      : 'La tasa se mantiene fija hasta que la cambies.',
+                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+                ),
               ),
+              if (currentCurrency != 'USD' &&
+                  _exchangeRateMode == _exchangeModeAuto) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        value: _exchangeSourceBcv,
+                        groupValue: _exchangeRateSource,
+                        activeColor: _palette.primary,
+                        onChanged: (value) async {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() {
+                            _exchangeRateSource = value;
+                            final synced = _rateForSource(value);
+                            final masked = _formatExchangeRateMasked(synced);
+                            _exchangeRateByCurrency[currentCurrency] = masked;
+                            _exchangeRateController.text = masked;
+                          });
+                          await _saveDraft();
+                        },
+                        title: const Text(
+                          'Tasa Oficial (BCV)',
+                          style: TextStyle(
+                            color: _setupTextHigh,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'BCV: ${_rateBadgeText(_exchangeSourceBcv)}',
+                          style: const TextStyle(
+                            color: _setupTextMedium,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: RadioListTile<String>(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        value: _exchangeSourceP2pBinance,
+                        groupValue: _exchangeRateSource,
+                        activeColor: _palette.primary,
+                        onChanged: (value) async {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() {
+                            _exchangeRateSource = value;
+                            final synced = _rateForSource(value);
+                            final masked = _formatExchangeRateMasked(synced);
+                            _exchangeRateByCurrency[currentCurrency] = masked;
+                            _exchangeRateController.text = masked;
+                          });
+                          await _saveDraft();
+                        },
+                        title: const Text(
+                          'Tasa Mercado (P2P)',
+                          style: TextStyle(
+                            color: _setupTextHigh,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'P2P: ${_rateBadgeText(_exchangeSourceP2pBinance)}',
+                          style: const TextStyle(
+                            color: _setupTextMedium,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _showExchangeRateHistory,
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFD8B4FE),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  child: const Text('Ver historial de cambios'),
+                ),
+              ),
+              if (isExchangeRateEditable)
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _exchangeRateController,
+                        enabled: true,
+                        enableInteractiveSelection: false,
+                        onTap: _forceExchangeRateCursorAtEnd,
+                        textAlign: TextAlign.right,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: <TextInputFormatter>[
+                          _MoneyAmountInputFormatter(
+                            decimalDigits: 2,
+                            maxIntegerDigits: 7,
+                          ),
+                        ],
+                        style: const TextStyle(color: _setupTextHigh),
+                        decoration: InputDecoration(
+                          labelText: 'Tasa manual',
+                          prefixText: '1 USD = ',
+                          suffixText: ' $currentCurrency',
+                          hintText: _formatExchangeRateMasked(
+                            _defaultExchangeRateFor(currentCurrency),
+                          ),
+                          filled: true,
+                          fillColor: const Color(0xFF120E25),
+                          labelStyle: const TextStyle(color: _setupTextLow),
+                          hintStyle: const TextStyle(color: _setupTextLow),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF3B2F63),
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF3B2F63),
+                            ),
+                          ),
+                        ),
+                        onChanged: (_) {
+                          _exchangeRateManuallyEdited = true;
+                          _exchangeRateByCurrency[currentCurrency] =
+                              _exchangeRateController.text.trim();
+                          unawaited(_saveDraft());
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               if (_exchangeRateMessage != null) ...[
                 const SizedBox(height: 10),
                 Text(
@@ -6443,6 +6919,52 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: _palette.primary),
       ),
+    );
+  }
+}
+
+class _MoneyAmountInputFormatter extends TextInputFormatter {
+  _MoneyAmountInputFormatter({
+    this.decimalDigits = 2,
+    this.maxIntegerDigits = 7,
+  });
+
+  final int decimalDigits;
+  final int maxIntegerDigits;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final rawDigits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    if (rawDigits.isEmpty) {
+      return const TextEditingValue(text: '');
+    }
+
+    final digits = BigInt.parse(rawDigits);
+    final divisor = BigInt.from(10).pow(decimalDigits);
+    final integerPart = digits ~/ divisor;
+    if (integerPart.toString().length > maxIntegerDigits) {
+      return oldValue;
+    }
+    final decimalPart = (digits % divisor).toString().padLeft(
+      decimalDigits,
+      '0',
+    );
+
+    final integerWithSeparators = integerPart.toString().replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (_) => ',',
+    );
+
+    final text = decimalDigits > 0
+        ? '$integerWithSeparators.$decimalPart'
+        : integerWithSeparators;
+
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
   }
 }
