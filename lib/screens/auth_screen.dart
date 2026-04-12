@@ -211,14 +211,34 @@ class _AuthScreenState extends State<AuthScreen> {
     if (normalized.contains('invalid login credentials')) {
       return 'Correo o contraseña incorrectos.';
     }
+    if (normalized.contains('invalid email')) {
+      return 'Ingresa un correo valido.';
+    }
+    if (normalized.contains('email address') &&
+        normalized.contains('invalid')) {
+      return 'Ingresa un correo valido.';
+    }
     if (normalized.contains('email not confirmed')) {
       return 'Tu correo aun no esta confirmado. Revisa tu bandeja de entrada.';
+    }
+    if (normalized.contains('signup requires a valid password')) {
+      return 'Debes usar una contraseña valida para crear tu cuenta.';
     }
     if (normalized.contains('user already registered')) {
       return 'Este correo ya esta registrado. Intenta iniciar sesion.';
     }
+    if (normalized.contains('signups not allowed') ||
+        normalized.contains('signup is disabled')) {
+      return 'El registro de nuevas cuentas no esta disponible en este momento.';
+    }
+    if (normalized.contains('provider is not enabled')) {
+      return 'Este metodo de acceso no esta disponible en este momento.';
+    }
     if (normalized.contains('password should be at least')) {
       return 'La contraseña debe tener al menos 6 caracteres.';
+    }
+    if (normalized.contains('weak password')) {
+      return 'La contraseña es demasiado debil. Usa una combinacion mas segura.';
     }
     if (normalized.contains('network')) {
       return 'Problema de red. Verifica tu conexion e intentalo otra vez.';
@@ -226,7 +246,13 @@ class _AuthScreenState extends State<AuthScreen> {
     if (normalized.contains('too many requests')) {
       return 'Demasiados intentos. Espera un momento e intentalo de nuevo.';
     }
-    return message;
+    if (normalized.contains('unexpected failure')) {
+      return 'Ocurrio un error inesperado. Intentalo nuevamente.';
+    }
+    if (normalized.contains('jwt') || normalized.contains('token')) {
+      return 'Tu sesion no pudo validarse. Intentalo nuevamente.';
+    }
+    return 'No se pudo completar la solicitud. Intentalo nuevamente.';
   }
 
   Future<void> _openLegalLink(String rawUrl) async {
