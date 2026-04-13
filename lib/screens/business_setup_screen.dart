@@ -4023,8 +4023,34 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         return 'Debe tener al menos 6 digitos.';
       }
     }
-    if (field.type == 'id' && value.length < 4) {
-      return 'El ID debe tener al menos 4 caracteres.';
+    if (field.type == 'id') {
+      final parsed = _parseIdentityValue(value);
+      final prefix = parsed.prefix.trim();
+      final identifier = parsed.document.trim();
+
+      if (prefix.isEmpty || identifier.isEmpty) {
+        return 'Completa el DNI/Cedula (ej. V-12345678).';
+      }
+
+      if (!RegExp(r'^[A-Z0-9]+$').hasMatch(prefix)) {
+        return 'Prefijo invalido.';
+      }
+      if (prefix.length > 6) {
+        return 'Prefijo demasiado largo.';
+      }
+
+      if (!RegExp(r'^[A-Z0-9]+(?:-[A-Z0-9])?$').hasMatch(identifier)) {
+        return 'Documento invalido. Formato permitido: 12345678 o 26679415-7.';
+      }
+
+      if (identifier.endsWith('-')) {
+        return 'Falta el digito verificador.';
+      }
+
+      final baseDocument = identifier.split('-').first;
+      if (baseDocument.length < 3) {
+        return 'Agrega al menos 3 caracteres en el numero/documento.';
+      }
     }
     if (field.type == 'telefono') {
       final parsed = _parsePhoneValue(
@@ -4067,11 +4093,127 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'telefono' => <TextInputFormatter>[
         FilteringTextInputFormatter.digitsOnly,
       ],
+      'id' => <TextInputFormatter>[
+        FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9-]')),
+        _UpperCaseTextFormatter(),
+      ],
       'correo' => <TextInputFormatter>[
         FilteringTextInputFormatter.deny(RegExp(r'\s')),
       ],
       _ => const <TextInputFormatter>[],
     };
+  }
+
+  String _normalizeIdentityValue(String value) {
+    final cleaned = value
+        .toUpperCase()
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll(RegExp(r'[^A-Z0-9-]'), '');
+    if (cleaned.isEmpty) {
+      return '';
+    }
+
+    final dashIndex = cleaned.indexOf('-');
+    if (dashIndex <= 0) {
+      return cleaned.replaceAll('-', '');
+    }
+
+    final prefix = cleaned.substring(0, dashIndex).replaceAll('-', '');
+    final document = _normalizeIdentityDocument(
+      cleaned.substring(dashIndex + 1),
+    );
+    if (document.isEmpty) {
+      return prefix;
+    }
+    return '$prefix-$document';
+  }
+
+  _ParsedIdentityValue _parseIdentityValue(String value) {
+    final normalized = _normalizeIdentityValue(value);
+    if (normalized.isEmpty) {
+      return const _ParsedIdentityValue(prefix: 'V', document: '');
+    }
+
+    final dashIndex = normalized.indexOf('-');
+    if (dashIndex <= 0) {
+      return _ParsedIdentityValue(
+        prefix: normalized.replaceAll('-', ''),
+        document: '',
+      );
+    }
+
+    final prefix = normalized.substring(0, dashIndex).replaceAll('-', '');
+    final document = _normalizeIdentityDocument(
+      normalized.substring(dashIndex + 1),
+    );
+    return _ParsedIdentityValue(
+      prefix: prefix.isEmpty ? 'V' : prefix,
+      document: document,
+    );
+  }
+
+  String _normalizeIdentityDocument(String value) {
+    final cleaned = value
+        .toUpperCase()
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll(RegExp(r'[^A-Z0-9-]'), '');
+    if (cleaned.isEmpty) {
+      return '';
+    }
+
+    final firstDash = cleaned.indexOf('-');
+    if (firstDash < 0) {
+      return cleaned.replaceAll('-', '');
+    }
+
+    final base = cleaned.substring(0, firstDash).replaceAll('-', '');
+    if (base.isEmpty) {
+      return '';
+    }
+
+    final verifier = cleaned.substring(firstDash + 1).replaceAll('-', '');
+    if (verifier.isEmpty) {
+      return '$base-';
+    }
+    return '$base-${verifier[0]}';
+  }
+
+  String _identityDocumentRaw(String value) {
+    return _normalizeIdentityDocument(value);
+  }
+
+  String _formatIdentityDocumentForDisplay(String rawValue) {
+    final raw = _normalizeIdentityDocument(rawValue);
+    if (raw.isEmpty) {
+      return '';
+    }
+
+    final hasVerifier = raw.contains('-');
+    final verifierIndex = raw.indexOf('-');
+    final base = hasVerifier ? raw.substring(0, verifierIndex) : raw;
+    final verifier = hasVerifier ? raw.substring(verifierIndex + 1) : '';
+
+    final hasLetters = RegExp(r'[A-Z]').hasMatch(base);
+    String formattedBase;
+    if (!hasLetters) {
+      formattedBase = base.replaceAllMapped(
+        RegExp(r'\B(?=(\d{3})+(?!\d))'),
+        (_) => '.',
+      );
+    } else {
+      final chunks = <String>[];
+      for (var i = 0; i < base.length; i += 4) {
+        final end = (i + 4 < base.length) ? i + 4 : base.length;
+        chunks.add(base.substring(i, end));
+      }
+      formattedBase = chunks.join(' ');
+    }
+
+    if (!hasVerifier) {
+      return formattedBase;
+    }
+
+    return verifier.isEmpty ? '$formattedBase-' : '$formattedBase-$verifier';
   }
 
   String? _transferAccountValidationMessage(_TransferAccountDraft account) {
@@ -4410,8 +4552,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final emailControllerByField = <int, TextEditingController>{};
     final emailFocusByField = <int, FocusNode>{};
     final emailAnchorByField = <int, GlobalKey>{};
+    final idPrefixControllerByField = <int, TextEditingController>{};
+    final idPrefixFocusByField = <int, FocusNode>{};
+    final idDocumentControllerByField = <int, TextEditingController>{};
     final allEmailControllers = <TextEditingController>{};
     final allEmailFocusNodes = <FocusNode>{};
+    final allIdPrefixControllers = <TextEditingController>{};
+    final allIdPrefixFocusNodes = <FocusNode>{};
+    final allIdDocumentControllers = <TextEditingController>{};
 
     TextEditingController _ensureEmailController(int fieldIndex, String value) {
       final existing = emailControllerByField[fieldIndex];
@@ -4432,6 +4580,45 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final created = FocusNode();
       emailFocusByField[fieldIndex] = created;
       allEmailFocusNodes.add(created);
+      return created;
+    }
+
+    TextEditingController _ensureIdPrefixController(
+      int fieldIndex,
+      String value,
+    ) {
+      final existing = idPrefixControllerByField[fieldIndex];
+      if (existing != null) {
+        return existing;
+      }
+      final created = TextEditingController(text: value.isEmpty ? 'V' : value);
+      idPrefixControllerByField[fieldIndex] = created;
+      allIdPrefixControllers.add(created);
+      return created;
+    }
+
+    FocusNode _ensureIdPrefixFocusNode(int fieldIndex) {
+      final existing = idPrefixFocusByField[fieldIndex];
+      if (existing != null) {
+        return existing;
+      }
+      final created = FocusNode();
+      idPrefixFocusByField[fieldIndex] = created;
+      allIdPrefixFocusNodes.add(created);
+      return created;
+    }
+
+    TextEditingController _ensureIdDocumentController(
+      int fieldIndex,
+      String value,
+    ) {
+      final existing = idDocumentControllerByField[fieldIndex];
+      if (existing != null) {
+        return existing;
+      }
+      final created = TextEditingController(text: value);
+      idDocumentControllerByField[fieldIndex] = created;
+      allIdDocumentControllers.add(created);
       return created;
     }
 
@@ -4465,6 +4652,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _ensureEmailController(i, fields[i].value);
         _ensureEmailFocusNode(i);
         emailAnchorByField[i] = GlobalKey();
+      }
+      if (fields[i].type == 'id') {
+        final parsedIdentity = _parseIdentityValue(fields[i].value);
+        _ensureIdPrefixController(i, parsedIdentity.prefix);
+        _ensureIdPrefixFocusNode(i);
+        _ensureIdDocumentController(i, parsedIdentity.document);
       }
     }
     var showInlineErrors = false;
@@ -4700,6 +4893,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                                   );
                                                   return '+${country.fullCountryCode}$digits';
                                                 }()
+                                              : value == 'id'
+                                              ? (currentField.value
+                                                        .trim()
+                                                        .isEmpty
+                                                    ? 'V-'
+                                                    : _normalizeIdentityValue(
+                                                        currentField.value,
+                                                      ))
                                               : currentField.value;
                                           if (value != 'telefono') {
                                             phoneCountryByField.remove(
@@ -4724,6 +4925,29 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                               fieldIndex,
                                             );
                                             emailAnchorByField.remove(
+                                              fieldIndex,
+                                            );
+                                          }
+                                          if (value == 'id') {
+                                            _ensureIdPrefixController(
+                                              fieldIndex,
+                                              'V',
+                                            );
+                                            _ensureIdPrefixFocusNode(
+                                              fieldIndex,
+                                            );
+                                            _ensureIdDocumentController(
+                                              fieldIndex,
+                                              '',
+                                            );
+                                          } else {
+                                            idPrefixControllerByField.remove(
+                                              fieldIndex,
+                                            );
+                                            idPrefixFocusByField.remove(
+                                              fieldIndex,
+                                            );
+                                            idDocumentControllerByField.remove(
                                               fieldIndex,
                                             );
                                           }
@@ -4808,6 +5032,55 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                         emailAnchorByField
                                           ..clear()
                                           ..addAll(shiftedAnchors);
+
+                                        final shiftedIdPrefixControllers =
+                                            <int, TextEditingController>{};
+                                        for (final entry
+                                            in idPrefixControllerByField
+                                                .entries) {
+                                          final nextIndex =
+                                              entry.key > fieldIndex
+                                              ? entry.key - 1
+                                              : entry.key;
+                                          shiftedIdPrefixControllers[nextIndex] =
+                                              entry.value;
+                                        }
+                                        idPrefixControllerByField
+                                          ..clear()
+                                          ..addAll(shiftedIdPrefixControllers);
+
+                                        final shiftedIdPrefixFocusNodes =
+                                            <int, FocusNode>{};
+                                        for (final entry
+                                            in idPrefixFocusByField.entries) {
+                                          final nextIndex =
+                                              entry.key > fieldIndex
+                                              ? entry.key - 1
+                                              : entry.key;
+                                          shiftedIdPrefixFocusNodes[nextIndex] =
+                                              entry.value;
+                                        }
+                                        idPrefixFocusByField
+                                          ..clear()
+                                          ..addAll(shiftedIdPrefixFocusNodes);
+
+                                        final shiftedIdDocumentControllers =
+                                            <int, TextEditingController>{};
+                                        for (final entry
+                                            in idDocumentControllerByField
+                                                .entries) {
+                                          final nextIndex =
+                                              entry.key > fieldIndex
+                                              ? entry.key - 1
+                                              : entry.key;
+                                          shiftedIdDocumentControllers[nextIndex] =
+                                              entry.value;
+                                        }
+                                        idDocumentControllerByField
+                                          ..clear()
+                                          ..addAll(
+                                            shiftedIdDocumentControllers,
+                                          );
                                       });
                                     },
                                     icon: const Icon(
@@ -5156,6 +5429,278 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                     );
                                   },
                                 )
+                              else if (field.type == 'id')
+                                Builder(
+                                  builder: (context) {
+                                    final parsedIdentity = _parseIdentityValue(
+                                      fields[fieldIndex].value,
+                                    );
+                                    final prefixController =
+                                        _ensureIdPrefixController(
+                                          fieldIndex,
+                                          parsedIdentity.prefix,
+                                        );
+                                    final prefixFocus =
+                                        _ensureIdPrefixFocusNode(fieldIndex);
+                                    final documentController =
+                                        _ensureIdDocumentController(
+                                          fieldIndex,
+                                          parsedIdentity.document,
+                                        );
+
+                                    if (!prefixFocus.hasFocus &&
+                                        prefixController.text !=
+                                            parsedIdentity.prefix) {
+                                      prefixController.value = TextEditingValue(
+                                        text: parsedIdentity.prefix,
+                                        selection: TextSelection.collapsed(
+                                          offset: parsedIdentity.prefix.length,
+                                        ),
+                                      );
+                                    }
+                                    final maskedDocument =
+                                        _formatIdentityDocumentForDisplay(
+                                          parsedIdentity.document,
+                                        );
+                                    if (documentController.text !=
+                                        maskedDocument) {
+                                      documentController.value =
+                                          TextEditingValue(
+                                            text: maskedDocument,
+                                            selection: TextSelection.collapsed(
+                                              offset: maskedDocument.length,
+                                            ),
+                                          );
+                                    }
+
+                                    final idError = showInlineErrors
+                                        ? _transferFieldValueError(
+                                            fields[fieldIndex],
+                                          )
+                                        : null;
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            SizedBox(
+                                              width: 110,
+                                              child: TextFormField(
+                                                controller: prefixController,
+                                                focusNode: prefixFocus,
+                                                maxLength: 6,
+                                                style: const TextStyle(
+                                                  color: _setupTextHigh,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                                textCapitalization:
+                                                    TextCapitalization
+                                                        .characters,
+                                                inputFormatters:
+                                                    <TextInputFormatter>[
+                                                      FilteringTextInputFormatter.allow(
+                                                        RegExp(r'[a-zA-Z0-9]'),
+                                                      ),
+                                                      _UpperCaseTextFormatter(),
+                                                    ],
+                                                decoration: InputDecoration(
+                                                  labelText: 'Prefijo',
+                                                  counterText: '',
+                                                  hintText: 'V',
+                                                  filled: true,
+                                                  fillColor: const Color(
+                                                    0xFF120E25,
+                                                  ),
+                                                  labelStyle: const TextStyle(
+                                                    color: _setupTextLow,
+                                                  ),
+                                                  hintStyle: const TextStyle(
+                                                    color: _setupTextMedium,
+                                                  ),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                    borderSide:
+                                                        const BorderSide(
+                                                          color: Color(
+                                                            0xFF3B2F63,
+                                                          ),
+                                                        ),
+                                                  ),
+                                                  enabledBorder:
+                                                      OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              12,
+                                                            ),
+                                                        borderSide:
+                                                            const BorderSide(
+                                                              color: Color(
+                                                                0xFF3B2F63,
+                                                              ),
+                                                            ),
+                                                      ),
+                                                  focusedBorder:
+                                                      OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              12,
+                                                            ),
+                                                        borderSide:
+                                                            const BorderSide(
+                                                              color: Color(
+                                                                0xFF6B5A9A,
+                                                              ),
+                                                            ),
+                                                      ),
+                                                ),
+                                                onChanged: (text) {
+                                                  final typedPrefix = text
+                                                      .trim()
+                                                      .toUpperCase();
+                                                  final nextPrefix =
+                                                      typedPrefix.isEmpty
+                                                      ? 'V'
+                                                      : typedPrefix;
+                                                  final rawDocument =
+                                                      _identityDocumentRaw(
+                                                        documentController.text,
+                                                      );
+                                                  fields[fieldIndex] =
+                                                      fields[fieldIndex].copyWith(
+                                                        value:
+                                                            '$nextPrefix-$rawDocument',
+                                                      );
+                                                  if (showInlineErrors) {
+                                                    setModalState(() {});
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: TextFormField(
+                                                controller: documentController,
+                                                maxLength: 24,
+                                                style: const TextStyle(
+                                                  color: _setupTextHigh,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                                textCapitalization:
+                                                    TextCapitalization
+                                                        .characters,
+                                                inputFormatters:
+                                                    <TextInputFormatter>[
+                                                      _UpperCaseTextFormatter(),
+                                                      _IdentityDocumentFormatter(),
+                                                    ],
+                                                decoration: InputDecoration(
+                                                  labelText: 'Documento',
+                                                  hintText:
+                                                      '12345678, 12345678-7 o AB123456',
+                                                  counterText: '',
+                                                  filled: true,
+                                                  fillColor: const Color(
+                                                    0xFF120E25,
+                                                  ),
+                                                  labelStyle: const TextStyle(
+                                                    color: _setupTextLow,
+                                                  ),
+                                                  hintStyle: const TextStyle(
+                                                    color: _setupTextMedium,
+                                                  ),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                    borderSide:
+                                                        const BorderSide(
+                                                          color: Color(
+                                                            0xFF3B2F63,
+                                                          ),
+                                                        ),
+                                                  ),
+                                                  enabledBorder:
+                                                      OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              12,
+                                                            ),
+                                                        borderSide:
+                                                            const BorderSide(
+                                                              color: Color(
+                                                                0xFF3B2F63,
+                                                              ),
+                                                            ),
+                                                      ),
+                                                  focusedBorder:
+                                                      OutlineInputBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              12,
+                                                            ),
+                                                        borderSide:
+                                                            const BorderSide(
+                                                              color: Color(
+                                                                0xFF6B5A9A,
+                                                              ),
+                                                            ),
+                                                      ),
+                                                ),
+                                                onChanged: (_) {
+                                                  final nextPrefix =
+                                                      prefixController.text
+                                                          .trim()
+                                                          .isEmpty
+                                                      ? 'V'
+                                                      : prefixController.text
+                                                            .trim()
+                                                            .toUpperCase();
+                                                  final rawDocument =
+                                                      _identityDocumentRaw(
+                                                        documentController.text,
+                                                      );
+                                                  fields[fieldIndex] =
+                                                      fields[fieldIndex].copyWith(
+                                                        value:
+                                                            '$nextPrefix-$rawDocument',
+                                                      );
+                                                  if (showInlineErrors) {
+                                                    setModalState(() {});
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        const Text(
+                                          'Formato: PREFIJO-DOCUMENTO (ej. V-12345678 o J-26679415-7).',
+                                          style: TextStyle(
+                                            color: _setupTextMedium,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                        if (idError != null) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            idError,
+                                            style: const TextStyle(
+                                              color: Color(0xFFFFD1DC),
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    );
+                                  },
+                                )
                               else
                                 TextFormField(
                                   key: ValueKey(
@@ -5163,8 +5708,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                   ),
                                   initialValue: field.value,
                                   onChanged: (text) {
+                                    final normalizedText = field.type == 'id'
+                                        ? _normalizeIdentityValue(text)
+                                        : text;
                                     fields[fieldIndex] = fields[fieldIndex]
-                                        .copyWith(value: text);
+                                        .copyWith(value: normalizedText);
                                     if (showInlineErrors) {
                                       setModalState(() {});
                                     }
@@ -5179,8 +5727,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                   inputFormatters:
                                       _transferFieldInputFormatters(field.type),
                                   decoration: InputDecoration(
-                                    labelText: 'Valor',
-                                    hintText: 'Dato que verá el cliente',
+                                    labelText: field.type == 'id'
+                                        ? 'DNI / Cedula'
+                                        : 'Valor',
+                                    hintText: field.type == 'id'
+                                        ? 'Ej. V-12345678, E-98765432, PAS-AB1234'
+                                        : 'Dato que vera el cliente',
                                     filled: true,
                                     fillColor: const Color(0xFF120E25),
                                     labelStyle: const TextStyle(
@@ -5304,12 +5856,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       },
     );
 
-    for (final controller in allEmailControllers) {
-      controller.dispose();
-    }
-    for (final focusNode in allEmailFocusNodes) {
-      focusNode.dispose();
-    }
+    unawaited(
+      Future<void>.delayed(const Duration(milliseconds: 280), () {
+        for (final controller in allEmailControllers) {
+          controller.dispose();
+        }
+        for (final focusNode in allEmailFocusNodes) {
+          focusNode.dispose();
+        }
+        for (final controller in allIdPrefixControllers) {
+          controller.dispose();
+        }
+        for (final focusNode in allIdPrefixFocusNodes) {
+          focusNode.dispose();
+        }
+        for (final controller in allIdDocumentControllers) {
+          controller.dispose();
+        }
+      }),
+    );
 
     if (updatedAccount == null || !mounted) {
       return;
@@ -7803,6 +8368,79 @@ class _MoneyAmountInputFormatter extends TextInputFormatter {
   }
 }
 
+class _UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final upper = newValue.text.toUpperCase();
+    return TextEditingValue(
+      text: upper,
+      selection: TextSelection.collapsed(offset: upper.length),
+      composing: TextRange.empty,
+    );
+  }
+}
+
+class _IdentityDocumentFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final cleaned = newValue.text.toUpperCase().replaceAll(
+      RegExp(r'[^A-Z0-9-]'),
+      '',
+    );
+    if (cleaned.isEmpty) {
+      return const TextEditingValue(text: '');
+    }
+
+    final firstDash = cleaned.indexOf('-');
+    final base = (firstDash < 0 ? cleaned : cleaned.substring(0, firstDash))
+        .replaceAll('-', '');
+    if (base.isEmpty) {
+      return const TextEditingValue(text: '');
+    }
+
+    final hasVerifierSeparator = firstDash >= 0;
+    final verifier = hasVerifierSeparator
+        ? cleaned.substring(firstDash + 1).replaceAll('-', '')
+        : '';
+    final verifierChar = verifier.isEmpty ? '' : verifier[0];
+
+    final hasLetters = RegExp(r'[A-Z]').hasMatch(base);
+    final formattedBase = hasLetters
+        ? _formatAlphaNumeric(base)
+        : _formatNumericWithDots(base);
+    final formatted = hasVerifierSeparator
+        ? verifierChar.isEmpty
+              ? '$formattedBase-'
+              : '$formattedBase-$verifierChar'
+        : formattedBase;
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+      composing: TextRange.empty,
+    );
+  }
+
+  static String _formatNumericWithDots(String digits) {
+    return digits.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => '.');
+  }
+
+  static String _formatAlphaNumeric(String raw) {
+    final chunks = <String>[];
+    for (var i = 0; i < raw.length; i += 4) {
+      final end = (i + 4 < raw.length) ? i + 4 : raw.length;
+      chunks.add(raw.substring(i, end));
+    }
+    return chunks.join(' ');
+  }
+}
+
 class _UrlBar extends StatelessWidget {
   const _UrlBar({
     required this.slugController,
@@ -8773,7 +9411,7 @@ class _TransferFieldDraft {
     return switch (type) {
       'numero_cuenta' => 'Numero de cuenta',
       'telefono' => 'Numero de telefono',
-      'id' => 'ID',
+      'id' => 'DNI / Cedula',
       'correo' => 'Correo',
       'nota' => 'Nota',
       _ => 'Campo de texto',
@@ -8837,6 +9475,13 @@ class _ParsedPhoneNumber {
 
   final String countryIso;
   final String nationalNumber;
+}
+
+class _ParsedIdentityValue {
+  const _ParsedIdentityValue({required this.prefix, required this.document});
+
+  final String prefix;
+  final String document;
 }
 
 class _LayoutOption {
