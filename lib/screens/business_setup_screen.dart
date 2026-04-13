@@ -196,6 +196,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   static const int _maxTransferAccountNameLength = 60;
   static const int _maxTransferFieldLabelLength = 40;
   static const int _maxTransferFieldValueLength = 140;
+  static const List<String> _commonEmailDomains = <String>[
+    '@gmail.com',
+    '@outlook.com',
+    '@hotmail.com',
+    '@yahoo.com',
+    '@icloud.com',
+    '@proton.me',
+  ];
 
   final List<_LayoutOption> _layouts = const <_LayoutOption>[
     _LayoutOption(
@@ -3941,6 +3949,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value);
   }
 
+  Iterable<String> _emailAutocompleteOptions(String input) {
+    final raw = input.trim();
+    if (raw.isEmpty) {
+      return const <String>[];
+    }
+
+    final atIndex = raw.indexOf('@');
+    final localPart = atIndex == -1 ? raw : raw.substring(0, atIndex);
+    final domainQuery = atIndex == -1 ? '' : raw.substring(atIndex + 1);
+    if (localPart.trim().isEmpty) {
+      return const <String>[];
+    }
+
+    final normalizedDomainQuery = domainQuery.toLowerCase();
+    return _commonEmailDomains
+        .where(
+          (domain) =>
+              normalizedDomainQuery.isEmpty ||
+              domain.substring(1).startsWith(normalizedDomainQuery),
+        )
+        .map((domain) => '${localPart.toLowerCase()}$domain')
+        .take(6);
+  }
+
   String? _cashValidationMessage(String notes) {
     if (notes.length > _maxCashTextLength) {
       return 'La nota de Efectivo debe tener maximo $_maxCashTextLength caracteres.';
@@ -3994,12 +4026,33 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (field.type == 'id' && value.length < 4) {
       return 'El ID debe tener al menos 4 caracteres.';
     }
+    if (field.type == 'telefono') {
+      final parsed = _parsePhoneValue(
+        value,
+        fallbackIso: _selectedPhoneCountryIso,
+      );
+      final local = parsed.nationalNumber.replaceAll(RegExp(r'\D'), '');
+      if (local.isEmpty) {
+        return 'Ingresa un numero de telefono.';
+      }
+      final country = _countryByIso(parsed.countryIso);
+      final phone = intl_phone_number.PhoneNumber(
+        countryISOCode: parsed.countryIso,
+        countryCode: '+${country.fullCountryCode}',
+        number: local,
+      );
+      final isValid = phone.isValidNumber();
+      if (!isValid) {
+        return 'Numero invalido para ese pais.';
+      }
+    }
     return null;
   }
 
   TextInputType _transferFieldKeyboardType(String type) {
     return switch (type) {
       'numero_cuenta' => TextInputType.number,
+      'telefono' => TextInputType.phone,
       'correo' => TextInputType.emailAddress,
       'nota' => TextInputType.multiline,
       _ => TextInputType.text,
@@ -4009,6 +4062,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   List<TextInputFormatter> _transferFieldInputFormatters(String type) {
     return switch (type) {
       'numero_cuenta' => <TextInputFormatter>[
+        FilteringTextInputFormatter.digitsOnly,
+      ],
+      'telefono' => <TextInputFormatter>[
         FilteringTextInputFormatter.digitsOnly,
       ],
       'correo' => <TextInputFormatter>[
@@ -4207,6 +4263,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 bottom: bottomInset + 20,
               ),
               child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -4324,6 +4382,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   Future<void> _openTransferAccountEditor({int? index}) async {
     final currency = _currentCurrency;
+    final currencyLabel = _currencyLabel(currency);
     final drafts = _paymentDraftsForCurrency(currency);
     final current =
         drafts['Transferencia'] ?? _PaymentMethodDraft(method: 'Transferencia');
@@ -4347,6 +4406,67 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     var accountName = editing.name;
     final fields = editing.fields.map((item) => item.copyWith()).toList();
+    final phoneCountryByField = <int, String>{};
+    final emailControllerByField = <int, TextEditingController>{};
+    final emailFocusByField = <int, FocusNode>{};
+    final emailAnchorByField = <int, GlobalKey>{};
+    final allEmailControllers = <TextEditingController>{};
+    final allEmailFocusNodes = <FocusNode>{};
+
+    TextEditingController _ensureEmailController(int fieldIndex, String value) {
+      final existing = emailControllerByField[fieldIndex];
+      if (existing != null) {
+        return existing;
+      }
+      final created = TextEditingController(text: value);
+      emailControllerByField[fieldIndex] = created;
+      allEmailControllers.add(created);
+      return created;
+    }
+
+    FocusNode _ensureEmailFocusNode(int fieldIndex) {
+      final existing = emailFocusByField[fieldIndex];
+      if (existing != null) {
+        return existing;
+      }
+      final created = FocusNode();
+      emailFocusByField[fieldIndex] = created;
+      allEmailFocusNodes.add(created);
+      return created;
+    }
+
+    void scrollEmailIntoView(int fieldIndex) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        try {
+          final anchorContext = emailAnchorByField[fieldIndex]?.currentContext;
+          if (anchorContext == null) {
+            return;
+          }
+          Scrollable.ensureVisible(
+            anchorContext,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: 0.72,
+          );
+        } catch (_) {
+          // Ignore scroll failures in transient modal rebuilds.
+        }
+      });
+    }
+
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].type == 'telefono') {
+        phoneCountryByField[i] = _parsePhoneValue(
+          fields[i].value,
+          fallbackIso: _selectedPhoneCountryIso,
+        ).countryIso;
+      }
+      if (fields[i].type == 'correo') {
+        _ensureEmailController(i, fields[i].value);
+        _ensureEmailFocusNode(i);
+        emailAnchorByField[i] = GlobalKey();
+      }
+    }
     var showInlineErrors = false;
 
     final updatedAccount = await showModalBottomSheet<_TransferAccountDraft>(
@@ -4370,6 +4490,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 bottom: bottomInset + 20,
               ),
               child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -4388,6 +4510,40 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     const Text(
                       'Agrega solo los campos que necesites: banco, procesador, pago movil, correo, ID u otros.',
                       style: TextStyle(color: _setupTextMedium, fontSize: 13),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF120E25),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF3B2F63)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.currency_exchange_rounded,
+                            color: Color(0xFFD3E8FF),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'IMPORTANTE: Solo para cobros en $currencyLabel.',
+                              style: const TextStyle(
+                                color: Color.fromARGB(255, 255, 211, 211),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 14),
                     TextFormField(
@@ -4521,7 +4677,56 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                                   RegExp(r'[^0-9]'),
                                                   '',
                                                 )
+                                              : value == 'telefono'
+                                              ? () {
+                                                  final parsed = _parsePhoneValue(
+                                                    currentField.value,
+                                                    fallbackIso:
+                                                        _selectedPhoneCountryIso,
+                                                  );
+                                                  phoneCountryByField[fieldIndex] =
+                                                      parsed.countryIso;
+                                                  final digits = parsed
+                                                      .nationalNumber
+                                                      .replaceAll(
+                                                        RegExp(r'\D'),
+                                                        '',
+                                                      );
+                                                  if (digits.isEmpty) {
+                                                    return '';
+                                                  }
+                                                  final country = _countryByIso(
+                                                    parsed.countryIso,
+                                                  );
+                                                  return '+${country.fullCountryCode}$digits';
+                                                }()
                                               : currentField.value;
+                                          if (value != 'telefono') {
+                                            phoneCountryByField.remove(
+                                              fieldIndex,
+                                            );
+                                          }
+                                          if (value == 'correo') {
+                                            _ensureEmailController(
+                                              fieldIndex,
+                                              nextValue,
+                                            );
+                                            _ensureEmailFocusNode(fieldIndex);
+                                            emailAnchorByField.putIfAbsent(
+                                              fieldIndex,
+                                              GlobalKey.new,
+                                            );
+                                          } else {
+                                            emailControllerByField.remove(
+                                              fieldIndex,
+                                            );
+                                            emailFocusByField.remove(
+                                              fieldIndex,
+                                            );
+                                            emailAnchorByField.remove(
+                                              fieldIndex,
+                                            );
+                                          }
                                           fields[fieldIndex] = currentField
                                               .copyWith(
                                                 type: value,
@@ -4552,7 +4757,57 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                         return;
                                       }
                                       setModalState(() {
+                                        emailControllerByField.remove(
+                                          fieldIndex,
+                                        );
+                                        emailFocusByField.remove(fieldIndex);
+
                                         fields.removeAt(fieldIndex);
+
+                                        final shiftedControllers =
+                                            <int, TextEditingController>{};
+                                        for (final entry
+                                            in emailControllerByField.entries) {
+                                          final nextIndex =
+                                              entry.key > fieldIndex
+                                              ? entry.key - 1
+                                              : entry.key;
+                                          shiftedControllers[nextIndex] =
+                                              entry.value;
+                                        }
+                                        emailControllerByField
+                                          ..clear()
+                                          ..addAll(shiftedControllers);
+
+                                        final shiftedFocusNodes =
+                                            <int, FocusNode>{};
+                                        for (final entry
+                                            in emailFocusByField.entries) {
+                                          final nextIndex =
+                                              entry.key > fieldIndex
+                                              ? entry.key - 1
+                                              : entry.key;
+                                          shiftedFocusNodes[nextIndex] =
+                                              entry.value;
+                                        }
+                                        emailFocusByField
+                                          ..clear()
+                                          ..addAll(shiftedFocusNodes);
+
+                                        final shiftedAnchors =
+                                            <int, GlobalKey>{};
+                                        for (final entry
+                                            in emailAnchorByField.entries) {
+                                          final nextIndex =
+                                              entry.key > fieldIndex
+                                              ? entry.key - 1
+                                              : entry.key;
+                                          shiftedAnchors[nextIndex] =
+                                              entry.value;
+                                        }
+                                        emailAnchorByField
+                                          ..clear()
+                                          ..addAll(shiftedAnchors);
                                       });
                                     },
                                     icon: const Icon(
@@ -4615,64 +4870,350 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              TextFormField(
-                                key: ValueKey(
-                                  'transfer-value-$fieldIndex-${field.type}',
-                                ),
-                                initialValue: field.value,
-                                onChanged: (text) {
-                                  fields[fieldIndex] = fields[fieldIndex]
-                                      .copyWith(value: text);
-                                  if (showInlineErrors) {
-                                    setModalState(() {});
-                                  }
-                                },
-                                maxLength: _maxTransferFieldValueLength,
-                                style: const TextStyle(color: _setupTextHigh),
-                                minLines: 1,
-                                maxLines: field.type == 'nota' ? 3 : 1,
-                                keyboardType: _transferFieldKeyboardType(
-                                  field.type,
-                                ),
-                                inputFormatters: _transferFieldInputFormatters(
-                                  field.type,
-                                ),
-                                decoration: InputDecoration(
-                                  labelText: 'Valor',
-                                  hintText: 'Dato que verá el cliente',
-                                  filled: true,
-                                  fillColor: const Color(0xFF120E25),
-                                  labelStyle: const TextStyle(
-                                    color: _setupTextLow,
+                              if (field.type == 'telefono')
+                                Builder(
+                                  builder: (context) {
+                                    final parsedPhone = _parsePhoneValue(
+                                      field.value,
+                                      fallbackIso:
+                                          phoneCountryByField[fieldIndex] ??
+                                          _selectedPhoneCountryIso,
+                                    );
+                                    final currentIso =
+                                        phoneCountryByField[fieldIndex] ??
+                                        parsedPhone.countryIso;
+                                    return IntlPhoneField(
+                                      key: ValueKey(
+                                        'transfer-phone-$fieldIndex-${field.value}-$currentIso',
+                                      ),
+                                      initialCountryCode:
+                                          currentIso.trim().isEmpty
+                                          ? 'VE'
+                                          : currentIso,
+                                      initialValue: parsedPhone.nationalNumber,
+                                      languageCode: 'es',
+                                      style: const TextStyle(
+                                        color: _setupTextHigh,
+                                      ),
+                                      dropdownTextStyle: const TextStyle(
+                                        color: _setupTextHigh,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      invalidNumberMessage:
+                                          'Numero invalido para ese pais.',
+                                      autovalidateMode:
+                                          AutovalidateMode.onUserInteraction,
+                                      inputFormatters: <TextInputFormatter>[
+                                        FilteringTextInputFormatter.digitsOnly,
+                                      ],
+                                      decoration: InputDecoration(
+                                        labelText: 'Numero de telefono',
+                                        hintText: 'Ej. 4140821633',
+                                        filled: true,
+                                        fillColor: const Color(0xFF120E25),
+                                        labelStyle: const TextStyle(
+                                          color: _setupTextLow,
+                                        ),
+                                        hintStyle: const TextStyle(
+                                          color: _setupTextLow,
+                                        ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFF3B2F63),
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFF3B2F63),
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: const BorderSide(
+                                            color: Color(0xFF6B5A9A),
+                                          ),
+                                        ),
+                                      ),
+                                      onCountryChanged: (country) {
+                                        setModalState(() {
+                                          phoneCountryByField[fieldIndex] =
+                                              country.code;
+                                        });
+                                      },
+                                      onChanged: (phone) {
+                                        final localDigits = phone.number
+                                            .replaceAll(RegExp(r'\D'), '');
+                                        final country = _countryByIso(
+                                          phone.countryISOCode,
+                                        );
+                                        final e164 = localDigits.isEmpty
+                                            ? ''
+                                            : '+${country.fullCountryCode}$localDigits';
+                                        fields[fieldIndex] = fields[fieldIndex]
+                                            .copyWith(value: e164);
+                                        phoneCountryByField[fieldIndex] =
+                                            phone.countryISOCode;
+                                        if (showInlineErrors) {
+                                          setModalState(() {});
+                                        }
+                                      },
+                                      validator: (phone) {
+                                        if (!showInlineErrors) {
+                                          return null;
+                                        }
+                                        final raw =
+                                            phone?.number.replaceAll(
+                                              RegExp(r'\D'),
+                                              '',
+                                            ) ??
+                                            '';
+                                        final iso =
+                                            phone?.countryISOCode ?? currentIso;
+                                        final country = _countryByIso(iso);
+                                        final value = raw.isEmpty
+                                            ? ''
+                                            : '+${country.fullCountryCode}$raw';
+                                        return _transferFieldValueError(
+                                          fields[fieldIndex].copyWith(
+                                            type: 'telefono',
+                                            value: value,
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  },
+                                )
+                              else if (field.type == 'correo')
+                                Builder(
+                                  builder: (context) {
+                                    final emailController =
+                                        _ensureEmailController(
+                                          fieldIndex,
+                                          field.value,
+                                        );
+                                    final emailFocus = _ensureEmailFocusNode(
+                                      fieldIndex,
+                                    );
+                                    final emailAnchor = emailAnchorByField
+                                        .putIfAbsent(fieldIndex, GlobalKey.new);
+
+                                    if (!emailFocus.hasFocus &&
+                                        emailController.text != field.value) {
+                                      emailController.value = TextEditingValue(
+                                        text: field.value,
+                                        selection: TextSelection.collapsed(
+                                          offset: field.value.length,
+                                        ),
+                                      );
+                                    }
+
+                                    final suggestions =
+                                        _emailAutocompleteOptions(
+                                          emailController.text,
+                                        ).toList();
+                                    return Container(
+                                      key: emailAnchor,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          TextFormField(
+                                            key: ValueKey(
+                                              'transfer-email-$fieldIndex',
+                                            ),
+                                            controller: emailController,
+                                            focusNode: emailFocus,
+                                            onChanged: (text) {
+                                              fields[fieldIndex] =
+                                                  fields[fieldIndex].copyWith(
+                                                    value: text,
+                                                  );
+                                              setModalState(() {});
+                                              if (text.trim().isNotEmpty) {
+                                                scrollEmailIntoView(fieldIndex);
+                                              }
+                                            },
+                                            maxLength:
+                                                _maxTransferFieldValueLength,
+                                            style: const TextStyle(
+                                              color: _setupTextHigh,
+                                            ),
+                                            keyboardType:
+                                                TextInputType.emailAddress,
+                                            inputFormatters: <TextInputFormatter>[
+                                              FilteringTextInputFormatter.deny(
+                                                RegExp(r'\s'),
+                                              ),
+                                            ],
+                                            decoration: InputDecoration(
+                                              labelText: 'Correo',
+                                              hintText: 'usuario@dominio.com',
+                                              helperText:
+                                                  'Puedes usar sugerencias o escribir otro dominio.',
+                                              filled: true,
+                                              fillColor: const Color(
+                                                0xFF120E25,
+                                              ),
+                                              labelStyle: const TextStyle(
+                                                color: _setupTextLow,
+                                              ),
+                                              hintStyle: const TextStyle(
+                                                color: _setupTextLow,
+                                              ),
+                                              helperStyle: const TextStyle(
+                                                color: _setupTextLow,
+                                                fontSize: 11,
+                                              ),
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                borderSide: const BorderSide(
+                                                  color: Color(0xFF3B2F63),
+                                                ),
+                                              ),
+                                              enabledBorder: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                borderSide: const BorderSide(
+                                                  color: Color(0xFF3B2F63),
+                                                ),
+                                              ),
+                                              focusedBorder: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                borderSide: const BorderSide(
+                                                  color: Color(0xFF6B5A9A),
+                                                ),
+                                              ),
+                                              errorText: showInlineErrors
+                                                  ? _transferFieldValueError(
+                                                      fields[fieldIndex],
+                                                    )
+                                                  : null,
+                                            ),
+                                          ),
+                                          if (suggestions.isNotEmpty) ...[
+                                            const SizedBox(height: 6),
+                                            Wrap(
+                                              spacing: 6,
+                                              runSpacing: 6,
+                                              children: suggestions
+                                                  .map(
+                                                    (option) => ActionChip(
+                                                      backgroundColor:
+                                                          const Color(
+                                                            0xFF1A1432,
+                                                          ),
+                                                      side: const BorderSide(
+                                                        color: Color(
+                                                          0xFF3B2F63,
+                                                        ),
+                                                      ),
+                                                      label: Text(
+                                                        option,
+                                                        style: const TextStyle(
+                                                          color: _setupTextHigh,
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
+                                                      onPressed: () {
+                                                        emailController.value =
+                                                            TextEditingValue(
+                                                              text: option,
+                                                              selection:
+                                                                  TextSelection.collapsed(
+                                                                    offset: option
+                                                                        .length,
+                                                                  ),
+                                                            );
+                                                        fields[fieldIndex] =
+                                                            fields[fieldIndex]
+                                                                .copyWith(
+                                                                  value: option,
+                                                                );
+                                                        setModalState(() {});
+                                                        emailFocus
+                                                            .requestFocus();
+                                                        scrollEmailIntoView(
+                                                          fieldIndex,
+                                                        );
+                                                      },
+                                                    ),
+                                                  )
+                                                  .toList(),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                )
+                              else
+                                TextFormField(
+                                  key: ValueKey(
+                                    'transfer-value-$fieldIndex-${field.type}',
                                   ),
-                                  hintStyle: const TextStyle(
-                                    color: _setupTextLow,
+                                  initialValue: field.value,
+                                  onChanged: (text) {
+                                    fields[fieldIndex] = fields[fieldIndex]
+                                        .copyWith(value: text);
+                                    if (showInlineErrors) {
+                                      setModalState(() {});
+                                    }
+                                  },
+                                  maxLength: _maxTransferFieldValueLength,
+                                  style: const TextStyle(color: _setupTextHigh),
+                                  minLines: 1,
+                                  maxLines: field.type == 'nota' ? 3 : 1,
+                                  keyboardType: _transferFieldKeyboardType(
+                                    field.type,
                                   ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFF3B2F63),
+                                  inputFormatters:
+                                      _transferFieldInputFormatters(field.type),
+                                  decoration: InputDecoration(
+                                    labelText: 'Valor',
+                                    hintText: 'Dato que verá el cliente',
+                                    filled: true,
+                                    fillColor: const Color(0xFF120E25),
+                                    labelStyle: const TextStyle(
+                                      color: _setupTextLow,
                                     ),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFF3B2F63),
+                                    hintStyle: const TextStyle(
+                                      color: _setupTextLow,
                                     ),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFF6B5A9A),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(
+                                        color: Color(0xFF3B2F63),
+                                      ),
                                     ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(
+                                        color: Color(0xFF3B2F63),
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(
+                                        color: Color(0xFF6B5A9A),
+                                      ),
+                                    ),
+                                    errorText: showInlineErrors
+                                        ? _transferFieldValueError(
+                                            fields[fieldIndex],
+                                          )
+                                        : null,
                                   ),
-                                  errorText: showInlineErrors
-                                      ? _transferFieldValueError(
-                                          fields[fieldIndex],
-                                        )
-                                      : null,
                                 ),
-                              ),
                             ],
                           ),
                         ),
@@ -4762,6 +5303,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         );
       },
     );
+
+    for (final controller in allEmailControllers) {
+      controller.dispose();
+    }
+    for (final focusNode in allEmailFocusNodes) {
+      focusNode.dispose();
+    }
 
     if (updatedAccount == null || !mounted) {
       return;
@@ -8203,6 +8751,7 @@ class _TransferFieldDraft {
   static const List<String> typeOptions = <String>[
     'texto',
     'numero_cuenta',
+    'telefono',
     'id',
     'correo',
     'nota',
@@ -8223,6 +8772,7 @@ class _TransferFieldDraft {
   static String labelForType(String type) {
     return switch (type) {
       'numero_cuenta' => 'Numero de cuenta',
+      'telefono' => 'Numero de telefono',
       'id' => 'ID',
       'correo' => 'Correo',
       'nota' => 'Nota',
