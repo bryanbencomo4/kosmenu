@@ -2,7 +2,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-type ProviderName = 'bcv' | 'p2p_binance';
+type ProviderName = 'bcv' | 'p2p_binance' | 'google';
 
 type GlobalRatesRow = {
   id?: number;
@@ -21,6 +21,9 @@ type GoogleFetchResult = {
   rates: GoogleAnchorRates;
   warnings: string[];
   payload: Record<string, unknown>;
+  checkedAt: string;
+  isFallback: boolean;
+  logResults: ProviderFetchResult[];
 };
 
 type ProviderFetchResult = {
@@ -34,6 +37,15 @@ type ProviderFetchResult = {
   payload: Record<string, unknown>;
   errorMessage: string | null;
   fallbackUsed: boolean;
+};
+
+type ProviderStatusSnapshot = {
+  provider: ProviderName;
+  lastCheckAt: string;
+  lastSuccessAt: string | null;
+  lastSourceUrl: string;
+  lastErrorMessage: string | null;
+  payload: Record<string, unknown>;
 };
 
 type RefreshRequest = {
@@ -125,8 +137,22 @@ Deno.serve(async (req: Request) => {
     const providerResults = [bcv, p2p];
     const freshProviderCount = providerResults.filter((item) => item.ok && !item.fallbackUsed).length;
 
+    const logResults = [...providerResults, ...google.logResults];
+    await upsertProviderStatuses(supabase, runId, [
+      statusSnapshotFromProviderResult(bcv),
+      statusSnapshotFromProviderResult(p2p),
+      {
+        provider: 'google',
+        lastCheckAt: google.checkedAt,
+        lastSuccessAt: google.ok && !google.isFallback ? google.checkedAt : null,
+        lastSourceUrl: firstGoogleSourceUrl(google.payload),
+        lastErrorMessage: firstGoogleErrorMessage(google.payload),
+        payload: google.payload,
+      },
+    ]);
+
     if (bcv.appliedRate == null || p2p.appliedRate == null || !google.ok) {
-      await insertFetchLogs(supabase, runId, providerResults);
+      await insertFetchLogs(supabase, runId, logResults);
       return jsonResponse(
         {
           ok: false,
@@ -163,6 +189,8 @@ Deno.serve(async (req: Request) => {
       const payload = {
         run_id: runId,
         source: 'refresh-market-rates',
+        checked_at: google.checkedAt,
+        is_fallback: google.isFallback,
         warnings: [...warnings, ...google.warnings],
         google_rates: google.rates,
         providers: providerResults.map((item) => ({
@@ -192,7 +220,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    await insertFetchLogs(supabase, runId, providerResults);
+    await insertFetchLogs(supabase, runId, logResults);
 
     return jsonResponse(
       {
@@ -524,8 +552,14 @@ async function fetchGoogleAnchorRates(
   previousRates: GoogleAnchorRates,
 ): Promise<GoogleFetchResult> {
   const warnings: string[] = [];
-  const payload: Record<string, unknown> = { queries: [] };
+  const checkedAt = new Date().toISOString();
+  const payload: Record<string, unknown> = {
+    checked_at: checkedAt,
+    is_fallback: false,
+    queries: [],
+  };
   const rates = defaultGoogleAnchorRates();
+  const logResults: ProviderFetchResult[] = [];
 
   const queries: Array<{
     key: GoogleAnchorKey;
@@ -551,37 +585,102 @@ async function fetchGoogleAnchorRates(
 
   for (const item of queries) {
     const result = await fetchGoogleFinanceRate(item.pair);
-    (payload.queries as Array<Record<string, unknown>>).push({
+    const queryPayload: Record<string, unknown> = {
       key: item.key,
       pair: item.pair,
+      checked_at: checkedAt,
       ok: result.ok,
       fetched_rate: result.rate,
+      applied_rate: result.rate,
       response_status: result.responseStatus,
+      response_time_ms: result.responseTimeMs,
       source_url: result.sourceUrl,
+      reference_url: result.referenceUrl,
       parser: item.parser,
       snippet: result.snippet,
       error_message: result.errorMessage,
-    });
+      is_fallback: false,
+    };
 
     if (result.rate > 0) {
       rates[item.key] = result.rate;
+      (payload.queries as Array<Record<string, unknown>>).push(queryPayload);
+      logResults.push({
+        provider: 'google',
+        ok: true,
+        fetchedRate: result.rate,
+        appliedRate: result.rate,
+        responseStatus: result.responseStatus,
+        responseTimeMs: result.responseTimeMs,
+        sourceUrl: result.sourceUrl,
+        payload: {
+          ...queryPayload,
+          anchor_key: item.key,
+        },
+        errorMessage: null,
+        fallbackUsed: false,
+      });
       continue;
     }
 
     if (previousRates[item.key] > 0) {
       rates[item.key] = previousRates[item.key];
       warnings.push(`Google ${item.key} uso fallback previo.`);
+      const fallbackQueryPayload = {
+        ...queryPayload,
+        applied_rate: previousRates[item.key],
+        fallback_previous_rate: previousRates[item.key],
+        is_fallback: true,
+      };
+      (payload.queries as Array<Record<string, unknown>>).push(fallbackQueryPayload);
+      logResults.push({
+        provider: 'google',
+        ok: false,
+        fetchedRate: null,
+        appliedRate: previousRates[item.key],
+        responseStatus: result.responseStatus,
+        responseTimeMs: result.responseTimeMs,
+        sourceUrl: result.sourceUrl,
+        payload: {
+          ...fallbackQueryPayload,
+          anchor_key: item.key,
+        },
+        errorMessage: result.errorMessage,
+        fallbackUsed: true,
+      });
       continue;
     }
 
     warnings.push(`Google ${item.key} no pudo resolverse.`);
+    (payload.queries as Array<Record<string, unknown>>).push(queryPayload);
+    logResults.push({
+      provider: 'google',
+      ok: false,
+      fetchedRate: null,
+      appliedRate: null,
+      responseStatus: result.responseStatus,
+      responseTimeMs: result.responseTimeMs,
+      sourceUrl: result.sourceUrl,
+      payload: {
+        ...queryPayload,
+        anchor_key: item.key,
+      },
+      errorMessage: result.errorMessage,
+      fallbackUsed: false,
+    });
   }
+
+  const isFallback = logResults.some((item) => item.fallbackUsed);
+  payload.is_fallback = isFallback;
 
   return {
     ok: (Object.keys(rates) as GoogleAnchorKey[]).every((key) => rates[key] > 0),
     rates,
     warnings,
     payload,
+    checkedAt,
+    isFallback,
+    logResults,
   };
 }
 
@@ -591,11 +690,15 @@ async function fetchGoogleFinanceRate(
   ok: boolean;
   rate: number;
   responseStatus: number | null;
+  responseTimeMs: number;
   sourceUrl: string;
+  referenceUrl: string;
   snippet: string;
   errorMessage: string | null;
 }> {
   const sourceUrl = `${GOOGLE_FINANCE_MIRROR_URL}${encodeURIComponent(pair)}`;
+  const referenceUrl = googleFinanceReferenceUrl(pair);
+  const startedAt = Date.now();
 
   try {
     const response = await fetch(sourceUrl, {
@@ -611,7 +714,9 @@ async function fetchGoogleFinanceRate(
         ok: false,
         rate: 0,
         responseStatus: response.status,
+        responseTimeMs: Date.now() - startedAt,
         sourceUrl,
+        referenceUrl,
         snippet: text.slice(0, 1200),
         errorMessage: 'Google mirrored query failed.',
       };
@@ -623,7 +728,9 @@ async function fetchGoogleFinanceRate(
       ok: rate > 0,
       rate,
       responseStatus: response.status,
+      responseTimeMs: Date.now() - startedAt,
       sourceUrl,
+      referenceUrl,
       snippet: normalized.slice(0, 1200),
       errorMessage: rate > 0 ? null : 'Could not parse Google Finance mirrored quote.',
     };
@@ -632,11 +739,17 @@ async function fetchGoogleFinanceRate(
       ok: false,
       rate: 0,
       responseStatus: null,
+      responseTimeMs: Date.now() - startedAt,
       sourceUrl,
+      referenceUrl,
       snippet: '',
       errorMessage: error instanceof Error ? error.message : 'Unknown Google Finance mirrored query error.',
     };
   }
+}
+
+function googleFinanceReferenceUrl(pair: string): string {
+  return `https://www.google.com/finance/quote/${encodeURIComponent(pair)}`;
 }
 
 function parseGoogleFinanceQuoteRate(text: string, pair: string): number {
@@ -940,4 +1053,93 @@ function jsonResponse(payload: unknown, status = 200): Response {
       ...corsHeaders,
     },
   });
+}
+
+function statusSnapshotFromProviderResult(
+  result: ProviderFetchResult,
+): ProviderStatusSnapshot {
+  const checkedAt = new Date().toISOString();
+  return {
+    provider: result.provider,
+    lastCheckAt: checkedAt,
+    lastSuccessAt: result.ok && !result.fallbackUsed ? checkedAt : null,
+    lastSourceUrl: result.sourceUrl,
+    lastErrorMessage: result.errorMessage,
+    payload: {
+      fetched_rate: result.fetchedRate,
+      applied_rate: result.appliedRate,
+      fallback_used: result.fallbackUsed,
+      response_status: result.responseStatus,
+      response_time_ms: result.responseTimeMs,
+      source_url: result.sourceUrl,
+      error_message: result.errorMessage,
+      provider_payload: result.payload,
+    },
+  };
+}
+
+function firstGoogleSourceUrl(payload: Record<string, unknown>): string {
+  const queries = Array.isArray(payload.queries) ? payload.queries : [];
+  for (const query of queries) {
+    if (isRecord(query) && normalizeString(query.source_url)) {
+      return normalizeString(query.source_url);
+    }
+  }
+  return GOOGLE_FINANCE_MIRROR_URL;
+}
+
+function firstGoogleErrorMessage(payload: Record<string, unknown>): string | null {
+  const queries = Array.isArray(payload.queries) ? payload.queries : [];
+  for (const query of queries) {
+    if (isRecord(query) && normalizeString(query.error_message)) {
+      return normalizeString(query.error_message);
+    }
+  }
+  return null;
+}
+
+async function upsertProviderStatuses(
+  supabase: ReturnType<typeof createClient>,
+  runId: string,
+  snapshots: ProviderStatusSnapshot[],
+): Promise<void> {
+  const providers = snapshots.map((item) => item.provider);
+  const { data: existingRows, error: existingError } = await supabase
+    .from('market_rate_provider_status')
+    .select('provider, last_success_at')
+    .in('provider', providers);
+
+  if (existingError) {
+    throw new Error(`Error loading market_rate_provider_status: ${existingError.message}`);
+  }
+
+  const existingSuccessByProvider = new Map<string, string>();
+  for (const row of existingRows ?? []) {
+    if (isRecord(row)) {
+      const provider = normalizeString(row.provider);
+      const lastSuccessAt = normalizeString(row.last_success_at);
+      if (provider) {
+        existingSuccessByProvider.set(provider, lastSuccessAt);
+      }
+    }
+  }
+
+  const rows = snapshots.map((snapshot) => ({
+    provider: snapshot.provider,
+    last_check_at: snapshot.lastCheckAt,
+    last_success_at: snapshot.lastSuccessAt ?? existingSuccessByProvider.get(snapshot.provider) ?? null,
+    last_run_id: runId,
+    last_source_url: snapshot.lastSourceUrl,
+    last_error_message: snapshot.lastErrorMessage,
+    payload: snapshot.payload,
+    updated_at: snapshot.lastCheckAt,
+  }));
+
+  const { error } = await supabase
+    .from('market_rate_provider_status')
+    .upsert(rows, { onConflict: 'provider' });
+
+  if (error) {
+    throw new Error(`Error upserting market_rate_provider_status: ${error.message}`);
+  }
 }

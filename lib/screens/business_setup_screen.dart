@@ -308,6 +308,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final Map<String, double> _googleAnchorRates = Map<String, double>.from(
     _defaultGoogleAnchorRates,
   );
+  DateTime? _latestMarketRatesUpdatedAt;
+  bool _latestGoogleIsFallback = false;
+  final Map<String, DateTime?> _providerLastCheckedAt = <String, DateTime?>{};
+  final Map<String, bool> _providerIsFallback = <String, bool>{};
   String _lastSuggestedRateCurrency = 'USD';
   bool _exchangeRateManuallyEdited = false;
   final Map<String, String> _exchangeRateByCurrency = <String, String>{
@@ -343,6 +347,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   Timer? _autosaveTimer;
   Timer? _draftRecoveredHintTimer;
   RealtimeChannel? _marketRatesChannel;
+  RealtimeChannel? _providerStatusChannel;
 
   bool _saving = false;
   bool _loadingExisting = true;
@@ -409,6 +414,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _ensureCurrencyConfig('USD');
     _loadActiveCurrencyIntoController();
     _subscribeToMarketRatesRealtime();
+    _subscribeToProviderStatusRealtime();
     _loadInitialData();
     _autosaveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_loadingExisting) {
@@ -424,6 +430,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (_marketRatesChannel != null) {
       unawaited(Supabase.instance.client.removeChannel(_marketRatesChannel!));
       _marketRatesChannel = null;
+    }
+    if (_providerStatusChannel != null) {
+      unawaited(Supabase.instance.client.removeChannel(_providerStatusChannel!));
+      _providerStatusChannel = null;
     }
     unawaited(_saveDraft());
     _exchangeRateController.removeListener(_forceExchangeRateCursorAtEnd);
@@ -498,6 +508,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (_step.index >= _SetupStep.checkout.index) {
         unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
       }
+      unawaited(_loadProviderStatuses());
     }
   }
 
@@ -535,6 +546,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         .subscribe();
 
     _marketRatesChannel = channel;
+  }
+
+  void _subscribeToProviderStatusRealtime() {
+    final client = Supabase.instance.client;
+    if (_providerStatusChannel != null) {
+      unawaited(client.removeChannel(_providerStatusChannel!));
+      _providerStatusChannel = null;
+    }
+
+    final channel = client
+        .channel('public:market_rate_provider_status:business_setup')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'market_rate_provider_status',
+          callback: (_) {
+            unawaited(_loadProviderStatuses());
+          },
+        )
+        .subscribe();
+
+    _providerStatusChannel = channel;
   }
 
   void _scheduleDraftRecoveredHintHide() {
@@ -3808,6 +3841,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return <String, dynamic>{};
   }
 
+  DateTime? _parseUtcTimestampToLocal(dynamic value) {
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) {
+      return null;
+    }
+    return DateTime.tryParse(raw)?.toLocal();
+  }
+
   Future<String> _ensureComercioIdForGemini() async {
     final current = (_editingComercioId ?? '').trim();
     if (current.isNotEmpty) {
@@ -4188,13 +4229,128 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         .toList();
   }
 
-  Uri _exchangeSourceReferenceUri(String source) {
+  String _googleReferencePairCode(String baseCurrency, String quoteCurrency) {
+    final pair = _pairKey(baseCurrency, quoteCurrency);
+    return switch (pair) {
+      'USD/COP' || 'COP/USD' => 'USD-COP',
+      'USD/EUR' || 'EUR/USD' => 'USD-EUR',
+      'VES/USD' || 'USD/VES' => 'VES-USD',
+      'VES/COP' || 'COP/VES' => 'USD-COP',
+      'VES/EUR' || 'EUR/VES' => 'USD-EUR',
+      'COP/EUR' || 'EUR/COP' => 'USD-COP',
+      _ => '${baseCurrency.toUpperCase()}-${quoteCurrency.toUpperCase()}',
+    };
+  }
+
+  bool _isGoogleFallbackPayload(dynamic payload) {
+    final map = _toStringDynamicMap(payload);
+    if (map['is_fallback'] == true) {
+      return true;
+    }
+    final googleProvider = _toStringDynamicMap(map['google_provider']);
+    return googleProvider['is_fallback'] == true;
+  }
+
+  Future<void> _loadProviderStatuses() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('market_rate_provider_status')
+          .select('provider, last_check_at, payload');
+      if (!mounted) {
+        return;
+      }
+
+      final lastCheckedAtByProvider = <String, DateTime?>{};
+      final isFallbackByProvider = <String, bool>{};
+      for (final row in response.whereType<Map>()) {
+        final provider = row['provider']?.toString().trim().toLowerCase() ?? '';
+        if (provider.isEmpty) {
+          continue;
+        }
+        final payload = _toStringDynamicMap(row['payload']);
+        lastCheckedAtByProvider[provider] =
+            _parseUtcTimestampToLocal(row['last_check_at']) ??
+            _parseUtcTimestampToLocal(payload['checked_at']);
+        isFallbackByProvider[provider] = payload['is_fallback'] == true;
+      }
+
+      setState(() {
+        _providerLastCheckedAt
+          ..clear()
+          ..addAll(lastCheckedAtByProvider);
+        _providerIsFallback
+          ..clear()
+          ..addAll(isFallbackByProvider);
+      });
+    } catch (_) {
+      // Preserve the previous status when loading fails.
+    }
+  }
+
+  DateTime? _providerLastChecked(String source) {
+    return _providerLastCheckedAt[source] ?? _latestMarketRatesUpdatedAt;
+  }
+
+  bool _providerFallbackUsed(String source) {
+    return _providerIsFallback[source] ??
+        (source == _exchangeSourceGoogle && _latestGoogleIsFallback);
+  }
+
+  ({Color color, String message}) _getProviderHealth(
+    DateTime? lastChecked,
+    bool isFallback,
+  ) {
+    if (lastChecked == null) {
+      return (color: const Color(0xFFEF4444), message: 'Fuente desincronizada');
+    }
+
+    final diff = DateTime.now().difference(lastChecked);
+    if (diff.inMinutes >= 60) {
+      return (color: const Color(0xFFEF4444), message: 'Fuente desincronizada');
+    }
+    if (diff.inMinutes >= 20) {
+      return (color: const Color(0xFFFBBF24), message: 'Latencia detectada');
+    }
+    if (isFallback) {
+      return (color: const Color(0xFFFBBF24), message: 'Usando respaldo');
+    }
+    return (color: const Color(0xFF22C55E), message: 'Conexion estable');
+  }
+
+  String? _providerFreshnessText(String source) {
+    final updatedAt = _providerLastChecked(source);
+    if (updatedAt == null) {
+      return null;
+    }
+
+    final diff = DateTime.now().difference(updatedAt);
+    if (diff.inSeconds < 60) {
+      return 'Verificado hace unos segundos';
+    }
+    if (diff.inMinutes < 60) {
+      return 'Verificado hace ${diff.inMinutes} min';
+    }
+    if (diff.inHours < 24) {
+      return 'Verificado hace ${diff.inHours} h';
+    }
+    return 'Verificado hace ${diff.inDays} d';
+  }
+
+  Uri _exchangeSourceReferenceUri(
+    String source, {
+    String? baseCurrency,
+    String? quoteCurrency,
+  }) {
+    final base = baseCurrency ?? _baseCurrency;
+    final quote = quoteCurrency ?? _currentCurrency;
     return switch (source) {
       _exchangeSourceBcv => Uri.parse('https://www.bcv.org.ve/'),
       _exchangeSourceP2pBinance => Uri.parse(
         'https://p2p.binance.com/en/trade/buy/USDT?fiat=VES&payment=ALL',
       ),
-      _exchangeSourceGoogle => Uri.parse('https://www.google.com/finance'),
+      _exchangeSourceGoogle => Uri.parse(
+        'https://www.google.com/finance/quote/${_googleReferencePairCode(base, quote)}',
+      ),
       _ => Uri.parse('https://www.bcv.org.ve/'),
     };
   }
@@ -4214,6 +4370,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final source = _exchangeRateSource;
     final pairLabel = '$baseCurrency/$quoteCurrency';
     final future = _fetchRateHistoryRows();
+    final health = _getProviderHealth(
+      _providerLastChecked(source),
+      _providerFallbackUsed(source),
+    );
+    final freshnessText =
+        _providerFreshnessText(source) ?? 'Verificacion no disponible';
 
     await showModalBottomSheet<void>(
       context: context,
@@ -4270,7 +4432,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                           tooltip: 'Abrir referencia web',
                           onPressed: () async {
                             await launchUrl(
-                              _exchangeSourceReferenceUri(source),
+                              _exchangeSourceReferenceUri(
+                                source,
+                                baseCurrency: baseCurrency,
+                                quoteCurrency: quoteCurrency,
+                              ),
                               mode: LaunchMode.externalApplication,
                             );
                           },
@@ -4280,6 +4446,42 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF120E25),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF3B2F63)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: health.color,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              '${health.message} • $freshnessText',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 12),
                     if (snapshot.connectionState == ConnectionState.waiting)
@@ -4560,7 +4762,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     try {
       final row = await Supabase.instance.client
           .from('global_market_rates')
-          .select('bcv_rate, p2p_binance_rate, payload')
+          .select('updated_at, bcv_rate, p2p_binance_rate, payload')
           .order('updated_at', ascending: false)
           .limit(1)
           .maybeSingle();
@@ -4571,6 +4773,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final bcvRate = _parseExchangeRate(row['bcv_rate']);
       final p2pRate = _parseExchangeRate(row['p2p_binance_rate']);
       final payload = row['payload'];
+      final updatedAt = _parseUtcTimestampToLocal(row['updated_at']);
       setState(() {
         if (bcvRate > 0) {
           _marketRates[_exchangeSourceBcv] = bcvRate;
@@ -4584,6 +4787,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             _googleAnchorRates[entry.key] = entry.value;
           }
         }
+        _latestMarketRatesUpdatedAt = updatedAt;
+        _latestGoogleIsFallback = _isGoogleFallbackPayload(payload);
 
         final shouldApplyAutoRate =
             applyToCurrentAutoRate &&
@@ -4913,11 +5118,26 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return null;
   }
 
-  bool _isCurrencyExchangeRateConfigured(String currency) {
+  double _effectiveExchangeRateForCurrency(String currency) {
     if (!_requiresExchangeRateForCurrency(currency)) {
-      return true;
+      return 1;
     }
-    final rate = _parseExchangeRate(_exchangeRateByCurrency[currency]);
+
+    final mode = _exchangeRateModeByCurrency[currency] ?? _exchangeRateMode;
+    if (mode == _exchangeModeAuto && _hasAutoSourcesForCurrency(currency)) {
+      final availableSources = _availableAutoSourcesForCurrency(currency);
+      final selectedSource = _exchangeRateSourceByCurrency[currency];
+      final source = availableSources.contains(selectedSource)
+          ? selectedSource!
+          : availableSources.first;
+      return _rateForSource(source, quoteCurrency: currency);
+    }
+
+    return _parseExchangeRate(_exchangeRateByCurrency[currency]);
+  }
+
+  bool _isCurrencyExchangeRateConfigured(String currency) {
+    final rate = _effectiveExchangeRateForCurrency(currency);
     return rate > 0;
   }
 
@@ -7418,6 +7638,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final requiresRate = _requiresExchangeRateForCurrency(currentCurrency);
     final canUseAuto =
         requiresRate && _hasAutoSourcesForCurrency(currentCurrency);
+    final selectedProviderLastChecked = _providerLastChecked(_exchangeRateSource);
+    final selectedProviderFallback = _providerFallbackUsed(_exchangeRateSource);
+    final providerHealth = _getProviderHealth(
+      selectedProviderLastChecked,
+      selectedProviderFallback,
+    );
+    final marketRatesFreshnessText = _providerFreshnessText(_exchangeRateSource);
     final currentDisplayedRate = requiresRate
       ? (_exchangeRateMode == _exchangeModeAuto
           ? _rateForSource(
@@ -7918,13 +8145,26 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               dense: true,
                               value: _exchangeSourceGoogle,
                               activeColor: _palette.primary,
-                              title: const Text(
-                                'Google',
-                                style: TextStyle(
-                                  color: _setupTextHigh,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              title: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text(
+                                    'Google',
+                                    style: TextStyle(
+                                      color: _setupTextHigh,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (_latestGoogleIsFallback) ...[
+                                    const SizedBox(width: 6),
+                                    const Icon(
+                                      Icons.warning_amber_rounded,
+                                      size: 16,
+                                      color: Color(0xFFFBBF24),
+                                    ),
+                                  ],
+                                ],
                               ),
                               subtitle: Text(
                                 'Google: ${_rateBadgeText(_exchangeSourceGoogle, quoteCurrency: currentCurrency)}',
@@ -7965,6 +8205,56 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       ),
                     ],
                   ),
+                  if (marketRatesFreshnessText != null) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: providerHealth.color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          marketRatesFreshnessText,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (_exchangeRateSource == _exchangeSourceGoogle &&
+                      selectedProviderFallback) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
+                          color: Color(0xFFFBBF24),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            providerHealth.message == 'Usando respaldo'
+                                ? 'Google esta usando un valor recuperado por fallo de conexion o parseo.'
+                                : providerHealth.message,
+                            style: const TextStyle(
+                              color: Color(0xFFFBBF24),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
                 if (isExchangeRateEditable)
                   Row(
