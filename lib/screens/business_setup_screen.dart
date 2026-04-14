@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:intl_phone_field/countries.dart' as intl_phone_countries;
 import 'package:intl_phone_field/country_picker_dialog.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
@@ -105,6 +106,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   static const String _exchangeModeManual = 'manual';
   static const String _exchangeSourceBcv = 'bcv';
   static const String _exchangeSourceP2pBinance = 'p2p_binance';
+  static const String _exchangeSourceGoogle = 'google';
+  static const double _p2pBuyerMarkupRate = 0.0140;
+  static const Map<String, double> _defaultGoogleAnchorRates = <String, double>{
+    'USD/COP': 4000,
+    'USD/EUR': 0.92,
+    'VES/USD': 0.0021,
+  };
   static const String _paletteAiPrompt =
       'Analiza exclusivamente el logo y propon una paleta fiel a sus tonos dominantes. '
       'Evita reinterpretaciones fuertes y conserva los colores reales de la marca.';
@@ -297,6 +305,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _exchangeSourceBcv: 477.1488,
     _exchangeSourceP2pBinance: 630.6,
   };
+  final Map<String, double> _googleAnchorRates = Map<String, double>.from(
+    _defaultGoogleAnchorRates,
+  );
   String _lastSuggestedRateCurrency = 'USD';
   bool _exchangeRateManuallyEdited = false;
   final Map<String, String> _exchangeRateByCurrency = <String, String>{
@@ -596,7 +607,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
     final source =
         (raw?['exchange_rate_source']?.toString().trim().toLowerCase() ?? '');
-    if (source == _exchangeSourceBcv || source == _exchangeSourceP2pBinance) {
+    if (source == _exchangeSourceBcv ||
+        source == _exchangeSourceP2pBinance ||
+        source == _exchangeSourceGoogle) {
       _exchangeRateSource = source;
       _exchangeRateSourceByCurrency[_activeCheckoutCurrency] = source;
     }
@@ -628,14 +641,57 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return currency != _baseCurrency;
   }
 
+  bool _isTrackedVesPair({
+    required String baseCurrency,
+    required String quoteCurrency,
+  }) {
+    final direct =
+        quoteCurrency == 'VES' &&
+        (baseCurrency == 'USD' || baseCurrency == 'EUR');
+    final reverse =
+        baseCurrency == 'VES' &&
+        (quoteCurrency == 'USD' || quoteCurrency == 'EUR');
+    return direct || reverse;
+  }
+
+  bool _canUseBcvSourceForPair({
+    required String quoteCurrency,
+    String? baseCurrency,
+  }) {
+    final base = baseCurrency ?? _baseCurrency;
+    return _isTrackedVesPair(baseCurrency: base, quoteCurrency: quoteCurrency);
+  }
+
+  bool _canUseP2pSourceForPair({
+    required String quoteCurrency,
+    String? baseCurrency,
+  }) {
+    final base = baseCurrency ?? _baseCurrency;
+    return _isTrackedVesPair(baseCurrency: base, quoteCurrency: quoteCurrency);
+  }
+
   bool _isBcvPairAvailable(String quoteCurrency) {
-    final base = _baseCurrency;
-    return quoteCurrency == 'VES' && base == 'USD';
+    return _canUseBcvSourceForPair(quoteCurrency: quoteCurrency) &&
+        _canDeriveExchangeRateFromSource(
+          _exchangeSourceBcv,
+          quoteCurrency: quoteCurrency,
+        );
   }
 
   bool _isP2pPairAvailable(String quoteCurrency) {
+    return _canUseP2pSourceForPair(quoteCurrency: quoteCurrency) &&
+        _canDeriveExchangeRateFromSource(
+          _exchangeSourceP2pBinance,
+          quoteCurrency: quoteCurrency,
+        );
+  }
+
+  bool _isGooglePairAvailable(String quoteCurrency) {
     final base = _baseCurrency;
-    return quoteCurrency == 'VES' && base == 'USD';
+    if (quoteCurrency == base || _isBcvPairAvailable(quoteCurrency)) {
+      return false;
+    }
+    return _googleRateForPair(base, quoteCurrency) > 0;
   }
 
   List<String> _availableAutoSourcesForCurrency(String quoteCurrency) {
@@ -645,6 +701,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
     if (_isP2pPairAvailable(quoteCurrency)) {
       sources.add(_exchangeSourceP2pBinance);
+    }
+    if (_isGooglePairAvailable(quoteCurrency)) {
+      sources.add(_exchangeSourceGoogle);
     }
     return sources;
   }
@@ -1044,7 +1103,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           .trim()
           .toLowerCase();
       if (draftSource == _exchangeSourceBcv ||
-          draftSource == _exchangeSourceP2pBinance) {
+          draftSource == _exchangeSourceP2pBinance ||
+          draftSource == _exchangeSourceGoogle) {
         _exchangeRateSource = draftSource;
       }
 
@@ -1077,7 +1137,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             continue;
           }
           if (source != _exchangeSourceBcv &&
-              source != _exchangeSourceP2pBinance) {
+              source != _exchangeSourceP2pBinance &&
+              source != _exchangeSourceGoogle) {
             continue;
           }
           _exchangeRateSourceByCurrency[currencyCode] = source;
@@ -1094,6 +1155,24 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final draftP2p = _parseExchangeRate(map['marketRateP2p']);
       if (draftP2p > 0) {
         _marketRates[_exchangeSourceP2pBinance] = draftP2p;
+      }
+      final draftGoogleUsdCop = _parseExchangeRate(
+        map['marketRateGoogleUsdCop'],
+      );
+      if (draftGoogleUsdCop > 0) {
+        _googleAnchorRates['USD/COP'] = draftGoogleUsdCop;
+      }
+      final draftGoogleUsdEur = _parseExchangeRate(
+        map['marketRateGoogleUsdEur'],
+      );
+      if (draftGoogleUsdEur > 0) {
+        _googleAnchorRates['USD/EUR'] = draftGoogleUsdEur;
+      }
+      final draftGoogleVesUsd = _parseExchangeRate(
+        map['marketRateGoogleVesUsd'],
+      );
+      if (draftGoogleVesUsd > 0) {
+        _googleAnchorRates['VES/USD'] = draftGoogleVesUsd;
       }
 
       final exchangeRates = _toStringDynamicMap(map['exchangeRates']);
@@ -1275,6 +1354,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'exchangeRateSources': _exchangeRateSourceByCurrency,
       'marketRateBcv': _marketRates[_exchangeSourceBcv],
       'marketRateP2p': _marketRates[_exchangeSourceP2pBinance],
+      'marketRateGoogleUsdCop': _googleAnchorRates['USD/COP'],
+      'marketRateGoogleUsdEur': _googleAnchorRates['USD/EUR'],
+      'marketRateGoogleVesUsd': _googleAnchorRates['VES/USD'],
       'lastSuggestedRateCurrency': _lastSuggestedRateCurrency,
       'exchangeRateManuallyEdited': _exchangeRateManuallyEdited,
       'editingComercioId': _editingComercioId ?? '',
@@ -1945,7 +2027,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ];
       if (canApplyGeneratedPalette) {
         _selectedPaletteId = localAnalysis == null ? 'elmenuxfa' : 'logo-smart';
-      }
+      } 
       _isGeminiPaletteLoading = true;
       _paletteStatusMessage =
           'Espera unos segundos mientras buscamos la paleta de colores de tu marca.';
@@ -3784,25 +3866,66 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return double.tryParse(cleaned.replaceAll(RegExp(r'[,.]'), '')) ?? 0;
   }
 
+  int _exchangeRateFractionDigits(double value) {
+    if (value <= 0) {
+      return 2;
+    }
+    if (value >= 1) {
+      return value.truncateToDouble() == value ? 0 : 2;
+    }
+    if (value >= 0.01) {
+      return 4;
+    }
+    return 6;
+  }
+
+  String _trimTrailingFractionZeros(String value) {
+    if (!value.contains('.')) {
+      return value;
+    }
+    return value
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
   String _formatExchangeRate(double value) {
     if (value <= 0) {
       return '';
     }
-    final isInteger = value.truncateToDouble() == value;
-    return isInteger ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
+    final digits = _exchangeRateFractionDigits(value);
+    return _trimTrailingFractionZeros(value.toStringAsFixed(digits));
   }
 
   String _formatExchangeRateMasked(double value) {
     if (value <= 0) {
       return '';
     }
-    final fixed = value.toStringAsFixed(2);
+    final fixed = value.toStringAsFixed(_exchangeRateFractionDigits(value));
     final parts = fixed.split('.');
     final integerPart = parts[0].replaceAllMapped(
       RegExp(r'\B(?=(\d{3})+(?!\d))'),
       (_) => ',',
     );
-    return '$integerPart.${parts[1]}';
+    if (parts.length == 1) {
+      return integerPart;
+    }
+    final fractionPart = _trimTrailingFractionZeros(parts[1]);
+    return fractionPart.isEmpty ? integerPart : '$integerPart.$fractionPart';
+  }
+
+  int _exchangeRateInputDecimalDigits(String quoteCurrency) {
+    final configured = _parseExchangeRate(_exchangeRateByCurrency[quoteCurrency]);
+    if (configured > 0) {
+      return _exchangeRateFractionDigits(configured);
+    }
+
+    final auto = _rateForSource(_exchangeRateSource, quoteCurrency: quoteCurrency);
+    if (auto > 0) {
+      return _exchangeRateFractionDigits(auto);
+    }
+
+    final fallback = _defaultExchangeRateFor(quoteCurrency);
+    return _exchangeRateFractionDigits(fallback);
   }
 
   String _currencyLabel(String code) {
@@ -3862,44 +3985,582 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
   }
 
+  double _adjustP2pRateForBuyer(double rate) {
+    if (rate <= 0) {
+      return 0;
+    }
+    return rate * (1 + _p2pBuyerMarkupRate);
+  }
+
+  double _usdToCurrencyRateForSource(String source, String currency) {
+    return switch (currency) {
+      'USD' => 1,
+      'VES' => () {
+        final liveRate = _marketRates[source] ?? 0;
+        if (liveRate > 0) {
+          return source == _exchangeSourceP2pBinance
+              ? _adjustP2pRateForBuyer(liveRate)
+              : liveRate;
+        }
+        return _usdToCurrencyRate('VES');
+      }(),
+      'COP' => _googleAnchorRates['USD/COP'] ?? _usdToCurrencyRate('COP'),
+      'EUR' => _googleAnchorRates['USD/EUR'] ?? _usdToCurrencyRate('EUR'),
+      _ => 0,
+    };
+  }
+
+  String _pairKey(String baseCurrency, String quoteCurrency) {
+    return '$baseCurrency/$quoteCurrency';
+  }
+
+  Map<String, double> _googleRatesFromPayload(dynamic payload) {
+    final rates = <String, double>{};
+    final rawMap = payload is Map ? payload['google_rates'] : null;
+    if (rawMap is! Map) {
+      return rates;
+    }
+
+    for (final entry in rawMap.entries) {
+      final key = entry.key.toString().trim().toUpperCase();
+      final value = _parseExchangeRate(entry.value);
+      if (key.isNotEmpty && value > 0) {
+        rates[key] = value;
+      }
+    }
+    return rates;
+  }
+
+  double _googleRateForPairFromAnchors(
+    String baseCurrency,
+    String quoteCurrency,
+    Map<String, double> anchors,
+  ) {
+    if (baseCurrency == quoteCurrency) {
+      return 1;
+    }
+
+    final direct = anchors[_pairKey(baseCurrency, quoteCurrency)] ?? 0;
+    if (direct > 0) {
+      return direct;
+    }
+
+    final usdCop = anchors['USD/COP'] ?? 0;
+    final usdEur = anchors['USD/EUR'] ?? 0;
+    final vesUsd = anchors['VES/USD'] ?? 0;
+
+    if (baseCurrency == 'COP' && quoteCurrency == 'USD' && usdCop > 0) {
+      return 1 / usdCop;
+    }
+    if (baseCurrency == 'EUR' && quoteCurrency == 'USD' && usdEur > 0) {
+      return 1 / usdEur;
+    }
+    if (baseCurrency == 'VES' &&
+        quoteCurrency == 'COP' &&
+        vesUsd > 0 &&
+        usdCop > 0) {
+      return vesUsd * usdCop;
+    }
+    if (baseCurrency == 'VES' &&
+        quoteCurrency == 'EUR' &&
+        vesUsd > 0 &&
+        usdEur > 0) {
+      return vesUsd * usdEur;
+    }
+    if (baseCurrency == 'COP' &&
+        quoteCurrency == 'VES' &&
+        vesUsd > 0 &&
+        usdCop > 0) {
+      final vesCop = vesUsd * usdCop;
+      return vesCop > 0 ? 1 / vesCop : 0;
+    }
+    if (baseCurrency == 'EUR' &&
+        quoteCurrency == 'VES' &&
+        vesUsd > 0 &&
+        usdEur > 0) {
+      final vesEur = vesUsd * usdEur;
+      return vesEur > 0 ? 1 / vesEur : 0;
+    }
+    if (baseCurrency == 'COP' &&
+        quoteCurrency == 'EUR' &&
+        usdCop > 0 &&
+        usdEur > 0) {
+      return usdEur / usdCop;
+    }
+    if (baseCurrency == 'EUR' &&
+        quoteCurrency == 'COP' &&
+        usdCop > 0 &&
+        usdEur > 0) {
+      return usdCop / usdEur;
+    }
+
+    return 0;
+  }
+
+  double _googleRateForPair(String baseCurrency, String quoteCurrency) {
+    return _googleRateForPairFromAnchors(
+      baseCurrency,
+      quoteCurrency,
+      _googleAnchorRates,
+    );
+  }
+
+  double? _calculateHistoricalRateForRow(
+    Map<String, dynamic> row, {
+    required String baseCurrency,
+    required String quoteCurrency,
+    required String source,
+  }) {
+    if (baseCurrency == quoteCurrency) {
+      return 1;
+    }
+
+    if (source == _exchangeSourceGoogle) {
+      final googleRates = _googleRatesFromPayload(row['payload']);
+      final derived = _googleRateForPairFromAnchors(
+        baseCurrency,
+        quoteCurrency,
+        googleRates,
+      );
+      return derived > 0 ? derived : null;
+    }
+
+    if (source == _exchangeSourceBcv &&
+        !_canUseBcvSourceForPair(
+          quoteCurrency: quoteCurrency,
+          baseCurrency: baseCurrency,
+        )) {
+      return null;
+    }
+    if (source == _exchangeSourceP2pBinance &&
+        !_canUseP2pSourceForPair(
+          quoteCurrency: quoteCurrency,
+          baseCurrency: baseCurrency,
+        )) {
+      return null;
+    }
+
+    final liveRate = switch (source) {
+      _exchangeSourceBcv => _parseExchangeRate(row['bcv_rate']),
+      _exchangeSourceP2pBinance => _adjustP2pRateForBuyer(
+        _parseExchangeRate(row['p2p_binance_rate']),
+      ),
+      _ => 0,
+    };
+    if (liveRate <= 0) {
+      return null;
+    }
+
+    double usdToCurrency(String currency) {
+      final usdCop = (_googleAnchorRates['USD/COP'] ?? _usdToCurrencyRate('COP'))
+          .toDouble();
+      final usdEur = (_googleAnchorRates['USD/EUR'] ?? _usdToCurrencyRate('EUR'))
+          .toDouble();
+      return switch (currency) {
+        'USD' => 1.0,
+        'VES' => liveRate.toDouble(),
+        'COP' => usdCop,
+        'EUR' => usdEur,
+        _ => 0.0,
+      };
+    }
+
+    final usdToBase = usdToCurrency(baseCurrency);
+    final usdToQuote = usdToCurrency(quoteCurrency);
+    if (usdToBase <= 0 || usdToQuote <= 0) {
+      return null;
+    }
+
+    final derived = usdToQuote / usdToBase;
+    return derived > 0 ? derived : null;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchRateHistoryRows() async {
+    final response = await Supabase.instance.client
+        .from('global_market_rates')
+        .select('updated_at, bcv_rate, p2p_binance_rate, payload')
+        .order('updated_at', ascending: false)
+        .limit(20);
+
+    return response
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
+  }
+
+  Uri _exchangeSourceReferenceUri(String source) {
+    return switch (source) {
+      _exchangeSourceBcv => Uri.parse('https://www.bcv.org.ve/'),
+      _exchangeSourceP2pBinance => Uri.parse(
+        'https://p2p.binance.com/en/trade/buy/USDT?fiat=VES&payment=ALL',
+      ),
+      _exchangeSourceGoogle => Uri.parse('https://www.google.com/finance'),
+      _ => Uri.parse('https://www.bcv.org.ve/'),
+    };
+  }
+
+  String _exchangeSourceReferenceLabel(String source) {
+    return switch (source) {
+      _exchangeSourceBcv => 'BCV • sitio oficial',
+      _exchangeSourceP2pBinance => 'Binance P2P • referencia web',
+      _exchangeSourceGoogle => 'Google Finance • referencia web',
+      _ => _exchangeSourceLabel(source),
+    };
+  }
+
+  Future<void> _showRateHistorySheet() async {
+    final baseCurrency = _baseCurrency;
+    final quoteCurrency = _currentCurrency;
+    final source = _exchangeRateSource;
+    final pairLabel = '$baseCurrency/$quoteCurrency';
+    final future = _fetchRateHistoryRows();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF17122E),
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 8,
+              bottom: MediaQuery.of(sheetContext).viewPadding.bottom + 20,
+            ),
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: future,
+              builder: (context, snapshot) {
+                final formatter = DateFormat('dd/MM HH:mm');
+
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Historial de tasas',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '$pairLabel • ${_exchangeSourceReferenceLabel(source)}',
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Abrir referencia web',
+                          onPressed: () async {
+                            await launchUrl(
+                              _exchangeSourceReferenceUri(source),
+                              mode: LaunchMode.externalApplication,
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.open_in_new_rounded,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    else if (snapshot.hasError)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'No se pudo cargar el historial de tasas.',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                      )
+                    else ...[
+                      Builder(
+                        builder: (_) {
+                          bool sameRate(double left, double right) {
+                            return (left - right).abs() < 0.000001;
+                          }
+
+                          final rows = snapshot.data ?? const <Map<String, dynamic>>[];
+                          final derivedEntries = rows
+                              .map((row) {
+                                final rate = _calculateHistoricalRateForRow(
+                                  row,
+                                  baseCurrency: baseCurrency,
+                                  quoteCurrency: quoteCurrency,
+                                  source: source,
+                                );
+                                if (rate == null || rate <= 0) {
+                                  return null;
+                                }
+                                final updatedAtRaw = row['updated_at']?.toString();
+                                final updatedAt = updatedAtRaw == null
+                                    ? null
+                                    : DateTime.tryParse(updatedAtRaw)?.toLocal();
+                                return (rate: rate, updatedAt: updatedAt);
+                              })
+                              .whereType<({double rate, DateTime? updatedAt})>()
+                              .toList();
+
+                          final items = <({
+                            double rate,
+                            DateTime? updatedAt,
+                            IconData? trendIcon,
+                            Color? trendColor,
+                          })>[];
+
+                          for (var index = 0; index < derivedEntries.length; index++) {
+                            final current = derivedEntries[index];
+                            final previousRaw = index > 0
+                                ? derivedEntries[index - 1]
+                                : null;
+                            if (previousRaw != null &&
+                                sameRate(current.rate, previousRaw.rate)) {
+                              continue;
+                            }
+
+                            ({double rate, DateTime? updatedAt})? nextDistinct;
+                            for (var nextIndex = index + 1;
+                                nextIndex < derivedEntries.length;
+                                nextIndex++) {
+                              final candidate = derivedEntries[nextIndex];
+                              if (!sameRate(candidate.rate, current.rate)) {
+                                nextDistinct = candidate;
+                                break;
+                              }
+                            }
+
+                            IconData? trendIcon;
+                            Color? trendColor;
+                            if (nextDistinct != null) {
+                              if (current.rate > nextDistinct.rate) {
+                                trendIcon = Icons.trending_up_rounded;
+                                trendColor = Colors.greenAccent.shade400;
+                              } else if (current.rate < nextDistinct.rate) {
+                                trendIcon = Icons.trending_down_rounded;
+                                trendColor = const Color(0xFFFF6B6B);
+                              } else {
+                                trendIcon = Icons.remove_rounded;
+                                trendColor = Colors.white38;
+                              }
+                            } else {
+                              trendIcon = Icons.remove_rounded;
+                              trendColor = Colors.white38;
+                            }
+
+                            items.add((
+                              rate: current.rate,
+                              updatedAt: current.updatedAt,
+                              trendIcon: trendIcon,
+                              trendColor: trendColor,
+                            ));
+                          }
+
+                          if (items.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                'No hay historial disponible para esta fuente y este par.',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            );
+                          }
+
+                          return Flexible(
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: items.length,
+                              separatorBuilder: (_, index) => const Divider(
+                                color: Color(0xFF3B2F63),
+                                height: 16,
+                              ),
+                              itemBuilder: (context, index) {
+                                final item = items[index];
+                                final timestamp = item.updatedAt == null
+                                    ? 'Fecha no disponible'
+                                    : formatter.format(item.updatedAt!);
+                                return ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text(
+                                    timestamp,
+                                    style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _formatExchangeRate(item.rate),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (item.trendIcon != null) ...[
+                                        const SizedBox(width: 8),
+                                        Icon(
+                                          item.trendIcon,
+                                          size: 18,
+                                          color: item.trendColor,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  bool _canDeriveExchangeRateFromSource(
+    String source, {
+    required String quoteCurrency,
+    String? baseCurrency,
+  }) {
+    final base = baseCurrency ?? _baseCurrency;
+    if (quoteCurrency == base) {
+      return false;
+    }
+
+    final usdToBase = _usdToCurrencyRateForSource(source, base);
+    final usdToQuote = _usdToCurrencyRateForSource(source, quoteCurrency);
+    return usdToBase > 0 && usdToQuote > 0;
+  }
+
   String _exchangeSourceLabel(String source) {
     return switch (source) {
       _exchangeSourceBcv => 'Tasa Oficial (BCV)',
+      _exchangeSourceGoogle => 'Google',
       _exchangeSourceP2pBinance => 'Tasa Mercado (Paralelo/P2P)',
       _ => source.toUpperCase(),
     };
   }
 
+  String _formatConversionRateText({
+    required double rate,
+    required String baseCurrency,
+    required String quoteCurrency,
+  }) {
+    if (rate <= 0) {
+      return '--';
+    }
+    return '${_formatExchangeRateMasked(rate)} $quoteCurrency por 1 $baseCurrency';
+  }
+
+  String _formatConversionEquivalenceText({
+    required double rate,
+    required String baseCurrency,
+    required String quoteCurrency,
+  }) {
+    if (rate <= 0) {
+      return '--';
+    }
+
+    final direct = _formatConversionRateText(
+      rate: rate,
+      baseCurrency: baseCurrency,
+      quoteCurrency: quoteCurrency,
+    );
+    final inverse =
+        '${_formatExchangeRateMasked(1 / rate)} $baseCurrency por 1 $quoteCurrency';
+    return '$direct  |  $inverse';
+  }
+
   double _rateForSource(String source, {String? quoteCurrency}) {
+    final base = _baseCurrency;
     final currency = quoteCurrency ?? _currentCurrency;
-    if (source == _exchangeSourceBcv && !_isBcvPairAvailable(currency)) {
+    if (source == _exchangeSourceGoogle) {
+      return _googleRateForPair(base, currency);
+    }
+    if (source == _exchangeSourceBcv &&
+        !_canUseBcvSourceForPair(quoteCurrency: currency, baseCurrency: base)) {
       return 0;
     }
-    if (source == _exchangeSourceP2pBinance && !_isP2pPairAvailable(currency)) {
+    if (source == _exchangeSourceP2pBinance &&
+        !_canUseP2pSourceForPair(quoteCurrency: currency, baseCurrency: base)) {
+      return 0;
+    }
+    if (!_canDeriveExchangeRateFromSource(
+      source,
+      quoteCurrency: currency,
+      baseCurrency: base,
+    )) {
       return 0;
     }
 
-    final value = _marketRates[source] ?? 0;
-    if (value > 0) {
-      return value;
+    final usdToBase = _usdToCurrencyRateForSource(source, base);
+    final usdToQuote = _usdToCurrencyRateForSource(source, currency);
+    if (usdToBase <= 0 || usdToQuote <= 0) {
+      return 0;
     }
-    final fallback = _defaultExchangeRateFor(currency);
+
+    final derived = usdToQuote / usdToBase;
+    if (derived > 0) {
+      return derived;
+    }
+
+    final fallback = _defaultExchangeRateFor(currency, baseCurrency: base);
     return fallback > 0 ? fallback : 0;
   }
 
   String _rateBadgeText(String source, {String? quoteCurrency}) {
-    final rate = _rateForSource(source, quoteCurrency: quoteCurrency);
+    final currency = quoteCurrency ?? _currentCurrency;
+    final rate = _rateForSource(source, quoteCurrency: currency);
     if (rate <= 0) {
       return '--';
     }
-    return _formatExchangeRate(rate);
+    return _formatConversionRateText(
+      rate: rate,
+      baseCurrency: _baseCurrency,
+      quoteCurrency: currency,
+    );
   }
 
   Future<void> _loadMarketRates({bool applyToCurrentAutoRate = false}) async {
     try {
       final row = await Supabase.instance.client
           .from('global_market_rates')
-          .select('bcv_rate, p2p_binance_rate')
+          .select('bcv_rate, p2p_binance_rate, payload')
           .order('updated_at', ascending: false)
           .limit(1)
           .maybeSingle();
@@ -3909,12 +4570,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
       final bcvRate = _parseExchangeRate(row['bcv_rate']);
       final p2pRate = _parseExchangeRate(row['p2p_binance_rate']);
+      final payload = row['payload'];
       setState(() {
         if (bcvRate > 0) {
           _marketRates[_exchangeSourceBcv] = bcvRate;
         }
         if (p2pRate > 0) {
           _marketRates[_exchangeSourceP2pBinance] = p2pRate;
+        }
+        final googleRatesMap = _googleRatesFromPayload(payload);
+        for (final entry in googleRatesMap.entries) {
+          if (entry.value > 0) {
+            _googleAnchorRates[entry.key] = entry.value;
+          }
         }
 
         final shouldApplyAutoRate =
@@ -3929,8 +4597,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             final formatted = _formatExchangeRateMasked(synced);
             _exchangeRateByCurrency[_currentCurrency] = formatted;
             _exchangeRateController.text = formatted;
-            _exchangeRateMessage =
-                'Tasa sincronizada automaticamente desde ${_exchangeSourceLabel(_exchangeRateSource)}.';
+            _exchangeRateMessage = null;
             _exchangeRateIsError = false;
             _lastSuggestedRateCurrency = _currentCurrency;
           }
@@ -4561,7 +5228,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final allIdPrefixFocusNodes = <FocusNode>{};
     final allIdDocumentControllers = <TextEditingController>{};
 
-    TextEditingController _ensureEmailController(int fieldIndex, String value) {
+    TextEditingController ensureEmailController(int fieldIndex, String value) {
       final existing = emailControllerByField[fieldIndex];
       if (existing != null) {
         return existing;
@@ -4572,7 +5239,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return created;
     }
 
-    FocusNode _ensureEmailFocusNode(int fieldIndex) {
+    FocusNode ensureEmailFocusNode(int fieldIndex) {
       final existing = emailFocusByField[fieldIndex];
       if (existing != null) {
         return existing;
@@ -4583,7 +5250,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return created;
     }
 
-    TextEditingController _ensureIdPrefixController(
+    TextEditingController ensureIdPrefixController(
       int fieldIndex,
       String value,
     ) {
@@ -4597,7 +5264,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return created;
     }
 
-    FocusNode _ensureIdPrefixFocusNode(int fieldIndex) {
+    FocusNode ensureIdPrefixFocusNode(int fieldIndex) {
       final existing = idPrefixFocusByField[fieldIndex];
       if (existing != null) {
         return existing;
@@ -4608,7 +5275,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return created;
     }
 
-    TextEditingController _ensureIdDocumentController(
+    TextEditingController ensureIdDocumentController(
       int fieldIndex,
       String value,
     ) {
@@ -4649,15 +5316,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         ).countryIso;
       }
       if (fields[i].type == 'correo') {
-        _ensureEmailController(i, fields[i].value);
-        _ensureEmailFocusNode(i);
+        ensureEmailController(i, fields[i].value);
+        ensureEmailFocusNode(i);
         emailAnchorByField[i] = GlobalKey();
       }
       if (fields[i].type == 'id') {
         final parsedIdentity = _parseIdentityValue(fields[i].value);
-        _ensureIdPrefixController(i, parsedIdentity.prefix);
-        _ensureIdPrefixFocusNode(i);
-        _ensureIdDocumentController(i, parsedIdentity.document);
+        ensureIdPrefixController(i, parsedIdentity.prefix);
+        ensureIdPrefixFocusNode(i);
+        ensureIdDocumentController(i, parsedIdentity.document);
       }
     }
     var showInlineErrors = false;
@@ -4908,11 +5575,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                             );
                                           }
                                           if (value == 'correo') {
-                                            _ensureEmailController(
+                                            ensureEmailController(
                                               fieldIndex,
                                               nextValue,
                                             );
-                                            _ensureEmailFocusNode(fieldIndex);
+                                            ensureEmailFocusNode(fieldIndex);
                                             emailAnchorByField.putIfAbsent(
                                               fieldIndex,
                                               GlobalKey.new,
@@ -4929,14 +5596,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                             );
                                           }
                                           if (value == 'id') {
-                                            _ensureIdPrefixController(
+                                            ensureIdPrefixController(
                                               fieldIndex,
                                               'V',
                                             );
-                                            _ensureIdPrefixFocusNode(
-                                              fieldIndex,
-                                            );
-                                            _ensureIdDocumentController(
+                                            ensureIdPrefixFocusNode(fieldIndex);
+                                            ensureIdDocumentController(
                                               fieldIndex,
                                               '',
                                             );
@@ -5268,11 +5933,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                 Builder(
                                   builder: (context) {
                                     final emailController =
-                                        _ensureEmailController(
+                                        ensureEmailController(
                                           fieldIndex,
                                           field.value,
                                         );
-                                    final emailFocus = _ensureEmailFocusNode(
+                                    final emailFocus = ensureEmailFocusNode(
                                       fieldIndex,
                                     );
                                     final emailAnchor = emailAnchorByField
@@ -5436,14 +6101,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                       fields[fieldIndex].value,
                                     );
                                     final prefixController =
-                                        _ensureIdPrefixController(
+                                        ensureIdPrefixController(
                                           fieldIndex,
                                           parsedIdentity.prefix,
                                         );
-                                    final prefixFocus =
-                                        _ensureIdPrefixFocusNode(fieldIndex);
+                                    final prefixFocus = ensureIdPrefixFocusNode(
+                                      fieldIndex,
+                                    );
                                     final documentController =
-                                        _ensureIdDocumentController(
+                                        ensureIdDocumentController(
                                           fieldIndex,
                                           parsedIdentity.document,
                                         );
@@ -5952,7 +6618,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _lastSuggestedRateCurrency = currency;
       _exchangeRateIsError = false;
       _exchangeRateMessage = canUseAuto
-          ? 'Tasa sincronizada automaticamente desde ${_exchangeSourceLabel(_exchangeRateSource)}.'
+          ? null
           : 'Tasa manual configurada para tu negocio.';
       _isExchangeRateLoading = false;
     });
@@ -6054,6 +6720,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           : null,
       'exchange_rate_mode': _exchangeRateMode,
       'exchange_rate_source': _exchangeRateSource,
+      'exchange_rate_quote_currency': quotedCurrency == primaryCurrency
+          ? null
+          : quotedCurrency,
       'exchange_rate_value': primaryExchangeRate > 0
           ? primaryExchangeRate
           : null,
@@ -6086,6 +6755,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'tasa_cambio_pesos',
       'exchange_rate_mode',
       'exchange_rate_source',
+      'exchange_rate_quote_currency',
       'exchange_rate_value',
       'last_rate_update',
       'metodo_pago_predeterminado',
@@ -6748,8 +7418,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final requiresRate = _requiresExchangeRateForCurrency(currentCurrency);
     final canUseAuto =
         requiresRate && _hasAutoSourcesForCurrency(currentCurrency);
+    final currentDisplayedRate = requiresRate
+      ? (_exchangeRateMode == _exchangeModeAuto
+          ? _rateForSource(
+            _exchangeRateSource,
+            quoteCurrency: currentCurrency,
+          )
+          : _parseExchangeRate(_exchangeRateByCurrency[currentCurrency]))
+      : 1.0;
     final allowBcv = _isBcvPairAvailable(currentCurrency);
     final allowP2p = _isP2pPairAvailable(currentCurrency);
+    final allowGoogle = _isGooglePairAvailable(currentCurrency);
     final currenciesForEditing = <String>[
       if (_selectedCurrencies.contains(baseCurrency)) baseCurrency,
       ..._selectedCurrencies.where((currency) => currency != baseCurrency),
@@ -7082,6 +7761,21 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       : 'Esta es tu moneda principal. No requiere tasa de conversion.',
                   style: const TextStyle(color: _setupTextMedium, fontSize: 12),
                 ),
+                if (requiresRate && currentDisplayedRate > 0) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _formatConversionEquivalenceText(
+                      rate: currentDisplayedRate,
+                      baseCurrency: baseCurrency,
+                      quoteCurrency: currentCurrency,
+                    ),
+                    style: const TextStyle(
+                      color: Color(0xFFD3E8FF),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
                 if (!requiresRate) ...[
                   const SizedBox(height: 8),
                   const Text(
@@ -7217,8 +7911,59 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               ),
                             ),
                           ),
+                        if (allowGoogle)
+                          Expanded(
+                            child: RadioListTile<String>(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              value: _exchangeSourceGoogle,
+                              activeColor: _palette.primary,
+                              title: const Text(
+                                'Google',
+                                style: TextStyle(
+                                  color: _setupTextHigh,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              subtitle: Text(
+                                'Google: ${_rateBadgeText(_exchangeSourceGoogle, quoteCurrency: currentCurrency)}',
+                                style: const TextStyle(
+                                  color: _setupTextMedium,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Fuente: ${_exchangeSourceLabel(_exchangeRateSource)}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _showRateHistorySheet,
+                        icon: const Icon(Icons.history_rounded, size: 18),
+                        label: const Text('Ver historial'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          textStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
                 if (isExchangeRateEditable)
@@ -7236,7 +7981,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                           ),
                           inputFormatters: <TextInputFormatter>[
                             _MoneyAmountInputFormatter(
-                              decimalDigits: 2,
+                              decimalDigits: _exchangeRateInputDecimalDigits(
+                                currentCurrency,
+                              ),
                               maxIntegerDigits: 7,
                             ),
                           ],
