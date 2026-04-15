@@ -345,6 +345,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   Timer? _slugDebounce;
   Timer? _autosaveTimer;
+  Timer? _marketRatesRefreshTimer;
   Timer? _draftRecoveredHintTimer;
   RealtimeChannel? _marketRatesChannel;
   RealtimeChannel? _providerStatusChannel;
@@ -415,6 +416,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _loadActiveCurrencyIntoController();
     _subscribeToMarketRatesRealtime();
     _subscribeToProviderStatusRealtime();
+    _marketRatesRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshLiveRateState(),
+    );
     _loadInitialData();
     _autosaveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_loadingExisting) {
@@ -426,6 +431,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   @override
   void dispose() {
     _autosaveTimer?.cancel();
+    _marketRatesRefreshTimer?.cancel();
     _draftRecoveredHintTimer?.cancel();
     if (_marketRatesChannel != null) {
       unawaited(Supabase.instance.client.removeChannel(_marketRatesChannel!));
@@ -578,6 +584,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
       setState(() => _showDraftRecoveredHint = false);
     });
+  }
+
+  void _refreshLiveRateState() {
+    if (!mounted || _loadingExisting) {
+      return;
+    }
+    unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
+    unawaited(_loadProviderStatuses());
   }
 
   void _applyComercioSeed(ComercioModel comercio, {Map<String, dynamic>? raw}) {

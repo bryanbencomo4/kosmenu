@@ -703,13 +703,32 @@ async function fetchGoogleFinanceRate(
   try {
     const response = await fetch(sourceUrl, {
       headers: {
-        'user-agent': 'kosmenu-app/1.0 refresh-market-rates',
-        accept: 'text/plain, text/markdown;q=0.9, */*;q=0.8',
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+        'accept-language': 'en-US,en;q=0.9,es-419;q=0.8,es;q=0.7',
+        'cache-control': 'no-cache',
+        pragma: 'no-cache',
+        referer: referenceUrl,
       },
     });
 
     const text = await response.text();
     if (!response.ok) {
+      const jsonFallback = await fetchGoogleJsonFallbackRate(pair, referenceUrl);
+      if (jsonFallback.rate > 0) {
+        return {
+          ok: true,
+          rate: jsonFallback.rate,
+          responseStatus: response.status,
+          responseTimeMs: Date.now() - startedAt,
+          sourceUrl: jsonFallback.sourceUrl,
+          referenceUrl,
+          snippet: jsonFallback.snippet,
+          errorMessage: null,
+        };
+      }
+
       return {
         ok: false,
         rate: 0,
@@ -718,12 +737,28 @@ async function fetchGoogleFinanceRate(
         sourceUrl,
         referenceUrl,
         snippet: text.slice(0, 1200),
-        errorMessage: 'Google mirrored query failed.',
+        errorMessage: `Google mirrored query failed with status ${response.status}.`,
       };
     }
 
-    const normalized = text.replace(/[*_`#]/g, ' ').replace(/\s+/g, ' ').trim();
+    const normalized = normalizeGoogleFinanceDocument(text);
     const rate = parseGoogleFinanceQuoteRate(normalized, pair);
+    if (rate <= 0) {
+      const jsonFallback = await fetchGoogleJsonFallbackRate(pair, referenceUrl);
+      if (jsonFallback.rate > 0) {
+        return {
+          ok: true,
+          rate: jsonFallback.rate,
+          responseStatus: response.status,
+          responseTimeMs: Date.now() - startedAt,
+          sourceUrl: jsonFallback.sourceUrl,
+          referenceUrl,
+          snippet: jsonFallback.snippet || normalized.slice(0, 1200),
+          errorMessage: null,
+        };
+      }
+    }
+
     return {
       ok: rate > 0,
       rate,
@@ -752,19 +787,123 @@ function googleFinanceReferenceUrl(pair: string): string {
   return `https://www.google.com/finance/quote/${encodeURIComponent(pair)}`;
 }
 
+function normalizeGoogleFinanceDocument(text: string): string {
+  return text
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[*_`#]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function parseGoogleFinanceQuoteRate(text: string, pair: string): number {
   const pairWithSlash = pair.replace('-', '/');
   const pairWithSpaces = pair.replace('-', ' / ');
+  const pairWithCompactSpaces = pair.replace('-', ' - ');
+  const pairIndex = text.search(new RegExp(pairWithSlash.replace('/', '\\/'), 'i'));
+  const pairWindow = pairIndex >= 0
+    ? text.slice(Math.max(0, pairIndex - 120), Math.min(text.length, pairIndex + 320))
+    : text;
   const patterns = [
-    new RegExp(`(?:^|\\s)${pairWithSlash.replace('/', '\\/')}\\s+([0-9.,]+)\\s*\\(`, 'i'),
+    new RegExp(`(?:^|\\s)${pairWithSlash.replace('/', '\\/')}\\s+([0-9][0-9.,\\s]*)\\s*(?:\\(|$)`, 'i'),
     new RegExp(
-      `${pairWithSpaces.replace('/', '\\/')}\\s*•\\s*Currency.*?\\b([0-9]+[0-9.,]*)\\b\\s*(?:Apr|Mar|Feb|Jan|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)`,
+      `${pairWithSpaces.replace('/', '\\/')}\\s*•\\s*Currency.*?\\b([0-9][0-9.,\\s]*)\\b\\s*(?:Apr|Mar|Feb|Jan|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)`,
       'is',
     ),
+    new RegExp(`${pairWithCompactSpaces}.*?\\b([0-9][0-9.,\\s]*)\\b`, 'is'),
+    /Currency.*?\b([0-9][0-9.,\s]*)\b\s*(?:Apr|Mar|Feb|Jan|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/is,
   ];
 
   for (const pattern of patterns) {
-    const rate = parseLocaleNumber(text.match(pattern)?.[1]);
+    const rate = parseLocaleNumber(pairWindow.match(pattern)?.[1] ?? text.match(pattern)?.[1]);
+    if (rate > 0) {
+      return rate;
+    }
+  }
+
+  const numericTokens = pairWindow.match(/\b\d[\d.,\s]{1,18}\b/g) ?? [];
+  for (const token of numericTokens) {
+    const rate = parseLocaleNumber(token);
+    if (rate > 0) {
+      return rate;
+    }
+  }
+
+  return 0;
+}
+
+async function fetchGoogleJsonFallbackRate(
+  pair: string,
+  referenceUrl: string,
+): Promise<{ rate: number; sourceUrl: string; snippet: string }> {
+  const template = normalizeString(Deno.env.get('GOOGLE_QUOTES_JSON_FALLBACK_URL'));
+  if (!template) {
+    return { rate: 0, sourceUrl: '', snippet: '' };
+  }
+
+  const sourceUrl = template
+    .replace('{pair}', encodeURIComponent(pair))
+    .replace('{reference_url}', encodeURIComponent(referenceUrl));
+
+  try {
+    const response = await fetch(sourceUrl, {
+      headers: {
+        accept: 'application/json, text/plain;q=0.9, */*;q=0.8',
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+      },
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return { rate: 0, sourceUrl, snippet: text.slice(0, 600) };
+    }
+
+    const json = JSON.parse(text) as unknown;
+    const rate = extractGoogleJsonFallbackRate(json, pair);
+    return { rate, sourceUrl, snippet: text.slice(0, 600) };
+  } catch {
+    return { rate: 0, sourceUrl, snippet: '' };
+  }
+}
+
+function extractGoogleJsonFallbackRate(value: unknown, pair: string): number {
+  if (!value) {
+    return 0;
+  }
+  if (typeof value === 'number') {
+    return normalizePositiveNumber(value);
+  }
+  if (typeof value === 'string') {
+    return parseLocaleNumber(value);
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const rate = extractGoogleJsonFallbackRate(item, pair);
+      if (rate > 0) {
+        return rate;
+      }
+    }
+    return 0;
+  }
+  if (!isRecord(value)) {
+    return 0;
+  }
+
+  const directKeys = ['rate', 'price', 'value', pair, pair.replace('-', '/'), pair.toLowerCase(), pair.toUpperCase()];
+  for (const key of directKeys) {
+    const rate = extractGoogleJsonFallbackRate(value[key], pair);
+    if (rate > 0) {
+      return rate;
+    }
+  }
+
+  for (const nestedKey of ['data', 'result', 'quote', 'quotes']) {
+    const rate = extractGoogleJsonFallbackRate(value[nestedKey], pair);
     if (rate > 0) {
       return rate;
     }
@@ -1124,16 +1263,22 @@ async function upsertProviderStatuses(
     }
   }
 
-  const rows = snapshots.map((snapshot) => ({
-    provider: snapshot.provider,
-    last_check_at: snapshot.lastCheckAt,
-    last_success_at: snapshot.lastSuccessAt ?? existingSuccessByProvider.get(snapshot.provider) ?? null,
-    last_run_id: runId,
-    last_source_url: snapshot.lastSourceUrl,
-    last_error_message: snapshot.lastErrorMessage,
-    payload: snapshot.payload,
-    updated_at: snapshot.lastCheckAt,
-  }));
+  const rows = snapshots.map((snapshot) => {
+    const persistedCheckAt = new Date().toISOString();
+    return {
+      provider: snapshot.provider,
+      last_check_at: persistedCheckAt,
+      last_success_at: snapshot.lastSuccessAt ?? existingSuccessByProvider.get(snapshot.provider) ?? null,
+      last_run_id: runId,
+      last_source_url: snapshot.lastSourceUrl,
+      last_error_message: snapshot.lastErrorMessage,
+      payload: {
+        ...snapshot.payload,
+        checked_at: persistedCheckAt,
+      },
+      updated_at: persistedCheckAt,
+    };
+  });
 
   const { error } = await supabase
     .from('market_rate_provider_status')
