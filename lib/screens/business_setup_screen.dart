@@ -109,7 +109,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   static const String _exchangeSourceGoogle = 'google';
   static const String _menuAiModeScan = 'scan';
   static const String _menuAiModeFileImport = 'file_import';
-  static const double _p2pBuyerMarkupRate = 0.0140;
+  static const double _p2pBuyerMarkupRate = 0.006;
   static const Map<String, double> _defaultGoogleAnchorRates = <String, double>{
     'USD/COP': 4000,
     'USD/EUR': 0.92,
