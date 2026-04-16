@@ -276,6 +276,44 @@ function preloadImageAsset(src: string, timeoutMs = 1200) {
   });
 }
 
+function useCountUp(target: number, enabled: boolean, durationMs = 1100) {
+  const [value, setValue] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setValue(0);
+      return;
+    }
+
+    const safeTarget = Math.max(0, Math.round(target));
+    if (safeTarget === 0) {
+      setValue(0);
+      return;
+    }
+
+    let frameId = 0;
+    const startedAt = performance.now();
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / durationMs);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.round(safeTarget * eased));
+
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [durationMs, enabled, target]);
+
+  return value;
+}
+
 function formatPhoneInput(digits: string, countryCode: '+58' | '+57' | '+1') {
   const onlyDigits = normalizePhone(digits).slice(0, 10);
   if (!onlyDigits) return '';
@@ -745,7 +783,9 @@ export default function PublicMenuPage() {
     description: string;
   } | null>(null);
   const categoryChipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const productCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const stickySearchCardRef = useRef<HTMLDivElement | null>(null);
+  const statsCardsRef = useRef<HTMLDivElement | null>(null);
   const mapPickerContainerRef = useRef<HTMLDivElement | null>(null);
   const mapPickerSearchInputRef = useRef<HTMLInputElement | null>(null);
   const mapPickerMapRef = useRef<any>(null);
@@ -759,6 +799,8 @@ export default function PublicMenuPage() {
     contact: true,
     payments: true,
   });
+  const [revealedProductIds, setRevealedProductIds] = useState<Record<string, boolean>>({});
+  const [statsCardsVisible, setStatsCardsVisible] = useState(false);
   const [cachedSplashLogoUrl, setCachedSplashLogoUrl] = useState('');
   const [cachedSplashName, setCachedSplashName] = useState('');
 
@@ -920,6 +962,77 @@ export default function PublicMenuPage() {
       })
       .filter((categoria) => categoria.productos.length > 0);
   }, [categoriasConProductos, searchQuery]);
+
+  const filteredProductIds = useMemo(
+    () => filteredCategorias.flatMap((categoria) => categoria.productos.map((producto) => producto.id)),
+    [filteredCategorias],
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (filteredProductIds.length === 0) {
+      setRevealedProductIds({});
+      return;
+    }
+
+    const revealVisibleCards = () => {
+      setRevealedProductIds((prev) => {
+        const next = { ...prev };
+        let changed = false;
+
+        for (const categoria of filteredCategorias) {
+          for (const producto of categoria.productos) {
+            const node = productCardRefs.current[producto.id];
+            if (!node || next[producto.id]) continue;
+
+            const rect = node.getBoundingClientRect();
+            const isVisible = rect.top < window.innerHeight * 0.96 && rect.bottom > window.innerHeight * -0.08;
+            if (isVisible) {
+              next[producto.id] = true;
+              changed = true;
+            }
+          }
+        }
+
+        return changed ? next : prev;
+      });
+    };
+
+    const frameId = window.requestAnimationFrame(revealVisibleCards);
+    const timeoutId = window.setTimeout(revealVisibleCards, 140);
+    const delayedTimeoutId = window.setTimeout(revealVisibleCards, 420);
+
+    window.addEventListener('scroll', revealVisibleCards, { passive: true });
+    window.addEventListener('resize', revealVisibleCards);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+      window.clearTimeout(delayedTimeoutId);
+      window.removeEventListener('scroll', revealVisibleCards);
+      window.removeEventListener('resize', revealVisibleCards);
+    };
+  }, [filteredCategorias, filteredProductIds]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (filteredCategorias.length === 0) {
+      setStatsCardsVisible(false);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      setStatsCardsVisible(true);
+    });
+    const timeoutId = window.setTimeout(() => {
+      setStatsCardsVisible(true);
+    }, 180);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [filteredCategorias.length]);
 
   useEffect(() => {
     if (filteredCategorias.length === 0) {
@@ -1125,6 +1238,10 @@ export default function PublicMenuPage() {
   const deliveryCostConverted = convertFromCop(deliveryCost, selectedCurrencyCode, selectedExchangeRate);
   const orderGrandTotalConverted = convertFromCop(orderGrandTotal, selectedCurrencyCode, selectedExchangeRate);
   const cartTotalConverted = convertFromCop(cartTotal, selectedCurrencyCode, selectedExchangeRate);
+  const summaryCategoryCount = filteredCategorias.length;
+  const summaryProductCount = categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0);
+  const animatedCategoryCount = useCountUp(summaryCategoryCount, statsCardsVisible, 950);
+  const animatedProductCount = useCountUp(summaryProductCount, statsCardsVisible, 1250);
   const checkoutStepTitles = ['Cliente', 'Logistica', 'Pago'];
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
@@ -2219,14 +2336,14 @@ export default function PublicMenuPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 md:w-[180px] md:shrink-0">
+              <div ref={statsCardsRef} className="grid grid-cols-2 gap-3 md:w-[180px] md:shrink-0">
                 <div className="rounded-[20px] border border-slate-200/90 bg-white/92 px-4 py-3 text-center backdrop-blur-sm">
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[11px]">Categorias</p>
-                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950 sm:text-3xl">{filteredCategorias.length}</p>
+                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950 sm:text-3xl">{animatedCategoryCount}</p>
                 </div>
                 <div className="rounded-[20px] border border-slate-200/90 bg-white/92 px-4 py-3 text-center backdrop-blur-sm">
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[11px]">Productos</p>
-                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950 sm:text-3xl">{categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0)}</p>
+                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950 sm:text-3xl">{animatedProductCount}</p>
                 </div>
               </div>
             </div>
@@ -2330,8 +2447,9 @@ export default function PublicMenuPage() {
                     </div>
 
                     <div className="space-y-4">
-                      {categoria.productos.map((producto) => {
+                      {categoria.productos.map((producto, productIndex) => {
                         const quantity = cart[producto.id] ?? 0;
+                        const isProductRevealed = Boolean(revealedProductIds[producto.id]);
                         const convertedPrice = formatAmountByCurrency(
                           convertFromCop(producto.precio ?? 0, selectedCurrencyCode, selectedExchangeRate),
                           selectedCurrencyCode,
@@ -2340,8 +2458,18 @@ export default function PublicMenuPage() {
                         return (
                           <article
                             key={producto.id}
-                            className="overflow-hidden rounded-[28px] border bg-[color:color-mix(in_srgb,var(--card-surface)_94%,white)] shadow-[0_18px_38px_rgba(15,23,42,0.07)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_28px_55px_rgba(15,23,42,0.10)]"
-                            style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 12%, white)' }}
+                            ref={(element) => {
+                              productCardRefs.current[producto.id] = element;
+                            }}
+                            data-product-id={producto.id}
+                            className="overflow-hidden rounded-[28px] border bg-[color:color-mix(in_srgb,var(--card-surface)_94%,white)] shadow-[0_18px_38px_rgba(15,23,42,0.07)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-0.5 hover:shadow-[0_28px_55px_rgba(15,23,42,0.10)]"
+                            style={{
+                              borderColor: 'color-mix(in srgb, var(--primary-color) 12%, white)',
+                              opacity: isProductRevealed ? 1 : 0,
+                              transform: isProductRevealed ? 'translate3d(0,0,0) scale(1)' : 'translate3d(0,28px,0) scale(0.985)',
+                              filter: isProductRevealed ? 'blur(0px)' : 'blur(8px)',
+                              transitionDelay: isProductRevealed ? `${(productIndex % 6) * 55}ms` : '0ms',
+                            }}
                           >
                             <div className="flex gap-4 p-4 sm:gap-5 sm:p-5">
                               <div className="min-w-0 flex-1 py-0.5">
