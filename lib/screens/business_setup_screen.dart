@@ -107,6 +107,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   static const String _exchangeSourceBcv = 'bcv';
   static const String _exchangeSourceP2pBinance = 'p2p_binance';
   static const String _exchangeSourceGoogle = 'google';
+  static const String _menuAiModeScan = 'scan';
+  static const String _menuAiModeFileImport = 'file_import';
   static const double _p2pBuyerMarkupRate = 0.0140;
   static const Map<String, double> _defaultGoogleAnchorRates = <String, double>{
     'USD/COP': 4000,
@@ -332,6 +334,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _receiveOrdersOnWhatsapp = true;
   String _selectedPhoneCountryIso = 'VE';
   bool _menuScanCompleted = false;
+  String _menuAiSetupMode = '';
   bool _manualMenuSetupSelected = false;
   int _menuCatalogCount = 0;
   int _scanCreatedCategories = 0;
@@ -438,7 +441,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _marketRatesChannel = null;
     }
     if (_providerStatusChannel != null) {
-      unawaited(Supabase.instance.client.removeChannel(_providerStatusChannel!));
+      unawaited(
+        Supabase.instance.client.removeChannel(_providerStatusChannel!),
+      );
       _providerStatusChannel = null;
     }
     unawaited(_saveDraft());
@@ -1264,6 +1269,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _receiveOrdersOnWhatsapp =
           map['receiveOrdersOnWhatsapp'] as bool? ?? true;
       _menuScanCompleted = map['menuScanCompleted'] as bool? ?? false;
+      _menuAiSetupMode = (map['menuAiSetupMode'] as String? ?? '').trim();
       _manualMenuSetupSelected =
           map['manualMenuSetupSelected'] as bool? ?? false;
       _menuCatalogCount = (map['menuCatalogCount'] as num?)?.toInt() ?? 0;
@@ -1416,6 +1422,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'allowDelivery': _allowDelivery,
       'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
       'menuScanCompleted': _menuScanCompleted,
+      'menuAiSetupMode': _menuAiSetupMode,
       'manualMenuSetupSelected': _manualMenuSetupSelected,
       'menuCatalogCount': _menuCatalogCount,
       'scanCreatedCategories': _scanCreatedCategories,
@@ -1934,16 +1941,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     await _saveDraft();
   }
 
-  void _showComingSoonImport() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Importar archivo con IA (PDF, imagenes, CSV) estara disponible pronto.',
-        ),
-      ),
-    );
-  }
-
   void _showComingSoonPrompt() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -2074,7 +2071,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ];
       if (canApplyGeneratedPalette) {
         _selectedPaletteId = localAnalysis == null ? 'elmenuxfa' : 'logo-smart';
-      } 
+      }
       _isGeminiPaletteLoading = true;
       _paletteStatusMessage =
           'Espera unos segundos mientras buscamos la paleta de colores de tu marca.';
@@ -3593,6 +3590,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _openMenuScan() async {
+    await _openMenuAiSetup(MagicOnboardingInputMode.camera);
+  }
+
+  Future<void> _openMenuFileImport() async {
+    await _openMenuAiSetup(MagicOnboardingInputMode.fileImport);
+  }
+
+  Future<void> _openMenuAiSetup(MagicOnboardingInputMode inputMode) async {
     final comercioId = await _ensureComercioIdForGemini();
     if (!mounted) {
       return;
@@ -3614,7 +3619,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
 
     final result = await Navigator.of(context).push<MagicOnboardingResult>(
-      MaterialPageRoute(builder: (_) => const MagicOnboardingScreen()),
+      MaterialPageRoute(
+        builder: (_) => MagicOnboardingScreen(inputMode: inputMode),
+      ),
     );
 
     if (!mounted || result == null) {
@@ -3623,6 +3630,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     setState(() {
       _menuScanCompleted = true;
+      _menuAiSetupMode = inputMode == MagicOnboardingInputMode.fileImport
+          ? _menuAiModeFileImport
+          : _menuAiModeScan;
       _manualMenuSetupSelected = false;
       _scanCreatedCategories = result.createdCategories;
       _scanCreatedProducts = result.createdProducts;
@@ -3969,12 +3979,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   int _exchangeRateInputDecimalDigits(String quoteCurrency) {
-    final configured = _parseExchangeRate(_exchangeRateByCurrency[quoteCurrency]);
+    final configured = _parseExchangeRate(
+      _exchangeRateByCurrency[quoteCurrency],
+    );
     if (configured > 0) {
       return _exchangeRateFractionDigits(configured);
     }
 
-    final auto = _rateForSource(_exchangeRateSource, quoteCurrency: quoteCurrency);
+    final auto = _rateForSource(
+      _exchangeRateSource,
+      quoteCurrency: quoteCurrency,
+    );
     if (auto > 0) {
       return _exchangeRateFractionDigits(auto);
     }
@@ -4207,10 +4222,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     double usdToCurrency(String currency) {
-      final usdCop = (_googleAnchorRates['USD/COP'] ?? _usdToCurrencyRate('COP'))
-          .toDouble();
-      final usdEur = (_googleAnchorRates['USD/EUR'] ?? _usdToCurrencyRate('EUR'))
-          .toDouble();
+      final usdCop =
+          (_googleAnchorRates['USD/COP'] ?? _usdToCurrencyRate('COP'))
+              .toDouble();
+      final usdEur =
+          (_googleAnchorRates['USD/EUR'] ?? _usdToCurrencyRate('EUR'))
+              .toDouble();
       return switch (currency) {
         'USD' => 1.0,
         'VES' => liveRate.toDouble(),
@@ -4501,9 +4518,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     if (snapshot.connectionState == ConnectionState.waiting)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Center(
-                          child: CircularProgressIndicator(),
-                        ),
+                        child: Center(child: CircularProgressIndicator()),
                       )
                     else if (snapshot.hasError)
                       const Padding(
@@ -4520,7 +4535,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                             return (left - right).abs() < 0.000001;
                           }
 
-                          final rows = snapshot.data ?? const <Map<String, dynamic>>[];
+                          final rows =
+                              snapshot.data ?? const <Map<String, dynamic>>[];
                           final derivedEntries = rows
                               .map((row) {
                                 final rate = _calculateHistoricalRateForRow(
@@ -4532,23 +4548,33 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                 if (rate == null || rate <= 0) {
                                   return null;
                                 }
-                                final updatedAtRaw = row['updated_at']?.toString();
+                                final updatedAtRaw = row['updated_at']
+                                    ?.toString();
                                 final updatedAt = updatedAtRaw == null
                                     ? null
-                                    : DateTime.tryParse(updatedAtRaw)?.toLocal();
+                                    : DateTime.tryParse(
+                                        updatedAtRaw,
+                                      )?.toLocal();
                                 return (rate: rate, updatedAt: updatedAt);
                               })
                               .whereType<({double rate, DateTime? updatedAt})>()
                               .toList();
 
-                          final items = <({
-                            double rate,
-                            DateTime? updatedAt,
-                            IconData? trendIcon,
-                            Color? trendColor,
-                          })>[];
+                          final items =
+                              <
+                                ({
+                                  double rate,
+                                  DateTime? updatedAt,
+                                  IconData? trendIcon,
+                                  Color? trendColor,
+                                })
+                              >[];
 
-                          for (var index = 0; index < derivedEntries.length; index++) {
+                          for (
+                            var index = 0;
+                            index < derivedEntries.length;
+                            index++
+                          ) {
                             final current = derivedEntries[index];
                             final previousRaw = index > 0
                                 ? derivedEntries[index - 1]
@@ -4559,9 +4585,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                             }
 
                             ({double rate, DateTime? updatedAt})? nextDistinct;
-                            for (var nextIndex = index + 1;
-                                nextIndex < derivedEntries.length;
-                                nextIndex++) {
+                            for (
+                              var nextIndex = index + 1;
+                              nextIndex < derivedEntries.length;
+                              nextIndex++
+                            ) {
                               final candidate = derivedEntries[nextIndex];
                               if (!sameRate(candidate.rate, current.rate)) {
                                 nextDistinct = candidate;
@@ -7652,21 +7680,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final requiresRate = _requiresExchangeRateForCurrency(currentCurrency);
     final canUseAuto =
         requiresRate && _hasAutoSourcesForCurrency(currentCurrency);
-    final selectedProviderLastChecked = _providerLastChecked(_exchangeRateSource);
+    final selectedProviderLastChecked = _providerLastChecked(
+      _exchangeRateSource,
+    );
     final selectedProviderFallback = _providerFallbackUsed(_exchangeRateSource);
     final providerHealth = _getProviderHealth(
       selectedProviderLastChecked,
       selectedProviderFallback,
     );
-    final marketRatesFreshnessText = _providerFreshnessText(_exchangeRateSource);
+    final marketRatesFreshnessText = _providerFreshnessText(
+      _exchangeRateSource,
+    );
     final currentDisplayedRate = requiresRate
-      ? (_exchangeRateMode == _exchangeModeAuto
-          ? _rateForSource(
-            _exchangeRateSource,
-            quoteCurrency: currentCurrency,
-          )
-          : _parseExchangeRate(_exchangeRateByCurrency[currentCurrency]))
-      : 1.0;
+        ? (_exchangeRateMode == _exchangeModeAuto
+              ? _rateForSource(
+                  _exchangeRateSource,
+                  quoteCurrency: currentCurrency,
+                )
+              : _parseExchangeRate(_exchangeRateByCurrency[currentCurrency]))
+        : 1.0;
     final allowBcv = _isBcvPairAvailable(currentCurrency);
     final allowP2p = _isP2pPairAvailable(currentCurrency);
     final allowGoogle = _isGooglePairAvailable(currentCurrency);
@@ -8968,7 +9000,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Digitaliza tu menu o crea manualmente. Debes completar una opcion para continuar.',
+            'Escanea con camara, importa un archivo o crea manualmente. Debes completar una opcion para continuar.',
             style: TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
           const SizedBox(height: 14),
@@ -9001,7 +9033,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     Expanded(
                       child: Text(
                         _menuScanCompleted
-                            ? 'Menu creado con IA'
+                            ? _menuAiSetupMode == _menuAiModeFileImport
+                                  ? 'Menu importado con IA'
+                                  : 'Menu creado con IA'
                             : _menuCatalogCount > 0
                             ? 'Creacion manual completada'
                             : 'Menu pendiente',
@@ -9033,21 +9067,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       onPressed: _openMenuScan,
                       icon: const Icon(Icons.auto_awesome_rounded),
                       label: Text(
-                        _menuScanCompleted
+                        _menuScanCompleted &&
+                                _menuAiSetupMode == _menuAiModeScan
                             ? 'Reescanear con IA'
-                            : 'Escanear con IA',
+                            : 'Escanear con camara',
                       ),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
-                      onPressed: _showComingSoonImport,
+                      onPressed: _openMenuFileImport,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: _setupTextHigh,
                         side: const BorderSide(color: Color(0xFF6B5A9A)),
                       ),
                       icon: const Icon(Icons.upload_file_rounded),
-                      label: const Text(
-                        'Importar archivo (PDF, imagen, CSV, etc.)',
+                      label: Text(
+                        _menuScanCompleted &&
+                                _menuAiSetupMode == _menuAiModeFileImport
+                            ? 'Reimportar archivo con IA'
+                            : 'Importar archivo con IA',
                       ),
                     ),
                     const SizedBox(height: 8),

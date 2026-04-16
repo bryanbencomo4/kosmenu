@@ -1,6 +1,8 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -25,8 +27,15 @@ class MagicOnboardingResult {
   });
 }
 
+enum MagicOnboardingInputMode { camera, fileImport }
+
 class MagicOnboardingScreen extends StatefulWidget {
-  const MagicOnboardingScreen({super.key});
+  const MagicOnboardingScreen({
+    super.key,
+    this.inputMode = MagicOnboardingInputMode.camera,
+  });
+
+  final MagicOnboardingInputMode inputMode;
 
   @override
   State<MagicOnboardingScreen> createState() => _MagicOnboardingScreenState();
@@ -42,7 +51,22 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
   bool _isLaunchingScan = false;
   String _scanProgressMessage = '';
   double _scanProgressValue = 0;
-  int _capturedPages = 0;
+  int _selectedAssetCount = 0;
+
+  bool get _isFileImportMode =>
+      widget.inputMode == MagicOnboardingInputMode.fileImport;
+
+  String get _screenTitle =>
+      _isFileImportMode ? 'Importar archivo con IA' : 'Escaneo con IA';
+
+  String get _primaryActionLabel =>
+      _isFileImportMode ? 'Seleccionar archivos' : 'Entendido';
+
+  String get _emptyProgressLabel => _isFileImportMode
+      ? 'Preparando importacion con IA...'
+      : 'Preparando escaneo con IA...';
+
+  String get _selectedAssetLabel => _isFileImportMode ? 'Archivos' : 'Paginas';
 
   @override
   void initState() {
@@ -69,12 +93,12 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
         elevation: 0,
         leading: IconButton(
           onPressed: () => Navigator.of(context).maybePop(),
-          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textStrong),
+          icon: const Icon(
+            Icons.arrow_back_rounded,
+            color: AppColors.textStrong,
+          ),
         ),
-        title: Text(
-          'Escaneo con IA',
-          style: textTheme.titleLarge,
-        ),
+        title: Text(_screenTitle, style: textTheme.titleLarge),
       ),
       body: Stack(
         children: [
@@ -90,25 +114,40 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                       _AnimatedReveal(
                         animation: CurvedAnimation(
                           parent: _entryController,
-                          curve: const Interval(0, 0.55, curve: Curves.easeOutCubic),
+                          curve: const Interval(
+                            0,
+                            0.55,
+                            curve: Curves.easeOutCubic,
+                          ),
                         ),
-                        child: _HeaderCard(),
+                        child: _HeaderCard(isFileImportMode: _isFileImportMode),
                       ),
                       const SizedBox(height: 16),
                       _AnimatedReveal(
                         animation: CurvedAnimation(
                           parent: _entryController,
-                          curve: const Interval(0.15, 0.75, curve: Curves.easeOutCubic),
+                          curve: const Interval(
+                            0.15,
+                            0.75,
+                            curve: Curves.easeOutCubic,
+                          ),
                         ),
-                        child: _InfographicCard(animation: _entryController),
+                        child: _InfographicCard(
+                          animation: _entryController,
+                          isFileImportMode: _isFileImportMode,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       _AnimatedReveal(
                         animation: CurvedAnimation(
                           parent: _entryController,
-                          curve: const Interval(0.3, 0.9, curve: Curves.easeOutCubic),
+                          curve: const Interval(
+                            0.3,
+                            0.9,
+                            curve: Curves.easeOutCubic,
+                          ),
                         ),
-                        child: _AiNoteCard(),
+                        child: _AiNoteCard(isFileImportMode: _isFileImportMode),
                       ),
                     ],
                   ),
@@ -122,10 +161,14 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                   child: _AnimatedReveal(
                     animation: CurvedAnimation(
                       parent: _entryController,
-                      curve: const Interval(0.45, 1, curve: Curves.easeOutCubic),
+                      curve: const Interval(
+                        0.45,
+                        1,
+                        curve: Curves.easeOutCubic,
+                      ),
                     ),
                     child: FilledButton.icon(
-                      onPressed: _isLaunchingScan ? null : _startScanFlow,
+                      onPressed: _isLaunchingScan ? null : _startIntakeFlow,
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.accent,
                         foregroundColor: Colors.white,
@@ -140,7 +183,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                             : Icons.check_circle_rounded,
                       ),
                       label: Text(
-                        'Entendido',
+                        _primaryActionLabel,
                         style: GoogleFonts.poppins(
                           fontWeight: FontWeight.w700,
                           fontSize: 15,
@@ -203,7 +246,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                     const SizedBox(height: 12),
                     Text(
                       _scanProgressMessage.isEmpty
-                          ? 'Preparando escaneo con IA...'
+                          ? _emptyProgressLabel
                           : _scanProgressMessage,
                       style: GoogleFonts.poppins(
                         color: AppColors.textStrong,
@@ -225,8 +268,10 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      _capturedPages > 0
-                          ? 'Paginas en proceso: $_capturedPages'
+                      _selectedAssetCount > 0
+                          ? '$_selectedAssetLabel en proceso: $_selectedAssetCount'
+                          : _isFileImportMode
+                          ? 'Preparando seleccion de archivos...'
                           : 'Preparando captura...',
                       style: GoogleFonts.poppins(
                         color: AppColors.textSoft,
@@ -243,7 +288,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     );
   }
 
-  Future<void> _startScanFlow() async {
+  Future<void> _startIntakeFlow() async {
     if (_isLaunchingScan) {
       return;
     }
@@ -261,45 +306,37 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       return;
     }
 
-    setState(() => _isLaunchingScan = true);
-
     try {
-      _setProgress(
-        value: 0.02,
-        message: 'Abriendo camara para capturar la primera pagina...',
-      );
-
-      final images = await _captureMenuPages();
+      final importedAssets = _isFileImportMode
+          ? await _selectImportAssets()
+          : await _captureMenuPages();
 
       if (!mounted) {
         return;
       }
 
-      if (images.isEmpty) {
-        setState(() => _isLaunchingScan = false);
+      if (importedAssets.isEmpty) {
         return;
       }
 
-      _setProgress(
-        value: 0.04,
-        message: 'Revisa, ordena o elimina paginas antes de procesar.',
-      );
-
-      final reviewedImages = await _reviewCapturedPages(images);
+      final reviewedAssets = await _reviewImportedAssets(importedAssets);
 
       if (!mounted) {
         return;
       }
 
-      if (reviewedImages.isEmpty) {
-        setState(() => _isLaunchingScan = false);
+      if (reviewedAssets.isEmpty) {
         return;
       }
 
-      _capturedPages = reviewedImages.length;
+      setState(() {
+        _isLaunchingScan = true;
+        _selectedAssetCount = reviewedAssets.length;
+      });
+      _setProgress(value: 0.02, message: _initialProgressMessage());
       _setProgress(
         value: 0.06,
-        message: 'Se confirmaron ${reviewedImages.length} pagina(s). Iniciando analisis con IA...',
+        message: _confirmedProgressMessage(reviewedAssets.length),
       );
 
       final supabase = Supabase.instance.client;
@@ -327,30 +364,44 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       int totalCreatedProducts = 0;
       final detectedCategoryNames = <String>{};
 
-      for (var i = 0; i < reviewedImages.length; i++) {
+      for (var i = 0; i < reviewedAssets.length; i++) {
         final pageNumber = i + 1;
-        final totalPages = reviewedImages.length;
+        final totalPages = reviewedAssets.length;
         final pageStart = i / totalPages;
+        final asset = reviewedAssets[i];
 
         _setProgress(
           value: 0.08 + (pageStart * 0.84),
-          message: 'Subiendo pagina $pageNumber de $totalPages...',
+          message: _uploadProgressMessage(
+            asset: asset,
+            position: pageNumber,
+            total: totalPages,
+          ),
         );
 
-        final upload = await _storageService.uploadMenuScan(
-          imageFile: File(reviewedImages[i].path),
+        final upload = await _storageService.uploadMenuAsset(
+          file: File(asset.path),
           comercioId: comercioId,
+          contentType: asset.mimeType,
+          fileName: asset.displayName,
         );
-        final imageUrl = supabase.storage.from('menu-scans').getPublicUrl(upload.path);
+        final imageUrl = supabase.storage
+            .from('menu-scans')
+            .getPublicUrl(upload.path);
 
         _setProgress(
           value: 0.1 + (pageStart * 0.84) + (0.25 / totalPages),
-          message: 'IA analizando pagina $pageNumber de $totalPages...',
+          message: _analyzingProgressMessage(
+            asset: asset,
+            position: pageNumber,
+            total: totalPages,
+          ),
         );
 
         final response = await supabase.functions.invoke(
           'process-menu-gemini',
           body: {
+            'file_url': imageUrl,
             'image_url': imageUrl,
             'comercio_id': comercioId,
             'catalog_name': catalogName,
@@ -364,7 +415,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
         final data = _responseMap(response.data);
         if (response.status < 200 || response.status >= 300) {
           throw StateError(
-            'Error al procesar la pagina $pageNumber (status ${response.status}): ${data['error'] ?? 'sin detalle'}.',
+            'Error al procesar ${asset.displayName} (status ${response.status}): ${data['error'] ?? 'sin detalle'}.',
           );
         }
 
@@ -373,7 +424,8 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
           catalogId = returnedCatalogId;
         }
 
-        final returnedCatalogName = data['catalog_name']?.toString().trim() ?? '';
+        final returnedCatalogName =
+            data['catalog_name']?.toString().trim() ?? '';
         if (returnedCatalogName.isNotEmpty) {
           catalogName = returnedCatalogName;
         }
@@ -381,17 +433,25 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
         isNewCatalog = isNewCatalog || data['catalog_created'] == true;
         totalCreatedCategories += _asInt(data['created_categories']);
         totalCreatedProducts += _asInt(data['created_products']);
-        detectedCategoryNames.addAll(_extractCategoryNames(data['parsed_menu']));
+        detectedCategoryNames.addAll(
+          _extractCategoryNames(data['parsed_menu']),
+        );
 
         _setProgress(
           value: 0.1 + (((i + 1) / totalPages) * 0.84),
-          message: 'Pagina $pageNumber procesada.',
+          message: _processedProgressMessage(
+            asset: asset,
+            position: pageNumber,
+            total: totalPages,
+          ),
         );
       }
 
       _setProgress(
         value: 0.95,
-        message: 'Uniendo paginas y eliminando productos repetidos...',
+        message: _isFileImportMode
+            ? 'Uniendo archivos y eliminando productos repetidos...'
+            : 'Uniendo paginas y eliminando productos repetidos...',
       );
 
       final dedupedCount = await _dedupeCatalogProducts(
@@ -409,6 +469,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
         return;
       }
 
+      setState(() => _isLaunchingScan = false);
       Navigator.of(context).pop(
         MagicOnboardingResult(
           catalog: CatalogModel(
@@ -432,33 +493,204 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'No se pudo completar el escaneo con IA. Intenta otra foto.\n$error',
+            _isFileImportMode
+                ? 'No se pudo completar la importacion con IA. Intenta con otro archivo.\n$error'
+                : 'No se pudo completar el escaneo con IA. Intenta otra foto.\n$error',
           ),
         ),
       );
     }
   }
 
-  Future<List<XFile>> _captureMenuPages() async {
+  Future<List<_MenuImportAsset>> _captureMenuPages() async {
     final image = await _picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 90,
     );
     if (image == null) {
-      return <XFile>[];
+      return <_MenuImportAsset>[];
     }
-    return <XFile>[image];
+    return <_MenuImportAsset>[
+      _MenuImportAsset(
+        path: image.path,
+        displayName: _fileNameFromPath(image.path),
+        mimeType: _inferMimeType(image.path),
+      ),
+    ];
   }
 
-  Future<List<XFile>> _reviewCapturedPages(List<XFile> pages) async {
-    final result = await showModalBottomSheet<List<XFile>>(
+  Future<List<_MenuImportAsset>> _pickMenuFiles() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: const <String>[
+          'jpg',
+          'jpeg',
+          'png',
+          'webp',
+          'pdf',
+          'csv',
+          'txt',
+        ],
+      );
+
+      if (result == null) {
+        return <_MenuImportAsset>[];
+      }
+
+      final imported = result.files
+          .where((file) => (file.path ?? '').trim().isNotEmpty)
+          .map(
+            (file) => _MenuImportAsset(
+              path: file.path!.trim(),
+              displayName: file.name.trim().isEmpty
+                  ? _fileNameFromPath(file.path!)
+                  : file.name.trim(),
+              mimeType: _inferMimeType(file.name),
+            ),
+          )
+          .toList();
+
+      if (imported.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No se pudieron leer los archivos seleccionados desde este dispositivo.',
+            ),
+          ),
+        );
+      }
+
+      return imported;
+    } on MissingPluginException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'El selector de archivos no esta disponible todavia. Cierra y abre la app por completo e intenta de nuevo.',
+            ),
+          ),
+        );
+      }
+      return <_MenuImportAsset>[];
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo abrir el selector de archivos. $error'),
+          ),
+        );
+      }
+      return <_MenuImportAsset>[];
+    }
+  }
+
+  Future<List<_MenuImportAsset>> _selectImportAssets() async {
+    final selectedSource = await showModalBottomSheet<_ImportSource>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.canvas,
+      builder: (context) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Importar con IA',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textStrong,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Elige de donde quieres traer el menu.',
+                  style: GoogleFonts.poppins(
+                    color: AppColors.textSoft,
+                    fontSize: 12.5,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _ImportSourceTile(
+                  icon: Icons.photo_library_rounded,
+                  title: 'Galeria de imagenes',
+                  subtitle:
+                      'Importa una o varias fotos del menu desde tu dispositivo.',
+                  onTap: () =>
+                      Navigator.of(context).pop(_ImportSource.galleryImages),
+                ),
+                const SizedBox(height: 10),
+                _ImportSourceTile(
+                  icon: Icons.folder_open_rounded,
+                  title: 'Archivos del dispositivo',
+                  subtitle:
+                      'Usa PDF, CSV, TXT o imagenes desde el explorador de archivos.',
+                  onTap: () =>
+                      Navigator.of(context).pop(_ImportSource.deviceFiles),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted || selectedSource == null) {
+      return <_MenuImportAsset>[];
+    }
+
+    switch (selectedSource) {
+      case _ImportSource.galleryImages:
+        return _pickGalleryImages();
+      case _ImportSource.deviceFiles:
+        return _pickMenuFiles();
+    }
+  }
+
+  Future<List<_MenuImportAsset>> _pickGalleryImages() async {
+    try {
+      final images = await _picker.pickMultiImage(imageQuality: 90);
+      if (images.isEmpty) {
+        return <_MenuImportAsset>[];
+      }
+
+      return images
+          .map(
+            (image) => _MenuImportAsset(
+              path: image.path,
+              displayName: _fileNameFromPath(image.path),
+              mimeType: _inferMimeType(image.path),
+            ),
+          )
+          .toList();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo abrir la galeria. $error')),
+        );
+      }
+      return <_MenuImportAsset>[];
+    }
+  }
+
+  Future<List<_MenuImportAsset>> _reviewImportedAssets(
+    List<_MenuImportAsset> assets,
+  ) async {
+    final result = await showModalBottomSheet<List<_MenuImportAsset>>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
       backgroundColor: AppColors.canvas,
       builder: (context) {
-        final working = List<XFile>.from(pages);
+        final working = List<_MenuImportAsset>.from(assets);
 
         return StatefulBuilder(
           builder: (context, setModalState) {
@@ -472,7 +704,9 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                       children: [
                         Expanded(
                           child: Text(
-                            'Revisa las paginas capturadas',
+                            _isFileImportMode
+                                ? 'Revisa los archivos importados'
+                                : 'Revisa las paginas capturadas',
                             style: GoogleFonts.manrope(
                               fontSize: 18,
                               fontWeight: FontWeight.w800,
@@ -481,7 +715,8 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                           ),
                         ),
                         TextButton(
-                          onPressed: () => Navigator.of(context).pop(<XFile>[]),
+                          onPressed: () =>
+                              Navigator.of(context).pop(<_MenuImportAsset>[]),
                           child: const Text('Cancelar'),
                         ),
                       ],
@@ -493,7 +728,9 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                       children: [
                         Expanded(
                           child: Text(
-                            'Puedes arrastrar para reordenar o eliminar paginas borrosas antes del analisis IA.',
+                            _isFileImportMode
+                                ? 'Puedes reordenar, eliminar o agregar archivos antes del analisis IA.'
+                                : 'Puedes arrastrar para reordenar o eliminar paginas borrosas antes del analisis IA.',
                             style: GoogleFonts.poppins(
                               color: AppColors.textSoft,
                               fontSize: 12.5,
@@ -503,17 +740,25 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                         const SizedBox(width: 8),
                         OutlinedButton.icon(
                           onPressed: () async {
-                            final newImage = await _picker.pickImage(
-                              source: ImageSource.camera,
-                              imageQuality: 90,
-                            );
-                            if (newImage == null) {
+                            final newAssets = _isFileImportMode
+                                ? await _pickMenuFiles()
+                                : await _captureMenuPages();
+                            if (newAssets.isEmpty) {
                               return;
                             }
-                            setModalState(() => working.add(newImage));
+                            setModalState(() => working.addAll(newAssets));
                           },
-                          icon: const Icon(Icons.add_a_photo_rounded, size: 18),
-                          label: const Text('Tomar otra'),
+                          icon: Icon(
+                            _isFileImportMode
+                                ? Icons.add_circle_outline_rounded
+                                : Icons.add_a_photo_rounded,
+                            size: 18,
+                          ),
+                          label: Text(
+                            _isFileImportMode
+                                ? 'Agregar archivos'
+                                : 'Tomar otra',
+                          ),
                           style: OutlinedButton.styleFrom(
                             minimumSize: const Size(0, 40),
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -530,7 +775,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     child: Text(
-                      'Paginas: ${working.length}',
+                      '$_selectedAssetLabel: ${working.length}',
                       style: GoogleFonts.poppins(
                         color: AppColors.textSoft,
                         fontSize: 12,
@@ -552,9 +797,9 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                         });
                       },
                       itemBuilder: (context, index) {
-                        final image = working[index];
+                        final asset = working[index];
                         return Container(
-                          key: ValueKey(image.path),
+                          key: ValueKey(asset.path),
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
@@ -564,27 +809,61 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                           ),
                           child: Row(
                             children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.file(
-                                  File(image.path),
+                              if (asset.isImage)
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.file(
+                                    File(asset.path),
+                                    width: 62,
+                                    height: 62,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              else
+                                Container(
                                   width: 62,
                                   height: 62,
-                                  fit: BoxFit.cover,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8),
+                                    color: AppColors.surfaceMuted,
+                                    border: Border.all(
+                                      color: AppColors.borderSubtle,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    asset.icon,
+                                    color: AppColors.accent,
+                                  ),
                                 ),
-                              ),
                               const SizedBox(width: 10),
                               Expanded(
-                                child: Text(
-                                  'Pagina ${index + 1}',
-                                  style: GoogleFonts.poppins(
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.textStrong,
-                                  ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      asset.displayName,
+                                      style: GoogleFonts.poppins(
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textStrong,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _isFileImportMode
+                                          ? 'Archivo ${index + 1} · ${asset.mimeType}'
+                                          : 'Pagina ${index + 1}',
+                                      style: GoogleFonts.poppins(
+                                        color: AppColors.textSoft,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                               IconButton(
-                                tooltip: 'Eliminar pagina',
+                                tooltip: _isFileImportMode
+                                    ? 'Eliminar archivo'
+                                    : 'Eliminar pagina',
                                 onPressed: () {
                                   setModalState(() => working.removeAt(index));
                                 },
@@ -610,13 +889,17 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                       child: FilledButton.icon(
                         onPressed: working.isEmpty
                             ? null
-                            : () => Navigator.of(context).pop(
-                                  List<XFile>.from(working),
-                                ),
+                            : () => Navigator.of(
+                                context,
+                              ).pop(List<_MenuImportAsset>.from(working)),
                         icon: const Icon(Icons.check_circle_rounded),
                         label: Text(
                           working.isEmpty
-                              ? 'Agrega al menos 1 pagina'
+                              ? _isFileImportMode
+                                    ? 'Agrega al menos 1 archivo'
+                                    : 'Agrega al menos 1 pagina'
+                              : _isFileImportMode
+                              ? 'Procesar ${working.length} archivo(s)'
                               : 'Procesar ${working.length} pagina(s)',
                         ),
                       ),
@@ -630,7 +913,64 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       },
     );
 
-    return result ?? <XFile>[];
+    return result ?? <_MenuImportAsset>[];
+  }
+
+  String _initialProgressMessage() {
+    return _isFileImportMode
+        ? 'Abriendo selector para importar archivos del menu...'
+        : 'Abriendo camara para capturar la primera pagina...';
+  }
+
+  String _confirmedProgressMessage(int count) {
+    return _isFileImportMode
+        ? 'Se confirmaron $count archivo(s). Iniciando analisis con IA...'
+        : 'Se confirmaron $count pagina(s). Iniciando analisis con IA...';
+  }
+
+  String _uploadProgressMessage({
+    required _MenuImportAsset asset,
+    required int position,
+    required int total,
+  }) {
+    return _isFileImportMode
+        ? 'Subiendo archivo $position de $total: ${asset.displayName}...'
+        : 'Subiendo pagina $position de $total...';
+  }
+
+  String _analyzingProgressMessage({
+    required _MenuImportAsset asset,
+    required int position,
+    required int total,
+  }) {
+    return _isFileImportMode
+        ? 'IA analizando archivo $position de $total: ${asset.displayName}...'
+        : 'IA analizando pagina $position de $total...';
+  }
+
+  String _processedProgressMessage({
+    required _MenuImportAsset asset,
+    required int position,
+    required int total,
+  }) {
+    return _isFileImportMode
+        ? 'Archivo $position de $total procesado: ${asset.displayName}.'
+        : 'Pagina $position procesada.';
+  }
+
+  String _fileNameFromPath(String path) {
+    final slashNormalized = path.replaceAll('\\', '/');
+    return slashNormalized.split('/').last.trim();
+  }
+
+  String _inferMimeType(String fileName) {
+    final normalized = fileName.trim().toLowerCase();
+    if (normalized.endsWith('.png')) return 'image/png';
+    if (normalized.endsWith('.webp')) return 'image/webp';
+    if (normalized.endsWith('.pdf')) return 'application/pdf';
+    if (normalized.endsWith('.csv')) return 'text/csv';
+    if (normalized.endsWith('.txt')) return 'text/plain';
+    return 'image/jpeg';
   }
 
   Future<int> _dedupeCatalogProducts({
@@ -687,7 +1027,9 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     }
 
     for (var i = 0; i < duplicateIds.length; i += 100) {
-      final end = (i + 100 < duplicateIds.length) ? i + 100 : duplicateIds.length;
+      final end = (i + 100 < duplicateIds.length)
+          ? i + 100
+          : duplicateIds.length;
       final chunk = duplicateIds.sublist(i, end);
       if (chunk.isEmpty) {
         continue;
@@ -739,7 +1081,9 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     }
 
     return categories
-        .map((item) => item is Map ? item['nombre']?.toString().trim() ?? '' : '')
+        .map(
+          (item) => item is Map ? item['nombre']?.toString().trim() ?? '' : '',
+        )
         .where((name) => name.isNotEmpty)
         .cast<String>()
         .toList();
@@ -765,10 +1109,7 @@ class _AnimatedReveal extends StatelessWidget {
 
         return Opacity(
           opacity: eased,
-          child: Transform.translate(
-            offset: Offset(0, dy),
-            child: builtChild,
-          ),
+          child: Transform.translate(offset: Offset(0, dy), child: builtChild),
         );
       },
     );
@@ -776,6 +1117,10 @@ class _AnimatedReveal extends StatelessWidget {
 }
 
 class _HeaderCard extends StatelessWidget {
+  final bool isFileImportMode;
+
+  const _HeaderCard({required this.isFileImportMode});
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -810,7 +1155,9 @@ class _HeaderCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Recomendaciones antes de escanear',
+                  isFileImportMode
+                      ? 'Recomendaciones antes de importar'
+                      : 'Recomendaciones antes de escanear',
                   style: GoogleFonts.manrope(
                     color: AppColors.textStrong,
                     fontSize: 18,
@@ -819,7 +1166,9 @@ class _HeaderCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Sigue esta guia rapida para obtener mejores resultados con IA.',
+                  isFileImportMode
+                      ? 'Usa archivos legibles y completos para obtener mejores resultados con IA.'
+                      : 'Sigue esta guia rapida para obtener mejores resultados con IA.',
                   style: GoogleFonts.poppins(
                     color: AppColors.textSoft,
                     fontSize: 12.5,
@@ -837,10 +1186,14 @@ class _HeaderCard extends StatelessWidget {
 
 class _InfographicCard extends StatelessWidget {
   final Animation<double> animation;
+  final bool isFileImportMode;
 
-  const _InfographicCard({required this.animation});
+  const _InfographicCard({
+    required this.animation,
+    required this.isFileImportMode,
+  });
 
-  static const List<_TipItem> _tips = <_TipItem>[
+  static const List<_TipItem> _scanTips = <_TipItem>[
     _TipItem(
       number: '01',
       title: 'Buena iluminacion',
@@ -850,7 +1203,8 @@ class _InfographicCard extends StatelessWidget {
     _TipItem(
       number: '02',
       title: 'Camara estable',
-      description: 'Mantener el telefono recto mejora lectura de texto y precios.',
+      description:
+          'Mantener el telefono recto mejora lectura de texto y precios.',
       icon: Icons.center_focus_strong_rounded,
     ),
     _TipItem(
@@ -873,8 +1227,46 @@ class _InfographicCard extends StatelessWidget {
     ),
   ];
 
+  static const List<_TipItem> _importTips = <_TipItem>[
+    _TipItem(
+      number: '01',
+      title: 'Archivo completo',
+      description: 'Incluye todas las paginas, columnas o secciones del menu.',
+      icon: Icons.library_books_rounded,
+    ),
+    _TipItem(
+      number: '02',
+      title: 'Formato legible',
+      description:
+          'PDF, imagen, CSV o TXT deben tener nombres, categorias y precios visibles.',
+      icon: Icons.file_present_rounded,
+    ),
+    _TipItem(
+      number: '03',
+      title: 'Sin recortes',
+      description:
+          'Evita exportaciones incompletas o capturas donde falten precios.',
+      icon: Icons.crop_free_rounded,
+    ),
+    _TipItem(
+      number: '04',
+      title: 'Orden correcto',
+      description:
+          'Si subes varios archivos, reordena antes de procesar para conservar el contexto.',
+      icon: Icons.swap_vert_rounded,
+    ),
+    _TipItem(
+      number: '05',
+      title: 'Revision final',
+      description:
+          'La IA acelera la carga, pero conviene revisar categorias y productos al terminar.',
+      icon: Icons.fact_check_rounded,
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
+    final tips = isFileImportMode ? _importTips : _scanTips;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -884,8 +1276,8 @@ class _InfographicCard extends StatelessWidget {
         boxShadow: AppTheme.softShadow,
       ),
       child: Column(
-        children: List<Widget>.generate(_tips.length, (index) {
-          final tip = _tips[index];
+        children: List<Widget>.generate(tips.length, (index) {
+          final tip = tips[index];
           final start = (0.12 + (index * 0.1)).clamp(0.0, 1.0).toDouble();
           final end = (start + 0.34).clamp(0.0, 1.0).toDouble();
 
@@ -895,7 +1287,9 @@ class _InfographicCard extends StatelessWidget {
               curve: Interval(start, end, curve: Curves.easeOutCubic),
             ),
             child: Padding(
-              padding: EdgeInsets.only(bottom: index == _tips.length - 1 ? 0 : 10),
+              padding: EdgeInsets.only(
+                bottom: index == tips.length - 1 ? 0 : 10,
+              ),
               child: _TipRow(tip: tip),
             ),
           );
@@ -973,6 +1367,10 @@ class _TipRow extends StatelessWidget {
 }
 
 class _AiNoteCard extends StatelessWidget {
+  final bool isFileImportMode;
+
+  const _AiNoteCard({required this.isFileImportMode});
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -989,7 +1387,9 @@ class _AiNoteCard extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Este escaneo se procesa con IA para detectar categorias, productos y precios automaticamente. Mientras mejor sea la foto, mejor sera el resultado.',
+              isFileImportMode
+                  ? 'Esta importacion se procesa con IA para detectar categorias, productos y precios automaticamente desde archivos como PDF, imagen, CSV o TXT. Mientras mas claro este el contenido, mejor sera el resultado.'
+                  : 'Este escaneo se procesa con IA para detectar categorias, productos y precios automaticamente. Mientras mejor sea la foto, mejor sera el resultado.',
               style: GoogleFonts.poppins(
                 color: AppColors.textStrong,
                 fontSize: 12.5,
@@ -1015,4 +1415,103 @@ class _TipItem {
     required this.description,
     required this.icon,
   });
+}
+
+enum _ImportSource { galleryImages, deviceFiles }
+
+class _ImportSourceTile extends StatelessWidget {
+  const _ImportSourceTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Ink(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.borderSubtle),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppColors.accentSoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: AppColors.accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textStrong,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.poppins(
+                      color: AppColors.textSoft,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textSoft),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuImportAsset {
+  const _MenuImportAsset({
+    required this.path,
+    required this.displayName,
+    required this.mimeType,
+  });
+
+  final String path;
+  final String displayName;
+  final String mimeType;
+
+  bool get isImage => mimeType.startsWith('image/');
+
+  IconData get icon {
+    if (mimeType == 'application/pdf') {
+      return Icons.picture_as_pdf_rounded;
+    }
+    if (mimeType == 'text/csv') {
+      return Icons.table_chart_rounded;
+    }
+    if (mimeType.startsWith('text/')) {
+      return Icons.description_rounded;
+    }
+    return Icons.insert_drive_file_rounded;
+  }
 }

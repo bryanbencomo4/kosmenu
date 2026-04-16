@@ -31,7 +31,8 @@ const corsHeaders = {
 };
 
 const PROMPT =
-  'Analiza esta imagen de un menu de restaurante. Extrae todas las categorias y sus productos (nombre, descripcion, precio). ' +
+  'Analiza este archivo de un menu de restaurante. Puede ser una imagen, un PDF, un CSV o texto exportado. ' +
+  'Extrae todas las categorias y sus productos (nombre, descripcion, precio). ' +
   'Devuelve UNICAMENTE un JSON con este formato: ' +
   '{"categorias": [{"nombre": "...", "productos": [{"nombre": "...", "descripcion": "...", "precio": 0.0}]}]}';
 
@@ -49,15 +50,15 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const imageUrl: string | undefined = body.image_url ?? body.imageUrl;
+    const fileUrl: string | undefined = body.file_url ?? body.fileUrl ?? body.image_url ?? body.imageUrl;
     const comercioIdInput: unknown = body.comercio_id ?? body.comercioId;
     const comercioId =
       typeof comercioIdInput === 'string' ? comercioIdInput.trim() : '';
     const requestedCatalogName = normalizeCatalogName(body.catalog_name ?? body.nombre_catalogo);
 
-    if (!imageUrl || !comercioId) {
+    if (!fileUrl || !comercioId) {
       return jsonResponse(
-        { error: 'Missing required fields: image_url and comercio_id' },
+        { error: 'Missing required fields: file_url and comercio_id' },
         400,
       );
     }
@@ -76,7 +77,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const parsedMenu = await extractMenuWithGemini(imageUrl, geminiApiKey);
+    const parsedMenu = await extractMenuWithGemini(fileUrl, geminiApiKey);
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -173,15 +174,14 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function extractMenuWithGemini(imageUrl: string, apiKey: string): Promise<ParsedMenu> {
-  const imageResponse = await fetch(imageUrl);
-  if (!imageResponse.ok) {
-    throw new Error(`Could not download image_url: ${imageResponse.status}`);
+async function extractMenuWithGemini(fileUrl: string, apiKey: string): Promise<ParsedMenu> {
+  const fileResponse = await fetch(fileUrl);
+  if (!fileResponse.ok) {
+    throw new Error(`Could not download file_url: ${fileResponse.status}`);
   }
 
-  const contentType = imageResponse.headers.get('content-type') ?? 'image/jpeg';
-  const imageBytes = new Uint8Array(await imageResponse.arrayBuffer());
-  const imageBase64 = toBase64(imageBytes);
+  const contentType = normalizeContentType(fileResponse.headers.get('content-type'));
+  const fileBytes = new Uint8Array(await fileResponse.arrayBuffer());
 
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent` +
@@ -191,20 +191,7 @@ async function extractMenuWithGemini(imageUrl: string, apiKey: string): Promise<
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: PROMPT },
-            {
-              inline_data: {
-                mime_type: contentType,
-                data: imageBase64,
-              },
-            },
-          ],
-        },
-      ],
+      contents: [buildGeminiRequestContent(contentType, fileBytes)],
       generationConfig: {
         temperature: 0,
         responseMimeType: 'application/json',
@@ -244,6 +231,52 @@ async function extractMenuWithGemini(imageUrl: string, apiKey: string): Promise<
   }));
 
   return parsed;
+}
+
+function buildGeminiRequestContent(contentType: string, fileBytes: Uint8Array) {
+  if (contentType.startsWith('text/') || contentType === 'application/csv') {
+    const rawText = new TextDecoder().decode(fileBytes).trim();
+    if (!rawText) {
+      throw new Error('The uploaded text file is empty');
+    }
+
+    return {
+      role: 'user',
+      parts: [
+        {
+          text:
+            `${PROMPT}\n\n` +
+            `El contenido fuente se entrega como texto (${contentType}). ` +
+            'Respeta categorias y precios tal como aparezcan en el archivo.\n\n' +
+            rawText,
+        },
+      ],
+    };
+  }
+
+  return {
+    role: 'user',
+    parts: [
+      { text: PROMPT },
+      {
+        inline_data: {
+          mime_type: contentType,
+          data: toBase64(fileBytes),
+        },
+      },
+    ],
+  };
+}
+
+function normalizeContentType(value: string | null): string {
+  const normalized = (value ?? '').split(';').first?.trim().toLowerCase() ?? '';
+  if (!normalized) {
+    return 'image/jpeg';
+  }
+  if (normalized === 'application/vnd.ms-excel') {
+    return 'text/csv';
+  }
+  return normalized;
 }
 
 async function ensureCatalogForComercio(
