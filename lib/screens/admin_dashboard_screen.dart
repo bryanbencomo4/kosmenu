@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
@@ -80,10 +81,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         comercio: ComercioModel(id: '', nombre: 'Comercio'),
         categoryCount: 0,
         productCount: 0,
+        lastDayRevenue: 0,
       );
     }
 
     final client = Supabase.instance.client;
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final yesterdayStart = todayStart.subtract(const Duration(days: 1));
     final comercioFuture = client
         .from('comercios')
         .select()
@@ -98,11 +103,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .from('productos')
         .select('id')
         .eq('comercio_id', SupabaseConfig.currentComercioId);
+    final yesterdayOrdersFuture = client
+        .from('pedidos')
+        .select('id, comercio_id, total, detalles, estado, created_at')
+        .eq('comercio_id', SupabaseConfig.currentComercioId)
+        .gte('created_at', yesterdayStart.toIso8601String())
+        .lt('created_at', todayStart.toIso8601String());
 
     final results = await Future.wait<dynamic>([
       comercioFuture,
       categoriasFuture,
       productosFuture,
+      yesterdayOrdersFuture,
     ]);
 
     final comercio = ComercioModel.fromMap(
@@ -115,10 +127,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
     }
 
+    final lastDayRevenue = (results[3] as List<dynamic>)
+        .map(
+          (row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)),
+        )
+        .where((pedido) => !pedido.hasParseError)
+        .fold<double>(0, (sum, pedido) => sum + (pedido.total ?? 0));
+
     return _DashboardSnapshot(
       comercio: comercio,
       categoryCount: (results[1] as List<dynamic>).length,
       productCount: (results[2] as List<dynamic>).length,
+      lastDayRevenue: lastDayRevenue,
     );
   }
 
@@ -136,7 +156,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .map(
           (rows) => rows
               .map((row) => PedidoModel.fromMap(Map<String, dynamic>.from(row)))
-            .toList(growable: false),
+              .toList(growable: false),
         );
   }
 
@@ -156,14 +176,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           return;
         }
 
-        final newOrders = validOrders.where((e) => !_seenOrderIds.contains(e.id));
+        final newOrders = validOrders.where(
+          (e) => !_seenOrderIds.contains(e.id),
+        );
         _seenOrderIds = currentIds;
 
         if (newOrders.isEmpty || !mounted) return;
 
         final newest = newOrders.first;
         final orderLabel = newest.orderId ?? newest.id;
-        final statusBucket = _orderStatusBucket(newest);
+        final statusBucket = newest.statusBucket;
         SystemSound.play(SystemSoundType.alert);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -373,7 +395,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     final rows = await Supabase.instance.client
         .from('pedidos')
-        .select('id, order_id, estado, created_at')
+        .select('id, estado, created_at, detalles')
         .eq('comercio_id', SupabaseConfig.currentComercioId)
         .order('created_at', ascending: false)
         .limit(12);
@@ -381,7 +403,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (!mounted) return;
 
     final items = (rows as List<dynamic>)
-        .map((e) => Map<String, dynamic>.from(e as Map))
+        .map(
+          (row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)),
+        )
+        .where((pedido) => !pedido.hasParseError)
         .toList();
 
     showModalBottomSheet<void>(
@@ -422,28 +447,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       itemCount: items.length,
                       separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
-                        final item = items[index];
-                        final rawStatus = (item['estado']?.toString() ?? '')
-                            .toLowerCase();
-                        final done = rawStatus.contains('complet');
-                        final color = done
-                            ? const Color(0xFF15803D)
-                            : const Color(0xFFF59E0B);
-                        final title =
-                            item['order_id']?.toString() ??
-                            item['id']?.toString() ??
-                            'Pedido';
+                        final pedido = items[index];
+                        final bucket = pedido.statusBucket;
+                        final title = pedido.orderId ?? pedido.id;
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
                           dense: true,
-                          leading: Icon(
-                            done
-                                ? Icons.check_circle_rounded
-                                : Icons.timelapse_rounded,
-                            color: color,
-                          ),
+                          leading: Icon(bucket.icon, color: bucket.color),
                           title: Text(title),
-                          subtitle: Text(done ? 'Completado' : 'Pendiente'),
+                          subtitle: Text(bucket.label),
                         );
                       },
                     ),
@@ -596,7 +608,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                               SupabaseConfig.currentComercioId,
                                           'estado': 'pendiente',
                                           'total': totalValue,
-                                          'order_id': orderCode,
                                           if (email.isNotEmpty)
                                             'cliente_email': email,
                                           'detalles': {
@@ -749,49 +760,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  _OrderStatusBucket _orderStatusBucket(PedidoModel pedido) {
-    final raw = (pedido.estado ?? '').trim().toLowerCase();
-
-    if (raw.isEmpty ||
-        raw == 'pendiente' ||
-        raw == 'nuevo' ||
-        raw == 'recibido' ||
-        raw == 'por_confirmar' ||
-        raw == 'por confirmar') {
-      return _OrderStatusBucket.pending;
-    }
-
-    if (raw == 'en_proceso' ||
-        raw == 'en proceso' ||
-        raw == 'preparando' ||
-        raw == 'preparacion' ||
-        raw == 'preparación' ||
-        raw == 'listo' ||
-        raw == 'en_camino' ||
-        raw == 'en camino' ||
-        raw == 'despachado' ||
-        raw == 'aceptado' ||
-        raw == 'confirmado') {
-      return _OrderStatusBucket.inProgress;
-    }
-
-    if (raw.contains('complet') ||
-        raw == 'entregado' ||
-        raw == 'finalizado') {
-      return _OrderStatusBucket.completed;
-    }
-
-    if (raw.contains('cancel') || raw == 'rechazado' || raw == 'anulado') {
-      return _OrderStatusBucket.canceled;
-    }
-
-    return _OrderStatusBucket.pending;
-  }
-
   bool _isOrderFinalized(PedidoModel pedido) {
-    final bucket = _orderStatusBucket(pedido);
-    return bucket == _OrderStatusBucket.completed ||
-        bucket == _OrderStatusBucket.canceled;
+    return pedido.isFinalizedStatus;
   }
 
   bool _isToday(DateTime? date) {
@@ -806,19 +776,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (pedido.hasParseError) {
       return true;
     }
-    final bucket = _orderStatusBucket(pedido);
+    final bucket = pedido.statusBucket;
 
     switch (_orderFilter) {
       case _OrderFilter.all:
         return true;
       case _OrderFilter.pending:
-        return bucket == _OrderStatusBucket.pending;
+        return bucket == OrderStatusBucket.pending;
       case _OrderFilter.inProgress:
-        return bucket == _OrderStatusBucket.inProgress;
+        return bucket == OrderStatusBucket.inProgress;
       case _OrderFilter.completed:
-        return bucket == _OrderStatusBucket.completed;
+        return bucket == OrderStatusBucket.completed;
       case _OrderFilter.canceled:
-        return bucket == _OrderStatusBucket.canceled;
+        return bucket == OrderStatusBucket.canceled;
     }
   }
 
@@ -852,6 +822,115 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     ];
 
     return fields.any((value) => value.toLowerCase().contains(query));
+  }
+
+  Future<void> _handleQuickAdvance(PedidoModel pedido) async {
+    final bucket = pedido.statusBucket;
+    String? nextEstado;
+    String? successMessage;
+
+    switch (bucket) {
+      case OrderStatusBucket.pending:
+        nextEstado = 'en_proceso';
+        successMessage = 'Pedido movido a En proceso.';
+        break;
+      case OrderStatusBucket.inProgress:
+        nextEstado = 'completado';
+        successMessage = 'Pedido marcado como Completado.';
+        break;
+      case OrderStatusBucket.completed:
+      case OrderStatusBucket.canceled:
+        nextEstado = null;
+        break;
+    }
+
+    if (nextEstado == null) {
+      _showInfo('Este pedido ya no se puede avanzar.');
+      return;
+    }
+
+    try {
+      await Supabase.instance.client
+          .from('pedidos')
+          .update({'estado': nextEstado})
+          .eq('id', pedido.id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(successMessage ?? 'Pedido actualizado.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('No se pudo actualizar el pedido.\n$error'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleQuickCancel(PedidoModel pedido) async {
+    final bucket = pedido.statusBucket;
+    if (bucket == OrderStatusBucket.completed ||
+        bucket == OrderStatusBucket.canceled) {
+      _showInfo('Este pedido ya no se puede cancelar.');
+      return;
+    }
+
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text('Cancelar pedido'),
+              content: Text(
+                '¿Deseas marcar como cancelado el pedido ${pedido.orderId ?? pedido.id}?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Volver'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('Cancelar pedido'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await Supabase.instance.client
+          .from('pedidos')
+          .update({'estado': 'cancelado'})
+          .eq('id', pedido.id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Pedido cancelado.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('No se pudo cancelar el pedido.\n$error'),
+        ),
+      );
+    }
   }
 
   Future<void> _goToMenuManagement() async {
@@ -992,9 +1071,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     const SizedBox(width: 12),
                     FloatingActionButton.extended(
                       heroTag: 'assisted-order-fab',
-                      onPressed: () => _openAssistedPublicMenu(
-                        dashboardData.comercio,
-                      ),
+                      onPressed: () =>
+                          _openAssistedPublicMenu(dashboardData.comercio),
                       icon: const Icon(Icons.receipt_long_rounded),
                       label: const Text('Crear pedido'),
                     ),
@@ -1051,45 +1129,43 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     final allOrders =
                         ordersSnapshot.data ?? const <PedidoModel>[];
                     final malformedOrders = allOrders
-                      .where((pedido) => pedido.hasParseError)
-                      .toList(growable: false);
+                        .where((pedido) => pedido.hasParseError)
+                        .toList(growable: false);
                     final filteredOrders = allOrders
-                      .where((pedido) => !pedido.hasParseError)
+                        .where((pedido) => !pedido.hasParseError)
                         .where(_matchesFilter)
                         .where(_matchesSearch)
-                      .toList(growable: false);
+                        .toList(growable: false);
                     final validOrders = allOrders
-                      .where((pedido) => !pedido.hasParseError)
-                      .toList(growable: false);
+                        .where((pedido) => !pedido.hasParseError)
+                        .toList(growable: false);
 
                     final pendingCount = validOrders
-                      .where(
-                        (pedido) =>
-                          _orderStatusBucket(pedido) ==
-                          _OrderStatusBucket.pending,
-                      )
-                      .length;
+                        .where(
+                          (pedido) =>
+                              pedido.statusBucket == OrderStatusBucket.pending,
+                        )
+                        .length;
                     final inProgressCount = validOrders
-                      .where(
-                        (pedido) =>
-                          _orderStatusBucket(pedido) ==
-                          _OrderStatusBucket.inProgress,
-                      )
-                      .length;
+                        .where(
+                          (pedido) =>
+                              pedido.statusBucket ==
+                              OrderStatusBucket.inProgress,
+                        )
+                        .length;
                     final completedCount = validOrders
-                      .where(
-                        (pedido) =>
-                          _orderStatusBucket(pedido) ==
-                          _OrderStatusBucket.completed,
-                      )
-                      .length;
+                        .where(
+                          (pedido) =>
+                              pedido.statusBucket ==
+                              OrderStatusBucket.completed,
+                        )
+                        .length;
                     final canceledCount = validOrders
-                      .where(
-                        (pedido) =>
-                          _orderStatusBucket(pedido) ==
-                          _OrderStatusBucket.canceled,
-                      )
-                      .length;
+                        .where(
+                          (pedido) =>
+                              pedido.statusBucket == OrderStatusBucket.canceled,
+                        )
+                        .length;
                     final todayCount = validOrders
                         .where((o) => _isToday(o.createdAt))
                         .length;
@@ -1152,6 +1228,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 value: '\$${todayRevenue.toStringAsFixed(2)}',
                                 icon: Icons.paid_rounded,
                                 highlight: colorScheme.primary,
+                                comparisonValue: data.lastDayRevenue,
                               ),
                             ],
                           ),
@@ -1214,7 +1291,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               subtitle: '${ordersSnapshot.error}',
                               icon: Icons.error_outline_rounded,
                             )
-                          else if (filteredOrders.isEmpty && malformedOrders.isEmpty)
+                          else if (filteredOrders.isEmpty &&
+                              malformedOrders.isEmpty)
                             _EmptyStateCard(
                               title: 'Sin pedidos para este filtro',
                               subtitle: _emptyStateSubtitleForFilter(),
@@ -1227,12 +1305,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             ...filteredOrders.map(
                               (pedido) => _OrderTile(
                                 pedido: pedido,
-                                statusBucket: _orderStatusBucket(pedido),
+                                statusBucket: pedido.statusBucket,
                                 isDelayed:
                                     !_isOrderFinalized(pedido) &&
                                     pedido.createdAt != null &&
-                                    DateTime.now().difference(pedido.createdAt!).inMinutes > 20,
+                                    DateTime.now()
+                                            .difference(pedido.createdAt!)
+                                            .inMinutes >
+                                        20,
                                 onTap: () => _openOrderDetail(pedido),
+                                onQuickAdvance: () =>
+                                    _handleQuickAdvance(pedido),
+                                onQuickCancel: () => _handleQuickCancel(pedido),
                               ),
                             ),
                           ],
@@ -1260,49 +1344,6 @@ enum _DashboardAction {
 }
 
 enum _OrderFilter { all, pending, inProgress, completed, canceled }
-
-enum _OrderStatusBucket { pending, inProgress, completed, canceled }
-
-extension on _OrderStatusBucket {
-  String get label {
-    switch (this) {
-      case _OrderStatusBucket.pending:
-        return 'Pendiente';
-      case _OrderStatusBucket.inProgress:
-        return 'En proceso';
-      case _OrderStatusBucket.completed:
-        return 'Completado';
-      case _OrderStatusBucket.canceled:
-        return 'Cancelado';
-    }
-  }
-
-  IconData get icon {
-    switch (this) {
-      case _OrderStatusBucket.pending:
-        return Icons.timelapse_rounded;
-      case _OrderStatusBucket.inProgress:
-        return Icons.local_shipping_rounded;
-      case _OrderStatusBucket.completed:
-        return Icons.check_circle_rounded;
-      case _OrderStatusBucket.canceled:
-        return Icons.cancel_rounded;
-    }
-  }
-
-  Color get color {
-    switch (this) {
-      case _OrderStatusBucket.pending:
-        return const Color(0xFFF59E0B);
-      case _OrderStatusBucket.inProgress:
-        return const Color(0xFF2563EB);
-      case _OrderStatusBucket.completed:
-        return const Color(0xFF16A34A);
-      case _OrderStatusBucket.canceled:
-        return const Color(0xFFE11D48);
-    }
-  }
-}
 
 extension on _OrderFilter {
   String get label {
@@ -1341,11 +1382,15 @@ class _DashboardSnapshot {
     required this.comercio,
     required this.categoryCount,
     required this.productCount,
-  });
+    double? lastDayRevenue,
+  }) : _lastDayRevenue = lastDayRevenue;
 
   final ComercioModel comercio;
   final int categoryCount;
   final int productCount;
+  final double? _lastDayRevenue;
+
+  double get lastDayRevenue => _lastDayRevenue ?? 0;
 }
 
 class _BusinessHeroCard extends StatelessWidget {
@@ -1781,18 +1826,47 @@ class _KpiCard extends StatelessWidget {
     required this.value,
     required this.icon,
     this.highlight,
+    this.comparisonValue,
   });
 
   final String label;
   final String value;
   final IconData icon;
   final Color? highlight;
+  final double? comparisonValue;
+
+  double? get _currentNumericValue {
+    final normalized = value.replaceAll(RegExp(r'[^0-9.,-]'), '').trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+
+    return double.tryParse(normalized.replaceAll(',', ''));
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final accent = highlight ?? colorScheme.primary;
+    final currentNumericValue = _currentNumericValue;
+    final previousNumericValue = comparisonValue;
+    final hasComparison =
+        currentNumericValue != null && previousNumericValue != null;
+    final percentageDelta = hasComparison
+        ? previousNumericValue == 0
+              ? (currentNumericValue > 0 ? 100.0 : 0.0)
+              : ((currentNumericValue - previousNumericValue) /
+                        previousNumericValue.abs()) *
+                    100
+        : null;
+    final isUp = (percentageDelta ?? 0) >= 0;
+    final comparisonColor = isUp
+        ? const Color(0xFF16A34A)
+        : const Color(0xFFE11D48);
+    final comparisonLabel = percentageDelta == null
+        ? null
+        : '${isUp ? '+' : ''}${percentageDelta.round()}% vs ayer';
 
     return Container(
       decoration: BoxDecoration(
@@ -1815,6 +1889,26 @@ class _KpiCard extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
+          if (comparisonLabel != null) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: comparisonColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '${isUp ? '↑' : '↓'} $comparisonLabel',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: comparisonColor,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 2),
           Text(
             label,
@@ -1848,28 +1942,28 @@ class _StatusRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final cards = <Widget>[
       _MiniInfoCard(
-        icon: _OrderStatusBucket.pending.icon,
+        icon: OrderStatusBucket.pending.icon,
         label: 'Pendientes',
         value: '$pendingCount',
-        color: _OrderStatusBucket.pending.color,
+        color: OrderStatusBucket.pending.color,
       ),
       _MiniInfoCard(
-        icon: _OrderStatusBucket.inProgress.icon,
+        icon: OrderStatusBucket.inProgress.icon,
         label: 'En proceso',
         value: '$inProgressCount',
-        color: _OrderStatusBucket.inProgress.color,
+        color: OrderStatusBucket.inProgress.color,
       ),
       _MiniInfoCard(
-        icon: _OrderStatusBucket.completed.icon,
+        icon: OrderStatusBucket.completed.icon,
         label: 'Completados',
         value: '$completedCount',
-        color: _OrderStatusBucket.completed.color,
+        color: OrderStatusBucket.completed.color,
       ),
       _MiniInfoCard(
-        icon: _OrderStatusBucket.canceled.icon,
+        icon: OrderStatusBucket.canceled.icon,
         label: 'Cancelados',
         value: '$canceledCount',
-        color: _OrderStatusBucket.canceled.color,
+        color: OrderStatusBucket.canceled.color,
       ),
     ];
 
@@ -1920,7 +2014,8 @@ class _MiniInfoCard extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 120 || constraints.maxHeight < 78;
+        final compact =
+            constraints.maxWidth < 120 || constraints.maxHeight < 78;
         final iconSize = compact ? 15.0 : 17.0;
         final valueFontSize = compact ? 13.0 : 14.0;
         final labelFontSize = compact ? 10.0 : 11.0;
@@ -1929,10 +2024,7 @@ class _MiniInfoCard extends StatelessWidget {
 
         Widget buildAnimatedValue() {
           return TweenAnimationBuilder<double>(
-            tween: Tween<double>(
-              begin: 0,
-              end: (numericValue ?? 0).toDouble(),
-            ),
+            tween: Tween<double>(begin: 0, end: (numericValue ?? 0).toDouble()),
             duration: const Duration(milliseconds: 320),
             curve: Curves.easeOutCubic,
             builder: (context, animatedValue, _) {
@@ -2152,8 +2244,8 @@ class _BusinessSettingsCard extends StatelessWidget {
                 isUpdatingBusinessOnline
                     ? 'Guardando estado en el servidor...'
                     : businessOnline
-                        ? 'Aceptando pedidos de clientes.'
-                        : 'Temporalmente pausado para nuevos pedidos.',
+                    ? 'Aceptando pedidos de clientes.'
+                    : 'Temporalmente pausado para nuevos pedidos.',
                 style: GoogleFonts.poppins(
                   fontSize: 11,
                   color: colorScheme.onSurfaceVariant,
@@ -2259,12 +2351,16 @@ class _OrderTile extends StatelessWidget {
     required this.statusBucket,
     required this.isDelayed,
     required this.onTap,
+    required this.onQuickAdvance,
+    required this.onQuickCancel,
   });
 
   final PedidoModel pedido;
-  final _OrderStatusBucket statusBucket;
+  final OrderStatusBucket statusBucket;
   final bool isDelayed;
   final VoidCallback onTap;
+  final Future<void> Function() onQuickAdvance;
+  final Future<void> Function() onQuickCancel;
 
   String get _statusLabel {
     return statusBucket.label;
@@ -2281,8 +2377,8 @@ class _OrderTile extends StatelessWidget {
   String? get _waitingLabel {
     final createdAt = pedido.createdAt;
     if (createdAt == null ||
-        statusBucket == _OrderStatusBucket.completed ||
-        statusBucket == _OrderStatusBucket.canceled) {
+        statusBucket == OrderStatusBucket.completed ||
+        statusBucket == OrderStatusBucket.canceled) {
       return null;
     }
 
@@ -2293,9 +2389,7 @@ class _OrderTile extends StatelessWidget {
     if (elapsed.inHours >= 1) {
       final hours = elapsed.inHours;
       final minutes = elapsed.inMinutes.remainder(60);
-      return minutes == 0
-          ? 'Hace ${hours}h'
-          : 'Hace ${hours}h ${minutes}m';
+      return minutes == 0 ? 'Hace ${hours}h' : 'Hace ${hours}h ${minutes}m';
     }
 
     return 'Hace ${elapsed.inMinutes} min';
@@ -2310,58 +2404,100 @@ class _OrderTile extends StatelessWidget {
         ? Theme.of(context).colorScheme.error
         : Theme.of(context).colorScheme.onSurfaceVariant;
 
-    return Card(
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        onTap: onTap,
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.16),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            _statusIcon,
-            color: color,
-          ),
+    return Dismissible(
+      key: ValueKey('order-${pedido.id}-${pedido.estado ?? ''}'),
+      direction: DismissDirection.horizontal,
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF16A34A),
+          borderRadius: BorderRadius.circular(12),
         ),
-        title: Text(
-          'Pedido ${(pedido.orderId ?? pedido.id).substring(0, (pedido.orderId ?? pedido.id).length < 16 ? (pedido.orderId ?? pedido.id).length : 16)}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        child: const Icon(Icons.check_circle_outline, color: Colors.white),
+      ),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE11D48),
+          borderRadius: BorderRadius.circular(12),
         ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 2),
-            Text(
-              pedido.clienteEmail?.trim().isNotEmpty == true
-                  ? '${pedido.clienteEmail} • ${pedido.metodoPago ?? 'Método no definido'}'
-                  : (pedido.createdAt?.toString() ?? 'Sin fecha disponible'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+        child: const Icon(Icons.block_flipped, color: Colors.white),
+      ),
+      confirmDismiss: (direction) async {
+        await HapticFeedback.mediumImpact();
+
+        if (direction == DismissDirection.startToEnd) {
+          await onQuickAdvance();
+          return false;
+        }
+
+        if (direction == DismissDirection.endToStart) {
+          await onQuickCancel();
+          return false;
+        }
+
+        return false;
+      },
+      child: Card(
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 6,
+          ),
+          onTap: onTap,
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(12),
             ),
-            if (waitingLabel != null) ...[
-              const SizedBox(height: 4),
+            child: Icon(_statusIcon, color: color),
+          ),
+          title: Text(
+            'Pedido ${(pedido.orderId ?? pedido.id).substring(0, (pedido.orderId ?? pedido.id).length < 16 ? (pedido.orderId ?? pedido.id).length : 16)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 2),
               Text(
-                waitingLabel,
+                pedido.clienteEmail?.trim().isNotEmpty == true
+                    ? '${pedido.clienteEmail} • ${pedido.metodoPago ?? 'Método no definido'}'
+                    : (pedido.createdAt?.toString() ?? 'Sin fecha disponible'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: isDelayed ? FontWeight.w700 : FontWeight.w500,
-                  color: waitingColor,
-                ),
               ),
+              if (waitingLabel != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  waitingLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: isDelayed ? FontWeight.w700 : FontWeight.w500,
+                    color: waitingColor,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 5),
+              _StatusPill(label: label, color: color),
             ],
-            const SizedBox(height: 5),
-            _StatusPill(label: label, color: color),
-          ],
-        ),
-        trailing: Text(
-          pedido.total != null ? '\$${pedido.total!.toStringAsFixed(2)}' : '--',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          trailing: Text(
+            pedido.total != null
+                ? '\$${pedido.total!.toStringAsFixed(2)}'
+                : '--',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+          ),
         ),
       ),
     );
@@ -2422,10 +2558,7 @@ class _MalformedOrderTile extends StatelessWidget {
             ),
           ),
         ),
-        trailing: const _StatusPill(
-          label: 'Error',
-          color: Color(0xFFE11D48),
-        ),
+        trailing: const _StatusPill(label: 'Error', color: Color(0xFFE11D48)),
       ),
     );
   }
