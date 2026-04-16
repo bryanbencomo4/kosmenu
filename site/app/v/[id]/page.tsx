@@ -925,6 +925,24 @@ export default function PublicMenuPage() {
     return map;
   }, [menuData]);
 
+  useEffect(() => {
+    setCart((prev) => {
+      let changed = false;
+      const next: Record<string, number> = {};
+
+      for (const [productId, quantity] of Object.entries(prev)) {
+        const product = productById.get(productId);
+        if (!product || (product.precio ?? 0) <= 0 || quantity <= 0) {
+          changed = true;
+          continue;
+        }
+        next[productId] = quantity;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [productById]);
+
   const cartItems = useMemo(() => {
     return Object.entries(cart)
       .map(([productId, quantity]) => {
@@ -1644,6 +1662,9 @@ export default function PublicMenuPage() {
   }
 
   function incrementProduct(productId: string) {
+    const product = productById.get(productId);
+    if (!product || (product.precio ?? 0) <= 0) return;
+
     setCart((prev) => ({
       ...prev,
       [productId]: (prev[productId] ?? 0) + 1,
@@ -2356,37 +2377,46 @@ export default function PublicMenuPage() {
             <div className="pointer-events-none absolute inset-x-5 -bottom-4 h-8 rounded-full bg-gradient-to-b from-slate-900/12 via-slate-900/6 to-transparent blur-md" />
             <div className="rounded-[22px] border border-slate-200/90 bg-[color:color-mix(in_srgb,var(--card-surface)_95%,white)] p-3 sm:p-4">
               <div className="relative">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Buscar producto o categoria"
-                  className="h-12 w-full rounded-2xl border border-slate-200/90 bg-white pl-11 pr-16 text-sm font-semibold text-slate-900 outline-none transition duration-200 focus:border-slate-300 focus:ring-4 focus:ring-slate-200/70"
-                />
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="M20 20l-3.5-3.5" />
-                </svg>
+                <div className="relative min-w-0">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Buscar producto..."
+                    className="h-12 w-full rounded-2xl border border-slate-200/90 bg-white pl-11 pr-12 text-sm font-semibold text-slate-900 outline-none transition duration-200 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-200/70"
+                  />
+                  <svg
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M20 20l-3.5-3.5" />
+                  </svg>
+                </div>
+
                 {searchQuery ? (
                   <button
                     type="button"
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-slate-500 hover:bg-slate-200"
+                    aria-label="Limpiar busqueda"
+                    className="absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
                   >
-                    Limpiar
+                    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4">
+                      <path d="M6 6l12 12" />
+                      <path d="M18 6L6 18" />
+                    </svg>
                   </button>
                 ) : null}
               </div>
 
-              <div className="mt-3 overflow-x-auto pb-1">
-                <div className="flex w-max items-center gap-2">
+              <div
+                className="mt-3 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+              >
+                <div className="flex w-max items-center gap-2 pr-2">
                   {filteredCategorias.map((categoria) => (
                     <button
                       type="button"
@@ -2401,7 +2431,7 @@ export default function PublicMenuPage() {
                           : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm'
                       }`}
                     >
-                      {categoria.nombre}
+                      {categoria.nombre.toUpperCase()}
                     </button>
                   ))}
                 </div>
@@ -2439,7 +2469,7 @@ export default function PublicMenuPage() {
                   <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-[12rem]">
                     <div className="mb-4 flex items-end justify-between gap-3">
                       <h2 className="text-2xl font-black tracking-[-0.02em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
-                        {categoria.nombre}
+                        {categoria.nombre.toUpperCase()}
                       </h2>
                       <span className="rounded-full border border-slate-200 bg-white/75 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
                         {categoria.productos.length} item{categoria.productos.length === 1 ? '' : 's'}
@@ -2449,6 +2479,7 @@ export default function PublicMenuPage() {
                     <div className="space-y-4">
                       {categoria.productos.map((producto, productIndex) => {
                         const quantity = cart[producto.id] ?? 0;
+                        const isZeroPricedProduct = (producto.precio ?? 0) <= 0;
                         const isProductRevealed = Boolean(revealedProductIds[producto.id]);
                         const convertedPrice = formatAmountByCurrency(
                           convertFromCop(producto.precio ?? 0, selectedCurrencyCode, selectedExchangeRate),
@@ -2510,16 +2541,25 @@ export default function PublicMenuPage() {
                                   {quantity === 0 ? (
                                     <button
                                       type="button"
-                                      onClick={() => incrementProduct(producto.id)}
+                                      onClick={() => {
+                                        if (isZeroPricedProduct) return;
+                                        incrementProduct(producto.id);
+                                      }}
+                                      disabled={isZeroPricedProduct}
                                       className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_28px_rgba(15,23,42,0.14)] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_20px_34px_rgba(15,23,42,0.18)]"
                                       style={{
                                         borderRadius: '18px',
-                                        backgroundColor: 'var(--primary-color)',
-                                        color: 'var(--text-on-primary)',
+                                        backgroundColor: isZeroPricedProduct ? '#E2E8F0' : 'var(--primary-color)',
+                                        color: isZeroPricedProduct ? '#64748B' : 'var(--text-on-primary)',
+                                        cursor: isZeroPricedProduct ? 'not-allowed' : 'pointer',
+                                        boxShadow: isZeroPricedProduct ? 'none' : undefined,
+                                        opacity: isZeroPricedProduct ? 0.9 : 1,
                                       }}
                                     >
-                                      <span className="grid h-5 w-5 place-items-center rounded-full bg-white/16 text-base leading-none">+</span>
-                                      Agregar
+                                      <span className={`grid h-5 w-5 place-items-center rounded-full text-base leading-none ${isZeroPricedProduct ? 'bg-slate-300/80' : 'bg-white/16'}`}>
+                                        +
+                                      </span>
+                                      {isZeroPricedProduct ? 'No disponible' : 'Agregar'}
                                     </button>
                                   ) : (
                                     <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
@@ -2534,8 +2574,13 @@ export default function PublicMenuPage() {
                                       <button
                                         type="button"
                                         onClick={() => incrementProduct(producto.id)}
+                                        disabled={isZeroPricedProduct}
                                         className="grid h-9 w-9 place-items-center rounded-xl text-lg font-black"
-                                        style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                                        style={{
+                                          backgroundColor: isZeroPricedProduct ? '#E2E8F0' : 'var(--primary-color)',
+                                          color: isZeroPricedProduct ? '#94A3B8' : 'var(--text-on-primary)',
+                                          cursor: isZeroPricedProduct ? 'not-allowed' : 'pointer',
+                                        }}
                                       >
                                         +
                                       </button>
