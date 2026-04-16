@@ -745,6 +745,7 @@ export default function PublicMenuPage() {
     description: string;
   } | null>(null);
   const categoryChipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const stickySearchCardRef = useRef<HTMLDivElement | null>(null);
   const mapPickerContainerRef = useRef<HTMLDivElement | null>(null);
   const mapPickerSearchInputRef = useRef<HTMLInputElement | null>(null);
   const mapPickerMapRef = useRef<any>(null);
@@ -937,14 +938,21 @@ export default function PublicMenuPage() {
   useEffect(() => {
     if (filteredCategorias.length === 0) return;
 
+    const getStickyCategoryOffset = () => {
+      const appBarOffset = 72;
+      const stickyHeight = stickySearchCardRef.current?.getBoundingClientRect().height ?? 108;
+      return appBarOffset + stickyHeight + 18;
+    };
+
     const getActiveCategoryByViewport = () => {
       let selectedId = filteredCategorias[0].id;
       let minDistance = Number.POSITIVE_INFINITY;
+      const stickyOffset = getStickyCategoryOffset();
 
       for (const categoria of filteredCategorias) {
         const section = document.getElementById(`categoria-${categoria.id}`);
         if (!section) continue;
-        const distance = Math.abs(section.getBoundingClientRect().top - 188);
+        const distance = Math.abs(section.getBoundingClientRect().top - stickyOffset);
         if (distance < minDistance) {
           minDistance = distance;
           selectedId = categoria.id;
@@ -1567,7 +1575,16 @@ export default function PublicMenuPage() {
     setActiveCategoryId(categoryId);
     const section = document.getElementById(`categoria-${categoryId}`);
     if (!section) return;
-    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    const appBarOffset = 72;
+    const stickyHeight = stickySearchCardRef.current?.getBoundingClientRect().height ?? 108;
+    const scrollOffset = appBarOffset + stickyHeight + 18;
+    const nextTop = window.scrollY + section.getBoundingClientRect().top - scrollOffset;
+
+    window.scrollTo({
+      top: Math.max(0, nextTop),
+      behavior: 'smooth',
+    });
   }
 
   function toggleInfoSection(section: 'location' | 'delivery' | 'contact' | 'payments') {
@@ -2215,7 +2232,11 @@ export default function PublicMenuPage() {
             </div>
           </div>
 
-          <div className="sticky top-14 z-30 mt-4 rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-shadow duration-300 md:p-4 hover:shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
+          <div
+            ref={stickySearchCardRef}
+            className="sticky top-[4.55rem] z-30 mt-4 overflow-visible rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-shadow duration-300 md:p-4 hover:shadow-[0_24px_70px_rgba(15,23,42,0.12)]"
+          >
+            <div className="pointer-events-none absolute inset-x-5 -bottom-4 h-8 rounded-full bg-gradient-to-b from-slate-900/12 via-slate-900/6 to-transparent blur-md" />
             <div className="rounded-[22px] border border-slate-200/90 bg-[color:color-mix(in_srgb,var(--card-surface)_95%,white)] p-3 sm:p-4">
               <div className="relative">
                 <input
@@ -2298,7 +2319,7 @@ export default function PublicMenuPage() {
             ) : (
               <div className="space-y-8">
                 {filteredCategorias.map((categoria) => (
-                  <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-36">
+                  <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-[12rem]">
                     <div className="mb-4 flex items-end justify-between gap-3">
                       <h2 className="text-2xl font-black tracking-[-0.02em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
                         {categoria.nombre}
