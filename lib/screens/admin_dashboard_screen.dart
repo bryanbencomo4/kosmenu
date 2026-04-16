@@ -137,7 +137,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .map(
           (rows) => rows
               .map((row) => PedidoModel.fromMap(Map<String, dynamic>.from(row)))
-              .toList(),
+            .toList(growable: false),
         );
   }
 
@@ -148,7 +148,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     _ordersSubscription = _ordersStream.listen(
       (orders) {
-        final currentIds = orders.map((e) => e.id).toSet();
+        final validOrders = orders.where((order) => !order.hasParseError);
+        final currentIds = validOrders.map((e) => e.id).toSet();
 
         if (!_didPrimeOrderAlert) {
           _seenOrderIds = currentIds;
@@ -156,18 +157,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           return;
         }
 
-        final newOrders = orders.where((e) => !_seenOrderIds.contains(e.id));
+        final newOrders = validOrders.where((e) => !_seenOrderIds.contains(e.id));
         _seenOrderIds = currentIds;
 
         if (newOrders.isEmpty || !mounted) return;
 
         final newest = newOrders.first;
         final orderLabel = newest.orderId ?? newest.id;
+        final statusBucket = _orderStatusBucket(newest);
         SystemSound.play(SystemSoundType.alert);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             behavior: SnackBarBehavior.floating,
-            content: Text('Nuevo pedido recibido: $orderLabel'),
+            content: Text(
+              'Nuevo pedido recibido: $orderLabel · ${statusBucket.label}',
+            ),
           ),
         );
       },
@@ -291,6 +295,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     if (!launched && mounted) {
       _showInfo('No se pudo abrir el menú público.');
+    }
+  }
+
+  Future<void> _openAssistedPublicMenu(ComercioModel comercio) async {
+    final baseUrl = _buildPublicUrl(comercio).trim();
+    if (baseUrl.isEmpty) {
+      _showInfo('No hay una URL pública disponible para este comercio.');
+      return;
+    }
+
+    final uri = Uri.parse(baseUrl);
+    final assistedUri = uri.replace(
+      queryParameters: <String, String>{
+        ...uri.queryParameters,
+        'mode': 'assisted',
+        'source': 'dashboard',
+      },
+    );
+
+    final launched = await launchUrl(
+      assistedUri,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!launched && mounted) {
+      _showInfo('No se pudo abrir el menú de venta asistida.');
     }
   }
 
@@ -643,6 +673,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Future<void> _updateBusinessOnline(bool value) async {
     if (_isUpdatingBusinessOnline) return;
 
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) {
+      _showInfo('No hay un comercio activo para actualizar su estado.');
+      return;
+    }
+
     final previous = _businessOnline;
     setState(() {
       _businessOnline = value;
@@ -650,32 +686,65 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     });
 
     try {
-      if (_supportsBusinessOnlineColumn) {
-        await Supabase.instance.client
-            .from('comercios')
-            .update({'en_linea': value})
-            .eq('id', SupabaseConfig.currentComercioId);
-      }
+      await Supabase.instance.client
+          .from('comercios')
+          .update({'en_linea': value})
+          .eq('id', comercioId);
+
+      if (!mounted) return;
+      _supportsBusinessOnlineColumn = true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            value
+                ? 'Negocio en línea y aceptando pedidos.'
+                : 'Negocio pausado para nuevos pedidos.',
+          ),
+        ),
+      );
     } on PostgrestException catch (error) {
       final code = (error.code ?? '').toUpperCase();
       final message = error.message.toLowerCase();
+      final missingOnlineColumn =
+          code == 'PGRST204' || message.contains('en_linea');
 
-      if (code == 'PGRST204' || message.contains('en_linea')) {
-        _supportsBusinessOnlineColumn = false;
-        _showInfo(
-          'La columna en_linea no existe en comercios. Agrega la columna para guardar este estado.',
-        );
-      } else {
-        _showInfo('No se pudo actualizar estado en línea: $error');
-      }
       if (mounted) {
         setState(() => _businessOnline = previous);
+      }
+
+      if (missingOnlineColumn) {
+        _supportsBusinessOnlineColumn = false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              'No se pudo guardar el estado porque falta la columna en_linea en comercios.',
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              'No se pudo actualizar el estado en línea. Intenta de nuevo.\n$error',
+            ),
+          ),
+        );
       }
     } catch (error) {
       if (mounted) {
         setState(() => _businessOnline = previous);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              'No se pudo actualizar el estado en línea. Intenta de nuevo.\n$error',
+            ),
+          ),
+        );
       }
-      _showInfo('No se pudo actualizar estado en línea: $error');
     } finally {
       if (mounted) {
         setState(() => _isUpdatingBusinessOnline = false);
@@ -684,8 +753,55 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   bool _isOrderCompleted(PedidoModel pedido) {
+    if (pedido.hasParseError) {
+      return false;
+    }
+    return _orderStatusBucket(pedido) == _OrderStatusBucket.completed;
+  }
+
+  _OrderStatusBucket _orderStatusBucket(PedidoModel pedido) {
     final raw = (pedido.estado ?? '').trim().toLowerCase();
-    return raw.contains('complet');
+
+    if (raw.isEmpty ||
+        raw == 'pendiente' ||
+        raw == 'nuevo' ||
+        raw == 'recibido' ||
+        raw == 'por_confirmar' ||
+        raw == 'por confirmar') {
+      return _OrderStatusBucket.pending;
+    }
+
+    if (raw == 'en_proceso' ||
+        raw == 'en proceso' ||
+        raw == 'preparando' ||
+        raw == 'preparacion' ||
+        raw == 'preparación' ||
+        raw == 'listo' ||
+        raw == 'en_camino' ||
+        raw == 'en camino' ||
+        raw == 'despachado' ||
+        raw == 'aceptado' ||
+        raw == 'confirmado') {
+      return _OrderStatusBucket.inProgress;
+    }
+
+    if (raw.contains('complet') ||
+        raw == 'entregado' ||
+        raw == 'finalizado') {
+      return _OrderStatusBucket.completed;
+    }
+
+    if (raw.contains('cancel') || raw == 'rechazado' || raw == 'anulado') {
+      return _OrderStatusBucket.canceled;
+    }
+
+    return _OrderStatusBucket.pending;
+  }
+
+  bool _isOrderFinalized(PedidoModel pedido) {
+    final bucket = _orderStatusBucket(pedido);
+    return bucket == _OrderStatusBucket.completed ||
+        bucket == _OrderStatusBucket.canceled;
   }
 
   bool _isToday(DateTime? date) {
@@ -697,10 +813,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   bool _matchesFilter(PedidoModel pedido) {
-    if (_orderFilter == _OrderFilter.all) return true;
-    final completed = _isOrderCompleted(pedido);
-    if (_orderFilter == _OrderFilter.completed) return completed;
-    return !completed;
+    if (pedido.hasParseError) {
+      return true;
+    }
+    final bucket = _orderStatusBucket(pedido);
+
+    switch (_orderFilter) {
+      case _OrderFilter.all:
+        return true;
+      case _OrderFilter.pending:
+        return bucket == _OrderStatusBucket.pending;
+      case _OrderFilter.inProgress:
+        return bucket == _OrderStatusBucket.inProgress;
+      case _OrderFilter.completed:
+        return bucket == _OrderStatusBucket.completed;
+      case _OrderFilter.canceled:
+        return bucket == _OrderStatusBucket.canceled;
+    }
+  }
+
+  String _emptyStateSubtitleForFilter() {
+    switch (_orderFilter) {
+      case _OrderFilter.all:
+        return 'Aun no has recibido pedidos o apareceran aqui cuando entren nuevos.';
+      case _OrderFilter.pending:
+        return 'No tienes pedidos pendientes en este momento.';
+      case _OrderFilter.inProgress:
+        return 'No tienes pedidos en proceso ahora mismo.';
+      case _OrderFilter.completed:
+        return 'No tienes pedidos completados todavia.';
+      case _OrderFilter.canceled:
+        return 'No tienes pedidos cancelados.';
+    }
   }
 
   bool _matchesSearch(PedidoModel pedido) {
@@ -751,6 +895,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const BrandedLoadingScreen(withScaffold: true);
         }
+
+        final dashboardData = snapshot.data;
 
         return Scaffold(
           appBar: AppBar(
@@ -838,11 +984,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
             ],
           ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: _openCreateManualOrderSheet,
-            icon: const Icon(Icons.receipt_long_rounded),
-            label: const Text('Crear pedido'),
-          ),
+          floatingActionButton: dashboardData == null
+              ? FloatingActionButton.extended(
+                  onPressed: _openCreateManualOrderSheet,
+                  icon: const Icon(Icons.receipt_long_rounded),
+                  label: const Text('Pedido manual'),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FloatingActionButton.small(
+                      heroTag: 'manual-order-fab',
+                      tooltip: 'Pedido manual',
+                      onPressed: _openCreateManualOrderSheet,
+                      child: const Icon(Icons.edit_note_rounded),
+                    ),
+                    const SizedBox(width: 12),
+                    FloatingActionButton.extended(
+                      heroTag: 'assisted-order-fab',
+                      onPressed: () => _openAssistedPublicMenu(
+                        dashboardData.comercio,
+                      ),
+                      icon: const Icon(Icons.receipt_long_rounded),
+                      label: const Text('Crear pedido'),
+                    ),
+                  ],
+                ),
           body: SafeArea(
             child: Builder(
               builder: (context) {
@@ -893,19 +1060,50 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   builder: (context, ordersSnapshot) {
                     final allOrders =
                         ordersSnapshot.data ?? const <PedidoModel>[];
+                    final malformedOrders = allOrders
+                      .where((pedido) => pedido.hasParseError)
+                      .toList(growable: false);
                     final filteredOrders = allOrders
+                      .where((pedido) => !pedido.hasParseError)
                         .where(_matchesFilter)
                         .where(_matchesSearch)
-                        .toList();
+                      .toList(growable: false);
+                    final validOrders = allOrders
+                      .where((pedido) => !pedido.hasParseError)
+                      .toList(growable: false);
 
-                    final completedCount = allOrders
-                        .where(_isOrderCompleted)
-                        .length;
-                    final pendingCount = allOrders.length - completedCount;
-                    final todayCount = allOrders
+                    final pendingCount = validOrders
+                      .where(
+                        (pedido) =>
+                          _orderStatusBucket(pedido) ==
+                          _OrderStatusBucket.pending,
+                      )
+                      .length;
+                    final inProgressCount = validOrders
+                      .where(
+                        (pedido) =>
+                          _orderStatusBucket(pedido) ==
+                          _OrderStatusBucket.inProgress,
+                      )
+                      .length;
+                    final completedCount = validOrders
+                      .where(
+                        (pedido) =>
+                          _orderStatusBucket(pedido) ==
+                          _OrderStatusBucket.completed,
+                      )
+                      .length;
+                    final canceledCount = validOrders
+                      .where(
+                        (pedido) =>
+                          _orderStatusBucket(pedido) ==
+                          _OrderStatusBucket.canceled,
+                      )
+                      .length;
+                    final todayCount = validOrders
                         .where((o) => _isToday(o.createdAt))
                         .length;
-                    final todayRevenue = allOrders
+                    final todayRevenue = validOrders
                         .where((o) => _isToday(o.createdAt))
                         .fold<double>(0, (sum, o) => sum + (o.total ?? 0));
 
@@ -970,8 +1168,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           const SizedBox(height: 12),
                           _StatusRow(
                             pendingCount: pendingCount,
+                            inProgressCount: inProgressCount,
                             completedCount: completedCount,
-                            businessOnline: _businessOnline,
+                            canceledCount: canceledCount,
                           ),
                           const SizedBox(height: 16),
                           const SizedBox(height: 6),
@@ -1025,21 +1224,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               subtitle: '${ordersSnapshot.error}',
                               icon: Icons.error_outline_rounded,
                             )
-                          else if (filteredOrders.isEmpty)
-                            const _EmptyStateCard(
+                          else if (filteredOrders.isEmpty && malformedOrders.isEmpty)
+                            _EmptyStateCard(
                               title: 'Sin pedidos para este filtro',
-                              subtitle:
-                                  'Intenta cambiar el filtro o esperar nuevos pedidos.',
+                              subtitle: _emptyStateSubtitleForFilter(),
                               icon: Icons.inbox_outlined,
                             )
-                          else
+                          else ...[
+                            ...malformedOrders.map(
+                              (pedido) => _MalformedOrderTile(pedido: pedido),
+                            ),
                             ...filteredOrders.map(
                               (pedido) => _OrderTile(
                                 pedido: pedido,
-                                completed: _isOrderCompleted(pedido),
+                                statusBucket: _orderStatusBucket(pedido),
+                                isDelayed:
+                                    !_isOrderFinalized(pedido) &&
+                                    pedido.createdAt != null &&
+                                    DateTime.now().difference(pedido.createdAt!).inMinutes > 20,
                                 onTap: () => _openOrderDetail(pedido),
                               ),
                             ),
+                          ],
                         ],
                       ),
                     );
@@ -1063,7 +1269,50 @@ enum _DashboardAction {
   openWeb,
 }
 
-enum _OrderFilter { all, pending, completed }
+enum _OrderFilter { all, pending, inProgress, completed, canceled }
+
+enum _OrderStatusBucket { pending, inProgress, completed, canceled }
+
+extension on _OrderStatusBucket {
+  String get label {
+    switch (this) {
+      case _OrderStatusBucket.pending:
+        return 'Pendiente';
+      case _OrderStatusBucket.inProgress:
+        return 'En proceso';
+      case _OrderStatusBucket.completed:
+        return 'Completado';
+      case _OrderStatusBucket.canceled:
+        return 'Cancelado';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case _OrderStatusBucket.pending:
+        return Icons.timelapse_rounded;
+      case _OrderStatusBucket.inProgress:
+        return Icons.local_shipping_rounded;
+      case _OrderStatusBucket.completed:
+        return Icons.check_circle_rounded;
+      case _OrderStatusBucket.canceled:
+        return Icons.cancel_rounded;
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case _OrderStatusBucket.pending:
+        return const Color(0xFFF59E0B);
+      case _OrderStatusBucket.inProgress:
+        return const Color(0xFF2563EB);
+      case _OrderStatusBucket.completed:
+        return const Color(0xFF16A34A);
+      case _OrderStatusBucket.canceled:
+        return const Color(0xFFE11D48);
+    }
+  }
+}
 
 extension on _OrderFilter {
   String get label {
@@ -1072,8 +1321,12 @@ extension on _OrderFilter {
         return 'Todos';
       case _OrderFilter.pending:
         return 'Pendientes';
+      case _OrderFilter.inProgress:
+        return 'En proceso';
       case _OrderFilter.completed:
         return 'Completados';
+      case _OrderFilter.canceled:
+        return 'Cancelados';
     }
   }
 
@@ -1083,8 +1336,12 @@ extension on _OrderFilter {
         return Icons.receipt_long_rounded;
       case _OrderFilter.pending:
         return Icons.timelapse_rounded;
+      case _OrderFilter.inProgress:
+        return Icons.local_shipping_rounded;
       case _OrderFilter.completed:
         return Icons.check_circle_rounded;
+      case _OrderFilter.canceled:
+        return Icons.cancel_rounded;
     }
   }
 }
@@ -1158,8 +1415,8 @@ class _BusinessHeroCard extends StatelessWidget {
                 ),
                 child: _BusinessLogoAvatar(
                   logoUrl: comercio.logoUrl,
-                  fallbackColor: palette.primary,
-                  onSurface: palette.onSurface,
+                  businessName: comercio.nombre,
+                  fallbackBackground: colorScheme.primaryContainer,
                 ),
               ),
               const SizedBox(width: 10),
@@ -1308,19 +1565,43 @@ class _StatusPill extends StatelessWidget {
 class _BusinessLogoAvatar extends StatelessWidget {
   const _BusinessLogoAvatar({
     required this.logoUrl,
-    required this.fallbackColor,
-    required this.onSurface,
+    required this.businessName,
+    required this.fallbackBackground,
   });
 
   final String? logoUrl;
-  final Color fallbackColor;
-  final Color onSurface;
+  final String businessName;
+  final Color fallbackBackground;
+
+  String get _fallbackInitial {
+    final trimmed = businessName.trim();
+    if (trimmed.isEmpty) {
+      return 'K';
+    }
+
+    return trimmed.substring(0, 1).toUpperCase();
+  }
+
+  Widget _buildFallbackAvatar() {
+    return Container(
+      color: fallbackBackground,
+      alignment: Alignment.center,
+      child: Text(
+        _fallbackInitial,
+        style: GoogleFonts.poppins(
+          color: Colors.white,
+          fontSize: 20,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final trimmed = logoUrl?.trim() ?? '';
     if (trimmed.isEmpty) {
-      return Icon(Icons.storefront_rounded, color: fallbackColor);
+      return _buildFallbackAvatar();
     }
 
     return ClipRRect(
@@ -1328,13 +1609,26 @@ class _BusinessLogoAvatar extends StatelessWidget {
       child: Image.network(
         trimmed,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) {
-          return Container(
-            color: fallbackColor.withValues(alpha: 0.18),
-            alignment: Alignment.center,
-            child: Icon(Icons.image_not_supported_rounded, color: onSurface),
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) {
+            return child;
+          }
+
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              _buildFallbackAvatar(),
+              const Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ],
           );
         },
+        errorBuilder: (_, _, _) => _buildFallbackAvatar(),
       ),
     );
   }
@@ -1550,13 +1844,15 @@ class _KpiCard extends StatelessWidget {
 class _StatusRow extends StatelessWidget {
   const _StatusRow({
     required this.pendingCount,
+    required this.inProgressCount,
     required this.completedCount,
-    required this.businessOnline,
+    required this.canceledCount,
   });
 
   final int pendingCount;
+  final int inProgressCount;
   final int completedCount;
-  final bool businessOnline;
+  final int canceledCount;
 
   @override
   Widget build(BuildContext context) {
@@ -1564,30 +1860,37 @@ class _StatusRow extends StatelessWidget {
       children: [
         Expanded(
           child: _MiniInfoCard(
-            icon: Icons.timelapse_rounded,
+            icon: _OrderStatusBucket.pending.icon,
             label: 'Pendientes',
             value: '$pendingCount',
-            color: const Color(0xFFF59E0B),
+            color: _OrderStatusBucket.pending.color,
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: _MiniInfoCard(
-            icon: Icons.check_circle_rounded,
+            icon: _OrderStatusBucket.inProgress.icon,
+            label: 'En proceso',
+            value: '$inProgressCount',
+            color: _OrderStatusBucket.inProgress.color,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MiniInfoCard(
+            icon: _OrderStatusBucket.completed.icon,
             label: 'Completados',
             value: '$completedCount',
-            color: const Color(0xFF22C55E),
+            color: _OrderStatusBucket.completed.color,
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: _MiniInfoCard(
-            icon: Icons.wifi_tethering_rounded,
-            label: 'Servicio',
-            value: businessOnline ? 'Activo' : 'Pausado',
-            color: businessOnline
-                ? const Color(0xFF3B82F6)
-                : const Color(0xFFF43F5E),
+            icon: _OrderStatusBucket.canceled.icon,
+            label: 'Cancelados',
+            value: '$canceledCount',
+            color: _OrderStatusBucket.canceled.color,
           ),
         ),
       ],
@@ -1774,30 +2077,38 @@ class _BusinessSettingsCard extends StatelessWidget {
               onChanged: isUpdatingBusinessOnline ? null : onToggleOnline,
               contentPadding: const EdgeInsets.symmetric(horizontal: 4),
               title: Text(
-                businessOnline ? 'Negocio en línea' : 'Negocio pausado',
+                businessOnline ? 'En línea' : 'Pausado',
                 style: GoogleFonts.poppins(
                   fontWeight: FontWeight.w700,
                   fontSize: 12.5,
                 ),
               ),
               subtitle: Text(
-                businessOnline
-                    ? 'Aceptando pedidos de clientes.'
-                    : 'Temporalmente pausado para nuevos pedidos.',
+                isUpdatingBusinessOnline
+                    ? 'Guardando estado en el servidor...'
+                    : businessOnline
+                        ? 'Aceptando pedidos de clientes.'
+                        : 'Temporalmente pausado para nuevos pedidos.',
                 style: GoogleFonts.poppins(
                   fontSize: 11,
                   color: colorScheme.onSurfaceVariant,
                 ),
               ),
-              secondary: Icon(
-                businessOnline
-                    ? Icons.wifi_tethering_rounded
-                    : Icons.wifi_tethering_off_rounded,
-                size: 18,
-                color: businessOnline
-                    ? const Color(0xFF16A34A)
-                    : const Color(0xFFE11D48),
-              ),
+              secondary: isUpdatingBusinessOnline
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2.2),
+                    )
+                  : Icon(
+                      businessOnline
+                          ? Icons.wifi_tethering_rounded
+                          : Icons.wifi_tethering_off_rounded,
+                      size: 18,
+                      color: businessOnline
+                          ? const Color(0xFF16A34A)
+                          : const Color(0xFFE11D48),
+                    ),
             ),
           ],
         ),
@@ -1880,18 +2191,59 @@ class _OrderSearchField extends StatelessWidget {
 class _OrderTile extends StatelessWidget {
   const _OrderTile({
     required this.pedido,
-    required this.completed,
+    required this.statusBucket,
+    required this.isDelayed,
     required this.onTap,
   });
 
   final PedidoModel pedido;
-  final bool completed;
+  final _OrderStatusBucket statusBucket;
+  final bool isDelayed;
   final VoidCallback onTap;
+
+  String get _statusLabel {
+    return statusBucket.label;
+  }
+
+  Color get _statusColor {
+    return statusBucket.color;
+  }
+
+  IconData get _statusIcon {
+    return statusBucket.icon;
+  }
+
+  String? get _waitingLabel {
+    final createdAt = pedido.createdAt;
+    if (createdAt == null ||
+        statusBucket == _OrderStatusBucket.completed ||
+        statusBucket == _OrderStatusBucket.canceled) {
+      return null;
+    }
+
+    final elapsed = DateTime.now().difference(createdAt);
+    if (elapsed.inMinutes < 1) {
+      return 'Hace menos de 1 min';
+    }
+    if (elapsed.inHours >= 1) {
+      final hours = elapsed.inHours;
+      final minutes = elapsed.inMinutes.remainder(60);
+      return minutes == 0
+          ? 'Hace ${hours}h'
+          : 'Hace ${hours}h ${minutes}m';
+    }
+
+    return 'Hace ${elapsed.inMinutes} min';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final color = completed ? const Color(0xFF16A34A) : const Color(0xFFF59E0B);
-    final label = completed ? 'Completado' : 'Pendiente';
+    final color = _statusColor;
+    final label = _statusLabel;
+    final waitingLabel = _waitingLabel;
+    final waitingColor = isDelayed
+        ? Theme.of(context).colorScheme.error
+        : Theme.of(context).colorScheme.onSurfaceVariant;
 
     return Card(
       child: ListTile(
@@ -1905,7 +2257,7 @@ class _OrderTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(
-            completed ? Icons.check_circle_rounded : Icons.timelapse_rounded,
+            _statusIcon,
             color: color,
           ),
         ),
@@ -1925,6 +2277,19 @@ class _OrderTile extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
+            if (waitingLabel != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                waitingLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: isDelayed ? FontWeight.w700 : FontWeight.w500,
+                  color: waitingColor,
+                ),
+              ),
+            ],
             const SizedBox(height: 5),
             _StatusPill(label: label, color: color),
           ],
@@ -1932,6 +2297,69 @@ class _OrderTile extends StatelessWidget {
         trailing: Text(
           pedido.total != null ? '\$${pedido.total!.toStringAsFixed(2)}' : '--',
           style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+      ),
+    );
+  }
+}
+
+class _MalformedOrderTile extends StatelessWidget {
+  const _MalformedOrderTile({required this.pedido});
+
+  final PedidoModel pedido;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final title = pedido.orderId?.trim().isNotEmpty == true
+        ? 'Pedido ${pedido.orderId}'
+        : 'Pedido con error de parseo';
+    final details = pedido.parseErrorMessage?.trim().isNotEmpty == true
+        ? pedido.parseErrorMessage!.trim()
+        : 'El registro llegó mal formado desde Supabase y fue aislado.';
+
+    return Card(
+      color: const Color(0xFFFFF1F2),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Color(0xFFFDA4AF)),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE11D48).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFFE11D48),
+          ),
+        ),
+        title: Text(
+          title,
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF9F1239),
+          ),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            details,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        trailing: const _StatusPill(
+          label: 'Error',
+          color: Color(0xFFE11D48),
         ),
       ),
     );

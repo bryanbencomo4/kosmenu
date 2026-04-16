@@ -21,6 +21,8 @@ class PedidoModel {
   final String? orderNotes;
   final List<PedidoItemModel> items;
   final Map<String, dynamic> detalles;
+  final bool hasParseError;
+  final String? parseErrorMessage;
 
   const PedidoModel({
     required this.id,
@@ -42,9 +44,32 @@ class PedidoModel {
     this.orderNotes,
     this.items = const <PedidoItemModel>[],
     this.detalles = const <String, dynamic>{},
+    this.hasParseError = false,
+    this.parseErrorMessage,
   });
 
   factory PedidoModel.fromMap(Map<String, dynamic> map) {
+    try {
+      return PedidoModel._fromMapUnsafe(map);
+    } catch (error, stackTrace) {
+      developer.log(
+        'Error parseando pedido ${map['id'] ?? '(sin id)'}: $error',
+        name: 'PedidoModel',
+        stackTrace: stackTrace,
+      );
+      developer.log(
+        'DEBUG: JSON Crudo de Supabase: $map',
+        name: 'PedidoModel',
+      );
+
+      return PedidoModel._malformed(
+        raw: map,
+        errorMessage: error.toString(),
+      );
+    }
+  }
+
+  factory PedidoModel._fromMapUnsafe(Map<String, dynamic> map) {
     developer.log(
       'DEBUG: Llaves encontradas en el mapa: ${map.keys.toList()}',
       name: 'PedidoModel',
@@ -107,6 +132,32 @@ class PedidoModel {
       orderNotes: _asTrimmedString(detallesMap['order_notes']),
       items: orderItems,
       detalles: detallesMap,
+    );
+  }
+
+  factory PedidoModel._malformed({
+    required Map<String, dynamic> raw,
+    required String errorMessage,
+  }) {
+    final detallesMap = _asMap(raw['detalles']);
+    final fallbackId = (raw['id']?.toString().trim() ?? '').isEmpty
+        ? 'pedido-malformado'
+        : raw['id'].toString().trim();
+
+    return PedidoModel(
+      id: fallbackId,
+      comercioId: raw['comercio_id']?.toString() ?? '',
+      orderId: _resolveOrderId(detallesMap),
+      clienteEmail:
+          raw['cliente_email']?.toString() ??
+          detallesMap['cliente_email']?.toString(),
+      estado: 'error_parseo',
+      total: _toDoubleOrNull(raw['total']) ?? _toDoubleOrNull(detallesMap['total']),
+      createdAt: _tryParseDate(raw['created_at']),
+      metodoPago: _resolveMetodoPago(detallesMap['metodo_pago']),
+      detalles: detallesMap,
+      hasParseError: true,
+      parseErrorMessage: errorMessage,
     );
   }
 
@@ -174,6 +225,12 @@ class PedidoModel {
     final raw = value?.toString().trim() ?? '';
     if (raw.isEmpty) return null;
     return double.tryParse(raw.replaceAll(',', '.'));
+  }
+
+  static DateTime? _tryParseDate(dynamic value) {
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+    return DateTime.tryParse(raw);
   }
 
   static Map<String, dynamic> _asMap(dynamic value) {
