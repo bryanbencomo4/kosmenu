@@ -43,7 +43,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   String _ordersSearchQuery = '';
 
   bool _isUpdatingBusinessOnline = false;
-  bool _supportsBusinessOnlineColumn = true;
   bool _businessOnline = true;
   bool _didPrimeOnlineSwitch = false;
 
@@ -692,7 +691,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           .eq('id', comercioId);
 
       if (!mounted) return;
-      _supportsBusinessOnlineColumn = true;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
@@ -714,7 +712,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       }
 
       if (missingOnlineColumn) {
-        _supportsBusinessOnlineColumn = false;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             behavior: SnackBarBehavior.floating,
@@ -750,13 +747,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         setState(() => _isUpdatingBusinessOnline = false);
       }
     }
-  }
-
-  bool _isOrderCompleted(PedidoModel pedido) {
-    if (pedido.hasParseError) {
-      return false;
-    }
-    return _orderStatusBucket(pedido) == _OrderStatusBucket.completed;
   }
 
   _OrderStatusBucket _orderStatusBucket(PedidoModel pedido) {
@@ -1856,44 +1846,56 @@ class _StatusRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _MiniInfoCard(
-            icon: _OrderStatusBucket.pending.icon,
-            label: 'Pendientes',
-            value: '$pendingCount',
-            color: _OrderStatusBucket.pending.color,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _MiniInfoCard(
-            icon: _OrderStatusBucket.inProgress.icon,
-            label: 'En proceso',
-            value: '$inProgressCount',
-            color: _OrderStatusBucket.inProgress.color,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _MiniInfoCard(
-            icon: _OrderStatusBucket.completed.icon,
-            label: 'Completados',
-            value: '$completedCount',
-            color: _OrderStatusBucket.completed.color,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _MiniInfoCard(
-            icon: _OrderStatusBucket.canceled.icon,
-            label: 'Cancelados',
-            value: '$canceledCount',
-            color: _OrderStatusBucket.canceled.color,
-          ),
-        ),
-      ],
+    final cards = <Widget>[
+      _MiniInfoCard(
+        icon: _OrderStatusBucket.pending.icon,
+        label: 'Pendientes',
+        value: '$pendingCount',
+        color: _OrderStatusBucket.pending.color,
+      ),
+      _MiniInfoCard(
+        icon: _OrderStatusBucket.inProgress.icon,
+        label: 'En proceso',
+        value: '$inProgressCount',
+        color: _OrderStatusBucket.inProgress.color,
+      ),
+      _MiniInfoCard(
+        icon: _OrderStatusBucket.completed.icon,
+        label: 'Completados',
+        value: '$completedCount',
+        color: _OrderStatusBucket.completed.color,
+      ),
+      _MiniInfoCard(
+        icon: _OrderStatusBucket.canceled.icon,
+        label: 'Cancelados',
+        value: '$canceledCount',
+        color: _OrderStatusBucket.canceled.color,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth > 500) {
+          return Row(
+            children: [
+              for (var index = 0; index < cards.length; index++) ...[
+                Expanded(child: cards[index]),
+                if (index != cards.length - 1) const SizedBox(width: 10),
+              ],
+            ],
+          );
+        }
+
+        return GridView.count(
+          crossAxisCount: 2,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 2.5,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: cards,
+        );
+      },
     );
   }
 }
@@ -1914,39 +1916,102 @@ class _MiniInfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.24)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 17, color: color),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
+    final numericValue = int.tryParse(value);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 120 || constraints.maxHeight < 78;
+        final iconSize = compact ? 15.0 : 17.0;
+        final valueFontSize = compact ? 13.0 : 14.0;
+        final labelFontSize = compact ? 10.0 : 11.0;
+        final padding = compact ? 8.0 : 10.0;
+        final spacing = compact ? 6.0 : 8.0;
+
+        Widget buildAnimatedValue() {
+          return TweenAnimationBuilder<double>(
+            tween: Tween<double>(
+              begin: 0,
+              end: (numericValue ?? 0).toDouble(),
             ),
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+            builder: (context, animatedValue, _) {
+              final displayValue = numericValue == null
+                  ? value
+                  : animatedValue.round().toString();
+
+              return Opacity(
+                opacity: numericValue == null || numericValue <= 0
+                    ? 1
+                    : (animatedValue / numericValue).clamp(0.0, 1.0),
+                child: Text(
+                  displayValue,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: valueFontSize,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              );
+            },
+          );
+        }
+
+        return Container(
+          padding: EdgeInsets.all(padding),
+          decoration: BoxDecoration(
+            color: theme.cardColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color.withValues(alpha: 0.24)),
           ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
+          child: compact
+              ? Row(
+                  children: [
+                    Icon(icon, size: iconSize, color: color),
+                    SizedBox(width: spacing),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          buildAnimatedValue(),
+                          const SizedBox(height: 1),
+                          Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(
+                              fontSize: labelFontSize,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(icon, size: iconSize, color: color),
+                    SizedBox(height: spacing),
+                    buildAnimatedValue(),
+                    const SizedBox(height: 2),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: labelFontSize,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+        );
+      },
     );
   }
 }
