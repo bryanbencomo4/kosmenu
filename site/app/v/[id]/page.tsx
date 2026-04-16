@@ -3,6 +3,7 @@
 
 import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
+import { ArrowUp, ChevronDown, Info, Menu, MessageCircle, Phone, Share2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
@@ -97,6 +98,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const publicBaseUrl = 'https://kosmenu.vercel.app';
 const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
+const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
+const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
 const preferLeafletMapPicker = false;
 const defaultProductImage =
@@ -241,6 +244,36 @@ async function reverseGeocodeWithNominatim(point: DeliveryPoint) {
 
 function normalizePhone(value: string | null | undefined) {
   return (value ?? '').replace(/\D/g, '');
+}
+
+function preloadImageAsset(src: string, timeoutMs = 1200) {
+  if (typeof window === 'undefined' || !src.trim()) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    let settled = false;
+
+    const finish = (result: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    const timer = window.setTimeout(() => finish(false), timeoutMs);
+
+    image.onload = () => {
+      window.clearTimeout(timer);
+      finish(true);
+    };
+
+    image.onerror = () => {
+      window.clearTimeout(timer);
+      finish(false);
+    };
+
+    image.decoding = 'async';
+    image.src = src;
+  });
 }
 
 function formatPhoneInput(digits: string, countryCode: '+58' | '+57' | '+1') {
@@ -676,6 +709,8 @@ export default function PublicMenuPage() {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isInfoPanelReady, setIsInfoPanelReady] = useState(false);
+  const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
+  const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   const [shareMessage, setShareMessage] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientWhatsappCountry, setClientWhatsappCountry] = useState<'+58' | '+57' | '+1'>('+58');
@@ -723,6 +758,22 @@ export default function PublicMenuPage() {
     contact: true,
     payments: true,
   });
+  const [cachedSplashLogoUrl, setCachedSplashLogoUrl] = useState('');
+  const [cachedSplashName, setCachedSplashName] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !commerceIdentifier) return;
+
+    const cachedLogo = window.sessionStorage.getItem(`${splashLogoCacheKeyPrefix}${commerceIdentifier}`) ?? '';
+    const cachedName = window.sessionStorage.getItem(`${splashNameCacheKeyPrefix}${commerceIdentifier}`) ?? '';
+
+    setCachedSplashLogoUrl(cachedLogo.trim());
+    setCachedSplashName(cachedName.trim());
+
+    if (cachedLogo.trim()) {
+      void preloadImageAsset(cachedLogo.trim(), 900);
+    }
+  }, [commerceIdentifier]);
 
   useEffect(() => {
     let cancelled = false;
@@ -775,9 +826,25 @@ export default function PublicMenuPage() {
           throw new Error('No se encontro el comercio para esta URL.');
         }
 
+        const nextCommerceName = (data.comercio.nombre ?? commerceIdentifier).trim();
+        const nextLogoUrl = (data.comercio.logo_url ?? '').trim();
+
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(`${splashNameCacheKeyPrefix}${commerceIdentifier}`, nextCommerceName);
+          if (nextLogoUrl) {
+            window.sessionStorage.setItem(`${splashLogoCacheKeyPrefix}${commerceIdentifier}`, nextLogoUrl);
+          }
+        }
+
         if (!cancelled) {
           setIsDraftMode(false);
           setMenuData(data);
+          setCachedSplashName(nextCommerceName);
+          setCachedSplashLogoUrl(nextLogoUrl);
+          if (nextLogoUrl) {
+            await preloadImageAsset(nextLogoUrl, 1200);
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 260));
         }
       } catch (err) {
         if (!cancelled) {
@@ -904,8 +971,8 @@ export default function PublicMenuPage() {
     chip.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }, [activeCategoryId]);
 
-  const comercioNombre = (menuData?.comercio.nombre ?? 'elmenuxfa.com').trim();
-  const comercioLogoUrl = (menuData?.comercio.logo_url ?? '').trim();
+  const comercioNombre = (menuData?.comercio.nombre ?? cachedSplashName ?? commerceIdentifier ?? 'elmenuxfa.com').trim() || 'elmenuxfa.com';
+  const comercioLogoUrl = (menuData?.comercio.logo_url ?? cachedSplashLogoUrl ?? '').trim();
   const comercioInitialLetter = comercioInitial(comercioNombre);
   const resolvedComercioId = (menuData?.comercio.id ?? commerceIdentifier).trim();
   const resolvedSlug = (menuData?.comercio.slug ?? commerceIdentifier).trim();
@@ -1143,6 +1210,27 @@ export default function PublicMenuPage() {
       document.body.style.overflow = previousOverflow;
     };
   }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
+
+  useEffect(() => {
+    if (isInfoOpen || isConfirmOpen || expandedProductImage || isMapPickerOpen) {
+      setIsQuickActionsOpen(false);
+    }
+  }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const updateScrollTopButton = () => {
+      setShowScrollTopButton(window.scrollY > 420);
+    };
+
+    updateScrollTopButton();
+    window.addEventListener('scroll', updateScrollTopButton, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', updateScrollTopButton);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isInfoOpen) {
@@ -1798,10 +1886,68 @@ export default function PublicMenuPage() {
 
   if (loading) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-950 text-slate-50">
-        <div className="text-center">
-          <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
-          <p className="mt-4 text-sm tracking-[0.14em] text-slate-300">CARGANDO MENU PUBLICO</p>
+      <main
+        className="relative min-h-screen overflow-hidden"
+        style={{
+          background:
+            'radial-gradient(circle at 50% 18%, rgba(214,90,31,0.16), transparent 22%), linear-gradient(180deg, #fff8f0 0%, #fffaf5 36%, #ffffff 100%)',
+        }}
+      >
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute left-1/2 top-[12%] h-72 w-72 -translate-x-1/2 rounded-full bg-[rgba(214,90,31,0.12)] blur-3xl animate-pulse" />
+          <div className="absolute left-[10%] top-[30%] h-28 w-28 rounded-full bg-[rgba(255,194,102,0.20)] blur-3xl animate-pulse" />
+          <div className="absolute bottom-[14%] right-[14%] h-36 w-36 rounded-full bg-[rgba(15,23,42,0.06)] blur-3xl animate-pulse" />
+          <div className="absolute inset-x-10 top-[22%] h-px bg-gradient-to-r from-transparent via-[rgba(214,90,31,0.18)] to-transparent" />
+        </div>
+
+        <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 text-center">
+          <div className="relative flex h-36 w-36 items-center justify-center sm:h-40 sm:w-40">
+            <div className="absolute inset-0 rounded-full border border-[rgba(214,90,31,0.16)] animate-[spin_8s_linear_infinite]" />
+            <div className="absolute inset-[10px] rounded-full border border-dashed border-[rgba(15,23,42,0.12)] animate-[spin_14s_linear_infinite_reverse]" />
+            <div className="absolute inset-[20px] rounded-full bg-white/78 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur-md" />
+
+            <div
+              className="relative z-[1] grid h-20 w-20 place-items-center rounded-[26px] text-3xl font-black text-white shadow-[0_16px_36px_rgba(15,23,42,0.16)] sm:h-24 sm:w-24 sm:text-4xl"
+              style={{ backgroundColor: '#D65A1F' }}
+            >
+              {comercioInitialLetter}
+            </div>
+
+            {comercioLogoUrl ? (
+              <img
+                src={comercioLogoUrl}
+                alt={`Logo de ${comercioNombre}`}
+                className="absolute z-10 h-20 w-20 rounded-[26px] object-cover shadow-[0_16px_36px_rgba(15,23,42,0.16)] sm:h-24 sm:w-24"
+                onError={(event) => {
+                  event.currentTarget.style.display = 'none';
+                }}
+              />
+            ) : null}
+          </div>
+
+          <div className="mt-8">
+            <p className="text-[10px] font-black uppercase tracking-[0.32em] text-slate-500">Cargando menu</p>
+            <h1 className="mt-4 text-3xl font-black tracking-[-0.05em] text-slate-950 sm:text-5xl" style={titleFontStyle}>
+              {comercioNombre}
+            </h1>
+            <p className="mx-auto mt-3 max-w-sm text-sm font-medium leading-6 text-slate-500 sm:text-[15px]">
+              Preparando la experiencia del menu digital.
+            </p>
+          </div>
+
+          <div className="mt-8 flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-[#D65A1F] animate-bounce" />
+            <span className="h-2 w-2 rounded-full bg-[#F59E0B] animate-bounce [animation-delay:140ms]" />
+            <span className="h-2 w-2 rounded-full bg-slate-400 animate-bounce [animation-delay:280ms]" />
+          </div>
+
+          <div className="mt-6 h-[3px] w-40 overflow-hidden rounded-full bg-slate-200/80">
+            <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-[#D65A1F] via-[#FF9A54] to-[#FFD089] animate-[pulse_1.1s_ease-in-out_infinite]" />
+          </div>
+        </section>
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-10 z-10 text-center">
+          <p className="text-[11px] font-semibold tracking-[0.22em] text-slate-400">elmenuxfa.com</p>
         </div>
       </main>
     );
@@ -1883,32 +2029,91 @@ export default function PublicMenuPage() {
                 <p className="truncate text-[11px] font-semibold text-slate-500">@{resolvedSlug}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="relative flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => void shareMenu()}
-                className="grid h-9 w-9 place-items-center rounded-full border border-slate-300 bg-white text-slate-600"
-                aria-label="Compartir menu"
+                onClick={() => setIsQuickActionsOpen((prev) => !prev)}
+                aria-expanded={isQuickActionsOpen}
+                aria-label="Abrir menu de acciones"
+                className="inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-black uppercase tracking-[0.08em] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--primary-color) 28%, white)',
+                  backgroundColor: 'var(--primary-color)',
+                  color: 'var(--text-on-primary)',
+                }}
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="18" cy="5" r="2.5" />
-                  <circle cx="6" cy="12" r="2.5" />
-                  <circle cx="18" cy="19" r="2.5" />
-                  <path d="M8.2 11l7.6-4.2M8.2 13l7.6 4.2" />
-                </svg>
+                <Menu className="h-4 w-4" strokeWidth={2.5} />
+                <span className="hidden sm:inline">Menu</span>
+                <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isQuickActionsOpen ? 'rotate-180' : ''}`} strokeWidth={2.4} />
               </button>
-              <button
-                type="button"
-                onClick={() => setIsInfoOpen(true)}
-                className="grid h-9 w-9 place-items-center rounded-full border border-slate-300 bg-white text-slate-600"
-                aria-label="Informacion del negocio"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 10v6" />
-                  <circle cx="12" cy="7" r="1" fill="currentColor" stroke="none" />
-                </svg>
-              </button>
+
+              {isQuickActionsOpen ? (
+                <div className="absolute right-0 top-[calc(100%+10px)] z-[72] w-[min(84vw,280px)] rounded-[24px] border border-white/70 bg-white/96 p-3 shadow-[0_22px_55px_rgba(15,23,42,0.18)] backdrop-blur-xl">
+                  <div className="rounded-[20px] border border-slate-200 bg-white p-2.5">
+                    <p className="px-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Acciones</p>
+                    <div className="mt-2 space-y-2">
+                      {callNumber ? (
+                        <a
+                          href={`tel:+${callNumber}`}
+                          onClick={() => setIsQuickActionsOpen(false)}
+                          className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Phone className="h-4 w-4" strokeWidth={2.2} />
+                            Llamar
+                          </span>
+                        </a>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsQuickActionsOpen(false);
+                          void shareMenu();
+                        }}
+                        className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Share2 className="h-4 w-4" strokeWidth={2.2} />
+                          Compartir
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsQuickActionsOpen(false);
+                          setIsInfoOpen(true);
+                        }}
+                        className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Info className="h-4 w-4" strokeWidth={2.2} />
+                          Informacion
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Divisa</p>
+                      <select
+                        value={selectedCurrencyCode}
+                        onChange={(event) => setSelectedCurrency(normalizeCurrencyCode(event.target.value))}
+                        className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-black uppercase tracking-[0.08em] text-slate-700 outline-none"
+                      >
+                        {(paymentMethodsByCurrency.length > 0
+                          ? paymentMethodsByCurrency.map((group) => group.currency)
+                          : ['COP']
+                        ).map((currency) => (
+                          <option key={`appbar-currency-${currency}`} value={currency}>
+                            {currency}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
@@ -1919,109 +2124,283 @@ export default function PublicMenuPage() {
           </div>
         ) : null}
 
-        <section className="mx-auto mt-4 max-w-6xl px-4 sm:px-6">
-          <div className="sticky top-14 z-30 space-y-2 rounded-2xl border border-slate-200/90 bg-white/95 p-2 shadow-sm backdrop-blur-md md:p-3">
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Buscar"
-                className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-sm font-semibold text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-              />
-              <svg
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="11" cy="11" r="7" />
-                <path d="M20 20l-3.5-3.5" />
-              </svg>
-              {searchQuery ? (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-100"
-                >
-                  Limpiar
-                </button>
-              ) : null}
-            </div>
-
-            <div className="overflow-x-auto">
-              <div className="flex w-max items-center gap-2">
-                {filteredCategorias.map((categoria) => (
-                  <button
-                    type="button"
-                    key={categoria.id}
-                    ref={(element) => {
-                      categoryChipRefs.current[categoria.id] = element;
-                    }}
-                    onClick={() => scrollToCategory(categoria.id)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                      activeCategoryId === categoria.id
-                        ? 'border-slate-900 bg-slate-900 text-white'
-                        : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-100'
-                    }`}
-                  >
-                    {categoria.nombre} ({categoria.productos.length})
-                  </button>
-                ))}
+        <section className="mx-auto mt-4 max-w-6xl px-4 sm:mt-5 sm:px-6">
+          <div className="relative overflow-hidden rounded-[28px] border border-slate-200/90 bg-[color:color-mix(in_srgb,var(--card-surface)_97%,white)] p-4 shadow-[0_18px_50px_rgba(15,23,42,0.07)] sm:p-5">
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-1" style={{ backgroundColor: 'var(--primary-color)' }} />
+            {comercioLogoUrl ? (
+              <div className="pointer-events-none absolute inset-0 overflow-hidden opacity-10">
+                <img
+                  src={comercioLogoUrl}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute right-[-2rem] top-1/2 h-[120%] w-auto -translate-y-1/2 object-contain blur-3xl md:right-0"
+                />
               </div>
-            </div>
+            ) : null}
 
-            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Moneda global</p>
-              <select
-                value={selectedCurrencyCode}
-                onChange={(event) => setSelectedCurrency(normalizeCurrencyCode(event.target.value))}
-                className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none"
-              >
-                {(paymentMethodsByCurrency.length > 0
-                  ? paymentMethodsByCurrency.map((group) => group.currency)
-                  : ['COP']
-                ).map((currency) => (
-                  <option key={`global-currency-${currency}`} value={currency}>
-                    {currency}
-                  </option>
-                ))}
-              </select>
+            <div className="relative flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div className="min-w-0 flex-1 rounded-[22px] border border-slate-200/90 bg-white/92 px-4 py-4 backdrop-blur-sm sm:px-5">
+                <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+                  <div className="shrink-0">
+                    {comercioLogoUrl ? (
+                      <img
+                        src={comercioLogoUrl}
+                        alt={`Logo de ${comercioNombre}`}
+                        className="h-12 w-12 rounded-[14px] border border-slate-200 bg-white object-cover shadow-sm sm:h-14 sm:w-14"
+                        onError={(event) => {
+                          event.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <div
+                        className="grid h-12 w-12 place-items-center rounded-[14px] text-base font-black text-white shadow-sm sm:h-14 sm:w-14 sm:text-lg"
+                        style={{ backgroundColor: 'var(--primary-color)' }}
+                      >
+                        {comercioInitialLetter}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <h2
+                        className="max-w-full overflow-hidden text-2xl font-black leading-[0.95] tracking-[-0.04em] text-slate-950 sm:text-4xl md:text-5xl"
+                      style={{
+                        ...titleFontStyle,
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      {comercioNombre}
+                    </h2>
+
+                    {menuData.comercio.descripcion?.trim() ? (
+                      <p
+                        className="mt-2 max-w-2xl text-sm font-medium leading-5 text-slate-600 sm:text-[15px] sm:leading-6"
+                        style={{
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          overflowWrap: 'anywhere',
+                        }}
+                      >
+                        {menuData.comercio.descripcion.trim()}
+                      </p>
+                    ) : null}
+
+                    {comercioAddress ? (
+                      <p
+                        className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-slate-500"
+                        style={{
+                          overflowWrap: 'anywhere',
+                        }}
+                        title={comercioAddress}
+                      >
+                        {comercioAddress}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 md:w-[180px] md:shrink-0">
+                <div className="rounded-[20px] border border-slate-200/90 bg-white/92 px-4 py-3 text-center backdrop-blur-sm">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[11px]">Categorias</p>
+                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950 sm:text-3xl">{filteredCategorias.length}</p>
+                </div>
+                <div className="rounded-[20px] border border-slate-200/90 bg-white/92 px-4 py-3 text-center backdrop-blur-sm">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[11px]">Productos</p>
+                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950 sm:text-3xl">{categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0)}</p>
+                </div>
+              </div>
             </div>
           </div>
 
+          <div className="sticky top-14 z-30 mt-4 rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-shadow duration-300 md:p-4 hover:shadow-[0_24px_70px_rgba(15,23,42,0.12)]">
+            <div className="rounded-[22px] border border-slate-200/90 bg-[color:color-mix(in_srgb,var(--card-surface)_95%,white)] p-3 sm:p-4">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Buscar producto o categoria"
+                  className="h-12 w-full rounded-2xl border border-slate-200/90 bg-white pl-11 pr-16 text-sm font-semibold text-slate-900 outline-none transition duration-200 focus:border-slate-300 focus:ring-4 focus:ring-slate-200/70"
+                />
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M20 20l-3.5-3.5" />
+                </svg>
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-slate-500 hover:bg-slate-200"
+                  >
+                    Limpiar
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="mt-3 overflow-x-auto pb-1">
+                <div className="flex w-max items-center gap-2">
+                  {filteredCategorias.map((categoria) => (
+                    <button
+                      type="button"
+                      key={categoria.id}
+                      ref={(element) => {
+                        categoryChipRefs.current[categoria.id] = element;
+                      }}
+                      onClick={() => scrollToCategory(categoria.id)}
+                      className={`rounded-full px-4 py-2 text-xs font-extrabold transition-all duration-200 ${
+                        activeCategoryId === categoria.id
+                          ? 'border border-slate-900 bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.14)]'
+                          : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm'
+                      }`}
+                    >
+                      {categoria.nombre}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {showScrollTopButton ? (
+            <div className={`fixed right-4 z-[80] ${cartCount > 0 ? 'bottom-24 sm:bottom-28' : 'bottom-6 sm:bottom-8'}`}>
+              <button
+                type="button"
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                aria-label="Volver arriba"
+                className="flex h-12 w-12 items-center justify-center rounded-full shadow-[0_18px_38px_rgba(15,23,42,0.24)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_24px_44px_rgba(15,23,42,0.28)]"
+                style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+              >
+                <ArrowUp className="h-5 w-5" strokeWidth={2.6} />
+              </button>
+            </div>
+          ) : null}
+
           <div className="mt-5 pb-40">
             {!hasProducts ? (
-              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                <p className="text-xl font-black" style={titleFontStyle}>
+              <div className="rounded-[28px] border border-slate-200/90 bg-white/92 p-8 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur-sm">
+                <p className="text-xl font-black text-slate-900" style={titleFontStyle}>
                   {searchQuery.trim() ? 'No encontramos productos con ese termino.' : 'Estamos preparando el menu digital'}
                 </p>
-                <p className="mt-2 text-sm text-slate-600">
+                <p className="mt-2 text-sm font-medium text-slate-600">
                   {searchQuery.trim() ? 'Prueba con otro nombre o categoria.' : 'Vuelve en unos minutos para ver todos los productos.'}
                 </p>
               </div>
             ) : (
               <div className="space-y-8">
                 {filteredCategorias.map((categoria) => (
-                  <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-32">
-                    <div className="mb-3">
-                      <h2 className="text-xl font-black md:text-2xl" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
+                  <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-36">
+                    <div className="mb-4 flex items-end justify-between gap-3">
+                      <h2 className="text-2xl font-black tracking-[-0.02em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
                         {categoria.nombre}
                       </h2>
+                      <span className="rounded-full border border-slate-200 bg-white/75 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
+                        {categoria.productos.length} item{categoria.productos.length === 1 ? '' : 's'}
+                      </span>
                     </div>
 
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       {categoria.productos.map((producto) => {
                         const quantity = cart[producto.id] ?? 0;
+                        const convertedPrice = formatAmountByCurrency(
+                          convertFromCop(producto.precio ?? 0, selectedCurrencyCode, selectedExchangeRate),
+                          selectedCurrencyCode,
+                        );
 
                         return (
                           <article
                             key={producto.id}
-                            className="overflow-hidden rounded-2xl border border-slate-200 bg-[var(--card-surface)]"
+                            className="overflow-hidden rounded-[28px] border bg-[color:color-mix(in_srgb,var(--card-surface)_94%,white)] shadow-[0_18px_38px_rgba(15,23,42,0.07)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_28px_55px_rgba(15,23,42,0.10)]"
+                            style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 12%, white)' }}
                           >
-                            <div className="flex gap-3 p-3">
+                            <div className="flex gap-4 p-4 sm:gap-5 sm:p-5">
+                              <div className="min-w-0 flex-1 py-0.5">
+                                <h3
+                                  className="text-lg font-extrabold leading-6 text-slate-900 sm:text-[22px]"
+                                  style={{
+                                    ...titleFontStyle,
+                                    wordBreak: 'break-word',
+                                  }}
+                                >
+                                  {producto.nombre}
+                                </h3>
+
+                                <p
+                                  className="mt-2 text-sm leading-6 text-slate-600 sm:max-w-[38rem]"
+                                  style={{
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: 3,
+                                    WebkitBoxOrient: 'vertical',
+                                    overflow: 'hidden',
+                                  }}
+                                >
+                                  {producto.descripcion?.trim() || 'Preparacion recomendada por la casa.'}
+                                </p>
+
+                                <div className="mt-4">
+                                  <p className="text-2xl font-black tracking-[-0.03em]" style={{ ...titleFontStyle, color: 'var(--primary-color)' }}>
+                                    {convertedPrice}
+                                  </p>
+                                  {selectedCurrencyCode !== 'COP' ? (
+                                    <p className="mt-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                                      Base {formatAmountByCurrency(producto.precio ?? 0, 'COP')}
+                                    </p>
+                                  ) : null}
+                                </div>
+
+                                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                                  {quantity === 0 ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => incrementProduct(producto.id)}
+                                      className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_28px_rgba(15,23,42,0.14)] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_20px_34px_rgba(15,23,42,0.18)]"
+                                      style={{
+                                        borderRadius: '18px',
+                                        backgroundColor: 'var(--primary-color)',
+                                        color: 'var(--text-on-primary)',
+                                      }}
+                                    >
+                                      <span className="grid h-5 w-5 place-items-center rounded-full bg-white/16 text-base leading-none">+</span>
+                                      Agregar
+                                    </button>
+                                  ) : (
+                                    <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
+                                      <button
+                                        type="button"
+                                        onClick={() => decrementProduct(producto.id)}
+                                        className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-lg font-black text-slate-700"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="min-w-8 text-center text-sm font-black text-slate-900">{quantity}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => incrementProduct(producto.id)}
+                                        className="grid h-9 w-9 place-items-center rounded-xl text-lg font-black"
+                                        style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {quantity > 0 ? (
+                                    <span className="rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-white">
+                                      {quantity} en tu pedido
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+
                               {showImages ? (
                                 <button
                                   type="button"
@@ -2033,7 +2412,7 @@ export default function PublicMenuPage() {
                                       description: producto.descripcion?.trim() || 'Preparacion recomendada por la casa.',
                                     })
                                   }
-                                  className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-100"
+                                  className="h-24 w-24 shrink-0 overflow-hidden rounded-[20px] bg-slate-100 shadow-[0_14px_26px_rgba(15,23,42,0.14)] transition-transform duration-300 hover:scale-[1.02] sm:h-[118px] sm:w-[118px] sm:rounded-[22px]"
                                   aria-label={`Ver imagen grande de ${producto.nombre}`}
                                 >
                                   <img
@@ -2050,54 +2429,6 @@ export default function PublicMenuPage() {
                                   />
                                 </button>
                               ) : null}
-
-                              <div className="min-w-0 flex-1 py-0.5">
-                                <h3
-                                  className="text-base font-extrabold leading-6"
-                                  style={titleFontStyle}
-                                >
-                                  {producto.nombre}
-                                </h3>
-
-                                <p className="mt-1.5 text-sm leading-5 text-slate-600">
-                                  {producto.descripcion?.trim() || 'Preparacion recomendada por la casa.'}
-                                </p>
-
-                                <div className="mt-3 flex items-center justify-between gap-3">
-                                  <span
-                                    className="shrink-0 rounded-full px-3 py-1 text-xs font-extrabold"
-                                    style={{
-                                      borderRadius: 'var(--border-radius)',
-                                      backgroundColor: 'color-mix(in srgb, var(--primary-color) 18%, white)',
-                                      color: 'var(--primary-color)',
-                                    }}
-                                  >
-                                    {formatAmountByCurrency(
-                                      convertFromCop(producto.precio ?? 0, selectedCurrencyCode, selectedExchangeRate),
-                                      selectedCurrencyCode,
-                                    )}
-                                  </span>
-
-                                  <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white p-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => decrementProduct(producto.id)}
-                                      className="h-8 w-8 rounded-full border border-slate-200 bg-white text-base font-bold text-slate-700"
-                                    >
-                                      -
-                                    </button>
-                                    <span className="min-w-7 text-center text-sm font-black">{quantity}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => incrementProduct(producto.id)}
-                                      className="h-8 w-8 rounded-full text-base font-bold"
-                                      style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
                             </div>
                           </article>
                         );
@@ -2111,39 +2442,39 @@ export default function PublicMenuPage() {
         </section>
 
         {cartCount > 0 ? (
-          <section className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200/80 bg-white/92 px-4 py-3 backdrop-blur-xl">
+          <section className="fixed inset-x-0 bottom-0 z-50 px-4 py-4">
             <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <div className="flex-1 rounded-[26px] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_18px_45px_rgba(15,23,42,0.16)] backdrop-blur-xl sm:px-5">
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
                   {cartCount} producto{cartCount === 1 ? '' : 's'}
                 </p>
-                <p className="text-2xl font-black" style={titleFontStyle}>
-                  {formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
-                </p>
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <p className="text-2xl font-black tracking-[-0.03em] text-slate-900" style={titleFontStyle}>
+                    {formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCheckoutError(null);
+                      setCheckoutStep(0);
+                      setIsConfirmOpen(true);
+                    }}
+                    disabled={isSubmittingOrder}
+                    className="rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.08em] shadow-[0_16px_32px_rgba(15,23,42,0.18)]"
+                    style={
+                      isSubmittingOrder
+                        ? { backgroundColor: '#E2E8F0', color: '#64748B' }
+                        : {
+                            borderRadius: '18px',
+                            backgroundColor: 'var(--primary-color)',
+                            color: 'var(--text-on-primary)',
+                          }
+                    }
+                  >
+                    {isSubmittingOrder ? 'Procesando...' : 'Ver pedido'}
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setCheckoutError(null);
-                  setCheckoutStep(0);
-                  setIsConfirmOpen(true);
-                }}
-                disabled={isSubmittingOrder}
-                className="rounded-full px-6 py-3 text-sm font-black uppercase tracking-[0.08em]"
-                style={
-                  isSubmittingOrder
-                    ? { backgroundColor: '#E2E8F0', color: '#64748B' }
-                    : {
-                        borderRadius: 'var(--border-radius)',
-                        backgroundColor: 'var(--primary-color)',
-                        color: 'var(--text-on-primary)',
-                      }
-                }
-              >
-                {isSubmittingOrder
-                  ? 'Procesando...'
-                  : 'Confirmar pedido'}
-              </button>
             </div>
           </section>
         ) : null}
@@ -2277,9 +2608,23 @@ export default function PublicMenuPage() {
                             href={`https://wa.me/${whatsappNumber}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex font-semibold text-slate-900 underline underline-offset-2"
+                            className="inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-black shadow-sm"
+                            style={
+                              receivesOrdersOnWhatsapp
+                                ? {
+                                    borderColor: '#86EFAC',
+                                    backgroundColor: '#F0FDF4',
+                                    color: '#166534',
+                                  }
+                                : {
+                                    borderColor: '#CBD5E1',
+                                    backgroundColor: '#F8FAFC',
+                                    color: '#475569',
+                                  }
+                            }
                           >
-                            +{whatsappNumber}
+                            <MessageCircle className="h-4 w-4" strokeWidth={2.2} />
+                            <span>+{whatsappNumber}</span>
                           </a>
                         ) : (
                           <p className="font-semibold text-slate-800">No registrado</p>
@@ -2350,14 +2695,15 @@ export default function PublicMenuPage() {
                       href={`https://wa.me/${whatsappNumber}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 rounded-full px-4 py-2.5 text-center text-xs font-bold uppercase tracking-[0.08em]"
+                      className="flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2.5 text-center text-xs font-black uppercase tracking-[0.08em]"
                       style={
                         receivesOrdersOnWhatsapp
-                          ? { backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }
+                          ? { backgroundColor: '#16A34A', color: '#FFFFFF' }
                           : { backgroundColor: '#E2E8F0', color: '#64748B' }
                       }
                     >
-                      {receivesOrdersOnWhatsapp ? 'WhatsApp' : 'WhatsApp (sin pedidos)'}
+                      <MessageCircle className="h-4 w-4" strokeWidth={2.2} />
+                      {receivesOrdersOnWhatsapp ? 'WhatsApp' : 'WhatsApp sin pedidos'}
                     </a>
                   ) : null}
                   <button
@@ -2958,27 +3304,6 @@ export default function PublicMenuPage() {
           </section>
         ) : null}
 
-        {whatsappNumber ? (
-          <a
-            href={`https://wa.me/${whatsappNumber}?text=${encodeURIComponent('Hola, estoy viendo su menú y tengo una duda...')}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="fixed bottom-24 right-4 z-[58] inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-lg shadow-[#25D366]/35 transition hover:scale-[1.03] sm:bottom-6 sm:right-6"
-            aria-label="Soporte por WhatsApp"
-            title="Soporte por WhatsApp"
-          >
-            <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden="true" focusable="false">
-              <path
-                fill="#FFFFFF"
-                d="M19.11 17.21c-.28-.14-1.65-.82-1.9-.91-.26-.1-.44-.14-.63.14-.19.28-.72.91-.89 1.1-.17.19-.33.21-.61.07-.28-.14-1.17-.43-2.23-1.36-.82-.73-1.37-1.63-1.53-1.91-.16-.28-.02-.44.12-.58.12-.12.28-.33.42-.49.14-.17.19-.28.28-.47.09-.19.05-.35-.02-.49-.07-.14-.63-1.51-.86-2.07-.23-.55-.46-.47-.63-.48h-.53c-.19 0-.49.07-.75.35-.26.28-.98.96-.98 2.35 0 1.39 1 2.74 1.14 2.93.14.19 1.96 3 4.74 4.2.66.29 1.18.46 1.58.59.67.21 1.28.18 1.76.11.54-.08 1.65-.67 1.89-1.32.23-.66.23-1.22.16-1.33-.07-.12-.25-.19-.53-.33z"
-              />
-              <path
-                fill="#FFFFFF"
-                d="M16 3C8.82 3 3 8.82 3 16c0 2.29.6 4.54 1.74 6.52L3 29l6.65-1.73A12.95 12.95 0 0 0 16 29c7.18 0 13-5.82 13-13S23.18 3 16 3zm0 23.6c-2.03 0-4.03-.55-5.77-1.58l-.41-.24-3.95 1.03 1.06-3.86-.27-.4A10.62 10.62 0 0 1 5.4 16C5.4 10.14 10.14 5.4 16 5.4S26.6 10.14 26.6 16 21.86 26.6 16 26.6z"
-              />
-            </svg>
-          </a>
-        ) : null}
       </main>
     </>
   );

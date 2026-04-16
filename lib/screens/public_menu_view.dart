@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -13,9 +14,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class PublicMenuView extends StatefulWidget {
-  const PublicMenuView({super.key, required this.comercioId});
+  const PublicMenuView({
+    super.key,
+    required this.comercioId,
+    this.assistedMode,
+    this.entrySource,
+  });
 
   final String comercioId;
+  final bool? assistedMode;
+  final String? entrySource;
 
   @override
   State<PublicMenuView> createState() => _PublicMenuViewState();
@@ -23,6 +31,7 @@ class PublicMenuView extends StatefulWidget {
 
 class _PublicMenuViewState extends State<PublicMenuView> {
   static const String _defaultBrandLogoAsset = 'assets/branding/logotipo.png';
+  static const double _stickyHeaderExtent = 132;
   static const List<String> _paymentMethods = <String>[
     'Pago Movil',
     'Efectivo (USD/COP)',
@@ -30,8 +39,13 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   ];
 
   late Future<_PublicMenuData> _menuFuture;
+  late final ScrollController _scrollController;
+  late final bool _isAssistedMode;
   final Map<String, int> _cart = <String, int>{};
-  String? _selectedCategoryId;
+  final Map<String, GlobalKey> _categorySectionKeys = <String, GlobalKey>{};
+  final TextEditingController _searchController = TextEditingController();
+  String? _activeCategoryId;
+  String? _entrySource;
   String _searchQuery = '';
 
   static const String _deliveryModePickup = 'pickup';
@@ -40,7 +54,20 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   @override
   void initState() {
     super.initState();
+    final routeParams = Uri.base.queryParameters;
+    _isAssistedMode = widget.assistedMode ?? routeParams['mode'] == 'assisted';
+    _entrySource = (widget.entrySource ?? routeParams['source'])?.trim();
+    _scrollController = ScrollController()..addListener(_handleMenuScroll);
     _menuFuture = _fetchMenuData();
+  }
+
+  @override
+  void dispose() {
+    _scrollController
+      ..removeListener(_handleMenuScroll)
+      ..dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<_PublicMenuData> _fetchMenuData() async {
@@ -232,6 +259,10 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     });
   }
 
+  void _handleQuickAdd(_PublicProduct product) {
+    _incrementProduct(product.id);
+  }
+
   void _decrementProduct(String productId) {
     setState(() {
       final current = _cart[productId] ?? 0;
@@ -241,6 +272,121 @@ class _PublicMenuViewState extends State<PublicMenuView> {
         _cart[productId] = current - 1;
       }
     });
+  }
+
+  void _handleMenuScroll() {
+    _updateActiveCategoryFromScroll();
+  }
+
+  List<_CategorySection> _buildVisibleSections(_PublicMenuData data) {
+    final categoryNameById = <String, String>{
+      for (final category in data.categories)
+        category.id.trim(): category.nombre,
+    };
+    final normalizedSearch = _normalizeSearchText(_searchQuery);
+
+    bool matchesSearch(_PublicProduct product) {
+      if (normalizedSearch.isEmpty) return true;
+      final categoryName = categoryNameById[product.categoryId.trim()] ?? '';
+      final haystack = _normalizeSearchText(
+        '${product.nombre} ${product.descripcion} $categoryName',
+      );
+      return haystack.contains(normalizedSearch);
+    }
+
+    final sections = <_CategorySection>[];
+    for (final category in data.categories) {
+      final items = data.products
+          .where((product) => product.categoryId.trim() == category.id.trim())
+          .where(matchesSearch)
+          .toList(growable: false);
+      if (items.isEmpty) continue;
+      sections.add(
+        _CategorySection(
+          id: category.id.trim(),
+          title: category.nombre,
+          products: items,
+        ),
+      );
+    }
+
+    final knownIds = categoryNameById.keys.toSet();
+    final uncategorized = data.products
+        .where((product) => !knownIds.contains(product.categoryId.trim()))
+        .where(matchesSearch)
+        .toList(growable: false);
+    if (uncategorized.isNotEmpty) {
+      sections.add(
+        _CategorySection(
+          id: '_uncategorized',
+          title: 'Recomendados',
+          products: uncategorized,
+        ),
+      );
+    }
+
+    return sections;
+  }
+
+  void _syncActiveCategory(List<_CategorySection> sections) {
+    final sectionIds = sections.map((section) => section.id).toSet();
+    final nextActive = sectionIds.contains(_activeCategoryId)
+        ? _activeCategoryId
+        : sections.isEmpty
+        ? null
+        : sections.first.id;
+    if (nextActive == _activeCategoryId) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || nextActive == _activeCategoryId) return;
+      setState(() => _activeCategoryId = nextActive);
+    });
+  }
+
+  void _updateActiveCategoryFromScroll() {
+    if (_categorySectionKeys.isEmpty || !mounted) return;
+
+    const anchorY = 206.0;
+    String? nextActive;
+    double closestDistance = double.infinity;
+
+    for (final entry in _categorySectionKeys.entries) {
+      final context = entry.value.currentContext;
+      if (context == null) continue;
+      final renderObject = context.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
+      final offsetY = renderObject.localToGlobal(Offset.zero).dy;
+      final distance = (offsetY - anchorY).abs();
+
+      if (offsetY <= anchorY + 24 && distance < closestDistance) {
+        nextActive = entry.key;
+        closestDistance = distance;
+      }
+    }
+
+    nextActive ??= _categorySectionKeys.keys.isEmpty
+        ? null
+        : _categorySectionKeys.keys.first;
+
+    if (nextActive != null && nextActive != _activeCategoryId) {
+      setState(() => _activeCategoryId = nextActive);
+    }
+  }
+
+  Future<void> _scrollToCategory(String categoryId) async {
+    if (_activeCategoryId != categoryId) {
+      setState(() => _activeCategoryId = categoryId);
+    }
+
+    final context = _categorySectionKeys[categoryId]?.currentContext;
+    if (context == null) return;
+
+    await Scrollable.ensureVisible(
+      context,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      alignment: 0.02,
+    );
   }
 
   String _generateTrackingCode() {
@@ -1339,30 +1485,21 @@ class _PublicMenuViewState extends State<PublicMenuView> {
               (sum, product) =>
                   sum + ((_cart[product.id] ?? 0) * product.precio),
             );
+            if (_searchController.text != _searchQuery) {
+              _searchController.value = TextEditingValue(
+                text: _searchQuery,
+                selection: TextSelection.collapsed(offset: _searchQuery.length),
+              );
+            }
 
-            final filteredProducts = _selectedCategoryId == null
-                ? data.products
-                : data.products
-                      .where(
-                        (product) => product.categoryId == _selectedCategoryId,
-                      )
-                      .toList();
-            final categoryNameById = <String, String>{
-              for (final category in data.categories)
-                category.id.trim(): category.nombre,
-            };
-
-            final normalizedSearch = _normalizeSearchText(_searchQuery);
-            final visibleProducts = normalizedSearch.isEmpty
-                ? filteredProducts
-                : filteredProducts.where((product) {
-                    final categoryName =
-                        categoryNameById[product.categoryId.trim()] ?? '';
-                    final haystack = _normalizeSearchText(
-                      '${product.nombre} ${product.descripcion} $categoryName',
-                    );
-                    return haystack.contains(normalizedSearch);
-                  }).toList();
+            final visibleSections = _buildVisibleSections(data);
+            _syncActiveCategory(visibleSections);
+            final activeCategoryId =
+                visibleSections.any(
+                  (section) => section.id == _activeCategoryId,
+                )
+                ? _activeCategoryId
+                : (visibleSections.isEmpty ? null : visibleSections.first.id);
 
             return Container(
               decoration: BoxDecoration(
@@ -1386,6 +1523,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       await future;
                     },
                     child: CustomScrollView(
+                      controller: _scrollController,
                       physics: const AlwaysScrollableScrollPhysics(),
                       slivers: [
                         SliverAppBar(
@@ -1426,15 +1564,66 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                               ),
                               child: Align(
                                 alignment: Alignment.bottomLeft,
-                                child: Text(
-                                  data.comercioNombre,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.manrope(
-                                    color: palette.onSurface,
-                                    fontSize: 31,
-                                    fontWeight: FontWeight.w800,
-                                  ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_isAssistedMode)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 7,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: palette.primary.withValues(
+                                            alpha: 0.18,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          border: Border.all(
+                                            color: palette.primary.withValues(
+                                              alpha: 0.32,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _entrySource == 'dashboard'
+                                              ? 'Modo mesero · desde dashboard'
+                                              : 'Modo mesero · selección rápida',
+                                          style: GoogleFonts.manrope(
+                                            color: palette.onSurface,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                    if (_isAssistedMode)
+                                      const SizedBox(height: 10),
+                                    Text(
+                                      data.comercioNombre,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.manrope(
+                                        color: palette.onSurface,
+                                        fontSize: 31,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _isAssistedMode
+                                          ? 'Toca cualquier producto para sumarlo al pedido al instante.'
+                                          : 'Explora el menú y arma tu pedido a tu ritmo.',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.manrope(
+                                        color: palette.onSurfaceMuted,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1442,78 +1631,129 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                         ),
                         SliverPersistentHeader(
                           pinned: true,
-                          delegate: _SearchCategoryHeaderDelegate(
-                            minExtentValue: 130,
-                            maxExtentValue: 130,
+                          delegate: _MenuHeaderDelegate(
+                            minExtentValue: _stickyHeaderExtent,
+                            maxExtentValue: _stickyHeaderExtent,
                             palette: palette,
-                            categories: data.categories,
-                            selectedCategoryId: _selectedCategoryId,
+                            searchController: _searchController,
                             searchQuery: _searchQuery,
+                            activeCategoryId: activeCategoryId,
+                            categories: visibleSections,
                             onSearchChanged: (value) {
                               setState(() => _searchQuery = value);
                             },
-                            onSelectAll: () {
-                              setState(() => _selectedCategoryId = null);
-                            },
-                            onSelectCategory: (categoryId) {
-                              setState(() => _selectedCategoryId = categoryId);
-                            },
+                            onSelectCategory: _scrollToCategory,
                           ),
                         ),
-                        if (visibleProducts.isEmpty)
-                          SliverPadding(
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                            sliver: SliverToBoxAdapter(
-                              child: Container(
-                                padding: const EdgeInsets.all(24),
-                                decoration: BoxDecoration(
-                                  color: palette.surface,
-                                  borderRadius: BorderRadius.circular(22),
-                                  border: Border.all(
-                                    color: palette.primary.withValues(
-                                      alpha: 0.22,
+                        ...<Widget>[
+                          visibleSections.isEmpty
+                              ? SliverPadding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    16,
+                                    16,
+                                    0,
+                                  ),
+                                  sliver: SliverToBoxAdapter(
+                                    child: Container(
+                                      padding: const EdgeInsets.all(24),
+                                      decoration: BoxDecoration(
+                                        color: palette.surface,
+                                        borderRadius: BorderRadius.circular(22),
+                                        border: Border.all(
+                                          color: palette.primary.withValues(
+                                            alpha: 0.22,
+                                          ),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        _searchQuery.trim().isEmpty
+                                            ? 'No hay productos disponibles en este momento.'
+                                            : 'No encontramos productos con ese término.',
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.manrope(
+                                          color: palette.onSurface,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
-                                child: Text(
-                                  _searchQuery.trim().isEmpty
-                                      ? 'No hay productos disponibles en esta categoria.'
-                                      : 'No encontramos productos con ese término.',
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.manrope(
-                                    color: palette.onSurface,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
+                                )
+                              : SliverPadding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    16,
+                                    16,
+                                    0,
+                                  ),
+                                  sliver: SliverList.builder(
+                                    itemCount: visibleSections.length,
+                                    itemBuilder: (context, index) {
+                                      final section = visibleSections[index];
+                                      final sectionKey = _categorySectionKeys
+                                          .putIfAbsent(
+                                            section.id,
+                                            GlobalKey.new,
+                                          );
+                                      return Container(
+                                        key: sectionKey,
+                                        margin: EdgeInsets.only(
+                                          bottom:
+                                              index ==
+                                                  visibleSections.length - 1
+                                              ? 0
+                                              : 22,
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 12,
+                                              ),
+                                              child: Text(
+                                                section.title,
+                                                style: GoogleFonts.manrope(
+                                                  color: palette.onSurface,
+                                                  fontSize: 20,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                            ),
+                                            ...section.products.map(
+                                              (product) => _ModernProductTile(
+                                                product: product,
+                                                quantity:
+                                                    _cart[product.id] ?? 0,
+                                                tasaCambioPesos:
+                                                    data.tasaCambioPesos,
+                                                palette: palette,
+                                                fallbackImageUrl:
+                                                    data.comercioLogoUrl,
+                                                assistedMode: _isAssistedMode,
+                                                onAdd: () => _incrementProduct(
+                                                  product.id,
+                                                ),
+                                                onRemove: () =>
+                                                    _decrementProduct(
+                                                      product.id,
+                                                    ),
+                                                onTap: _isAssistedMode
+                                                    ? () => _handleQuickAdd(
+                                                        product,
+                                                      )
+                                                    : null,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
-                              ),
-                            ),
-                          )
-                        else
-                          SliverPadding(
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                            sliver: SliverList.builder(
-                              itemCount: visibleProducts.length,
-                              itemBuilder: (context, index) {
-                                final product = visibleProducts[index];
-                                return _PublicProductCard(
-                                  product: product,
-                                  quantity: _cart[product.id] ?? 0,
-                                  tasaCambioPesos: data.tasaCambioPesos,
-                                  heading: palette.onSurface,
-                                  muted: palette.onSurfaceMuted,
-                                  surface: palette.surface,
-                                  accent: palette.primary,
-                                  surfaceAlt: palette.surfaceAlt,
-                                  fallbackImageUrl: data.comercioLogoUrl,
-                                  onIncrement: () =>
-                                      _incrementProduct(product.id),
-                                  onDecrement: () =>
-                                      _decrementProduct(product.id),
-                                );
-                              },
-                            ),
-                          ),
+                        ],
                         const SliverToBoxAdapter(child: SizedBox(height: 110)),
                       ],
                     ),
@@ -1552,27 +1792,27 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   }
 }
 
-class _SearchCategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _SearchCategoryHeaderDelegate({
+class _MenuHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _MenuHeaderDelegate({
     required this.minExtentValue,
     required this.maxExtentValue,
     required this.palette,
     required this.categories,
-    required this.selectedCategoryId,
+    required this.activeCategoryId,
+    required this.searchController,
     required this.searchQuery,
     required this.onSearchChanged,
-    required this.onSelectAll,
     required this.onSelectCategory,
   });
 
   final double minExtentValue;
   final double maxExtentValue;
   final _PublicMenuPalette palette;
-  final List<_PublicCategory> categories;
-  final String? selectedCategoryId;
+  final List<_CategorySection> categories;
+  final String? activeCategoryId;
+  final TextEditingController searchController;
   final String searchQuery;
   final ValueChanged<String> onSearchChanged;
-  final VoidCallback onSelectAll;
   final ValueChanged<String> onSelectCategory;
 
   @override
@@ -1592,8 +1832,8 @@ class _SearchCategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Column(
         children: [
-          TextFormField(
-            initialValue: searchQuery,
+          TextField(
+            controller: searchController,
             onChanged: onSearchChanged,
             style: GoogleFonts.manrope(
               color: palette.onSurface,
@@ -1628,52 +1868,11 @@ class _SearchCategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
             ),
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            height: 42,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: const Text('Todo'),
-                    selected: selectedCategoryId == null,
-                    onSelected: (_) => onSelectAll(),
-                    selectedColor: palette.primary,
-                    labelStyle: GoogleFonts.manrope(
-                      color: selectedCategoryId == null
-                          ? palette.onPrimary
-                          : palette.onSurface,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    side: BorderSide(
-                      color: palette.primary.withValues(alpha: 0.22),
-                    ),
-                    backgroundColor: palette.surfaceAlt,
-                  ),
-                ),
-                ...categories.map((category) {
-                  final selected = selectedCategoryId == category.id;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(category.nombre),
-                      selected: selected,
-                      onSelected: (_) => onSelectCategory(category.id),
-                      selectedColor: palette.primary,
-                      labelStyle: GoogleFonts.manrope(
-                        color: selected ? palette.onPrimary : palette.onSurface,
-                        fontWeight: FontWeight.w800,
-                      ),
-                      side: BorderSide(
-                        color: palette.primary.withValues(alpha: 0.22),
-                      ),
-                      backgroundColor: palette.surfaceAlt,
-                    ),
-                  );
-                }),
-              ],
-            ),
+          _CategoryBar(
+            categories: categories,
+            activeCategoryId: activeCategoryId,
+            palette: palette,
+            onSelectCategory: onSelectCategory,
           ),
         ],
       ),
@@ -1681,72 +1880,121 @@ class _SearchCategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
   }
 
   @override
-  bool shouldRebuild(covariant _SearchCategoryHeaderDelegate oldDelegate) {
+  bool shouldRebuild(covariant _MenuHeaderDelegate oldDelegate) {
     return oldDelegate.palette != palette ||
         oldDelegate.categories != categories ||
-        oldDelegate.selectedCategoryId != selectedCategoryId ||
+        oldDelegate.activeCategoryId != activeCategoryId ||
         oldDelegate.searchQuery != searchQuery;
   }
 }
 
-class _PublicProductCard extends StatelessWidget {
-  const _PublicProductCard({
+class _CategoryBar extends StatelessWidget {
+  const _CategoryBar({
+    required this.categories,
+    required this.activeCategoryId,
+    required this.palette,
+    required this.onSelectCategory,
+  });
+
+  final List<_CategorySection> categories;
+  final String? activeCategoryId;
+  final _PublicMenuPalette palette;
+  final ValueChanged<String> onSelectCategory;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: categories.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final category = categories[index];
+          final selected = category.id == activeCategoryId;
+          return GestureDetector(
+            onTap: () => onSelectCategory(category.id),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: selected ? palette.primary : palette.surfaceAlt,
+                borderRadius: BorderRadius.circular(999),
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: palette.primary.withValues(alpha: 0.28),
+                          blurRadius: 18,
+                          offset: const Offset(0, 8),
+                        ),
+                      ]
+                    : const [],
+              ),
+              child: Text(
+                category.title,
+                style: GoogleFonts.manrope(
+                  color: selected ? palette.onPrimary : palette.onSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ModernProductTile extends StatelessWidget {
+  const _ModernProductTile({
     required this.product,
     required this.quantity,
     required this.tasaCambioPesos,
-    required this.heading,
-    required this.muted,
-    required this.surface,
-    required this.accent,
-    required this.surfaceAlt,
+    required this.palette,
     required this.fallbackImageUrl,
-    required this.onIncrement,
-    required this.onDecrement,
+    required this.assistedMode,
+    required this.onAdd,
+    required this.onRemove,
+    this.onTap,
   });
 
   final _PublicProduct product;
   final int quantity;
   final double tasaCambioPesos;
-  final Color heading;
-  final Color muted;
-  final Color surface;
-  final Color accent;
-  final Color surfaceAlt;
+  final _PublicMenuPalette palette;
   final String? fallbackImageUrl;
-  final VoidCallback onIncrement;
-  final VoidCallback onDecrement;
+  final bool assistedMode;
+  final VoidCallback onAdd;
+  final VoidCallback onRemove;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
+    final totalCop = product.precio * tasaCambioPesos;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: const [
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: palette.primary.withValues(alpha: 0.16)),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x12000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
           ),
         ],
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: _ProductVisual(
-              productImageUrl: product.imageUrl,
-              fallbackImageUrl: fallbackImageUrl,
-              surfaceAlt: surfaceAlt,
-              muted: muted,
-              defaultAssetPath: _PublicMenuViewState._defaultBrandLogoAsset,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(26),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1754,97 +2002,146 @@ class _PublicProductCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (assistedMode)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: palette.primary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'Toque rápido',
+                            style: GoogleFonts.manrope(
+                              color: palette.primary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
                       Text(
                         product.nombre,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.manrope(
-                          color: heading,
+                          color: palette.onSurface,
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      if (product.descripcion.isNotEmpty)
+                      if (product.descripcion.trim().isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
                             product.descripcion,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.manrope(
-                              color: muted,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
+                              color: palette.onSurfaceMuted,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
                             ),
                           ),
                         ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '\$${product.precio.toStringAsFixed(2)}',
+                        style: GoogleFonts.manrope(
+                          color: palette.primary,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (tasaCambioPesos > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '${totalCop.toStringAsFixed(0)} COP',
+                            style: GoogleFonts.manrope(
+                              color: palette.onSurfaceMuted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 14),
+                      quantity == 0
+                          ? FilledButton.icon(
+                              onPressed: onAdd,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: palette.primary,
+                                foregroundColor: palette.onPrimary,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 13,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              icon: const Icon(Icons.add_rounded, size: 18),
+                              label: Text(
+                                assistedMode
+                                    ? 'Agregar al instante'
+                                    : 'Agregar',
+                                style: GoogleFonts.manrope(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            )
+                          : Container(
+                              decoration: BoxDecoration(
+                                color: palette.surfaceAlt,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              padding: const EdgeInsets.all(4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    onPressed: onRemove,
+                                    icon: const Icon(Icons.remove_rounded),
+                                    color: palette.primary,
+                                  ),
+                                  SizedBox(
+                                    width: 28,
+                                    child: Text(
+                                      '$quantity',
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.manrope(
+                                        color: palette.onSurface,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    onPressed: onAdd,
+                                    icon: const Icon(Icons.add_rounded),
+                                    color: palette.primary,
+                                  ),
+                                ],
+                              ),
+                            ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '\$${product.precio.toStringAsFixed(2)}',
-                      style: GoogleFonts.manrope(
-                        color: accent,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    if (tasaCambioPesos > 0)
-                      Text(
-                        '${(product.precio * tasaCambioPesos).toStringAsFixed(0)} COP',
-                        style: GoogleFonts.manrope(
-                          color: muted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                  ],
+                _ProductTileVisual(
+                  productImageUrl: product.imageUrl,
+                  fallbackImageUrl: fallbackImageUrl,
+                  surfaceAlt: palette.surfaceAlt,
+                  muted: palette.onSurfaceMuted,
+                  defaultAssetPath: _PublicMenuViewState._defaultBrandLogoAsset,
                 ),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: surfaceAlt,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        onPressed: quantity == 0 ? null : onDecrement,
-                        icon: const Icon(Icons.remove_circle_outline),
-                        color: accent,
-                      ),
-                      SizedBox(
-                        width: 28,
-                        child: Text(
-                          '$quantity',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.manrope(
-                            color: heading,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: onIncrement,
-                        icon: const Icon(Icons.add_circle),
-                        color: accent,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1878,6 +2175,18 @@ class _PublicMenuData {
   final List<_PublicProduct> products;
 }
 
+class _CategorySection {
+  const _CategorySection({
+    required this.id,
+    required this.title,
+    required this.products,
+  });
+
+  final String id;
+  final String title;
+  final List<_PublicProduct> products;
+}
+
 class _DeliveryMapPick {
   const _DeliveryMapPick({
     required this.address,
@@ -1890,8 +2199,8 @@ class _DeliveryMapPick {
   final double longitude;
 }
 
-class _ProductVisual extends StatelessWidget {
-  const _ProductVisual({
+class _ProductTileVisual extends StatelessWidget {
+  const _ProductTileVisual({
     required this.productImageUrl,
     required this.fallbackImageUrl,
     required this.surfaceAlt,
@@ -1910,29 +2219,61 @@ class _ProductVisual extends StatelessWidget {
     final productUrl = productImageUrl?.trim() ?? '';
     final businessLogoUrl = fallbackImageUrl?.trim() ?? '';
 
-    if (productUrl.isNotEmpty) {
-      return Image.network(
-        productUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          return _buildLogoOrDefault(businessLogoUrl);
-        },
-      );
-    }
-
-    return _buildLogoOrDefault(businessLogoUrl);
+    return Container(
+      width: 118,
+      height: 118,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: productUrl.isNotEmpty
+          ? CachedNetworkImage(
+              imageUrl: productUrl,
+              fit: BoxFit.cover,
+              fadeInDuration: const Duration(milliseconds: 180),
+              placeholder: (context, url) => _buildLoadingState(),
+              errorWidget: (context, url, error) {
+                return _buildLogoOrDefault(businessLogoUrl);
+              },
+            )
+          : _buildLogoOrDefault(businessLogoUrl),
+    );
   }
 
   Widget _buildLogoOrDefault(String businessLogoUrl) {
     if (businessLogoUrl.isNotEmpty) {
-      return Image.network(
-        businessLogoUrl,
+      return CachedNetworkImage(
+        imageUrl: businessLogoUrl,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _buildDefaultLogo(),
+        fadeInDuration: const Duration(milliseconds: 180),
+        placeholder: (context, url) => _buildLoadingState(),
+        errorWidget: (context, url, error) => _buildDefaultLogo(),
       );
     }
 
     return _buildDefaultLogo();
+  }
+
+  Widget _buildLoadingState() {
+    return Container(
+      color: surfaceAlt,
+      alignment: Alignment.center,
+      child: SizedBox(
+        width: 22,
+        height: 22,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.2,
+          valueColor: AlwaysStoppedAnimation<Color>(muted),
+        ),
+      ),
+    );
   }
 
   Widget _buildDefaultLogo() {

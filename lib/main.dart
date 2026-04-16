@@ -184,7 +184,11 @@ class _KosmenuAppState extends State<KosmenuApp> {
       final comercioId = uri.pathSegments[1];
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => PublicMenuView(comercioId: comercioId),
+        builder: (_) => PublicMenuView(
+          comercioId: comercioId,
+          assistedMode: uri.queryParameters['mode'] == 'assisted',
+          entrySource: uri.queryParameters['source'],
+        ),
       );
     }
 
