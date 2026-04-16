@@ -27,7 +27,16 @@ class MagicOnboardingResult {
   });
 }
 
-enum MagicOnboardingInputMode { camera, fileImport }
+class _AiFlowException implements Exception {
+  const _AiFlowException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+enum MagicOnboardingInputMode { camera, fileImport, textPrompt }
 
 class MagicOnboardingScreen extends StatefulWidget {
   const MagicOnboardingScreen({
@@ -45,7 +54,9 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     with SingleTickerProviderStateMixin {
   final ImagePicker _picker = ImagePicker();
   final StorageService _storageService = const StorageService();
+  final TextEditingController _menuPromptController = TextEditingController();
   static const String _defaultCatalogName = 'Menu principal';
+  static const int _maxPromptLength = 2800;
 
   late final AnimationController _entryController;
   bool _isLaunchingScan = false;
@@ -56,17 +67,40 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
   bool get _isFileImportMode =>
       widget.inputMode == MagicOnboardingInputMode.fileImport;
 
-  String get _screenTitle =>
-      _isFileImportMode ? 'Importar archivo con IA' : 'Escaneo con IA';
+  bool get _isTextPromptMode =>
+      widget.inputMode == MagicOnboardingInputMode.textPrompt;
 
-  String get _primaryActionLabel =>
-      _isFileImportMode ? 'Seleccionar archivos' : 'Entendido';
+  String get _screenTitle {
+    if (_isTextPromptMode) {
+      return 'Crear menu desde texto';
+    }
+    return _isFileImportMode ? 'Importar archivo con IA' : 'Escaneo con IA';
+  }
 
-  String get _emptyProgressLabel => _isFileImportMode
-      ? 'Preparando importacion con IA...'
-      : 'Preparando escaneo con IA...';
+  String get _primaryActionLabel {
+    if (_isTextPromptMode) {
+      return 'Generar menu con IA';
+    }
+    return _isFileImportMode ? 'Seleccionar archivos' : 'Entendido';
+  }
 
-  String get _selectedAssetLabel => _isFileImportMode ? 'Archivos' : 'Paginas';
+  String get _emptyProgressLabel {
+    if (_isTextPromptMode) {
+      return 'Preparando tu descripcion del menu...';
+    }
+    return _isFileImportMode
+        ? 'Preparando importacion con IA...'
+        : 'Preparando escaneo con IA...';
+  }
+
+  String get _selectedAssetLabel {
+    if (_isTextPromptMode) {
+      return 'Bloques';
+    }
+    return _isFileImportMode ? 'Archivos' : 'Paginas';
+  }
+
+  bool get _canSubmitPrompt => _menuPromptController.text.trim().length >= 12;
 
   @override
   void initState() {
@@ -80,6 +114,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
   @override
   void dispose() {
     _entryController.dispose();
+    _menuPromptController.dispose();
     super.dispose();
   }
 
@@ -120,7 +155,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                             curve: Curves.easeOutCubic,
                           ),
                         ),
-                        child: _HeaderCard(isFileImportMode: _isFileImportMode),
+                        child: _HeaderCard(inputMode: widget.inputMode),
                       ),
                       const SizedBox(height: 16),
                       _AnimatedReveal(
@@ -134,9 +169,31 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                         ),
                         child: _InfographicCard(
                           animation: _entryController,
-                          isFileImportMode: _isFileImportMode,
+                          inputMode: widget.inputMode,
                         ),
                       ),
+                      if (_isTextPromptMode) ...[
+                        const SizedBox(height: 16),
+                        _AnimatedReveal(
+                          animation: CurvedAnimation(
+                            parent: _entryController,
+                            curve: const Interval(
+                              0.22,
+                              0.88,
+                              curve: Curves.easeOutCubic,
+                            ),
+                          ),
+                          child: _PromptComposerCard(
+                            controller: _menuPromptController,
+                            maxLength: _maxPromptLength,
+                            onChanged: () {
+                              if (mounted) {
+                                setState(() {});
+                              }
+                            },
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       _AnimatedReveal(
                         animation: CurvedAnimation(
@@ -147,7 +204,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                             curve: Curves.easeOutCubic,
                           ),
                         ),
-                        child: _AiNoteCard(isFileImportMode: _isFileImportMode),
+                        child: _AiNoteCard(inputMode: widget.inputMode),
                       ),
                     ],
                   ),
@@ -168,7 +225,11 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                       ),
                     ),
                     child: FilledButton.icon(
-                      onPressed: _isLaunchingScan ? null : _startIntakeFlow,
+                      onPressed:
+                          _isLaunchingScan ||
+                              (_isTextPromptMode && !_canSubmitPrompt)
+                          ? null
+                          : _startIntakeFlow,
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.accent,
                         foregroundColor: Colors.white,
@@ -270,6 +331,8 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                     Text(
                       _selectedAssetCount > 0
                           ? '$_selectedAssetLabel en proceso: $_selectedAssetCount'
+                          : _isTextPromptMode
+                          ? 'Procesando descripcion del menu...'
                           : _isFileImportMode
                           ? 'Preparando seleccion de archivos...'
                           : 'Preparando captura...',
@@ -307,6 +370,11 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     }
 
     try {
+      if (_isTextPromptMode) {
+        await _startPromptFlow(comercioId);
+        return;
+      }
+
       final importedAssets = _isFileImportMode
           ? await _selectImportAssets()
           : await _captureMenuPages();
@@ -414,8 +482,13 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
 
         final data = _responseMap(response.data);
         if (response.status < 200 || response.status >= 300) {
-          throw StateError(
-            'Error al procesar ${asset.displayName} (status ${response.status}): ${data['error'] ?? 'sin detalle'}.',
+          throw _AiFlowException(
+            _buildAiFailureMessage(
+              status: response.status,
+              data: data,
+              fallback:
+                  'No se pudo procesar ${asset.displayName} con IA en este momento.',
+            ),
           );
         }
 
@@ -493,9 +566,155 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            _isFileImportMode
-                ? 'No se pudo completar la importacion con IA. Intenta con otro archivo.\n$error'
-                : 'No se pudo completar el escaneo con IA. Intenta otra foto.\n$error',
+            _buildAiFlowCatchMessage(
+              error: error,
+              fallback: _isFileImportMode
+                  ? 'No se pudo completar la importacion con IA. Intenta con otro archivo.'
+                  : 'No se pudo completar el escaneo con IA. Intenta otra foto.',
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _startPromptFlow(String comercioId) async {
+    final promptText = _menuPromptController.text.trim();
+    if (promptText.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Describe tu menu antes de generar con IA.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isLaunchingScan = true;
+      _selectedAssetCount = 0;
+    });
+    _setProgress(value: 0.02, message: _initialProgressMessage());
+    _setProgress(value: 0.08, message: _confirmedProgressMessage(1));
+
+    try {
+      final supabase = Supabase.instance.client;
+      String catalogId = '';
+      String catalogName = _defaultCatalogName;
+      bool isNewCatalog = false;
+      final existingCatalogRow = await supabase
+          .from('catalogos')
+          .select('id,nombre')
+          .eq('comercio_id', comercioId)
+          .order('orden', ascending: true)
+          .order('created_at', ascending: true)
+          .limit(1)
+          .maybeSingle();
+      final existing = existingCatalogRow ?? const <String, dynamic>{};
+      final existingId = existing['id']?.toString().trim() ?? '';
+      final existingName = existing['nombre']?.toString().trim() ?? '';
+      if (existingId.isNotEmpty) {
+        catalogId = existingId;
+      }
+      if (existingName.isNotEmpty) {
+        catalogName = existingName;
+      }
+
+      _setProgress(
+        value: 0.24,
+        message:
+            'IA estructurando categorias, productos y precios desde tu descripcion...',
+      );
+
+      final response = await supabase.functions.invoke(
+        'process-menu-gemini',
+        body: {
+          'prompt_text': promptText,
+          'comercio_id': comercioId,
+          'catalog_name': catalogName,
+        },
+        headers: {
+          'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+          'apikey': SupabaseConfig.anonKey,
+        },
+      );
+
+      final data = _responseMap(response.data);
+      if (response.status < 200 || response.status >= 300) {
+        throw _AiFlowException(
+          _buildAiFailureMessage(
+            status: response.status,
+            data: data,
+            fallback: 'No se pudo procesar tu descripcion del menu con IA.',
+          ),
+        );
+      }
+
+      final returnedCatalogId = data['catalog_id']?.toString().trim() ?? '';
+      if (catalogId.isEmpty && returnedCatalogId.isNotEmpty) {
+        catalogId = returnedCatalogId;
+      }
+
+      final returnedCatalogName = data['catalog_name']?.toString().trim() ?? '';
+      if (returnedCatalogName.isNotEmpty) {
+        catalogName = returnedCatalogName;
+      }
+
+      isNewCatalog = data['catalog_created'] == true;
+      final totalCreatedCategories = _asInt(data['created_categories']);
+      var totalCreatedProducts = _asInt(data['created_products']);
+      final detectedCategoryNames = _extractCategoryNames(data['parsed_menu']);
+
+      _setProgress(
+        value: 0.9,
+        message: 'Eliminando productos repetidos y consolidando el menu...',
+      );
+
+      final dedupedCount = await _dedupeCatalogProducts(
+        comercioId: comercioId,
+        catalogId: catalogId,
+      );
+      totalCreatedProducts = (totalCreatedProducts - dedupedCount).clamp(
+        0,
+        1 << 31,
+      );
+
+      _setProgress(value: 1, message: 'Listo. Menu generado desde texto.');
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _isLaunchingScan = false);
+      Navigator.of(context).pop(
+        MagicOnboardingResult(
+          catalog: CatalogModel(
+            id: catalogId,
+            comercioId: comercioId,
+            nombre: catalogName,
+            orden: 0,
+            activo: true,
+          ),
+          createdCategories: totalCreatedCategories,
+          createdProducts: totalCreatedProducts,
+          detectedCategoryNames: detectedCategoryNames,
+          isNewCatalog: isNewCatalog,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isLaunchingScan = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _buildAiFlowCatchMessage(
+              error: error,
+              fallback:
+                  'No se pudo crear el menu desde texto. Ajusta la descripcion e intenta de nuevo.',
+            ),
           ),
         ),
       );
@@ -917,12 +1136,18 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
   }
 
   String _initialProgressMessage() {
+    if (_isTextPromptMode) {
+      return 'Preparando tu descripcion para estructurar el menu con IA...';
+    }
     return _isFileImportMode
         ? 'Abriendo selector para importar archivos del menu...'
         : 'Abriendo camara para capturar la primera pagina...';
   }
 
   String _confirmedProgressMessage(int count) {
+    if (_isTextPromptMode) {
+      return 'Descripcion recibida. Generando menu con IA...';
+    }
     return _isFileImportMode
         ? 'Se confirmaron $count archivo(s). Iniciando analisis con IA...'
         : 'Se confirmaron $count pagina(s). Iniciando analisis con IA...';
@@ -1067,6 +1292,41 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     return <String, dynamic>{};
   }
 
+  String _buildAiFailureMessage({
+    required int status,
+    required Map<String, dynamic> data,
+    required String fallback,
+  }) {
+    final serverMessage = data['error']?.toString().trim() ?? '';
+    final retryable = data['retryable'] == true;
+
+    if (status == 503 && retryable) {
+      return 'La IA esta temporalmente saturada. Intenta de nuevo en unos segundos.';
+    }
+
+    if (serverMessage.isNotEmpty) {
+      return serverMessage;
+    }
+
+    return fallback;
+  }
+
+  String _buildAiFlowCatchMessage({
+    required Object error,
+    required String fallback,
+  }) {
+    if (error is _AiFlowException) {
+      return error.message;
+    }
+
+    final raw = error.toString().trim();
+    if (raw.isEmpty) {
+      return fallback;
+    }
+
+    return '$fallback\n$raw';
+  }
+
   int _asInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
@@ -1117,9 +1377,15 @@ class _AnimatedReveal extends StatelessWidget {
 }
 
 class _HeaderCard extends StatelessWidget {
-  final bool isFileImportMode;
+  final MagicOnboardingInputMode inputMode;
 
-  const _HeaderCard({required this.isFileImportMode});
+  const _HeaderCard({required this.inputMode});
+
+  bool get _isFileImportMode =>
+      inputMode == MagicOnboardingInputMode.fileImport;
+
+  bool get _isTextPromptMode =>
+      inputMode == MagicOnboardingInputMode.textPrompt;
 
   @override
   Widget build(BuildContext context) {
@@ -1155,7 +1421,9 @@ class _HeaderCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isFileImportMode
+                  _isTextPromptMode
+                      ? 'Recomendaciones para describir tu menu'
+                      : _isFileImportMode
                       ? 'Recomendaciones antes de importar'
                       : 'Recomendaciones antes de escanear',
                   style: GoogleFonts.manrope(
@@ -1166,7 +1434,9 @@ class _HeaderCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  isFileImportMode
+                  _isTextPromptMode
+                      ? 'Mientras mas clara y estructurada sea tu descripcion, mejor quedara el menu generado por IA.'
+                      : _isFileImportMode
                       ? 'Usa archivos legibles y completos para obtener mejores resultados con IA.'
                       : 'Sigue esta guia rapida para obtener mejores resultados con IA.',
                   style: GoogleFonts.poppins(
@@ -1186,12 +1456,9 @@ class _HeaderCard extends StatelessWidget {
 
 class _InfographicCard extends StatelessWidget {
   final Animation<double> animation;
-  final bool isFileImportMode;
+  final MagicOnboardingInputMode inputMode;
 
-  const _InfographicCard({
-    required this.animation,
-    required this.isFileImportMode,
-  });
+  const _InfographicCard({required this.animation, required this.inputMode});
 
   static const List<_TipItem> _scanTips = <_TipItem>[
     _TipItem(
@@ -1264,9 +1531,51 @@ class _InfographicCard extends StatelessWidget {
     ),
   ];
 
+  static const List<_TipItem> _textPromptTips = <_TipItem>[
+    _TipItem(
+      number: '01',
+      title: 'Separar por categorias',
+      description:
+          'Agrupa tu descripcion por secciones como entradas, hamburguesas, bebidas o postres.',
+      icon: Icons.category_rounded,
+    ),
+    _TipItem(
+      number: '02',
+      title: 'Precio junto al producto',
+      description:
+          'Escribe cada item con su precio para que la IA no tenga que inferirlo.',
+      icon: Icons.attach_money_rounded,
+    ),
+    _TipItem(
+      number: '03',
+      title: 'Variantes y extras',
+      description:
+          'Si manejas tamanos o sabores, indicalos en la misma linea o debajo del producto.',
+      icon: Icons.tune_rounded,
+    ),
+    _TipItem(
+      number: '04',
+      title: 'Sin ambiguedad',
+      description:
+          'Evita frases vagas como “precio segun presentacion” si puedes detallar cada opcion.',
+      icon: Icons.rule_rounded,
+    ),
+    _TipItem(
+      number: '05',
+      title: 'Revision final',
+      description:
+          'La IA arma el borrador rapido, pero conviene revisar nombres, descripciones y precios despues.',
+      icon: Icons.fact_check_rounded,
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final tips = isFileImportMode ? _importTips : _scanTips;
+    final tips = switch (inputMode) {
+      MagicOnboardingInputMode.fileImport => _importTips,
+      MagicOnboardingInputMode.textPrompt => _textPromptTips,
+      MagicOnboardingInputMode.camera => _scanTips,
+    };
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1367,9 +1676,9 @@ class _TipRow extends StatelessWidget {
 }
 
 class _AiNoteCard extends StatelessWidget {
-  final bool isFileImportMode;
+  final MagicOnboardingInputMode inputMode;
 
-  const _AiNoteCard({required this.isFileImportMode});
+  const _AiNoteCard({required this.inputMode});
 
   @override
   Widget build(BuildContext context) {
@@ -1387,7 +1696,9 @@ class _AiNoteCard extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              isFileImportMode
+              inputMode == MagicOnboardingInputMode.textPrompt
+                  ? 'Esta opcion convierte una descripcion escrita en categorias, productos y precios estructurados. Si hay informacion incompleta, la IA intentara ordenarla sin inventar detalles que no aparezcan en tu texto.'
+                  : inputMode == MagicOnboardingInputMode.fileImport
                   ? 'Esta importacion se procesa con IA para detectar categorias, productos y precios automaticamente desde archivos como PDF, imagen, CSV o TXT. Mientras mas claro este el contenido, mejor sera el resultado.'
                   : 'Este escaneo se procesa con IA para detectar categorias, productos y precios automaticamente. Mientras mejor sea la foto, mejor sera el resultado.',
               style: GoogleFonts.poppins(
@@ -1396,6 +1707,116 @@ class _AiNoteCard extends StatelessWidget {
                 height: 1.4,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PromptComposerCard extends StatelessWidget {
+  const _PromptComposerCard({
+    required this.controller,
+    required this.maxLength,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final int maxLength;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = controller.text.trim();
+    final remaining = maxLength - controller.text.characters.length;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.borderSubtle),
+        boxShadow: AppTheme.softShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Describe tu menu',
+            style: GoogleFonts.manrope(
+              color: AppColors.textStrong,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Incluye categorias, nombres de productos, descripciones y precios. Mientras mas ordenado este el texto, mejor quedara el borrador.',
+            style: GoogleFonts.poppins(
+              color: AppColors.textSoft,
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller,
+            onChanged: (_) => onChanged(),
+            maxLength: maxLength,
+            minLines: 8,
+            maxLines: 14,
+            style: GoogleFonts.poppins(color: AppColors.textStrong),
+            decoration: InputDecoration(
+              hintText:
+                  'Ejemplo:\nEntradas\nTequenos - Palitos de queso con salsa tartara - 6\n\nHamburguesas\nClasica - Carne, queso, lechuga y tomate - 8\nDoble bacon - Doble carne, tocineta y cheddar - 11\n\nBebidas\nRefresco 355ml - 2',
+              hintStyle: GoogleFonts.poppins(
+                color: AppColors.textSoft,
+                fontSize: 12,
+                height: 1.45,
+              ),
+              counterText: '',
+              filled: true,
+              fillColor: AppColors.surfaceMuted,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: AppColors.borderSubtle),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(color: AppColors.borderSubtle),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: AppColors.accent),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  text.length < 12
+                      ? 'Agrega suficiente detalle para que la IA pueda separar categorias y precios.'
+                      : 'La IA usara este texto como base para construir tu catalogo.',
+                  style: GoogleFonts.poppins(
+                    color: AppColors.textSoft,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '$remaining restantes',
+                style: GoogleFonts.poppins(
+                  color: remaining < 180
+                      ? AppColors.danger
+                      : AppColors.textSoft,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ],
       ),

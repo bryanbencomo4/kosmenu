@@ -109,6 +109,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   static const String _exchangeSourceGoogle = 'google';
   static const String _menuAiModeScan = 'scan';
   static const String _menuAiModeFileImport = 'file_import';
+  static const String _menuAiModeTextPrompt = 'text_prompt';
   static const double _p2pBuyerMarkupRate = 0.006;
   static const Map<String, double> _defaultGoogleAnchorRates = <String, double>{
     'USD/COP': 4000,
@@ -1942,13 +1943,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   void _showComingSoonPrompt() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Crear menu desde un prompt de texto estara disponible pronto.',
-        ),
-      ),
-    );
+    unawaited(_openMenuPromptSetup());
   }
 
   Future<String?> _openManualLogoEditor(String sourcePath) async {
@@ -3597,6 +3592,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     await _openMenuAiSetup(MagicOnboardingInputMode.fileImport);
   }
 
+  Future<void> _openMenuPromptSetup() async {
+    await _openMenuAiSetup(MagicOnboardingInputMode.textPrompt);
+  }
+
   Future<void> _openMenuAiSetup(MagicOnboardingInputMode inputMode) async {
     final comercioId = await _ensureComercioIdForGemini();
     if (!mounted) {
@@ -3606,7 +3605,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Completa y guarda los datos base antes de escanear el menu.',
+            'Completa y guarda los datos base antes de crear el menu con IA.',
           ),
         ),
       );
@@ -3630,9 +3629,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     setState(() {
       _menuScanCompleted = true;
-      _menuAiSetupMode = inputMode == MagicOnboardingInputMode.fileImport
-          ? _menuAiModeFileImport
-          : _menuAiModeScan;
+      _menuAiSetupMode = switch (inputMode) {
+        MagicOnboardingInputMode.fileImport => _menuAiModeFileImport,
+        MagicOnboardingInputMode.textPrompt => _menuAiModeTextPrompt,
+        MagicOnboardingInputMode.camera => _menuAiModeScan,
+      };
       _manualMenuSetupSelected = false;
       _scanCreatedCategories = result.createdCategories;
       _scanCreatedProducts = result.createdProducts;
@@ -9000,7 +9001,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Escanea con camara, importa un archivo o crea manualmente. Debes completar una opcion para continuar.',
+            'Escanea con camara, importa un archivo, describe tu menu con texto o crealo manualmente. Debes completar una opcion para continuar.',
             style: TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
           const SizedBox(height: 14),
@@ -9035,6 +9036,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                         _menuScanCompleted
                             ? _menuAiSetupMode == _menuAiModeFileImport
                                   ? 'Menu importado con IA'
+                                  : _menuAiSetupMode == _menuAiModeTextPrompt
+                                  ? 'Menu creado desde texto con IA'
                                   : 'Menu creado con IA'
                             : _menuCatalogCount > 0
                             ? 'Creacion manual completada'
@@ -9096,7 +9099,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                         side: const BorderSide(color: Color(0xFF6B5A9A)),
                       ),
                       icon: const Icon(Icons.chat_rounded),
-                      label: const Text('Crear desde prompt de texto'),
+                      label: Text(
+                        _menuScanCompleted &&
+                                _menuAiSetupMode == _menuAiModeTextPrompt
+                            ? 'Regenerar desde prompt de texto'
+                            : 'Crear desde prompt de texto',
+                      ),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(

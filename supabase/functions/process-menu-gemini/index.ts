@@ -25,6 +25,17 @@ type CatalogRecord = {
   created: boolean;
 };
 
+class HttpResponseError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryable = false,
+  ) {
+    super(message);
+    this.name = 'HttpResponseError';
+  }
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -36,8 +47,18 @@ const PROMPT =
   'Devuelve UNICAMENTE un JSON con este formato: ' +
   '{"categorias": [{"nombre": "...", "productos": [{"nombre": "...", "descripcion": "...", "precio": 0.0}]}]}';
 
+const PROMPT_FROM_TEXT =
+  'Analiza esta descripcion escrita de un menu de restaurante. ' +
+  'Organiza el contenido en categorias y productos con nombre, descripcion y precio. ' +
+  'No inventes categorias ni precios que no aparezcan o no puedan deducirse razonablemente del texto. ' +
+  'Si una descripcion no existe, usa cadena vacia. Si un precio no aparece, usa 0.0. ' +
+  'Devuelve UNICAMENTE un JSON con este formato: ' +
+  '{"categorias": [{"nombre": "...", "productos": [{"nombre": "...", "descripcion": "...", "precio": 0.0}]}]}';
+
 const GEMINI_MODEL = 'gemini-2.5-flash';
 const DEFAULT_CATALOG_NAME = 'Menú Principal';
+const GEMINI_MAX_ATTEMPTS = 3;
+const GEMINI_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -51,14 +72,16 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const fileUrl: string | undefined = body.file_url ?? body.fileUrl ?? body.image_url ?? body.imageUrl;
+    const promptTextRaw: unknown = body.prompt_text ?? body.promptText ?? body.menu_text ?? body.menuText;
+    const promptText = typeof promptTextRaw === 'string' ? promptTextRaw.trim() : '';
     const comercioIdInput: unknown = body.comercio_id ?? body.comercioId;
     const comercioId =
       typeof comercioIdInput === 'string' ? comercioIdInput.trim() : '';
     const requestedCatalogName = normalizeCatalogName(body.catalog_name ?? body.nombre_catalogo);
 
-    if (!fileUrl || !comercioId) {
+    if ((!fileUrl && !promptText) || !comercioId) {
       return jsonResponse(
-        { error: 'Missing required fields: file_url and comercio_id' },
+        { error: 'Missing required fields: (file_url or prompt_text) and comercio_id' },
         400,
       );
     }
@@ -77,7 +100,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const parsedMenu = await extractMenuWithGemini(fileUrl, geminiApiKey);
+    const parsedMenu = promptText
+      ? await extractMenuFromPromptText(promptText, geminiApiKey)
+      : await extractMenuWithGemini(fileUrl!, geminiApiKey);
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -169,6 +194,16 @@ Deno.serve(async (req: Request) => {
       200,
     );
   } catch (error) {
+    if (error instanceof HttpResponseError) {
+      return jsonResponse(
+        {
+          error: error.message,
+          retryable: error.retryable,
+        },
+        error.status,
+      );
+    }
+
     const message = error instanceof Error ? error.message : 'Unknown error';
     return jsonResponse({ error: message }, 500);
   }
@@ -183,36 +218,119 @@ async function extractMenuWithGemini(fileUrl: string, apiKey: string): Promise<P
   const contentType = normalizeContentType(fileResponse.headers.get('content-type'));
   const fileBytes = new Uint8Array(await fileResponse.arrayBuffer());
 
+  return generateStructuredMenu(
+    [buildGeminiRequestContent(contentType, fileBytes)],
+    apiKey,
+  );
+}
+
+async function extractMenuFromPromptText(promptText: string, apiKey: string): Promise<ParsedMenu> {
+  return generateStructuredMenu(
+    [
+      {
+        role: 'user',
+        parts: [
+          {
+            text:
+              `${PROMPT_FROM_TEXT}\n\n` +
+              'Descripcion del negocio o del menu:\n' +
+              promptText,
+          },
+        ],
+      },
+    ],
+    apiKey,
+  );
+}
+
+async function generateStructuredMenu(contents: Array<Record<string, unknown>>, apiKey: string): Promise<ParsedMenu> {
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent` +
     `?key=${encodeURIComponent(apiKey)}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [buildGeminiRequestContent(contentType, fileBytes)],
-      generationConfig: {
-        temperature: 0,
-        responseMimeType: 'application/json',
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini error (${GEMINI_MODEL}): ${errorText}`);
-  }
+  const response = await fetchGeminiWithRetry(url, contents);
 
   const completion = await response.json();
   const text = completion?.candidates?.[0]?.content?.parts?.[0]?.text;
 
   if (!text || typeof text !== 'string') {
-    throw new Error('Gemini response did not include text output');
+    throw new HttpResponseError(
+      'La IA no devolvio una respuesta valida para estructurar el menu.',
+      502,
+    );
   }
 
-  const parsed = parseMenuJson(text);
+  return normalizeParsedMenu(parseMenuJson(text));
+}
 
+async function fetchGeminiWithRetry(
+  url: string,
+  contents: Array<Record<string, unknown>>,
+): Promise<Response> {
+  let lastErrorText = '';
+  let lastStatus = 503;
+
+  for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt++) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: 'application/json',
+        },
+      }),
+    });
+
+    if (response.ok) {
+      return response;
+    }
+
+    lastStatus = response.status;
+    lastErrorText = await response.text();
+
+    if (
+      GEMINI_RETRYABLE_STATUS_CODES.has(response.status) &&
+      attempt < GEMINI_MAX_ATTEMPTS
+    ) {
+      console.warn('Gemini transient error, retrying request', {
+        model: GEMINI_MODEL,
+        attempt,
+        status: response.status,
+        body: lastErrorText,
+      });
+      await delayMs(500 * attempt);
+      continue;
+    }
+
+    if (GEMINI_RETRYABLE_STATUS_CODES.has(response.status)) {
+      throw new HttpResponseError(
+        'El servicio de IA esta temporalmente saturado. Intenta de nuevo en unos segundos.',
+        503,
+        true,
+      );
+    }
+
+    console.error('Gemini non-retryable error', {
+      model: GEMINI_MODEL,
+      status: response.status,
+      body: lastErrorText,
+    });
+    throw new HttpResponseError(
+      'La IA no pudo procesar el menu en este momento.',
+      502,
+    );
+  }
+
+  throw new HttpResponseError(
+    `La IA no pudo procesar el menu tras varios intentos (status ${lastStatus}). ${lastErrorText}`,
+    503,
+    true,
+  );
+}
+
+function normalizeParsedMenu(parsed: ParsedMenu): ParsedMenu {
   if (!Array.isArray(parsed.categorias)) {
     throw new Error('Invalid JSON shape: categorias must be an array');
   }
@@ -269,7 +387,7 @@ function buildGeminiRequestContent(contentType: string, fileBytes: Uint8Array) {
 }
 
 function normalizeContentType(value: string | null): string {
-  const normalized = (value ?? '').split(';').first?.trim().toLowerCase() ?? '';
+  const normalized = ((value ?? '').split(';')[0] ?? '').trim().toLowerCase();
   if (!normalized) {
     return 'image/jpeg';
   }
@@ -422,6 +540,10 @@ function toBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+}
+
+function delayMs(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function jsonResponse(body: unknown, status: number): Response {
