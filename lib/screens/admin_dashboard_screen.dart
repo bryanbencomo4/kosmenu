@@ -633,10 +633,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Future<void> _editBusinessInfo(ComercioModel comercio) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => BusinessSetupScreen(
-          initialComercio: comercio,
-          businessConfigOnly: true,
-        ),
+        builder: (_) => BusinessSetupScreen(initialComercio: comercio),
       ),
     );
     if (!mounted) return;

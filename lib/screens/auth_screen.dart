@@ -46,13 +46,6 @@ class _AuthGateState extends State<AuthGate> {
         return _PostAuthTarget.setup;
       }
 
-      final prefs = await SharedPreferences.getInstance();
-      final draftRaw = prefs.getString('$_setupDraftKeyPrefix:$userId');
-      if ((draftRaw ?? '').trim().isNotEmpty) {
-        SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
-        return _PostAuthTarget.setup;
-      }
-
       final firstCatalog = await Supabase.instance.client
           .from('catalogos')
           .select('id')
@@ -63,6 +56,9 @@ class _AuthGateState extends State<AuthGate> {
         SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
         return _PostAuthTarget.setup;
       }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('$_setupDraftKeyPrefix:$userId');
 
       SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
       return _PostAuthTarget.dashboard;

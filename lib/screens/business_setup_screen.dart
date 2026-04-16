@@ -345,6 +345,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   double? _businessLongitude;
 
   XFile? _selectedLogo;
+  String _selectedLogoUrl = '';
   String? _editingComercioId;
 
   Timer? _slugDebounce;
@@ -356,6 +357,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   bool _saving = false;
   bool _loadingExisting = true;
+  bool _draftPersistenceEnabled = true;
   bool _checkingSlug = false;
   bool _isSlugAvailable = false;
   String? _slugAvailabilityMessage;
@@ -426,7 +428,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
     _loadInitialData();
     _autosaveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!_loadingExisting) {
+      if (!_loadingExisting && _draftPersistenceEnabled) {
         unawaited(_saveDraft());
       }
     });
@@ -447,7 +449,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       );
       _providerStatusChannel = null;
     }
-    unawaited(_saveDraft());
+    if (_draftPersistenceEnabled) {
+      unawaited(_saveDraft());
+    }
     _exchangeRateController.removeListener(_forceExchangeRateCursorAtEnd);
     _nameController.dispose();
     _slugController.dispose();
@@ -469,6 +473,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     try {
+      if (widget.initialComercio != null) {
+        final initialId = widget.initialComercio!.id.trim();
+        if (initialId.isNotEmpty) {
+          final row = await Supabase.instance.client
+              .from('comercios')
+              .select()
+              .eq('id', initialId)
+              .limit(1)
+              .maybeSingle();
+          if (row != null) {
+            final raw = Map<String, dynamic>.from(row);
+            final comercio = ComercioModel.fromMap(raw);
+            _applyComercioSeed(comercio, raw: raw);
+            await _loadStoredPaymentMethods(comercio.id);
+            return;
+          }
+        }
+
+        _applyComercioSeed(widget.initialComercio!);
+        return;
+      }
+
       final restored = await _restoreDraft(user.id);
       if (restored) {
         if ((_editingComercioId ?? '').trim().isEmpty) {
@@ -476,11 +502,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         }
         _showDraftRecoveredHint = true;
         _scheduleDraftRecoveredHintHide();
-        return;
-      }
-
-      if (widget.initialComercio != null) {
-        _applyComercioSeed(widget.initialComercio!);
         return;
       }
 
@@ -605,6 +626,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _nameController.text = comercio.nombre.trim();
     _slugController.text = (comercio.slug ?? '').trim();
     _slugManuallyEdited = _slugController.text.trim().isNotEmpty;
+    _selectedLogoUrl = (raw?['logo_url']?.toString() ?? comercio.logoUrl ?? '')
+        .trim();
 
     final category = (raw?['categoria']?.toString().trim() ?? '');
     if (_sectors.contains(category)) {
@@ -630,6 +653,107 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
     _allowDelivery = raw?['permite_delivery'] == true;
     _receiveOrdersOnWhatsapp = raw?['recibe_pedidos_whatsapp'] == true;
+
+    final layout = (raw?['menu_layout']?.toString().trim() ?? '');
+    if (_layouts.any((item) => item.id == layout)) {
+      _selectedLayoutId = layout;
+    }
+
+    final paletteId =
+        (raw?['menu_palette']?.toString().trim() ?? comercio.menuPalette ?? '');
+    if (paletteId.isNotEmpty) {
+      _selectedPaletteId = paletteId;
+    }
+
+    final branding = _toStringDynamicMap(raw?['branding_ia']);
+    final customColors = _toStringDynamicMap(
+      branding['colores_personalizados'],
+    );
+    final brandingPrimary = _tryParseHexColor(
+      branding['color_principal']?.toString() ?? '',
+    );
+    final brandingAccent = _tryParseHexColor(
+      branding['color_secundario']?.toString() ?? '',
+    );
+    final brandingSurface = _tryParseHexColor(
+      customColors['background']?.toString() ??
+          customColors['card_surface']?.toString() ??
+          '',
+    );
+    final brandingText = _tryParseHexColor(
+      customColors['text_on_primary']?.toString() ?? '',
+    );
+    final legacyPrimary = _tryParseHexColor(
+      raw?['color_principal']?.toString() ?? '',
+    );
+
+    final palettePrimary = _toIntOrNull(
+      raw?['menu_palette_primary'] ?? comercio.menuPalettePrimaryArgb,
+    );
+    final paletteAccent = _toIntOrNull(
+      raw?['menu_palette_accent'] ?? comercio.menuPaletteAccentArgb,
+    );
+    final paletteSurface = _toIntOrNull(
+      raw?['menu_palette_surface'] ?? comercio.menuPaletteSurfaceArgb,
+    );
+    final paletteText = _toIntOrNull(
+      raw?['menu_palette_text'] ?? comercio.menuPaletteTextArgb,
+    );
+    if (palettePrimary != null &&
+        paletteSurface != null &&
+        paletteText != null) {
+      _paletteSuggestion = _PaletteOption(
+        id: _selectedPaletteId,
+        name: 'Guardada',
+        primary: Color(palettePrimary),
+        accent: Color(paletteAccent ?? palettePrimary),
+        surface: Color(paletteSurface),
+        text: Color(paletteText),
+      );
+    } else if (brandingPrimary != null || legacyPrimary != null) {
+      final resolvedPrimary = brandingPrimary ?? legacyPrimary!;
+      final resolvedSurface =
+          brandingSurface ??
+          (HSLColor.fromColor(resolvedPrimary).lightness > 0.58
+              ? const Color(0xFF1B1238)
+              : const Color(0xFFF8F5FF));
+      final resolvedText =
+          brandingText ??
+          (ThemeData.estimateBrightnessForColor(resolvedSurface) ==
+                  Brightness.dark
+              ? const Color(0xFFF8F5FF)
+              : const Color(0xFF1D1733));
+
+      _paletteSuggestion = _PaletteOption(
+        id: _selectedPaletteId.isEmpty ? 'stored-branding' : _selectedPaletteId,
+        name: 'Guardada',
+        primary: resolvedPrimary,
+        accent:
+            brandingAccent ??
+            _resolveAccentColor(
+              primary: resolvedPrimary,
+              candidates: <Color>[resolvedPrimary],
+            ),
+        surface: resolvedSurface,
+        text: resolvedText,
+      );
+      _logoDetectedColors = <Color>[
+        _paletteSuggestion.primary,
+        _paletteSuggestion.accent,
+        _paletteSuggestion.surface,
+        _paletteSuggestion.text,
+      ];
+    }
+
+    final headingFont = (raw?['menu_font']?.toString() ?? '').trim();
+    if (headingFont.isNotEmpty) {
+      _selectedHeadingFont = headingFont;
+    }
+
+    final footer = (raw?['menu_footer']?.toString() ?? '').trim();
+    if (_footers.contains(footer)) {
+      _selectedFooter = footer;
+    }
 
     final currency = (raw?['moneda']?.toString().trim().toUpperCase() ?? '');
     if (_currencies.contains(currency)) {
@@ -1286,6 +1410,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _lastPaletteLogoPath = (map['lastPaletteLogoPath'] as String? ?? '')
           .trim();
       _lastFontLogoPath = (map['lastFontLogoPath'] as String? ?? '').trim();
+      _selectedLogoUrl = (map['logoUrl'] as String? ?? '').trim();
       _paletteManuallyEdited = map['paletteManuallyEdited'] as bool? ?? false;
       _fontManuallyEdited = map['fontManuallyEdited'] as bool? ?? false;
 
@@ -1373,6 +1498,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _saveDraft() async {
+    if (!_draftPersistenceEnabled) {
+      return;
+    }
+
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
       return;
@@ -1431,6 +1560,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'scanCatalogName': _scanCatalogName,
       'lastPaletteLogoPath': _lastPaletteLogoPath,
       'lastFontLogoPath': _lastFontLogoPath,
+      'logoUrl': _selectedLogoUrl,
       'paletteManuallyEdited': _paletteManuallyEdited,
       'fontManuallyEdited': _fontManuallyEdited,
       'footer': _selectedFooter,
@@ -1691,7 +1821,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                           context,
                         ).pop(_LogoPickAction.editCurrent),
                       ),
-                    if (_selectedLogo != null)
+                    if (_selectedLogo != null ||
+                        _selectedLogoUrl.trim().isNotEmpty)
                       ListTile(
                         leading: const Icon(Icons.delete_outline_rounded),
                         title: const Text('Eliminar logo'),
@@ -1718,6 +1849,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         if (action == _LogoPickAction.removeCurrent) {
           setState(() {
             _selectedLogo = null;
+            _selectedLogoUrl = '';
             _lastPaletteLogoPath = '';
             _lastFontLogoPath = '';
             _paletteManuallyEdited = false;
@@ -1755,6 +1887,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
           setState(() {
             _selectedLogo = XFile(persistedPath);
+            _selectedLogoUrl = '';
             _lastPaletteLogoPath = '';
             _lastFontLogoPath = '';
             _paletteManuallyEdited = false;
@@ -1794,6 +1927,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
         setState(() {
           _selectedLogo = XFile(persistedPath);
+          _selectedLogoUrl = '';
           _lastPaletteLogoPath = '';
           _lastFontLogoPath = '';
           _paletteManuallyEdited = false;
@@ -2690,6 +2824,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return value.toDouble();
     }
     return double.tryParse((value ?? '').toString().trim());
+  }
+
+  int? _toIntOrNull(dynamic value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    return int.tryParse((value ?? '').toString().trim());
   }
 
   intl_phone_countries.Country _countryByIso(String isoCode) {
@@ -6976,7 +7120,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (_businessLongitude != null) 'longitud': _businessLongitude,
       'permite_delivery': _allowDelivery,
       'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
-      if (logoUrl != null && logoUrl.trim().isNotEmpty) 'logo_url': logoUrl,
+      'logo_url': (logoUrl != null && logoUrl.trim().isNotEmpty)
+          ? logoUrl.trim()
+          : null,
       'moneda': primaryCurrency,
       'tasa_cambio_pesos': primaryCurrency == 'COP' && primaryExchangeRate > 0
           ? primaryExchangeRate
@@ -6994,12 +7140,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           : null,
       'metodo_pago_predeterminado': defaultMethod,
       'metodos_pago': allMethods.toList(),
-      'menu_layout': 'cards',
+      'menu_layout': _selectedLayoutId,
       'menu_palette': _selectedPaletteId,
-      'menu_palette_primary': _paletteSuggestion.primary.toARGB32(),
-      'menu_palette_accent': _paletteSuggestion.accent.toARGB32(),
-      'menu_palette_surface': _paletteSuggestion.surface.toARGB32(),
-      'menu_palette_text': _paletteSuggestion.text.toARGB32(),
+      'color_principal': _colorToHex(_paletteSuggestion.primary),
+      'branding_ia': {
+        'color_principal': _colorToHex(_paletteSuggestion.primary),
+        'color_secundario': _colorToHex(_paletteSuggestion.accent),
+        'tipografia_principal': _selectedHeadingFont,
+        'colores_personalizados': {
+          'background': _colorToHex(_paletteSuggestion.surface),
+          'card_surface': _colorToHex(_paletteSuggestion.surface),
+          'text_on_primary': _colorToHex(_paletteSuggestion.text),
+        },
+      },
       'menu_font': _selectedHeadingFont,
       'menu_footer': _selectedFooter,
     };
@@ -7025,10 +7178,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'metodos_pago',
       'menu_layout',
       'menu_palette',
-      'menu_palette_primary',
-      'menu_palette_accent',
-      'menu_palette_surface',
-      'menu_palette_text',
+      'color_principal',
+      'branding_ia',
       'menu_font',
       'menu_footer',
     };
@@ -7161,6 +7312,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       await _syncPaymentMethods(comercio.id);
 
       SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
+      _draftPersistenceEnabled = false;
       await _clearDraft();
 
       if (!mounted) {
@@ -7198,7 +7350,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   Future<String?> _uploadLogoIfNeeded(User user) async {
     final logo = _selectedLogo;
     if (logo == null) {
-      return null;
+      final currentLogoUrl = _selectedLogoUrl.trim();
+      return currentLogoUrl.isEmpty ? null : currentLogoUrl;
     }
 
     final bytes = await logo.readAsBytes();
@@ -7439,6 +7592,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           onNameChanged: _onNameChanged,
           onPickLogo: _pickLogo,
           selectedLogo: _selectedLogo,
+          selectedLogoUrl: _selectedLogoUrl,
         ),
         const SizedBox(height: 12),
         _UrlBar(
@@ -7656,10 +7810,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _BrandMiniPreview(
           palette: _paletteSuggestion,
           logoPath: _selectedLogo?.path,
+          logoUrl: _selectedLogoUrl,
           businessName: _nameController.text.trim().isEmpty
               ? 'Tu menu'
               : _nameController.text.trim(),
-          layoutName: 'Tarjetas',
+          layoutName: _layouts
+              .firstWhere(
+                (item) => item.id == _selectedLayoutId,
+                orElse: () => _layouts.first,
+              )
+              .name,
           headingStyleBuilder: _headingFontStyle,
         ),
       ],
@@ -9654,6 +9814,7 @@ class _MenuPreviewNavbar extends StatelessWidget {
     required this.onNameChanged,
     required this.onPickLogo,
     required this.selectedLogo,
+    required this.selectedLogoUrl,
   });
 
   final bool compact;
@@ -9662,6 +9823,7 @@ class _MenuPreviewNavbar extends StatelessWidget {
   final ValueChanged<String> onNameChanged;
   final VoidCallback onPickLogo;
   final XFile? selectedLogo;
+  final String selectedLogoUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -9679,7 +9841,10 @@ class _MenuPreviewNavbar extends StatelessWidget {
               InkWell(
                 onTap: onPickLogo,
                 borderRadius: BorderRadius.circular(999),
-                child: _LogoPreview(file: selectedLogo),
+                child: _LogoPreview(
+                  file: selectedLogo,
+                  logoUrl: selectedLogoUrl,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -9832,37 +9997,38 @@ class _StepPills extends StatelessWidget {
 }
 
 class _LogoPreview extends StatelessWidget {
-  const _LogoPreview({required this.file});
+  const _LogoPreview({required this.file, required this.logoUrl});
 
   final XFile? file;
+  final String logoUrl;
   static const String _defaultBrandLogoAsset = 'assets/branding/isotipo.png';
 
   @override
   Widget build(BuildContext context) {
+    final trimmedLogoUrl = logoUrl.trim();
+
     if (file == null) {
-      return Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: const Color(0xFF241B42),
-          border: Border.all(color: const Color(0xFFD8B4FE), width: 1.5),
-        ),
-        child: ClipOval(
-          child: Image.asset(
-            _defaultBrandLogoAsset,
-            width: 56,
-            height: 56,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) {
-              return const Icon(
-                Icons.storefront_rounded,
-                color: Color(0xFFD8B4FE),
-              );
-            },
+      if (trimmedLogoUrl.isNotEmpty) {
+        return Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFFD8B4FE), width: 1.5),
           ),
-        ),
-      );
+          child: ClipOval(
+            child: Image.network(
+              trimmedLogoUrl,
+              width: 56,
+              height: 56,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => _fallbackAvatar(),
+            ),
+          ),
+        );
+      }
+
+      return _fallbackAvatar();
     }
 
     return FutureBuilder<Uint8List>(
@@ -9904,6 +10070,32 @@ class _LogoPreview extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _fallbackAvatar() {
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: const Color(0xFF241B42),
+        border: Border.all(color: const Color(0xFFD8B4FE), width: 1.5),
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          _defaultBrandLogoAsset,
+          width: 56,
+          height: 56,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) {
+            return const Icon(
+              Icons.storefront_rounded,
+              color: Color(0xFFD8B4FE),
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -10040,6 +10232,7 @@ class _BrandMiniPreview extends StatelessWidget {
   const _BrandMiniPreview({
     required this.palette,
     required this.logoPath,
+    required this.logoUrl,
     required this.businessName,
     required this.layoutName,
     required this.headingStyleBuilder,
@@ -10047,6 +10240,7 @@ class _BrandMiniPreview extends StatelessWidget {
 
   final _PaletteOption palette;
   final String? logoPath;
+  final String logoUrl;
   final String businessName;
   final String layoutName;
   final TextStyle Function({
@@ -10101,7 +10295,11 @@ class _BrandMiniPreview extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    _BrandPreviewLogo(logoPath: logoPath, palette: palette),
+                    _BrandPreviewLogo(
+                      logoPath: logoPath,
+                      logoUrl: logoUrl,
+                      palette: palette,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -10182,9 +10380,14 @@ class _PreviewPill extends StatelessWidget {
 }
 
 class _BrandPreviewLogo extends StatelessWidget {
-  const _BrandPreviewLogo({required this.logoPath, required this.palette});
+  const _BrandPreviewLogo({
+    required this.logoPath,
+    required this.logoUrl,
+    required this.palette,
+  });
 
   final String? logoPath;
+  final String logoUrl;
   final _PaletteOption palette;
 
   @override
@@ -10197,6 +10400,20 @@ class _BrandPreviewLogo extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         child: Image.file(
           File(path),
+          width: 36,
+          height: 36,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _logoFallback(),
+        ),
+      );
+    }
+
+    final trimmedLogoUrl = logoUrl.trim();
+    if (trimmedLogoUrl.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.network(
+          trimmedLogoUrl,
           width: 36,
           height: 36,
           fit: BoxFit.cover,
