@@ -86,7 +86,7 @@ export async function GET(_: Request, { params }: Params) {
       }
     }
 
-    const [categoriasResult, productosResult, metodosPagoResult] = await Promise.all([
+    const [categoriasResult, productosResult, metodosPagoResult, marketRatesResult] = await Promise.all([
       supabase
         .from('categorias')
         .select('*')
@@ -101,6 +101,12 @@ export async function GET(_: Request, { params }: Params) {
         .from('metodos_pago')
         .select('*')
         .eq('comercio_id', resolvedComercioId),
+      supabase
+        .from('global_market_rates')
+        .select('bcv_rate, p2p_binance_rate, payload, updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     if (categoriasResult.error) {
@@ -113,6 +119,10 @@ export async function GET(_: Request, { params }: Params) {
 
     if (metodosPagoResult.error) {
       throw new Error(metodosPagoResult.error.message);
+    }
+
+    if (marketRatesResult.error) {
+      throw new Error(marketRatesResult.error.message);
     }
 
     const productos = (productosResult.data ?? []).filter((producto: any) => {
@@ -130,6 +140,7 @@ export async function GET(_: Request, { params }: Params) {
           categorias: categoriasResult.data ?? [],
           productos,
           metodosPago: metodosPagoResult.data ?? [],
+          marketRates: marketRatesResult.data ?? null,
         },
       },
       { status: 200 },

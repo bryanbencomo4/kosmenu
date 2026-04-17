@@ -53,7 +53,12 @@ type ComercioRow = {
   id: string;
   slug?: string | null;
   nombre?: string | null;
+  moneda?: string | null;
   costo_envio?: number | string | null;
+  tasa_cambio_pesos?: number | string | null;
+  exchange_rate_source?: string | null;
+  exchange_rate_value?: number | string | null;
+  exchange_rate_quote_currency?: string | null;
   logo_url?: string | null;
   latitud?: number | string | null;
   longitud?: number | string | null;
@@ -88,6 +93,15 @@ type MenuData = {
   categorias: CategoriaRow[];
   productos: ProductoRow[];
   metodosPago: MetodoPagoRow[];
+  marketRates?: MarketRatesRow | null;
+};
+
+type MarketRatesRow = {
+  bcv_rate?: number | string | null;
+  p2p_binance_rate?: number | string | null;
+  payload?: {
+    google_rates?: Record<string, number | string | null> | null;
+  } | null;
 };
 
 type OrderDeliveryMode = 'pickup' | 'delivery';
@@ -100,8 +114,12 @@ const publicBaseUrl = 'https://kosmenu.vercel.app';
 const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
 const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
 const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';
+const selectedCurrencyStorageKeyPrefix = 'elmenuxfa:selected-currency:';
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
 const preferLeafletMapPicker = false;
+const topTickerHeightPx = 36;
+const topAppBarHeightPx = 56;
+const stickySearchTopPx = topTickerHeightPx + topAppBarHeightPx + 10;
 const defaultProductImage =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
@@ -339,6 +357,13 @@ function formatAmountByCurrency(value: number, currency: string) {
   const safe = Number.isFinite(value) ? value : 0;
   const code = (currency || 'COP').trim().toUpperCase();
   const normalized = code === 'SIN MONEDA' ? 'COP' : code;
+  if (normalized === 'VES') {
+    const formattedNumber = new Intl.NumberFormat('es-VE', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(safe);
+    return `Bs ${formattedNumber}`;
+  }
   try {
     return new Intl.NumberFormat('es-CO', {
       style: 'currency',
@@ -474,6 +499,14 @@ function paymentMethodCurrency(method: MetodoPagoRow) {
   return 'SIN MONEDA';
 }
 
+function paymentMethodCurrencyOrFallback(method: MetodoPagoRow, fallbackCurrency: string) {
+  const detectedCurrency = paymentMethodCurrency(method);
+  if (detectedCurrency === 'SIN MONEDA') {
+    return normalizeCurrencyCode(fallbackCurrency);
+  }
+  return normalizeCurrencyCode(detectedCurrency);
+}
+
 function parseExchangeRate(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
   const raw = (value ?? '').toString().trim().replace(',', '.');
@@ -512,12 +545,143 @@ function normalizeCurrencyCode(value: string | null | undefined) {
   return code;
 }
 
-function convertFromCop(amountInCop: number, currency: string, exchangeRate: number) {
-  const safeAmount = Number.isFinite(amountInCop) ? amountInCop : 0;
+function pairKey(baseCurrency: string, quoteCurrency: string) {
+  return `${normalizeCurrencyCode(baseCurrency)}/${normalizeCurrencyCode(quoteCurrency)}`;
+}
+
+function googleRatesFromPayload(payload: MarketRatesRow['payload']) {
+  const rates = new Map<string, number>();
+  const rawRates = payload?.google_rates;
+  if (!rawRates) return rates;
+
+  for (const [key, value] of Object.entries(rawRates)) {
+    const parsed = parseExchangeRate(value);
+    if (parsed) {
+      rates.set(key.trim().toUpperCase(), parsed);
+    }
+  }
+
+  return rates;
+}
+
+function googleRateForPair(baseCurrency: string, quoteCurrency: string, anchors: Map<string, number>) {
+  const base = normalizeCurrencyCode(baseCurrency);
+  const quote = normalizeCurrencyCode(quoteCurrency);
+  if (base === quote) return 1;
+
+  const directRate = anchors.get(pairKey(base, quote)) ?? 0;
+  if (directRate > 0) return directRate;
+
+  const usdCop = anchors.get('USD/COP') ?? 0;
+  const usdEur = anchors.get('USD/EUR') ?? 0;
+  const vesUsd = anchors.get('VES/USD') ?? 0;
+
+  if (base === 'COP' && quote === 'USD' && usdCop > 0) return 1 / usdCop;
+  if (base === 'EUR' && quote === 'USD' && usdEur > 0) return 1 / usdEur;
+  if (base === 'VES' && quote === 'COP' && vesUsd > 0 && usdCop > 0) return vesUsd * usdCop;
+  if (base === 'VES' && quote === 'EUR' && vesUsd > 0 && usdEur > 0) return vesUsd * usdEur;
+  if (base === 'COP' && quote === 'VES' && vesUsd > 0 && usdCop > 0) {
+    const vesCop = vesUsd * usdCop;
+    return vesCop > 0 ? 1 / vesCop : 0;
+  }
+  if (base === 'EUR' && quote === 'VES' && vesUsd > 0 && usdEur > 0) {
+    const vesEur = vesUsd * usdEur;
+    return vesEur > 0 ? 1 / vesEur : 0;
+  }
+  if (base === 'COP' && quote === 'EUR' && usdCop > 0 && usdEur > 0) return usdEur / usdCop;
+  if (base === 'EUR' && quote === 'COP' && usdCop > 0 && usdEur > 0) return usdCop / usdEur;
+
+  return 0;
+}
+
+function isTrackedVesPair(baseCurrency: string, quoteCurrency: string) {
+  const base = normalizeCurrencyCode(baseCurrency);
+  const quote = normalizeCurrencyCode(quoteCurrency);
+  const direct = quote === 'VES' && (base === 'USD' || base === 'EUR');
+  const reverse = base === 'VES' && (quote === 'USD' || quote === 'EUR');
+  return direct || reverse;
+}
+
+function adjustedP2pRateForBuyer(rate: number) {
+  return rate > 0 ? rate * 1.006 : 0;
+}
+
+function usdToCurrencyRateForSource(source: string, currency: string, marketRates: MarketRatesRow | null | undefined) {
   const normalizedCurrency = normalizeCurrencyCode(currency);
+  if (normalizedCurrency === 'USD') return 1;
+
+  const googleRates = googleRatesFromPayload(marketRates?.payload ?? null);
+  if (normalizedCurrency === 'VES') {
+    const liveRate =
+      source === 'p2p_binance'
+        ? adjustedP2pRateForBuyer(parseExchangeRate(marketRates?.p2p_binance_rate) ?? 0)
+        : parseExchangeRate(marketRates?.bcv_rate) ?? 0;
+    if (liveRate > 0) return liveRate;
+    return (googleRates.get('VES/USD') ?? 0) > 0 ? 1 / (googleRates.get('VES/USD') ?? 0) : 0;
+  }
+  if (normalizedCurrency === 'COP') return googleRates.get('USD/COP') ?? 0;
+  if (normalizedCurrency === 'EUR') return googleRates.get('USD/EUR') ?? 0;
+  return 0;
+}
+
+function derivedExchangeRateForCurrency(
+  baseCurrency: string,
+  quoteCurrency: string,
+  source: string,
+  marketRates: MarketRatesRow | null | undefined,
+  configuredRate?: number | null,
+  configuredQuoteCurrency?: string | null,
+) {
+  const base = normalizeCurrencyCode(baseCurrency);
+  const quote = normalizeCurrencyCode(quoteCurrency);
+  if (base === quote) return 1;
+
+  if (configuredRate && configuredRate > 0 && quote === normalizeCurrencyCode(configuredQuoteCurrency ?? '')) {
+    return configuredRate;
+  }
+
+  if (source === 'google') {
+    const rate = googleRateForPair(base, quote, googleRatesFromPayload(marketRates?.payload ?? null));
+    if (rate > 0) return rate;
+  }
+
+  if ((source === 'bcv' || source === 'p2p_binance') && isTrackedVesPair(base, quote)) {
+    const usdToBase = usdToCurrencyRateForSource(source, base, marketRates);
+    const usdToQuote = usdToCurrencyRateForSource(source, quote, marketRates);
+    if (usdToBase > 0 && usdToQuote > 0) {
+      const derived = usdToQuote / usdToBase;
+      if (derived > 0) return derived;
+    }
+  }
+
+  const googleFallback = googleRateForPair(base, quote, googleRatesFromPayload(marketRates?.payload ?? null));
+  if (googleFallback > 0) return googleFallback;
+
+  return 1;
+}
+
+function exchangeSourceLabel(source: string | null | undefined) {
+  switch ((source ?? '').trim().toLowerCase()) {
+    case 'bcv':
+      return 'BCV';
+    case 'p2p_binance':
+      return 'Binance P2P';
+    case 'google':
+      return 'Google Finance';
+    case 'manual':
+      return 'Manual';
+    default:
+      return 'Referencia del negocio';
+  }
+}
+
+function convertFromBaseCurrency(amountInBaseCurrency: number, baseCurrency: string, targetCurrency: string, exchangeRate: number) {
+  const safeAmount = Number.isFinite(amountInBaseCurrency) ? amountInBaseCurrency : 0;
+  const normalizedBaseCurrency = normalizeCurrencyCode(baseCurrency);
+  const normalizedTargetCurrency = normalizeCurrencyCode(targetCurrency);
   const safeRate = Number.isFinite(exchangeRate) && exchangeRate > 0 ? exchangeRate : 1;
-  if (normalizedCurrency === 'COP') return safeAmount;
-  return safeAmount / safeRate;
+  if (normalizedTargetCurrency === normalizedBaseCurrency) return safeAmount;
+  return safeAmount * safeRate;
 }
 
 function menuGridClass(layoutType: 'list' | 'grid' | 'compact', itemsPerRow: number) {
@@ -1070,7 +1234,7 @@ export default function PublicMenuPage() {
     if (filteredCategorias.length === 0) return;
 
     const getStickyCategoryOffset = () => {
-      const appBarOffset = 72;
+      const appBarOffset = topTickerHeightPx + topAppBarHeightPx;
       const stickyHeight = stickySearchCardRef.current?.getBoundingClientRect().height ?? 108;
       return appBarOffset + stickyHeight + 18;
     };
@@ -1226,10 +1390,16 @@ export default function PublicMenuPage() {
   const deliveryCost = isDeliveryOrder ? Math.max(0, deliveryCostBase) : 0;
   const orderSubtotal = cartTotal;
   const orderGrandTotal = orderSubtotal + deliveryCost;
+  const businessBaseCurrency = normalizeCurrencyCode(menuData?.comercio.moneda ?? 'COP');
+  const businessQuoteCurrencyRaw = (menuData?.comercio.exchange_rate_quote_currency ?? '').toString().trim();
+  const businessQuoteCurrency = businessQuoteCurrencyRaw ? normalizeCurrencyCode(businessQuoteCurrencyRaw) : null;
+  const businessExchangeSource = (menuData?.comercio.exchange_rate_source ?? 'google').toString().trim().toLowerCase();
+  const businessExchangeRate =
+    parseExchangeRate(menuData?.comercio.exchange_rate_value) ?? parseExchangeRate(menuData?.comercio.tasa_cambio_pesos);
   const paymentMethodsByCurrency = useMemo(() => {
     const grouped = new Map<string, { methods: MetodoPagoRow[]; exchangeRate: number | null }>();
     for (const method of menuData?.metodosPago ?? []) {
-      const currency = normalizeCurrencyCode(paymentMethodCurrency(method));
+      const currency = paymentMethodCurrencyOrFallback(method, businessBaseCurrency);
       const entry = grouped.get(currency) ?? { methods: [], exchangeRate: null };
       entry.methods.push(method);
       if (entry.exchangeRate === null) {
@@ -1237,25 +1407,96 @@ export default function PublicMenuPage() {
       }
       grouped.set(currency, entry);
     }
-    return Array.from(grouped.entries()).map(([currency, value]) => ({
+
+    if (!grouped.has(businessBaseCurrency)) {
+      grouped.set(businessBaseCurrency, { methods: [], exchangeRate: 1 });
+    }
+
+    return Array.from(grouped.entries())
+      .map(([currency, value]) => ({
       currency,
       methods: value.methods,
-      exchangeRate: value.exchangeRate ?? 1,
-    }));
-  }, [menuData?.metodosPago]);
+      exchangeRate:
+        value.exchangeRate ??
+        derivedExchangeRateForCurrency(
+          businessBaseCurrency,
+          currency,
+          businessExchangeSource,
+          menuData?.marketRates,
+          businessExchangeRate,
+          businessQuoteCurrency,
+        ),
+    }))
+      .sort((left, right) => {
+        if (left.currency === businessBaseCurrency) return -1;
+        if (right.currency === businessBaseCurrency) return 1;
+        return left.currency.localeCompare(right.currency);
+      });
+  }, [
+    businessBaseCurrency,
+    businessExchangeRate,
+    businessExchangeSource,
+    businessQuoteCurrency,
+    menuData?.marketRates,
+    menuData?.metodosPago,
+  ]);
   const selectedCurrencyGroup =
     paymentMethodsByCurrency.find((group) => group.currency === normalizeCurrencyCode(selectedCurrency)) ?? null;
-  const selectedCurrencyCode = normalizeCurrencyCode(selectedCurrency || selectedCurrencyGroup?.currency || 'COP');
+  const businessRateEntries = useMemo(
+    () =>
+      paymentMethodsByCurrency.filter(
+        (group) => group.currency !== businessBaseCurrency && Number.isFinite(group.exchangeRate) && group.exchangeRate > 0,
+      ),
+    [businessBaseCurrency, paymentMethodsByCurrency],
+  );
+  const tickerRateEntries = useMemo(() => {
+    if (businessRateEntries.length === 0) {
+      return [
+        `Moneda principal: ${businessBaseCurrency}`,
+        `Fuente: ${exchangeSourceLabel(businessExchangeSource)}`,
+        `Moneda principal: ${businessBaseCurrency}`,
+        `Fuente: ${exchangeSourceLabel(businessExchangeSource)}`,
+      ];
+    }
+
+    const entries = businessRateEntries.map(
+      (group) => `1 ${businessBaseCurrency} = ${group.exchangeRate} ${group.currency}`,
+    );
+    return [...entries, ...entries];
+  }, [businessBaseCurrency, businessExchangeSource, businessRateEntries]);
+  const selectedCurrencyCode = normalizeCurrencyCode(
+    selectedCurrency || selectedCurrencyGroup?.currency || businessBaseCurrency,
+  );
   const selectedExchangeRate =
-    selectedCurrencyCode === 'COP'
+    selectedCurrencyCode === businessBaseCurrency
       ? 1
       : Number.isFinite(selectedCurrencyGroup?.exchangeRate)
-        ? Math.max(1, Number(selectedCurrencyGroup?.exchangeRate))
+        ? Number(selectedCurrencyGroup?.exchangeRate)
         : 1;
-  const orderSubtotalConverted = convertFromCop(orderSubtotal, selectedCurrencyCode, selectedExchangeRate);
-  const deliveryCostConverted = convertFromCop(deliveryCost, selectedCurrencyCode, selectedExchangeRate);
-  const orderGrandTotalConverted = convertFromCop(orderGrandTotal, selectedCurrencyCode, selectedExchangeRate);
-  const cartTotalConverted = convertFromCop(cartTotal, selectedCurrencyCode, selectedExchangeRate);
+  const orderSubtotalConverted = convertFromBaseCurrency(
+    orderSubtotal,
+    businessBaseCurrency,
+    selectedCurrencyCode,
+    selectedExchangeRate,
+  );
+  const deliveryCostConverted = convertFromBaseCurrency(
+    deliveryCost,
+    businessBaseCurrency,
+    selectedCurrencyCode,
+    selectedExchangeRate,
+  );
+  const orderGrandTotalConverted = convertFromBaseCurrency(
+    orderGrandTotal,
+    businessBaseCurrency,
+    selectedCurrencyCode,
+    selectedExchangeRate,
+  );
+  const cartTotalConverted = convertFromBaseCurrency(
+    cartTotal,
+    businessBaseCurrency,
+    selectedCurrencyCode,
+    selectedExchangeRate,
+  );
   const summaryCategoryCount = filteredCategorias.length;
   const summaryProductCount = categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0);
   const animatedCategoryCount = useCountUp(summaryCategoryCount, statsCardsVisible, 950);
@@ -1296,14 +1537,17 @@ export default function PublicMenuPage() {
         clientName?: string;
         clientWhatsapp?: string;
         clientEmail?: string;
+        selectedCurrency?: string;
       };
 
       const savedName = (parsed.clientName ?? '').trim();
       const savedEmail = (parsed.clientEmail ?? '').trim();
       const savedWhatsapp = (parsed.clientWhatsapp ?? '').trim();
+      const savedCurrency = (parsed.selectedCurrency ?? '').trim().toUpperCase();
 
       if (savedName) setClientName(savedName);
       if (savedEmail) setClientEmail(savedEmail);
+      if (savedCurrency) setSelectedCurrency(savedCurrency);
 
       if (savedWhatsapp) {
         const knownCodes = ['+58', '+57', '+1'];
@@ -1339,11 +1583,27 @@ export default function PublicMenuPage() {
       return;
     }
 
-    const hasSelected = paymentMethodsByCurrency.some((group) => group.currency === selectedCurrency);
+    const availableCurrencies = new Set(paymentMethodsByCurrency.map((group) => group.currency));
+    const hasSelected = availableCurrencies.has(selectedCurrency);
     if (!hasSelected) {
-      setSelectedCurrency(paymentMethodsByCurrency[0].currency);
+      if (typeof window !== 'undefined') {
+        const storedCurrency = (window.localStorage.getItem(`${selectedCurrencyStorageKeyPrefix}${resolvedComercioId}`) ?? '')
+          .trim()
+          .toUpperCase();
+        if (storedCurrency && availableCurrencies.has(storedCurrency)) {
+          setSelectedCurrency(storedCurrency);
+          return;
+        }
+      }
+
+      setSelectedCurrency(availableCurrencies.has(businessBaseCurrency) ? businessBaseCurrency : paymentMethodsByCurrency[0].currency);
     }
-  }, [paymentMethodsByCurrency, selectedCurrency]);
+  }, [businessBaseCurrency, paymentMethodsByCurrency, resolvedComercioId, selectedCurrency]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !resolvedComercioId || !selectedCurrencyCode) return;
+    window.localStorage.setItem(`${selectedCurrencyStorageKeyPrefix}${resolvedComercioId}`, selectedCurrencyCode);
+  }, [resolvedComercioId, selectedCurrencyCode]);
 
   useEffect(() => {
     if (!isInfoOpen && !isConfirmOpen && !expandedProductImage && !isMapPickerOpen) return;
@@ -1990,6 +2250,7 @@ export default function PublicMenuPage() {
             clientName: normalizedClientName,
             clientWhatsapp: normalizedClientWhatsapp,
             clientEmail: normalizedClientEmail,
+            selectedCurrency: selectedCurrencyCode,
           }),
         );
       }
@@ -2150,14 +2411,51 @@ export default function PublicMenuPage() {
           <link rel="stylesheet" href={googleFontsUrl} />
         </Head>
       ) : null}
+      <style jsx global>{`
+        @keyframes kosmenuTickerScroll {
+          0% {
+            transform: translateX(0);
+          }
+          100% {
+            transform: translateX(-50%);
+          }
+        }
+      `}</style>
       <main
-        className="min-h-screen text-slate-900"
+        className="min-h-screen pt-9 text-slate-900"
         style={{
           ...containerStyle,
           background: pageBackgroundByPreset(rubroPreset.id),
         }}
       >
-        <section className="sticky top-0 z-40 border-b border-slate-200/90 bg-white/95 backdrop-blur-sm">
+        <section className="fixed inset-x-0 top-0 z-50 border-b border-slate-900/10 bg-slate-950 text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)]">
+          <div className="mx-auto flex h-9 max-w-6xl items-center overflow-hidden px-4 sm:px-6">
+            <div className="mr-3 shrink-0 rounded-full bg-white/12 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/90">
+              Divisas
+            </div>
+            <div className="relative min-w-0 flex-1 overflow-hidden">
+              <div
+                className="flex min-w-max items-center gap-3 whitespace-nowrap"
+                style={{ animation: 'kosmenuTickerScroll 24s linear infinite' }}
+              >
+                {tickerRateEntries.map((entry, index) => (
+                  <div key={`ticker-rate-${index}`} className="flex items-center gap-3">
+                    <span className="text-xs font-bold tracking-[0.04em] text-white/95">{entry}</span>
+                    <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--primary-color)]" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="ml-3 shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70">
+              {exchangeSourceLabel(businessExchangeSource)}
+            </div>
+          </div>
+        </section>
+
+        <section
+          className="sticky z-40 border-b border-slate-200/90 bg-white/95 backdrop-blur-sm"
+          style={{ top: `${topTickerHeightPx}px` }}
+        >
           <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
               {comercioLogoUrl ? (
@@ -2258,7 +2556,7 @@ export default function PublicMenuPage() {
                       >
                         {(paymentMethodsByCurrency.length > 0
                           ? paymentMethodsByCurrency.map((group) => group.currency)
-                          : ['COP']
+                          : [businessBaseCurrency]
                         ).map((currency) => (
                           <option key={`appbar-currency-${currency}`} value={currency}>
                             {currency}
@@ -2274,7 +2572,7 @@ export default function PublicMenuPage() {
         </section>
 
         {shareMessage ? (
-          <div className="fixed left-1/2 top-16 z-[70] -translate-x-1/2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm">
+          <div className="fixed left-1/2 z-[70] -translate-x-1/2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm" style={{ top: `${topTickerHeightPx + topAppBarHeightPx + 8}px` }}>
             {shareMessage}
           </div>
         ) : null}
@@ -2372,7 +2670,8 @@ export default function PublicMenuPage() {
 
           <div
             ref={stickySearchCardRef}
-            className="sticky top-[4.55rem] z-30 mt-4 overflow-visible rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-shadow duration-300 md:p-4 hover:shadow-[0_24px_70px_rgba(15,23,42,0.12)]"
+            className="sticky z-30 mt-4 overflow-visible rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-shadow duration-300 md:p-4 hover:shadow-[0_24px_70px_rgba(15,23,42,0.12)]"
+            style={{ top: `${stickySearchTopPx}px` }}
           >
             <div className="pointer-events-none absolute inset-x-5 -bottom-4 h-8 rounded-full bg-gradient-to-b from-slate-900/12 via-slate-900/6 to-transparent blur-md" />
             <div className="rounded-[22px] border border-slate-200/90 bg-[color:color-mix(in_srgb,var(--card-surface)_95%,white)] p-3 sm:p-4">
@@ -2482,7 +2781,12 @@ export default function PublicMenuPage() {
                         const isZeroPricedProduct = (producto.precio ?? 0) <= 0;
                         const isProductRevealed = Boolean(revealedProductIds[producto.id]);
                         const convertedPrice = formatAmountByCurrency(
-                          convertFromCop(producto.precio ?? 0, selectedCurrencyCode, selectedExchangeRate),
+                          convertFromBaseCurrency(
+                            producto.precio ?? 0,
+                            businessBaseCurrency,
+                            selectedCurrencyCode,
+                            selectedExchangeRate,
+                          ),
                           selectedCurrencyCode,
                         );
 
@@ -2842,6 +3146,11 @@ export default function PublicMenuPage() {
                           paymentMethodsByCurrency.map((group) => (
                             <div key={`currency-info-${group.currency}`} className="rounded-xl border border-slate-200 bg-white p-2">
                               <p className="px-1 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{group.currency}</p>
+                              {group.currency !== businessBaseCurrency && group.exchangeRate > 0 ? (
+                                <p className="px-1 pt-1 text-[11px] font-semibold text-slate-500">
+                                  Tasa aplicada: 1 {businessBaseCurrency} = {group.exchangeRate} {group.currency}
+                                </p>
+                              ) : null}
                               <div className="mt-1 space-y-1.5">
                                 {group.methods.map((method) => (
                                   <div key={`info-${method.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
@@ -3300,7 +3609,9 @@ export default function PublicMenuPage() {
                               }
                             >
                               {group.currency}
-                              {group.currency !== 'COP' && group.exchangeRate > 1 ? ` (1 ${group.currency} = ${group.exchangeRate} COP)` : ''}
+                              {group.currency !== businessBaseCurrency && group.exchangeRate > 0
+                                ? ` (1 ${businessBaseCurrency} = ${group.exchangeRate} ${group.currency})`
+                                : ''}
                             </button>
                           ))}
                         </div>
@@ -3436,9 +3747,9 @@ export default function PublicMenuPage() {
                           <span>Total en {selectedCurrencyCode}</span>
                           <span style={titleFontStyle}>{formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}</span>
                         </p>
-                        {selectedCurrencyCode !== 'COP' ? (
+                        {selectedCurrencyCode !== businessBaseCurrency ? (
                           <p className="mt-1 text-[11px] font-semibold text-slate-500">
-                            Tasa snapshot usada: {selectedExchangeRate} COP por 1 {selectedCurrencyCode}
+                            Tasa snapshot usada: {selectedExchangeRate} {selectedCurrencyCode} por 1 {businessBaseCurrency}
                           </p>
                         ) : null}
                       </div>
