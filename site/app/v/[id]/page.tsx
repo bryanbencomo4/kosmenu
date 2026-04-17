@@ -3,9 +3,11 @@
 
 import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
-import { ArrowUp, ChevronDown, Info, Menu, MessageCircle, Phone, Share2 } from 'lucide-react';
+import { ArrowUp, ChevronDown, Info, Mail, Menu, MessageCircle, Phone, Share2, User, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
+import type { Country } from 'react-phone-number-input';
 
 type CategoriaRow = {
   id: string;
@@ -330,27 +332,6 @@ function useCountUp(target: number, enabled: boolean, durationMs = 1100) {
   }, [durationMs, enabled, target]);
 
   return value;
-}
-
-function formatPhoneInput(digits: string, countryCode: '+58' | '+57' | '+1') {
-  const onlyDigits = normalizePhone(digits).slice(0, 10);
-  if (!onlyDigits) return '';
-
-  if (countryCode === '+1') {
-    const p1 = onlyDigits.slice(0, 3);
-    const p2 = onlyDigits.slice(3, 6);
-    const p3 = onlyDigits.slice(6, 10);
-    if (onlyDigits.length <= 3) return `(${p1}`;
-    if (onlyDigits.length <= 6) return `(${p1}) ${p2}`;
-    return `(${p1}) ${p2}-${p3}`;
-  }
-
-  const p1 = onlyDigits.slice(0, 3);
-  const p2 = onlyDigits.slice(3, 6);
-  const p3 = onlyDigits.slice(6, 10);
-  if (onlyDigits.length <= 3) return p1;
-  if (onlyDigits.length <= 6) return `${p1} ${p2}`;
-  return `${p1} ${p2} ${p3}`;
 }
 
 function formatAmountByCurrency(value: number, currency: string) {
@@ -909,13 +890,14 @@ export default function PublicMenuPage() {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [isCheckoutFooterExpanded, setIsCheckoutFooterExpanded] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isInfoPanelReady, setIsInfoPanelReady] = useState(false);
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   const [shareMessage, setShareMessage] = useState('');
   const [clientName, setClientName] = useState('');
-  const [clientWhatsappCountry, setClientWhatsappCountry] = useState<'+58' | '+57' | '+1'>('+58');
+  const [clientWhatsappCountry, setClientWhatsappCountry] = useState<Country>('VE');
   const [clientWhatsapp, setClientWhatsapp] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -981,6 +963,12 @@ export default function PublicMenuPage() {
       void preloadImageAsset(cachedLogo.trim(), 900);
     }
   }, [commerceIdentifier]);
+
+  useEffect(() => {
+    if (!isConfirmOpen) {
+      setIsCheckoutFooterExpanded(false);
+    }
+  }, [isConfirmOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1379,13 +1367,14 @@ export default function PublicMenuPage() {
       : 'Consulta disponibilidad por WhatsApp';
   const publicMenuUrl = `${publicBaseUrl}/v/${encodeURIComponent(resolvedSlug)}`;
   const normalizedClientName = clientName.trim();
-  const normalizedClientWhatsappDigits = normalizePhone(clientWhatsapp);
-  const normalizedClientWhatsapp = `${clientWhatsappCountry}${normalizedClientWhatsappDigits}`;
-  const maskedClientWhatsapp = formatPhoneInput(normalizedClientWhatsappDigits, clientWhatsappCountry);
+  const normalizedClientWhatsapp = clientWhatsapp.trim();
+  const formattedClientWhatsapp = normalizedClientWhatsapp
+    ? (parsePhoneNumber(normalizedClientWhatsapp)?.formatInternational() ?? normalizedClientWhatsapp)
+    : '';
   const normalizedClientEmail = clientEmail.trim().toLowerCase();
   const isClientNameValid = normalizedClientName.length >= 3;
-  const isClientWhatsappValid = normalizedClientWhatsapp.length >= 10;
-  const isClientEmailValid = normalizedClientEmail.length === 0 || emailRegex.test(normalizedClientEmail);
+  const isClientWhatsappValid = normalizedClientWhatsapp.length > 0 && isValidPhoneNumber(normalizedClientWhatsapp);
+  const isClientEmailValid = normalizedClientEmail.length > 0 && emailRegex.test(normalizedClientEmail);
   const deliveryCostBase = toNumberOrNull(menuData?.comercio.costo_envio) ?? 0;
   const deliveryCost = isDeliveryOrder ? Math.max(0, deliveryCostBase) : 0;
   const orderSubtotal = cartTotal;
@@ -1501,7 +1490,7 @@ export default function PublicMenuPage() {
   const summaryProductCount = categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0);
   const animatedCategoryCount = useCountUp(summaryCategoryCount, statsCardsVisible, 950);
   const animatedProductCount = useCountUp(summaryProductCount, statsCardsVisible, 1250);
-  const checkoutStepTitles = ['Cliente', 'Logistica', 'Pago'];
+  const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
   const isCashPayment = selectedPaymentLabel.toLowerCase().includes('efectivo');
@@ -1517,15 +1506,210 @@ export default function PublicMenuPage() {
   const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
   const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
   const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint;
+  const checkoutStepDescriptions = ['Edita tu pedido', 'Tus datos', 'Entrega', 'Pago'];
+  const checkoutProgress = (checkoutStep + 1) / checkoutStepTitles.length;
+  const nextStepCtaLabels = ['Continuar', 'Continuar', 'Continuar'];
+  const checkoutSummaryItems = useMemo(
+    () =>
+      cartItems.map(({ product, quantity }) => {
+        const unitPrice = convertFromBaseCurrency(
+          product.precio ?? 0,
+          businessBaseCurrency,
+          selectedCurrencyCode,
+          selectedExchangeRate,
+        );
+        return {
+          id: product.id,
+          name: product.nombre,
+          description: (product.descripcion ?? '').trim(),
+          imageUrl: safeImageSrc(product.imagen_url, comercioLogoUrl),
+          quantity,
+          canIncrease: (product.precio ?? 0) > 0,
+          unitPrice,
+          totalPrice: unitPrice * quantity,
+        };
+      }),
+    [
+      businessBaseCurrency,
+      cartItems,
+      comercioLogoUrl,
+      selectedCurrencyCode,
+      selectedExchangeRate,
+    ],
+  );
+  const checkoutItemsCount = checkoutSummaryItems.reduce((sum, item) => sum + item.quantity, 0);
+  const canGoNextFromStep0 = checkoutItemsCount > 0;
   const canGoNextFromStep1 = isClientNameValid && isClientWhatsappValid && isClientEmailValid;
   const canGoNextFromStep2 = isDeliveryReady;
   const canSubmitStep3 =
     (menuData?.metodosPago.length ?? 0) === 0 ||
     (selectedPaymentMethodId !== null && isPaymentReferenceValid && hasPaymentProof);
   const canSubmitCheckout =
+    canGoNextFromStep0 &&
     canGoNextFromStep1 &&
     canGoNextFromStep2 &&
     canSubmitStep3;
+  const currentCheckoutStepTitle = checkoutStepTitles[checkoutStep] ?? 'Confirmar pedido';
+  const currentCheckoutStepDescription = checkoutStepDescriptions[checkoutStep] ?? checkoutStepDescriptions[0];
+  const selectedPaymentSummary = selectedPaymentLabel || 'Por seleccionar';
+  const selectedPaymentDetailsSummary = selectedMethod ? paymentMethodDetails(selectedMethod).slice(0, 2).join(' · ') : '';
+  const clientSummaryLine = normalizedClientName || 'Agrega tu nombre completo';
+  const contactSummaryLine = formattedClientWhatsapp || 'Agrega tu WhatsApp';
+  const deliverySummary = isDeliveryOrder
+    ? normalizedDeliveryAddress || 'Aun no has definido la direccion de entrega.'
+    : 'Retiro en tienda';
+  const compactCheckoutSummary = checkoutStep > 0;
+  const renderCheckoutSummary = (variant: 'mobile' | 'desktop') => {
+    const isDesktop = variant === 'desktop';
+    return (
+      <aside className={isDesktop ? 'hidden lg:block' : 'mb-4 lg:hidden'}>
+        <div
+          className={isDesktop
+            ? 'sticky top-4 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_28px_65px_rgba(15,23,42,0.12)]'
+            : 'overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_18px_44px_rgba(15,23,42,0.10)]'}
+        >
+          <div className="border-b border-slate-200 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--primary-color)_11%,white)_0%,white_100%)] px-4 py-4 sm:px-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">Tu pedido</p>
+                <h4 className="mt-1 text-2xl font-black tracking-[-0.035em] text-slate-950" style={titleFontStyle}>
+                  {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                </h4>
+                <p className="mt-1 text-xs font-semibold text-slate-500">
+                  {checkoutItemsCount} producto{checkoutItemsCount === 1 ? '' : 's'} · {selectedCurrencyCode}
+                </p>
+              </div>
+              {selectedPaymentLabel ? (
+                <div className="rounded-full border border-white/70 bg-white px-3 py-2 text-[11px] font-black text-slate-700 shadow-sm">
+                  {selectedPaymentSummary}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="space-y-4 px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
+                {checkoutItemsCount} item{checkoutItemsCount === 1 ? '' : 's'}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
+                {isDeliveryOrder ? 'Delivery' : 'Retiro'}
+              </span>
+              {normalizedClientName ? (
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
+                  {normalizedClientName}
+                </span>
+              ) : null}
+              {selectedPaymentLabel ? (
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
+                  {selectedPaymentSummary}
+                </span>
+              ) : null}
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Resumen</p>
+                <p className="text-[11px] font-semibold text-slate-500">{checkoutItemsCount} uds</p>
+              </div>
+              <div className={isDesktop ? 'max-h-[320px] space-y-2 overflow-y-auto pr-1' : 'space-y-2'}>
+                {checkoutSummaryItems.map((item) => (
+                  <article key={`checkout-summary-${item.id}`} className="flex items-start gap-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
+                    <img
+                      src={item.imageUrl}
+                      alt={item.name}
+                      className="h-14 w-14 shrink-0 rounded-[18px] border border-slate-200 bg-slate-50 object-cover"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black text-slate-900">{item.name}</p>
+                          {!compactCheckoutSummary && item.description ? (
+                            <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-5 text-slate-500">{item.description}</p>
+                          ) : null}
+                        </div>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-slate-600">
+                          x{item.quantity}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-3 text-xs font-semibold text-slate-500">
+                        <span>{formatAmountByCurrency(item.unitPrice, selectedCurrencyCode)} c/u</span>
+                        <span className="text-sm font-black text-slate-900">
+                          {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
+                        </span>
+                      </div>
+                      {!compactCheckoutSummary ? (
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                        <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-1">
+                          <button
+                            type="button"
+                            onClick={() => decrementProduct(item.id)}
+                            className="grid h-8 w-8 place-items-center rounded-full bg-white text-base font-black text-slate-700"
+                            aria-label={`Reducir cantidad de ${item.name}`}
+                          >
+                            −
+                          </button>
+                          <span className="min-w-8 px-2 text-center text-sm font-black text-slate-900">{item.quantity}</span>
+                          <button
+                            type="button"
+                            onClick={() => incrementProduct(item.id)}
+                            disabled={!item.canIncrease}
+                            className="grid h-8 w-8 place-items-center rounded-full bg-white text-base font-black text-slate-700 disabled:opacity-40"
+                            aria-label={`Aumentar cantidad de ${item.name}`}
+                          >
+                            +
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCart((prev) => {
+                            const next = { ...prev };
+                            delete next[item.id];
+                            return next;
+                          })}
+                          className="text-[11px] font-black uppercase tracking-[0.08em] text-rose-500"
+                        >
+                          Eliminar
+                        </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Total</p>
+              <div className="mt-3 space-y-2 text-sm text-slate-700">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Subtotal</span>
+                  <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
+                </div>
+                {isDeliveryOrder ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Costo de envio</span>
+                    <span className="font-semibold">{formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}</span>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2.5">
+                  <span className="font-semibold text-slate-900">Total</span>
+                  <span className="text-base font-black text-slate-950" style={titleFontStyle}>
+                    {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                  </span>
+                </div>
+              </div>
+              {selectedCurrencyCode !== businessBaseCurrency ? (
+                <p className="mt-2 text-[11px] font-semibold text-slate-500">
+                  Tasa usada: 1 {businessBaseCurrency} = {selectedExchangeRate} {selectedCurrencyCode}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </aside>
+    );
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1550,14 +1734,11 @@ export default function PublicMenuPage() {
       if (savedCurrency) setSelectedCurrency(savedCurrency);
 
       if (savedWhatsapp) {
-        const knownCodes = ['+58', '+57', '+1'];
-        const matchedCode = knownCodes.find((code) => savedWhatsapp.startsWith(code));
-        if (matchedCode) {
-          setClientWhatsappCountry(matchedCode as '+58' | '+57' | '+1');
-          setClientWhatsapp(savedWhatsapp.slice(matchedCode.length));
-        } else {
-          setClientWhatsapp(normalizePhone(savedWhatsapp));
+        const parsedPhone = parsePhoneNumber(savedWhatsapp);
+        if (parsedPhone?.country) {
+          setClientWhatsappCountry(parsedPhone.country as Country);
         }
+        setClientWhatsapp(savedWhatsapp);
       }
     } catch {
       // Ignore malformed stored checkout draft.
@@ -1619,6 +1800,13 @@ export default function PublicMenuPage() {
       setIsQuickActionsOpen(false);
     }
   }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
+
+  useEffect(() => {
+    if (cartCount > 0 || !isConfirmOpen) return;
+    setCheckoutError(null);
+    setCheckoutStep(0);
+    setIsConfirmOpen(false);
+  }, [cartCount, isConfirmOpen]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2156,7 +2344,7 @@ export default function PublicMenuPage() {
       `Hola, quiero confirmar este pedido.\n` +
       `Pedido: ${orderId}.\n` +
       `Cliente: ${customerName}.\n` +
-      `Telefono: +${customerWhatsapp}.\n` +
+      `Telefono: ${customerWhatsapp}.\n` +
       `Tipo de entrega: ${delivery.mode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}.\n` +
       (delivery.mode === 'delivery' ? `Direccion de entrega: ${delivery.address}.\n` : '') +
       (delivery.mode === 'delivery' && delivery.reference
@@ -2283,16 +2471,20 @@ export default function PublicMenuPage() {
   }
 
   function goToNextStep() {
-    if (checkoutStep === 0 && !canGoNextFromStep1) {
-      setCheckoutError('Completa nombre y telefono. Si agregas correo, valida el formato para continuar.');
+    if (checkoutStep === 0 && !canGoNextFromStep0) {
+      setCheckoutError('Agrega al menos un producto para continuar con el pedido.');
       return;
     }
-    if (checkoutStep === 1 && !canGoNextFromStep2) {
+    if (checkoutStep === 1 && !canGoNextFromStep1) {
+      setCheckoutError('Completa nombre, WhatsApp y correo valido para continuar.');
+      return;
+    }
+    if (checkoutStep === 2 && !canGoNextFromStep2) {
       setCheckoutError('Completa la direccion y el punto en el mapa para continuar con delivery.');
       return;
     }
     setCheckoutError(null);
-    setCheckoutStep((prev) => Math.min(2, prev + 1));
+    setCheckoutStep((prev) => Math.min(3, prev + 1));
   }
 
   function goToPreviousStep() {
@@ -2739,7 +2931,7 @@ export default function PublicMenuPage() {
           </div>
 
           {showScrollTopButton ? (
-            <div className={`fixed right-4 z-[80] ${cartCount > 0 ? 'bottom-24 sm:bottom-28' : 'bottom-6 sm:bottom-8'}`}>
+            <div className={`fixed right-4 z-[45] ${cartCount > 0 ? 'bottom-24 sm:bottom-28' : 'bottom-6 sm:bottom-8'}`}>
               <button
                 type="button"
                 onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
@@ -3384,137 +3576,269 @@ export default function PublicMenuPage() {
         ) : null}
 
         {isConfirmOpen ? (
-          <section className="fixed inset-0 z-[60] bg-white">
-            <div className="mx-auto h-full max-w-2xl bg-white">
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:px-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Checkout</p>
-                  <h3 className="text-xl font-black text-slate-900" style={titleFontStyle}>Confirmar pedido</h3>
+          <section className="fixed inset-0 z-[60] bg-[rgba(241,245,249,0.96)] backdrop-blur-sm">
+            <div className="mx-auto flex h-full max-w-6xl flex-col bg-[#f8fafc]">
+              <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/96 px-4 py-3 backdrop-blur-xl sm:px-6">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Checkout</p>
+                    <h3 className="mt-0.5 text-xl font-black tracking-[-0.03em] text-slate-950" style={titleFontStyle}>Finaliza tu pedido</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmOpen(false)}
+                    className="grid h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm"
+                    aria-label="Cerrar checkout"
+                  >
+                    <X className="h-4 w-4" strokeWidth={2.4} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setIsConfirmOpen(false)}
-                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600"
-                >
-                  Cerrar
-                </button>
               </div>
 
-              <div className="h-[calc(100%-132px)] overflow-hidden px-4 py-4 sm:px-6">
-                <div className="grid grid-cols-3 gap-2">
-                  {checkoutStepTitles.map((title, index) => {
-                    const state = checkoutStep === index ? 'active' : checkoutStep > index ? 'done' : 'pending';
-                    return (
-                      <div
-                        key={`checkout-step-${title}`}
-                        className="rounded-2xl border px-3 py-2"
-                        style={
-                          state === 'active'
-                            ? {
-                                borderColor: 'color-mix(in srgb, var(--primary-color) 40%, white)',
-                                backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, white)',
-                              }
-                            : state === 'done'
-                              ? { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }
-                              : { borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' }
-                        }
-                      >
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Paso {index + 1}</p>
-                        <p className="mt-0.5 text-sm font-bold text-slate-900">{title}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="mt-4 h-[calc(100%-164px)] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  {checkoutStep === 0 ? (
-                    <div className="space-y-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Datos del cliente</p>
-                      <label className="block">
-                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Nombre completo
-                        </span>
-                        <input
-                          type="text"
-                          value={clientName}
-                          onChange={(event) => setClientName(event.target.value)}
-                          placeholder="Ejemplo: Maria Fernanda Lopez"
-                          className="h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                          style={{
-                            borderColor: isClientNameValid || clientName.trim().length === 0 ? '#CBD5E1' : '#F43F5E',
-                          }}
-                          required
-                        />
-                      </label>
-
-                      <label className="block">
-                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Telefono WhatsApp
-                        </span>
+              <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+                <div className="mx-auto max-w-3xl">
+                  <div className="min-w-0">
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5">
+                      <div className="h-1 overflow-hidden rounded-full bg-slate-200">
                         <div
-                          className="flex h-12 overflow-hidden rounded-xl border bg-white"
-                          style={{
-                            borderColor:
-                              isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? '#CBD5E1' : '#F43F5E',
-                          }}
-                        >
-                          <select
-                            value={clientWhatsappCountry}
-                            onChange={(event) => setClientWhatsappCountry(event.target.value as '+58' | '+57' | '+1')}
-                            className="w-28 border-r border-slate-200 bg-slate-50 px-2 text-sm font-semibold text-slate-800 outline-none"
-                            aria-label="Codigo de pais"
-                          >
-                            <option value="+58">🇻🇪 VE +58</option>
-                            <option value="+57">🇨🇴 CO +57</option>
-                            <option value="+1">🇺🇸 US +1</option>
-                          </select>
-                          <input
-                            type="tel"
-                            inputMode="numeric"
-                            value={maskedClientWhatsapp}
-                            onChange={(event) => setClientWhatsapp(normalizePhone(event.target.value).slice(0, 10))}
-                            placeholder={clientWhatsappCountry === '+1' ? '(305) 555-1212' : '412 123 4567'}
-                            className="h-full w-full px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                            required
-                          />
-                        </div>
-                        <p className="mt-1 text-[11px] font-medium text-slate-500">
-                          Numero final: {normalizedClientWhatsapp || 'Sin completar'}
-                        </p>
-                      </label>
-
-                      <label className="block">
-                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Correo del cliente (opcional)
-                        </span>
-                        <input
-                          id="client-email"
-                          type="email"
-                          inputMode="email"
-                          autoComplete="email"
-                          placeholder="tucorreo@ejemplo.com"
-                          value={clientEmail}
-                          onChange={(event) => setClientEmail(event.target.value)}
-                          className="h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                          style={{
-                            borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? '#CBD5E1' : '#F43F5E',
-                          }}
+                          className="h-full rounded-full transition-all duration-300"
+                          style={{ width: `${Math.max(checkoutProgress * 100, 8)}%`, backgroundColor: 'var(--primary-color)' }}
                         />
-                        {clientEmail.trim().length > 0 && !isClientEmailValid ? (
-                          <p className="mt-1 text-[11px] font-medium text-rose-500">Ingresa un correo valido o deja el campo vacio.</p>
-                        ) : null}
-                      </label>
+                      </div>
+                      <div className="mt-4 grid grid-cols-4 items-start">
+                        {checkoutStepTitles.map((title, index) => {
+                          const isActive = checkoutStep === index;
+                          const isDone = index < checkoutStep;
+                          return (
+                            <div key={`checkout-step-${title}`} className="relative flex min-w-0 justify-center">
+                              {index < checkoutStepTitles.length - 1 ? (
+                                <div
+                                  className="absolute left-1/2 top-[18px] h-[2px] w-full"
+                                  style={{ backgroundColor: isDone ? 'var(--primary-color)' : '#CBD5E1' }}
+                                />
+                              ) : null}
+                              <div className="relative z-[1] flex flex-col items-center bg-white px-2">
+                                <div
+                                  className="grid h-9 w-9 place-items-center rounded-full border text-sm font-black"
+                                  style={
+                                    isActive
+                                      ? {
+                                          backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
+                                          borderColor: 'color-mix(in srgb, var(--primary-color) 48%, white)',
+                                          color: 'var(--primary-color)',
+                                        }
+                                      : isDone
+                                        ? { backgroundColor: '#F0FDF4', borderColor: '#86EFAC', color: '#15803D' }
+                                        : { backgroundColor: '#FFFFFF', borderColor: '#CBD5E1', color: '#94A3B8' }
+                                  }
+                                >
+                                  {isDone ? '✓' : index + 1}
+                                </div>
+                                <p className={`mt-2 text-center text-[10px] font-black uppercase tracking-[0.12em] ${isActive ? 'text-slate-900' : 'text-slate-400'}`}>
+                                  {title}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5">
+                      <div className="mb-5 border-b border-slate-200 pb-4">
+                        <h4 className="text-xl font-black text-slate-950" style={titleFontStyle}>{currentCheckoutStepTitle}</h4>
+                      </div>
+
+                      <div className="sm:px-1">
+                  {checkoutStep === 0 ? (
+                    <div className="space-y-4">
+                      <div className="px-1">
+                        <h5 className="text-lg font-black text-slate-950" style={titleFontStyle}>Revisa tus productos</h5>
+                        <p className="mt-1 text-sm font-medium text-slate-500">Ajusta cantidades o deja una nota.</p>
+                      </div>
+
+                      {checkoutSummaryItems.length > 0 ? (
+                        <div className="space-y-3">
+                          {checkoutSummaryItems.map((item) => (
+                            <article key={`checkout-step-order-${item.id}`} className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5">
+                              <div className="flex items-start gap-4">
+                                <img
+                                  src={item.imageUrl}
+                                  alt={item.name}
+                                  className="h-20 w-20 shrink-0 rounded-[22px] bg-slate-100 object-cover"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="truncate text-[15px] font-black text-slate-950">{item.name}</p>
+                                      {item.description ? (
+                                        <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">{item.description}</p>
+                                      ) : null}
+                                    </div>
+                                    <p className="whitespace-nowrap text-sm font-black text-slate-950">
+                                      {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
+                                    </p>
+                                  </div>
+
+                                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                                    <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => decrementProduct(item.id)}
+                                        className="grid h-9 w-9 place-items-center rounded-full bg-white text-base font-black text-slate-700"
+                                        aria-label={`Reducir cantidad de ${item.name}`}
+                                      >
+                                        −
+                                      </button>
+                                      <span className="min-w-10 px-2 text-center text-sm font-black text-slate-900">{item.quantity}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => incrementProduct(item.id)}
+                                        disabled={!item.canIncrease}
+                                        className="grid h-9 w-9 place-items-center rounded-full bg-white text-base font-black text-slate-700 disabled:opacity-40"
+                                        aria-label={`Aumentar cantidad de ${item.name}`}
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => setCart((prev) => {
+                                        const next = { ...prev };
+                                        delete next[item.id];
+                                        return next;
+                                      })}
+                                      className="text-sm font-bold text-rose-500"
+                                    >
+                                      Quitar
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-[24px] border border-dashed border-slate-300 bg-white px-4 py-5 text-sm font-semibold text-slate-500">
+                          Tu carrito esta vacio. Cierra esta vista y agrega productos para continuar.
+                        </div>
+                      )}
+
+                      <div className="rounded-[24px] border border-slate-200 bg-white p-4">
+                        <label htmlFor="order-notes" className="block">
+                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                            <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
+                            Nota para el negocio
+                          </span>
+                          <textarea
+                            id="order-notes"
+                            value={orderNotes}
+                            onChange={(event) => setOrderNotes(event.target.value)}
+                            placeholder="Sin cebolla, tocar timbre, empaquetar aparte"
+                            rows={4}
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                          />
+                        </label>
+                        <p className="mt-2 text-[11px] font-medium text-slate-500">
+                          Opcional.
+                        </p>
+                      </div>
                     </div>
                   ) : null}
 
                   {checkoutStep === 1 ? (
+                    <div className="space-y-4">
+                      <div className="px-1">
+                        <h5 className="text-lg font-black text-slate-950" style={titleFontStyle}>¿Quien recibe el pedido?</h5>
+                        <p className="mt-1 text-sm font-medium text-slate-500">Completa los datos para contactarte.</p>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="block rounded-[24px] border border-slate-200 bg-white p-4">
+                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                            <User className="h-3.5 w-3.5" strokeWidth={2.4} />
+                            Nombre completo
+                          </span>
+                          <input
+                            type="text"
+                            value={clientName}
+                            onChange={(event) => setClientName(event.target.value)}
+                            placeholder="Maria Fernanda Lopez"
+                            className="h-12 w-full rounded-2xl border bg-slate-50 px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                            style={{
+                              borderColor: isClientNameValid || clientName.trim().length === 0 ? '#E2E8F0' : '#F43F5E',
+                            }}
+                            required
+                          />
+                        </label>
+
+                        <label className="block rounded-[24px] border border-slate-200 bg-white p-4">
+                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                            <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
+                            Correo electronico
+                          </span>
+                          <input
+                            id="client-email"
+                            type="email"
+                            inputMode="email"
+                            autoComplete="email"
+                            placeholder="correo@ejemplo.com"
+                            value={clientEmail}
+                            onChange={(event) => setClientEmail(event.target.value)}
+                            className="h-12 w-full rounded-2xl border bg-slate-50 px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                            style={{
+                              borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? '#E2E8F0' : '#F43F5E',
+                            }}
+                            required
+                          />
+                          {!isClientEmailValid && clientEmail.trim().length > 0 ? (
+                            <p className="mt-2 text-[11px] font-semibold text-rose-500">Ingresa un correo valido.</p>
+                          ) : null}
+                        </label>
+                      </div>
+
+                      <label className="block rounded-[24px] border border-slate-200 bg-white p-4">
+                        <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                          <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
+                          WhatsApp
+                        </span>
+                        <div
+                          className="checkout-phone-field rounded-2xl border bg-slate-50"
+                          style={{
+                            borderColor:
+                              isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? '#E2E8F0' : '#F43F5E',
+                          }}
+                        >
+                          <PhoneInput
+                            international
+                            countryCallingCodeEditable={false}
+                            defaultCountry={clientWhatsappCountry}
+                            country={clientWhatsappCountry}
+                            value={clientWhatsapp || undefined}
+                            onChange={(value) => setClientWhatsapp(value ?? '')}
+                            onCountryChange={(country) => {
+                              if (country) setClientWhatsappCountry(country as Country);
+                            }}
+                            placeholder="Ingresa tu numero"
+                            numberInputProps={{
+                              required: true,
+                              autoComplete: 'tel',
+                            }}
+                          />
+                        </div>
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {checkoutStep === 2 ? (
                     <div className="space-y-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Logistica y entrega</p>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="inline-flex rounded-full border border-slate-200 bg-white p-1">
                         <button
                           type="button"
                           onClick={() => setDeliveryMode('pickup')}
-                          className="rounded-full px-3 py-1.5 text-xs font-bold"
+                          className="rounded-full px-4 py-2 text-xs font-bold"
                           style={
                             deliveryMode === 'pickup'
                               ? {
@@ -3530,7 +3854,7 @@ export default function PublicMenuPage() {
                           type="button"
                           disabled={!supportsDelivery}
                           onClick={() => setDeliveryMode('delivery')}
-                          className="rounded-full px-3 py-1.5 text-xs font-bold"
+                          className="rounded-full px-4 py-2 text-xs font-bold"
                           style={
                             !supportsDelivery
                               ? { backgroundColor: '#E2E8F0', color: '#94A3B8' }
@@ -3551,13 +3875,16 @@ export default function PublicMenuPage() {
                           <button
                             type="button"
                             onClick={() => setIsMapPickerOpen(true)}
-                            className="flex h-11 w-full items-center justify-between rounded-xl border bg-white px-3 text-left text-sm text-slate-900 outline-none"
+                            className="flex min-h-14 w-full items-center justify-between rounded-2xl border bg-white px-4 py-3 text-left text-sm text-slate-900 outline-none shadow-sm"
                             style={{ borderColor: isDeliveryAddressValid ? '#CBD5E1' : '#F43F5E' }}
                           >
-                            <span className={`${normalizedDeliveryAddress ? 'text-slate-900' : 'text-slate-500'}`}>
-                              {normalizedDeliveryAddress || 'Direccion de entrega'}
-                            </span>
-                            <span className="text-[11px] font-black uppercase tracking-[0.08em] text-slate-600">Mapa</span>
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Direccion</p>
+                              <p className={`mt-1 ${normalizedDeliveryAddress ? 'text-slate-900' : 'text-slate-500'}`}>
+                                {normalizedDeliveryAddress || 'Selecciona la direccion de entrega'}
+                              </p>
+                            </div>
+                            <span className="text-lg font-black text-slate-300">›</span>
                           </button>
                           <input
                             type="text"
@@ -3587,35 +3914,9 @@ export default function PublicMenuPage() {
                     </div>
                   ) : null}
 
-                  {checkoutStep === 2 ? (
+                  {checkoutStep === 3 ? (
                     <div className="space-y-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Pago y total final</p>
-
-                      {paymentMethodsByCurrency.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {paymentMethodsByCurrency.map((group) => (
-                            <button
-                              key={`currency-chip-${group.currency}`}
-                              type="button"
-                              onClick={() => setSelectedCurrency(group.currency)}
-                              className="rounded-full px-3 py-1.5 text-xs font-bold"
-                              style={
-                                selectedCurrency === group.currency
-                                  ? {
-                                      backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
-                                      color: 'var(--primary-color)',
-                                    }
-                                  : { backgroundColor: '#E2E8F0', color: '#334155' }
-                              }
-                            >
-                              {group.currency}
-                              {group.currency !== businessBaseCurrency && group.exchangeRate > 0
-                                ? ` (1 ${businessBaseCurrency} = ${group.exchangeRate} ${group.currency})`
-                                : ''}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
 
                       {selectedCurrencyGroup?.methods.length ? (
                         <div className="space-y-2">
@@ -3627,7 +3928,7 @@ export default function PublicMenuPage() {
                                 key={method.id}
                                 type="button"
                                 onClick={() => setSelectedPaymentMethodId(method.id)}
-                                className="w-full rounded-2xl border p-3 text-left"
+                                className="w-full rounded-[22px] border px-4 py-3 text-left shadow-sm"
                                 style={
                                   isSelected
                                     ? {
@@ -3637,10 +3938,17 @@ export default function PublicMenuPage() {
                                     : { borderColor: '#E2E8F0', backgroundColor: '#FFFFFF' }
                                 }
                               >
-                                <p className="text-sm font-bold text-slate-900">{paymentMethodLabel(method)}</p>
-                                {details.length > 0 ? (
-                                  <p className="mt-1 text-xs text-slate-600">{details.slice(0, 2).join(' · ')}</p>
-                                ) : null}
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-bold text-slate-900">{paymentMethodLabel(method)}</p>
+                                    {details.length > 0 ? (
+                                      <p className="mt-1 text-xs text-slate-600">{details.slice(0, 2).join(' · ')}</p>
+                                    ) : null}
+                                  </div>
+                                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${isSelected ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                    {isSelected ? '✓' : ''}
+                                  </span>
+                                </div>
                               </button>
                             );
                           })}
@@ -3718,20 +4026,6 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
-                      <div>
-                        <label htmlFor="order-notes" className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Notas del pedido
-                        </label>
-                        <textarea
-                          id="order-notes"
-                          value={orderNotes}
-                          onChange={(event) => setOrderNotes(event.target.value)}
-                          placeholder="Ejemplo: sin cebolla, tocar timbre"
-                          rows={2}
-                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 outline-none"
-                        />
-                      </div>
-
                       <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
                         <p className="flex items-center justify-between text-sm text-slate-700">
                           <span>Subtotal</span>
@@ -3755,51 +4049,113 @@ export default function PublicMenuPage() {
                       </div>
                     </div>
                   ) : null}
-                </div>
+                      </div>
+                    </div>
 
-                {checkoutError ? (
-                  <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
-                    {checkoutError}
+                    {checkoutError ? (
+                      <div className="mt-4 rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 shadow-sm">
+                        {checkoutError}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
+                </div>
               </div>
 
-              <div className="border-t border-slate-200 bg-white px-4 py-3 sm:px-6">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={goToPreviousStep}
-                    disabled={checkoutStep === 0 || isSubmittingOrder}
-                    className="h-11 min-w-28 rounded-full border border-slate-300 px-4 text-sm font-bold text-slate-700 disabled:opacity-45"
-                  >
-                    Anterior
-                  </button>
+              <div className="border-t border-slate-200 bg-white/98 px-4 py-2 backdrop-blur-xl sm:px-6">
+                <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-2.5 sm:px-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Total</p>
+                      <p className="mt-0.5 truncate text-lg font-black tracking-[-0.03em] text-slate-950 sm:text-xl" style={titleFontStyle}>
+                        {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                      </p>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        {checkoutItemsCount} unid. · {selectedCurrencyCode}
+                      </p>
+                    </div>
 
-                  {checkoutStep < 2 ? (
+                    {paymentMethodsByCurrency.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsCheckoutFooterExpanded((prev) => !prev)}
+                        aria-expanded={isCheckoutFooterExpanded}
+                        aria-label={isCheckoutFooterExpanded ? 'Ocultar opciones del checkout' : 'Mostrar opciones del checkout'}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-600"
+                      >
+                        <ChevronDown
+                          className={`h-4 w-4 transition-transform duration-300 ${isCheckoutFooterExpanded ? 'rotate-180' : 'rotate-0'}`}
+                          strokeWidth={2.4}
+                        />
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div
+                    className={`grid overflow-hidden transition-all duration-300 ease-out ${isCheckoutFooterExpanded && paymentMethodsByCurrency.length > 1 ? 'mt-3 grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+                  >
+                    <div className="min-h-0">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Moneda</p>
+                        <div className="mt-2 flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                          {paymentMethodsByCurrency.map((group) => (
+                            <button
+                              key={`footer-currency-chip-${group.currency}`}
+                              type="button"
+                              onClick={() => setSelectedCurrency(group.currency)}
+                              className="shrink-0 rounded-full px-3 py-1.5 text-[11px] font-black transition-colors duration-200"
+                              style={
+                                selectedCurrency === group.currency
+                                  ? {
+                                      backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
+                                      color: 'var(--primary-color)',
+                                    }
+                                  : { backgroundColor: '#F8FAFC', color: '#475569' }
+                              }
+                            >
+                              {group.currency}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:min-w-[300px]">
                     <button
                       type="button"
-                      onClick={goToNextStep}
+                      onClick={checkoutStep === 0 ? () => setIsConfirmOpen(false) : goToPreviousStep}
                       disabled={isSubmittingOrder}
-                      className="h-11 flex-1 rounded-full px-5 text-sm font-black uppercase tracking-[0.08em]"
-                      style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                      className="h-11 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 disabled:opacity-45"
                     >
-                      Siguiente
+                      {checkoutStep === 0 ? 'Seguir viendo' : 'Atras'}
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => void confirmOrder()}
-                      disabled={isSubmittingOrder || !canSubmitCheckout}
-                      className="h-11 flex-1 rounded-full px-5 text-sm font-black uppercase tracking-[0.08em]"
-                      style={
-                        isSubmittingOrder || !canSubmitCheckout
-                          ? { backgroundColor: '#E2E8F0', color: '#64748B' }
-                          : { backgroundColor: '#FF7A00', color: '#FFFFFF' }
-                      }
-                    >
-                      {isSubmittingOrder ? 'Guardando pedido...' : 'Confirmar pedido'}
-                    </button>
-                  )}
+
+                    {checkoutStep < 3 ? (
+                      <button
+                        type="button"
+                        onClick={goToNextStep}
+                        disabled={isSubmittingOrder}
+                        className="h-11 rounded-2xl px-5 text-sm font-black tracking-[0.01em]"
+                        style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                      >
+                        {nextStepCtaLabels[checkoutStep] ?? 'Siguiente'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void confirmOrder()}
+                        disabled={isSubmittingOrder || !canSubmitCheckout}
+                        className="h-11 rounded-2xl px-5 text-sm font-black tracking-[0.01em]"
+                        style={
+                          isSubmittingOrder || !canSubmitCheckout
+                            ? { backgroundColor: '#E2E8F0', color: '#64748B' }
+                            : { backgroundColor: '#12B886', color: '#FFFFFF', boxShadow: '0 16px 32px rgba(18,184,134,0.28)' }
+                        }
+                      >
+                        {isSubmittingOrder ? 'Guardando pedido...' : 'Confirmar pedido'}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {isSubmittingOrder ? (
                   <p className="mt-2 text-center text-xs font-semibold text-slate-500">Estamos guardando tu pedido. No cierres esta ventana.</p>
