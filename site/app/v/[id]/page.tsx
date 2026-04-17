@@ -3,7 +3,7 @@
 
 import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
-import { ArrowUp, ChevronDown, Info, Mail, Menu, MessageCircle, Phone, Share2, User, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Info, Mail, MapPin, Menu, MessageCircle, Phone, Share2, Store, Truck, User, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
@@ -3576,8 +3576,8 @@ export default function PublicMenuPage() {
         ) : null}
 
         {isConfirmOpen ? (
-          <section className="fixed inset-0 z-[60] bg-[rgba(241,245,249,0.96)] backdrop-blur-sm">
-            <div className="mx-auto flex h-full max-w-6xl flex-col bg-[#f8fafc]">
+          <section className="checkout-overlay-enter fixed inset-0 z-[60] bg-[rgba(241,245,249,0.96)] backdrop-blur-sm">
+            <div className="checkout-sheet-enter mx-auto flex h-full max-w-6xl flex-col bg-[#f8fafc]">
               <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/96 px-4 py-3 backdrop-blur-xl sm:px-6">
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0">
@@ -3598,7 +3598,7 @@ export default function PublicMenuPage() {
               <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
                 <div className="mx-auto max-w-3xl">
                   <div className="min-w-0">
-                    <div className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5">
+                    <div className="checkout-panel-enter rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5">
                       <div className="h-1 overflow-hidden rounded-full bg-slate-200">
                         <div
                           className="h-full rounded-full transition-all duration-300"
@@ -3619,7 +3619,7 @@ export default function PublicMenuPage() {
                               ) : null}
                               <div className="relative z-[1] flex flex-col items-center bg-white px-2">
                                 <div
-                                  className="grid h-9 w-9 place-items-center rounded-full border text-sm font-black"
+                                  className={`grid h-9 w-9 place-items-center rounded-full border text-sm font-black transition-all duration-300 ${isActive ? 'checkout-step-active' : ''}`}
                                   style={
                                     isActive
                                       ? {
@@ -3644,23 +3644,23 @@ export default function PublicMenuPage() {
                       </div>
                     </div>
 
-                    <div className="mt-4 rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5">
+                    <div className="checkout-panel-enter mt-4 rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5" style={{ animationDelay: '70ms' }}>
                       <div className="mb-5 border-b border-slate-200 pb-4">
                         <h4 className="text-xl font-black text-slate-950" style={titleFontStyle}>{currentCheckoutStepTitle}</h4>
                       </div>
 
-                      <div className="sm:px-1">
+                      <div key={`checkout-step-panel-${checkoutStep}`} className="checkout-panel-enter sm:px-1">
                   {checkoutStep === 0 ? (
                     <div className="space-y-4">
-                      <div className="px-1">
+                      <div className="checkout-item-enter px-1">
                         <h5 className="text-lg font-black text-slate-950" style={titleFontStyle}>Revisa tus productos</h5>
                         <p className="mt-1 text-sm font-medium text-slate-500">Ajusta cantidades o deja una nota.</p>
                       </div>
 
                       {checkoutSummaryItems.length > 0 ? (
                         <div className="space-y-3">
-                          {checkoutSummaryItems.map((item) => (
-                            <article key={`checkout-step-order-${item.id}`} className="rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5">
+                          {checkoutSummaryItems.map((item, index) => (
+                            <article key={`checkout-step-order-${item.id}`} className="checkout-item-enter rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5" style={{ animationDelay: `${index * 50}ms` }}>
                               <div className="flex items-start gap-4">
                                 <img
                                   src={item.imageUrl}
@@ -3725,7 +3725,7 @@ export default function PublicMenuPage() {
                         </div>
                       )}
 
-                      <div className="rounded-[24px] border border-slate-200 bg-white p-4">
+                      <div className="checkout-item-enter rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '120ms' }}>
                         <label htmlFor="order-notes" className="block">
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
                             <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
@@ -3749,13 +3749,13 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 1 ? (
                     <div className="space-y-4">
-                      <div className="px-1">
+                      <div className="checkout-item-enter px-1">
                         <h5 className="text-lg font-black text-slate-950" style={titleFontStyle}>¿Quien recibe el pedido?</h5>
                         <p className="mt-1 text-sm font-medium text-slate-500">Completa los datos para contactarte.</p>
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2">
-                        <label className="block rounded-[24px] border border-slate-200 bg-white p-4">
+                        <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '40ms' }}>
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
                             <User className="h-3.5 w-3.5" strokeWidth={2.4} />
                             Nombre completo
@@ -3773,7 +3773,7 @@ export default function PublicMenuPage() {
                           />
                         </label>
 
-                        <label className="block rounded-[24px] border border-slate-200 bg-white p-4">
+                        <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '90ms' }}>
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
                             <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
                             Correo electronico
@@ -3798,7 +3798,7 @@ export default function PublicMenuPage() {
                         </label>
                       </div>
 
-                      <label className="block rounded-[24px] border border-slate-200 bg-white p-4">
+                      <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '140ms' }}>
                         <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
                           <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
                           WhatsApp
@@ -3832,83 +3832,181 @@ export default function PublicMenuPage() {
                   ) : null}
 
                   {checkoutStep === 2 ? (
-                    <div className="space-y-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Logistica y entrega</p>
-                      <div className="inline-flex rounded-full border border-slate-200 bg-white p-1">
+                    <div className="space-y-4">
+                      <div className="checkout-item-enter px-1">
+                        <h5 className="text-lg font-black text-slate-950" style={titleFontStyle}>Define la entrega</h5>
+                        <p className="mt-1 text-sm font-medium text-slate-500">Elige si retiras en el local o si quieres enviar el pedido a una direccion.</p>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
                         <button
                           type="button"
                           onClick={() => setDeliveryMode('pickup')}
-                          className="rounded-full px-4 py-2 text-xs font-bold"
-                          style={
-                            deliveryMode === 'pickup'
-                              ? {
-                                  backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
-                                  color: 'var(--primary-color)',
-                                }
-                              : { backgroundColor: '#E2E8F0', color: '#334155' }
-                          }
+                          className="checkout-item-enter rounded-[24px] border p-4 text-left"
+                          style={{
+                            animationDelay: '40ms',
+                            borderColor:
+                              !isDeliveryOrder
+                                ? 'color-mix(in srgb, var(--primary-color) 42%, white)'
+                                : '#E2E8F0',
+                            backgroundColor:
+                              !isDeliveryOrder
+                                ? 'color-mix(in srgb, var(--primary-color) 8%, white)'
+                                : '#FFFFFF',
+                          }}
                         >
-                          Retiro
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                                <Store className="h-5 w-5" strokeWidth={2.2} />
+                              </span>
+                              <p className="mt-3 text-base font-black text-slate-950">Retiro en local</p>
+                              <p className="mt-1 text-sm leading-5 text-slate-500">Recoges el pedido directamente en el negocio.</p>
+                            </div>
+                            {!isDeliveryOrder ? (
+                              <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 shadow-sm">Activo</span>
+                            ) : null}
+                          </div>
                         </button>
+
                         <button
                           type="button"
                           disabled={!supportsDelivery}
                           onClick={() => setDeliveryMode('delivery')}
-                          className="rounded-full px-4 py-2 text-xs font-bold"
-                          style={
-                            !supportsDelivery
-                              ? { backgroundColor: '#E2E8F0', color: '#94A3B8' }
-                              : deliveryMode === 'delivery'
-                                ? {
-                                    backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
-                                    color: 'var(--primary-color)',
-                                  }
-                                : { backgroundColor: '#E2E8F0', color: '#334155' }
-                          }
+                          className="checkout-item-enter rounded-[24px] border p-4 text-left disabled:cursor-not-allowed disabled:opacity-70"
+                          style={{
+                            animationDelay: '80ms',
+                            borderColor:
+                              isDeliveryOrder
+                                ? 'color-mix(in srgb, var(--primary-color) 42%, white)'
+                                : '#E2E8F0',
+                            backgroundColor:
+                              isDeliveryOrder
+                                ? 'color-mix(in srgb, var(--primary-color) 8%, white)'
+                                : '#FFFFFF',
+                          }}
                         >
-                          Delivery
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                                <Truck className="h-5 w-5" strokeWidth={2.2} />
+                              </span>
+                              <p className="mt-3 text-base font-black text-slate-950">Delivery</p>
+                              <p className="mt-1 text-sm leading-5 text-slate-500">
+                                {supportsDelivery
+                                  ? 'Enviamos el pedido a tu ubicacion.'
+                                  : 'Este negocio no tiene delivery activo.'}
+                              </p>
+                            </div>
+                            {isDeliveryOrder ? (
+                              <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 shadow-sm">Activo</span>
+                            ) : supportsDelivery ? (
+                              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                                {formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}
+                              </span>
+                            ) : null}
+                          </div>
                         </button>
                       </div>
 
                       {isDeliveryOrder ? (
-                        <>
+                        <div className="space-y-3">
                           <button
                             type="button"
                             onClick={() => setIsMapPickerOpen(true)}
-                            className="flex min-h-14 w-full items-center justify-between rounded-2xl border bg-white px-4 py-3 text-left text-sm text-slate-900 outline-none shadow-sm"
-                            style={{ borderColor: isDeliveryAddressValid ? '#CBD5E1' : '#F43F5E' }}
+                            className="checkout-item-enter w-full rounded-[24px] border bg-white p-4 text-left shadow-sm"
+                            style={{
+                              animationDelay: '120ms',
+                              borderColor: isDeliveryAddressValid ? '#CBD5E1' : '#F43F5E',
+                            }}
                           >
-                            <div>
-                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Direccion</p>
-                              <p className={`mt-1 ${normalizedDeliveryAddress ? 'text-slate-900' : 'text-slate-500'}`}>
-                                {normalizedDeliveryAddress || 'Selecciona la direccion de entrega'}
-                              </p>
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex min-w-0 gap-3">
+                                <span className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                                  <MapPin className="h-5 w-5" strokeWidth={2.2} />
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Direccion de entrega</p>
+                                  <p className={`mt-2 text-sm leading-6 ${normalizedDeliveryAddress ? 'text-slate-900' : 'text-slate-500'}`}>
+                                    {normalizedDeliveryAddress || 'Selecciona la direccion exacta en el mapa para continuar'}
+                                  </p>
+                                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${hasDeliveryPoint ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                      {hasDeliveryPoint ? 'Punto confirmado' : 'Falta ubicar el punto'}
+                                    </span>
+                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                                      Costo {formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="shrink-0 text-lg font-black text-slate-300">›</span>
                             </div>
-                            <span className="text-lg font-black text-slate-300">›</span>
                           </button>
-                          <input
-                            type="text"
-                            value={deliveryReference}
-                            onChange={(event) => setDeliveryReference(event.target.value)}
-                            placeholder="Referencia (opcional)"
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none"
-                          />
-                          <textarea
-                            value={deliveryInstructions}
-                            onChange={(event) => setDeliveryInstructions(event.target.value)}
-                            placeholder="Indicaciones para entregar (opcional)"
-                            rows={2}
-                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none"
-                          />
-                          {(!isDeliveryAddressValid || !hasDeliveryPoint) ? (
-                            <p className="text-xs font-semibold text-rose-500">Ingresa direccion valida y selecciona el punto en el mapa.</p>
-                          ) : (
-                            <p className="text-xs font-semibold text-emerald-700">Direccion y punto de mapa validados.</p>
-                          )}
-                        </>
+
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '160ms' }}>
+                              <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                                <MapPin className="h-3.5 w-3.5" strokeWidth={2.4} />
+                                Referencia
+                              </span>
+                              <input
+                                type="text"
+                                value={deliveryReference}
+                                onChange={(event) => setDeliveryReference(event.target.value)}
+                                placeholder="Apartamento, porton, piso, torre"
+                                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                              />
+                              <p className="mt-2 text-[11px] font-medium text-slate-500">Opcional, pero ayuda a ubicarte mas rapido.</p>
+                            </label>
+
+                            <div className="checkout-item-enter rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '200ms' }}>
+                              <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                                <Truck className="h-3.5 w-3.5" strokeWidth={2.4} />
+                                Estado
+                              </p>
+                              <div className="mt-3 space-y-2">
+                                <div className={`rounded-2xl px-3 py-2 text-sm font-semibold ${isDeliveryAddressValid ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'}`}>
+                                  {isDeliveryAddressValid ? 'Direccion valida' : 'Agrega una direccion mas precisa'}
+                                </div>
+                                <div className={`rounded-2xl px-3 py-2 text-sm font-semibold ${hasDeliveryPoint ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                  {hasDeliveryPoint ? 'Punto en mapa confirmado' : 'Falta marcar el punto en el mapa'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '240ms' }}>
+                            <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                              <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
+                              Indicaciones para entregar
+                            </span>
+                            <textarea
+                              value={deliveryInstructions}
+                              onChange={(event) => setDeliveryInstructions(event.target.value)}
+                              placeholder="Ejemplo: tocar timbre, llamar al llegar, dejar en recepcion"
+                              rows={3}
+                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                            />
+                            <p className="mt-2 text-[11px] font-medium text-slate-500">Opcional.</p>
+                          </label>
+                        </div>
                       ) : (
-                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-                          Pedido para retiro en el local.
+                        <div className="checkout-item-enter rounded-[24px] border border-emerald-200 bg-[linear-gradient(180deg,#F0FDF4_0%,#ECFDF5_100%)] p-4" style={{ animationDelay: '120ms' }}>
+                          <div className="flex items-start gap-3">
+                            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-emerald-700 shadow-sm">
+                              <Store className="h-5 w-5" strokeWidth={2.2} />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-base font-black text-emerald-900">Retiras en el local</p>
+                              <p className="mt-1 text-sm leading-6 text-emerald-800">
+                                {comercioAddress || 'Podras retirar directamente en el negocio una vez el pedido este listo.'}
+                              </p>
+                              <div className="mt-3 inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-black text-emerald-700 shadow-sm">
+                                Sin costo de entrega
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -3916,11 +4014,11 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 3 ? (
                     <div className="space-y-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Pago y total final</p>
+                      <p className="checkout-item-enter text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Pago y total final</p>
 
                       {selectedCurrencyGroup?.methods.length ? (
                         <div className="space-y-2">
-                          {selectedCurrencyGroup.methods.map((method) => {
+                          {selectedCurrencyGroup.methods.map((method, index) => {
                             const isSelected = selectedPaymentMethodId === method.id;
                             const details = paymentMethodDetails(method);
                             return (
@@ -3928,15 +4026,16 @@ export default function PublicMenuPage() {
                                 key={method.id}
                                 type="button"
                                 onClick={() => setSelectedPaymentMethodId(method.id)}
-                                className="w-full rounded-[22px] border px-4 py-3 text-left shadow-sm"
-                                style={
-                                  isSelected
+                                className="checkout-item-enter w-full rounded-[22px] border px-4 py-3 text-left shadow-sm"
+                                style={{
+                                  ...(isSelected
                                     ? {
                                         borderColor: 'color-mix(in srgb, var(--primary-color) 42%, white)',
                                         backgroundColor: 'color-mix(in srgb, var(--primary-color) 10%, white)',
                                       }
-                                    : { borderColor: '#E2E8F0', backgroundColor: '#FFFFFF' }
-                                }
+                                    : { borderColor: '#E2E8F0', backgroundColor: '#FFFFFF' }),
+                                  animationDelay: `${index * 45}ms`,
+                                }}
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
@@ -3954,13 +4053,13 @@ export default function PublicMenuPage() {
                           })}
                         </div>
                       ) : (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
+                        <div className="checkout-item-enter rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
                           Este comercio no tiene metodos de pago configurados.
                         </div>
                       )}
 
                       {isCashPayment ? (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                        <div className="checkout-item-enter rounded-2xl border border-slate-200 bg-white p-3" style={{ animationDelay: '90ms' }}>
                           <label className="block">
                             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                               ¿Con cuanto pagaras? (Opcional)
@@ -3984,7 +4083,7 @@ export default function PublicMenuPage() {
                       ) : null}
 
                       {isDigitalPayment ? (
-                        <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3">
+                        <div className="checkout-item-enter space-y-2 rounded-2xl border border-slate-200 bg-white p-3" style={{ animationDelay: '120ms' }}>
                           <label className="block">
                             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                               Referencia (ultimos 4 digitos)
@@ -4026,7 +4125,7 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
-                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="checkout-item-enter rounded-2xl border border-slate-200 bg-white px-4 py-3" style={{ animationDelay: '150ms' }}>
                         <p className="flex items-center justify-between text-sm text-slate-700">
                           <span>Subtotal</span>
                           <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
@@ -4062,7 +4161,7 @@ export default function PublicMenuPage() {
               </div>
 
               <div className="border-t border-slate-200 bg-white/98 px-4 py-2 backdrop-blur-xl sm:px-6">
-                <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-2.5 sm:px-4">
+                <div className="checkout-panel-enter rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-2.5 sm:px-4" style={{ animationDelay: '120ms' }}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Total</p>
