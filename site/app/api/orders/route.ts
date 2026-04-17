@@ -268,7 +268,7 @@ export async function POST(request: Request) {
 
     const comercioQuery = supabase
       .from('comercios')
-      .select('id')
+      .select('id,slug')
       .limit(1);
     const { data: comercios, error: comercioError } = isUuid(comercioId)
       ? await comercioQuery.eq('id', comercioId)
@@ -279,6 +279,7 @@ export async function POST(request: Request) {
     }
 
     const resolvedComercioId = (comercios ?? [])[0]?.id?.toString().trim() ?? '';
+    const resolvedComercioSlug = (comercios ?? [])[0]?.slug?.toString().trim() ?? '';
     if (!resolvedComercioId) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
@@ -326,7 +327,9 @@ export async function POST(request: Request) {
       throw new Error(insertError.message ?? 'Failed to create order.');
     }
 
-    const trackingUrl = `https://kosmenu.vercel.app/orders/${encodeURIComponent(orderId)}`;
+    const trackingUrl = resolvedComercioSlug
+      ? `https://kosmenu.vercel.app/v/${encodeURIComponent(resolvedComercioSlug)}/orders/${encodeURIComponent(orderId)}`
+      : `https://kosmenu.vercel.app/orders/${encodeURIComponent(orderId)}`;
     let emailStatus: 'queued' | 'skipped' = 'skipped';
 
     if (clientEmail && canSendOrderEmail()) {

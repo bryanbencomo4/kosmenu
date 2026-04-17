@@ -2229,9 +2229,24 @@ export default function PublicMenuPage() {
       paymentProofUrl = proofPublicData?.publicUrl ?? '';
     }
 
-    const subtotalConverted = convertFromCop(orderSubtotal, paymentMeta.currency, paymentMeta.exchangeRate);
-    const deliveryConverted = convertFromCop(deliveryCost, paymentMeta.currency, paymentMeta.exchangeRate);
-    const totalConverted = convertFromCop(orderGrandTotal, paymentMeta.currency, paymentMeta.exchangeRate);
+    const subtotalConverted = convertFromBaseCurrency(
+      orderSubtotal,
+      businessBaseCurrency,
+      paymentMeta.currency,
+      paymentMeta.exchangeRate,
+    );
+    const deliveryConverted = convertFromBaseCurrency(
+      deliveryCost,
+      businessBaseCurrency,
+      paymentMeta.currency,
+      paymentMeta.exchangeRate,
+    );
+    const totalConverted = convertFromBaseCurrency(
+      orderGrandTotal,
+      businessBaseCurrency,
+      paymentMeta.currency,
+      paymentMeta.exchangeRate,
+    );
     const orderItems = cartItems.map((item) => ({
       product_id: item.product.id,
       nombre: item.product.nombre,
@@ -2458,6 +2473,14 @@ export default function PublicMenuPage() {
       setDeliveryMode('pickup');
       setCheckoutStep(0);
       setIsConfirmOpen(false);
+      if (typeof window !== 'undefined') {
+        const absoluteTrackingUrl = new URL(
+          persisted.orderUrl || `/orders/${encodeURIComponent(persisted.orderId)}`,
+          window.location.origin,
+        ).toString();
+        window.location.assign(absoluteTrackingUrl);
+        return;
+      }
       router.push(`/orders/${encodeURIComponent(persisted.orderId)}`);
     } catch (persistError) {
       const message =

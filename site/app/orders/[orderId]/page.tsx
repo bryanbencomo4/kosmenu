@@ -2,8 +2,9 @@
 'use client';
 
 import { createClient } from '@supabase/supabase-js';
+import { Bell, CreditCard, MapPin, MessageCircle, Package, Phone, Store, User } from 'lucide-react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 type OrderStatus =
@@ -72,6 +73,7 @@ type PedidoRow = {
 type ComercioRow = {
   id: string;
   nombre?: string | null;
+  slug?: string | null;
   direccion?: string | null;
   latitud?: number | string | null;
   longitud?: number | string | null;
@@ -79,6 +81,18 @@ type ComercioRow = {
   telefono?: string | null;
   telefonos?: string | null;
   celular?: string | null;
+  logo_url?: string | null;
+  branding_ia?: {
+    color_principal?: string | null;
+    color_secundario?: string | null;
+    fuente_titulos?: string | null;
+    fuente_cuerpo?: string | null;
+    colores_personalizados?: {
+      background?: string | null;
+      card_surface?: string | null;
+      text_on_primary?: string | null;
+    } | null;
+  } | null;
 };
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -151,6 +165,18 @@ function formatAmountByCurrency(value: number | null | undefined, currency: stri
   }
 }
 
+function normalizeHexColor(value: unknown, fallback: string) {
+  const raw = (value ?? '').toString().trim();
+  if (!raw) return fallback;
+  const normalized = raw.startsWith('#') ? raw : `#${raw}`;
+  return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized : fallback;
+}
+
+function fontFamilyCssValue(primary: string | null | undefined, fallback: string) {
+  const value = (primary ?? '').toString().trim();
+  return value ? `${value}, ${fallback}` : fallback;
+}
+
 function convertFromCop(amountInCop: number, currency: string, exchangeRate: number) {
   const safeAmount = Number.isFinite(amountInCop) ? amountInCop : 0;
   const normalizedCurrency = normalizeCurrencyCode(currency);
@@ -178,6 +204,8 @@ function buildWhatsAppLink(orderId: string, status: OrderStatus, comercio: Comer
 
 export default function OrderTrackingPage() {
   const params = useParams<{ orderId: string }>();
+  const pathname = usePathname();
+  const router = useRouter();
   const orderId = decodeURIComponent(params?.orderId ?? '').trim();
 
   const [loading, setLoading] = useState(true);
@@ -258,7 +286,7 @@ export default function OrderTrackingPage() {
         if (currentComercioId) {
           const { data: comercioRow } = await supabase
             .from('comercios')
-            .select('id,nombre,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular')
+            .select('id,nombre,slug,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular,logo_url,branding_ia')
             .eq('id', currentComercioId)
             .maybeSingle<ComercioRow>();
 
@@ -321,7 +349,7 @@ export default function OrderTrackingPage() {
           currentComercioId = comercioId;
           const { data: comercioRow } = await supabase
             .from('comercios')
-            .select('id,nombre,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular')
+            .select('id,nombre,slug,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular,logo_url,branding_ia')
             .eq('id', comercioId)
             .maybeSingle<ComercioRow>();
           if (active) {
@@ -413,6 +441,20 @@ export default function OrderTrackingPage() {
     [comercio, orderId, resolvedStatus],
   );
   const finalWaLink = waReceiptUrl || fallbackWaLink;
+  const branding = comercio?.branding_ia ?? null;
+  const trackingPrimary = normalizeHexColor(branding?.color_principal, '#FF7A00');
+  const trackingSecondary = normalizeHexColor(branding?.color_secundario, '#0F172A');
+  const trackingBackground = normalizeHexColor(branding?.colores_personalizados?.background, '#F8FAFC');
+  const trackingSurface = normalizeHexColor(branding?.colores_personalizados?.card_surface, '#FFFFFF');
+  const trackingOnPrimary = normalizeHexColor(branding?.colores_personalizados?.text_on_primary, '#FFFFFF');
+  const titleFontFamily = fontFamilyCssValue(branding?.fuente_titulos, 'Montserrat, sans-serif');
+  const bodyFontFamily = fontFamilyCssValue(branding?.fuente_cuerpo, 'Roboto, sans-serif');
+
+  useEffect(() => {
+    const slug = (comercio?.slug ?? '').trim();
+    if (!slug || !orderId || !pathname?.startsWith('/orders/')) return;
+    router.replace(`/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}`);
+  }, [comercio?.slug, orderId, pathname, router]);
 
   async function enableStatusNotifications() {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -442,10 +484,10 @@ export default function OrderTrackingPage() {
 
   if (loading) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#0F0D0B] text-[#F9F3EB]">
+      <main className="grid min-h-screen place-items-center px-6 text-slate-900" style={{ background: trackingBackground, fontFamily: bodyFontFamily }}>
         <div className="text-center">
-          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-[#D7A74D]/50 border-t-[#D7A74D]" />
-          <p className="mt-3 text-sm text-[#D8C6AE]">Cargando seguimiento...</p>
+          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-slate-300" style={{ borderTopColor: trackingPrimary }} />
+          <p className="mt-3 text-sm text-slate-500">Cargando seguimiento...</p>
         </div>
       </main>
     );
@@ -453,21 +495,22 @@ export default function OrderTrackingPage() {
 
   if (error) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#0F0D0B] px-6 text-[#F9F3EB]">
-        <p className="max-w-md text-center text-sm text-[#E7D5BF]">{error}</p>
+      <main className="grid min-h-screen place-items-center px-6 text-slate-900" style={{ background: trackingBackground, fontFamily: bodyFontFamily }}>
+        <p className="max-w-md text-center text-sm text-slate-600">{error}</p>
       </main>
     );
   }
 
   if (!order) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#0F0D0B] px-6 text-[#F9F3EB]">
-        <section className="max-w-lg rounded-3xl border border-[#D7A74D]/25 bg-[#1A140E] p-8 text-center shadow-xl shadow-black/35">
-          <p className="text-lg font-bold text-[#FFEACC]">Pedido no encontrado</p>
-          <p className="mt-2 text-sm text-[#D8C6AE]">Verifica el enlace o intenta de nuevo en unos minutos.</p>
+      <main className="grid min-h-screen place-items-center px-6 text-slate-900" style={{ background: trackingBackground, fontFamily: bodyFontFamily }}>
+        <section className="max-w-lg rounded-3xl p-8 text-center shadow-xl" style={{ backgroundColor: trackingSurface, border: '1px solid color-mix(in srgb, var(--tracking-primary) 18%, white)', ['--tracking-primary' as any]: trackingPrimary }}>
+          <p className="text-lg font-bold text-slate-950" style={{ fontFamily: titleFontFamily }}>Pedido no encontrado</p>
+          <p className="mt-2 text-sm text-slate-600">Verifica el enlace o intenta de nuevo en unos minutos.</p>
           <Link
             href="/"
-            className="mt-5 inline-flex rounded-full bg-[#FF7A00] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#E56E00]"
+            className="mt-5 inline-flex rounded-full px-5 py-3 text-sm font-bold transition"
+            style={{ backgroundColor: trackingPrimary, color: trackingOnPrimary }}
           >
             Ir al inicio
           </Link>
@@ -477,207 +520,286 @@ export default function OrderTrackingPage() {
   }
 
   const currentStep = statusIndex(resolvedStatus);
+  const createdAtLabel = order?.created_at
+    ? new Intl.DateTimeFormat('es-CO', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date(order.created_at))
+    : '';
+  const borderTone = `color-mix(in srgb, ${trackingPrimary} 18%, white)`;
+  const softTone = `color-mix(in srgb, ${trackingPrimary} 8%, white)`;
+  const softerTone = `color-mix(in srgb, ${trackingPrimary} 12%, white)`;
+  const mutedTone = `color-mix(in srgb, ${trackingSecondary} 12%, white)`;
+  const cardStyle = {
+    backgroundColor: trackingSurface,
+    border: `1px solid ${borderTone}`,
+  } as React.CSSProperties;
+  const mutedCardStyle = {
+    backgroundColor: softTone,
+    border: `1px solid ${borderTone}`,
+  } as React.CSSProperties;
 
   return (
-    <main className="min-h-screen bg-[#0F0D0B] px-4 py-8 text-[#F9F3EB] sm:px-6">
-      <section className="mx-auto max-w-3xl rounded-3xl border border-[#D7A74D]/25 bg-[#1A140E] p-5 shadow-2xl shadow-black/35 sm:p-7">
-        <p className="text-[10px] uppercase tracking-[0.34em] text-[#D7A74D]">Seguimiento de pedido</p>
-        <h1 className="mt-2 text-2xl font-black text-[#FFF4E2] sm:text-3xl">Pedido {orderId}</h1>
-        <p className="mt-2 text-sm text-[#D8C6AE]">{statusLabel(resolvedStatus)}</p>
+    <main
+      className="min-h-screen px-4 py-8 text-slate-900 sm:px-6"
+      style={{
+        background: `radial-gradient(circle at 10% 0%, color-mix(in srgb, ${trackingPrimary} 16%, white) 0%, transparent 34%), radial-gradient(circle at 90% 0%, color-mix(in srgb, ${trackingSecondary} 10%, white) 0%, transparent 28%), linear-gradient(180deg, color-mix(in srgb, ${trackingPrimary} 4%, white) 0%, transparent 22%), ${trackingBackground}`,
+        fontFamily: bodyFontFamily,
+      }}
+    >
+      <section className="mx-auto max-w-5xl space-y-5">
+        <div className="overflow-hidden rounded-[32px] p-6 shadow-[0_26px_60px_rgba(15,23,42,0.12)] sm:p-8" style={{ ...cardStyle, background: `linear-gradient(145deg, color-mix(in srgb, ${trackingPrimary} 12%, white) 0%, ${trackingSurface} 38%, ${trackingSurface} 100%)` }}>
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em]" style={{ backgroundColor: softerTone, color: trackingPrimary }}>
+                  Seguimiento
+                </span>
+                <span className="rounded-full px-3 py-1 text-[11px] font-black" style={{ backgroundColor: resolvedStatus === 'entregado' ? 'color-mix(in srgb, #10B981 14%, white)' : softTone, color: resolvedStatus === 'entregado' ? '#047857' : trackingPrimary }}>
+                  {statusLabel(resolvedStatus)}
+                </span>
+              </div>
+              <h1 className="mt-4 text-3xl font-black leading-tight text-slate-950 sm:text-4xl" style={{ fontFamily: titleFontFamily }}>
+                Tu pedido ya esta en seguimiento
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
+                Sigue el estado, revisa el resumen y mantente conectado con {(comercio?.nombre ?? 'el negocio').trim()} desde una sola vista.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
+                <span className="rounded-full bg-white px-3 py-1.5" style={{ border: `1px solid ${borderTone}` }}>
+                  {(comercio?.nombre ?? 'Kosmenu').trim()}
+                </span>
+                {comercio?.slug ? (
+                  <span className="rounded-full bg-white px-3 py-1.5" style={{ border: `1px solid ${borderTone}` }}>
+                    @{comercio.slug}
+                  </span>
+                ) : null}
+                {createdAtLabel ? (
+                  <span className="rounded-full bg-white px-3 py-1.5" style={{ border: `1px solid ${borderTone}` }}>
+                    {createdAtLabel}
+                  </span>
+                ) : null}
+              </div>
+            </div>
 
-        <div className="mt-5 rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Estado</p>
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-5">
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 rounded-[24px] bg-white/90 px-4 py-3 shadow-sm" style={{ border: `1px solid ${borderTone}` }}>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Codigo</p>
+                <p className="mt-2 max-w-[260px] break-all text-sm font-black text-slate-950">{orderId}</p>
+              </div>
+              {comercio?.logo_url ? (
+                <img src={comercio.logo_url} alt={comercio?.nombre ?? 'Comercio'} className="h-16 w-16 rounded-[22px] object-cover shadow-sm" style={{ border: `1px solid ${borderTone}` }} />
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-[28px] p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] sm:p-6" style={cardStyle}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Estado</p>
+              <p className="mt-1 text-sm text-slate-600">El negocio actualizara este progreso a medida que avance tu pedido.</p>
+            </div>
+          </div>
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-5">
             {ORDER_FLOW.map((step, index) => {
               const isDone = index <= currentStep;
               const isCurrent = index === currentStep;
               return (
-                <div key={step.key} className="flex items-center gap-2 sm:flex-col sm:items-start">
-                  <div
-                    className={`h-2 w-2 rounded-full ${
-                      isDone ? 'bg-[#FF7A00]' : 'bg-[#6B5A45]'
-                    } ${isCurrent ? 'ring-4 ring-[#FF7A00]/20' : ''}`}
-                  />
-                  <p className={`text-xs font-semibold ${isDone ? 'text-[#FFEACC]' : 'text-[#9A876E]'}`}>
-                    {step.short}
-                  </p>
+                <div key={step.key} className="relative min-w-0">
+                  {index < ORDER_FLOW.length - 1 ? (
+                    <div className="absolute left-7 top-6 hidden h-[2px] w-[calc(100%-1rem)] sm:block" style={{ backgroundColor: isDone ? trackingPrimary : mutedTone }} />
+                  ) : null}
+                  <div className="relative rounded-[24px] px-4 py-4" style={{ backgroundColor: isCurrent ? softTone : '#FFFFFF', border: `1px solid ${isDone ? trackingPrimary : borderTone}` }}>
+                    <div className="flex items-center gap-3 sm:flex-col sm:items-start">
+                      <span
+                        className="grid h-10 w-10 place-items-center rounded-full text-sm font-black"
+                        style={{
+                          backgroundColor: isDone ? trackingPrimary : '#FFFFFF',
+                          color: isDone ? trackingOnPrimary : '#64748B',
+                          border: `1px solid ${isDone ? trackingPrimary : borderTone}`,
+                          boxShadow: isCurrent ? `0 14px 30px -18px ${trackingPrimary}` : 'none',
+                        }}
+                      >
+                        {isDone && index < currentStep ? '✓' : index + 1}
+                      </span>
+                      <div>
+                        <p className={`text-sm font-black ${isCurrent || isDone ? 'text-slate-950' : 'text-slate-500'}`}>{step.short}</p>
+                        <p className="mt-1 text-xs text-slate-500">{step.label}</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Cliente</p>
-            <p className="mt-2 text-sm text-[#F4E6D2]">{contactName || 'Sin nombre registrado'}</p>
-            <p className="mt-1 text-sm text-[#D8C6AE]">{contactPhone || 'Sin telefono registrado'}</p>
-            <p className="mt-1 text-xs text-[#BFA88B]">{contactEmail || 'Sin correo registrado'}</p>
-          </div>
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: softTone, color: trackingPrimary }}>
+                    <User className="h-5 w-5" strokeWidth={2.2} />
+                  </span>
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Cliente</p>
+                    <p className="mt-1 text-base font-black text-slate-950">{contactName || 'Sin nombre registrado'}</p>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3 text-sm text-slate-600">
+                  <p className="flex items-center gap-2"><Phone className="h-4 w-4" strokeWidth={2.1} /> {contactPhone || 'Sin telefono registrado'}</p>
+                  <p className="flex items-center gap-2"><MessageCircle className="h-4 w-4" strokeWidth={2.1} /> {contactEmail || 'Sin correo registrado'}</p>
+                </div>
+              </div>
 
-          <div className="rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Resumen</p>
-            <p className="mt-2 flex items-center justify-between text-sm text-[#D8C6AE]">
-              <span>Subtotal</span>
-              <span>{formatAmountByCurrency(subtotalCheckout, checkoutCurrency)}</span>
-            </p>
-            <p className="mt-1 flex items-center justify-between text-sm text-[#D8C6AE]">
-              <span>Delivery</span>
-              <span>{formatAmountByCurrency(deliveryCheckout, checkoutCurrency)}</span>
-            </p>
-            <p className="mt-2 flex items-center justify-between border-t border-[#D7A74D]/15 pt-2 text-base font-black text-[#FFEACC]">
-              <span>Total ({checkoutCurrency})</span>
-              <span>{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</span>
-            </p>
-            {checkoutCurrency !== 'COP' ? (
-              <p className="mt-2 text-[11px] text-[#BFA88B]">Tasa snapshot: 1 {checkoutCurrency} = {exchangeRate} COP</p>
-            ) : null}
-            <p className="mt-1 text-[11px] text-[#9E886D]">Base COP: {formatCop(total)}</p>
-          </div>
-        </div>
+              <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={mutedCardStyle}>
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white" style={{ color: trackingPrimary, border: `1px solid ${borderTone}` }}>
+                    <CreditCard className="h-5 w-5" strokeWidth={2.2} />
+                  </span>
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Resumen</p>
+                    <p className="mt-1 text-base font-black text-slate-950">{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</p>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-2 text-sm text-slate-700">
+                  <p className="flex items-center justify-between"><span>Subtotal</span><span className="font-semibold">{formatAmountByCurrency(subtotalCheckout, checkoutCurrency)}</span></p>
+                  <p className="flex items-center justify-between"><span>Entrega</span><span className="font-semibold">{formatAmountByCurrency(deliveryCheckout, checkoutCurrency)}</span></p>
+                  <p className="flex items-center justify-between border-t pt-3 text-base font-black text-slate-950" style={{ borderColor: borderTone }}><span>Total</span><span>{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</span></p>
+                  <p className="text-[11px] text-slate-500">
+                    {checkoutCurrency !== 'COP'
+                      ? `Tasa snapshot: 1 ${checkoutCurrency} = ${exchangeRate} COP`
+                      : `Base COP: ${formatCop(total)}`}
+                  </p>
+                </div>
+              </div>
+            </div>
 
-        {orderNotes ? (
-          <div className="mt-5 rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Notas del pedido</p>
-            <p className="mt-2 text-sm text-[#F4E6D2]">{orderNotes}</p>
-          </div>
-        ) : null}
-
-        {orderItems.length > 0 ? (
-          <div className="mt-5 rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Productos</p>
-            <div className="mt-3 overflow-hidden rounded-xl border border-[#D7A74D]/15">
-              <table className="w-full text-left text-sm text-[#D8C6AE]">
-                <thead className="bg-[#1B140D] text-[11px] uppercase tracking-[0.12em] text-[#C9AB83]">
-                  <tr>
-                    <th className="px-3 py-2">Cant.</th>
-                    <th className="px-3 py-2">Producto</th>
-                    <th className="px-3 py-2 text-right">P. Unitario</th>
-                    <th className="px-3 py-2 text-right">Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody>
+            {orderItems.length > 0 ? (
+              <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: softTone, color: trackingPrimary }}>
+                    <Package className="h-5 w-5" strokeWidth={2.2} />
+                  </span>
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Productos</p>
+                    <p className="mt-1 text-sm text-slate-600">Resumen del pedido confirmado.</p>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3">
                   {orderItems.map((item, index) => (
-                    <tr key={`order-item-${index}`} className="border-t border-[#D7A74D]/10">
-                      <td className="px-3 py-2 font-semibold">{item.cantidad}</td>
-                      <td className="px-3 py-2">{item.nombre}</td>
-                      <td className="px-3 py-2 text-right font-semibold">
-                        {formatAmountByCurrency(item.precioUnitario, checkoutCurrency)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-semibold">
-                        {formatAmountByCurrency(item.subtotal, checkoutCurrency)}
-                      </td>
-                    </tr>
+                    <div key={`order-item-${index}`} className="flex items-center justify-between gap-3 rounded-[22px] bg-white px-4 py-3" style={{ border: `1px solid ${borderTone}` }}>
+                      <div className="min-w-0 flex items-center gap-3">
+                        <span className="grid h-9 w-9 place-items-center rounded-full text-sm font-black" style={{ backgroundColor: softTone, color: trackingPrimary }}>{item.cantidad}</span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black text-slate-950">{item.nombre}</p>
+                          <p className="mt-1 text-xs text-slate-500">Unitario {formatAmountByCurrency(item.precioUnitario, checkoutCurrency)}</p>
+                        </div>
+                      </div>
+                      <p className="whitespace-nowrap text-sm font-black text-slate-950">{formatAmountByCurrency(item.subtotal, checkoutCurrency)}</p>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              </div>
+            ) : null}
+
+            {orderNotes ? (
+              <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Notas del pedido</p>
+                <p className="mt-3 text-sm leading-6 text-slate-700">{orderNotes}</p>
+              </div>
+            ) : null}
           </div>
-        ) : null}
 
-        <div className="mt-5 rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Pago</p>
-          <p className="mt-2 text-sm text-[#D8C6AE]">
-            Metodo: {paymentMethodName || 'No especificado'}
-          </p>
-          {paymentMethodDetails.length > 0 ? (
-            <p className="mt-1 text-xs text-[#BFA88B]">{paymentMethodDetails.slice(0, 2).join(' · ')}</p>
-          ) : null}
-          <p className="mt-2 text-sm text-[#D8C6AE]">
-            Referencia: {paymentReference ? `****${paymentReference.slice(-4)}` : 'No registrada'}
-          </p>
-          <p className="mt-1 text-sm text-[#D8C6AE]">
-            Comprobante: {paymentProofUrl ? 'Cargado correctamente' : 'No cargado'}
-          </p>
-          <p className="mt-1 text-sm text-[#D8C6AE]">
-            Total pagado ({checkoutCurrency}): {formatAmountByCurrency(totalCheckout, checkoutCurrency)}
-          </p>
-          <p className="mt-1 text-xs text-[#BFA88B]">
-            Tasa aplicada: 1 {checkoutCurrency} = {exchangeRate} COP
-          </p>
-          {cashPaymentAmount !== null ? (
-            <p className="mt-1 text-sm text-[#D8C6AE]">
-              Pago en efectivo con: {formatAmountByCurrency(cashPaymentAmount, checkoutCurrency)}
-            </p>
-          ) : null}
-          {cashChangeAmount > 0 ? (
-            <p className="mt-1 text-sm text-[#D8C6AE]">
-              Cambio: {formatAmountByCurrency(cashChangeAmount, checkoutCurrency)}
-            </p>
-          ) : null}
-          {paymentProofUrl ? (
-            <a
-              href={paymentProofUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 inline-flex rounded-full border border-[#D7A74D]/30 px-4 py-2 text-xs font-semibold text-[#FFEACC]"
-            >
-              Ver comprobante
-            </a>
-          ) : null}
-        </div>
-
-        {isDelivery ? (
-          <div className="mt-5 space-y-3">
-            <div className="rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Direccion de entrega</p>
-              <p className="mt-2 text-sm text-[#F4E6D2]">{deliveryAddress || 'Direccion no disponible'}</p>
-              {deliveryReference ? (
-                <p className="mt-2 text-sm text-[#D8C6AE]">Referencia: {deliveryReference}</p>
-              ) : null}
-              {deliveryInstructions ? (
-                <p className="mt-1 text-sm text-[#D8C6AE]">Indicaciones: {deliveryInstructions}</p>
-              ) : null}
-              <div className="mt-3 overflow-hidden rounded-xl border border-[#D7A74D]/15">
-                <iframe
-                  src={deliveryMapSrc}
-                  title="Mapa de entrega"
-                  className="h-48 w-full"
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
+          <div className="space-y-4">
+            <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
+              <div className="flex items-center gap-3">
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: softTone, color: trackingPrimary }}>
+                  <CreditCard className="h-5 w-5" strokeWidth={2.2} />
+                </span>
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Pago</p>
+                  <p className="mt-1 text-base font-black text-slate-950">{paymentMethodName || 'No especificado'}</p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3 text-sm text-slate-700">
+                {paymentMethodDetails.length > 0 ? <p>{paymentMethodDetails.slice(0, 2).join(' · ')}</p> : null}
+                <p className="flex items-center justify-between gap-3"><span>Referencia</span><span className="font-semibold">{paymentReference ? `****${paymentReference.slice(-4)}` : 'No registrada'}</span></p>
+                <p className="flex items-center justify-between gap-3"><span>Comprobante</span><span className="font-semibold">{paymentProofUrl ? 'Cargado' : 'No cargado'}</span></p>
+                <p className="flex items-center justify-between gap-3"><span>Total pagado</span><span className="font-semibold">{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</span></p>
+                {cashPaymentAmount !== null ? <p className="flex items-center justify-between gap-3"><span>Pago con</span><span className="font-semibold">{formatAmountByCurrency(cashPaymentAmount, checkoutCurrency)}</span></p> : null}
+                {cashChangeAmount > 0 ? <p className="flex items-center justify-between gap-3"><span>Cambio</span><span className="font-semibold">{formatAmountByCurrency(cashChangeAmount, checkoutCurrency)}</span></p> : null}
+                {paymentProofUrl ? (
+                  <a href={paymentProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-full px-4 py-2 text-xs font-black" style={{ backgroundColor: softTone, color: trackingPrimary }}>
+                    Ver comprobante
+                  </a>
+                ) : null}
               </div>
             </div>
 
-            <div className="rounded-2xl border border-[#D7A74D]/20 bg-[#120D08] p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-[#C9AB83]">Ubicacion del comercio</p>
-              <p className="mt-2 text-sm text-[#F4E6D2]">{(comercio?.nombre ?? 'elmenuxfa.com').trim()}</p>
-              <div className="mt-3 overflow-hidden rounded-xl border border-[#D7A74D]/15">
-                <iframe
-                  src={businessMapSrc}
-                  title="Mapa del comercio"
-                  className="h-48 w-full"
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
+            <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
+              <div className="flex items-center gap-3">
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: softTone, color: trackingPrimary }}>
+                  {isDelivery ? <MapPin className="h-5 w-5" strokeWidth={2.2} /> : <Store className="h-5 w-5" strokeWidth={2.2} />}
+                </span>
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">{isDelivery ? 'Entrega' : 'Retiro'}</p>
+                  <p className="mt-1 text-base font-black text-slate-950">{isDelivery ? 'Delivery confirmado' : 'Retiro en local'}</p>
+                </div>
               </div>
+              {isDelivery ? (
+                <div className="mt-4 space-y-3 text-sm text-slate-700">
+                  <p className="leading-6">{deliveryAddress || 'Direccion no disponible'}</p>
+                  {deliveryReference ? <p><span className="font-semibold">Referencia:</span> {deliveryReference}</p> : null}
+                  {deliveryInstructions ? <p><span className="font-semibold">Indicaciones:</span> {deliveryInstructions}</p> : null}
+                  <div className="overflow-hidden rounded-[22px]" style={{ border: `1px solid ${borderTone}` }}>
+                    <iframe src={deliveryMapSrc} title="Mapa de entrega" className="h-52 w-full" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-3 text-sm text-slate-700">
+                  <p>{(comercio?.nombre ?? 'elmenuxfa.com').trim()}</p>
+                  <p>{(comercio?.direccion ?? 'Direccion no disponible').trim()}</p>
+                  <div className="overflow-hidden rounded-[22px]" style={{ border: `1px solid ${borderTone}` }}>
+                    <iframe src={businessMapSrc} title="Mapa del comercio" className="h-52 w-full" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={mutedCardStyle}>
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Acciones</p>
+              <div className="mt-4 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => void enableStatusNotifications()}
+                  className="inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-black"
+                  style={{ backgroundColor: trackingPrimary, color: trackingOnPrimary }}
+                >
+                  <Bell className="h-4 w-4" strokeWidth={2.2} />
+                  Activar notificaciones
+                </button>
+                {finalWaLink ? (
+                  <a
+                    href={finalWaLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-4 py-3 text-sm font-black text-slate-700"
+                    style={{ border: `1px solid ${borderTone}` }}
+                  >
+                    <MessageCircle className="h-4 w-4" strokeWidth={2.2} />
+                    Abrir WhatsApp
+                  </a>
+                ) : null}
+              </div>
+              {notificationMessage ? (
+                <p className="mt-3 text-xs text-slate-600">{notificationMessage}</p>
+              ) : null}
             </div>
           </div>
-        ) : null}
-
-        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            onClick={() => void enableStatusNotifications()}
-            className="rounded-full border border-[#D7A74D]/30 bg-[#241A11] px-4 py-2 text-xs font-bold uppercase tracking-[0.08em] text-[#FFEACC]"
-          >
-            Activar notificaciones de estado
-          </button>
-          {finalWaLink ? (
-            <a
-              href={finalWaLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-full border border-[#D7A74D]/20 px-4 py-2 text-center text-xs font-semibold text-[#D8C6AE]"
-            >
-              Abrir comprobante en WhatsApp
-            </a>
-          ) : null}
         </div>
-
-        {notificationMessage ? (
-          <p className="mt-2 text-xs text-[#C9AB83]">{notificationMessage}</p>
-        ) : null}
       </section>
     </main>
   );
