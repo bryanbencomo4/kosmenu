@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/models/pedido.dart';
@@ -57,6 +58,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   String? _markerIconsKey;
   BitmapDescriptor? _businessMarkerIcon;
   BitmapDescriptor? _deliveryMarkerIcon;
+  bool _isMapInteractionEnabled = false;
 
   @override
   void initState() {
@@ -352,14 +354,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     _successController.reset();
   }
 
-  Future<void> _copyValue(String value, String message) async {
-    await Clipboard.setData(ClipboardData(text: value));
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
   Future<void> _openCustomerWhatsapp(
     String phone,
     String comercioNombre,
@@ -382,6 +376,51 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     if (!launched && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
+      );
+    }
+  }
+
+  Future<void> _openCustomerCall(String phone) async {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El pedido no tiene un telefono valido.')),
+      );
+      return;
+    }
+
+    final uri = Uri.parse('tel:$digits');
+    final launched = await launchUrl(uri);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir la llamada.')),
+      );
+    }
+  }
+
+  Future<void> _openCustomerEmail(String email, String comercioNombre) async {
+    final normalizedEmail = email.trim();
+    if (normalizedEmail.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El pedido no tiene correo registrado.')),
+      );
+      return;
+    }
+
+    final subject = Uri.encodeComponent('Consulta de pedido ${widget.orderId}');
+    final body = Uri.encodeComponent(
+      'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.',
+    );
+    final uri = Uri.parse(
+      'mailto:$normalizedEmail?subject=$subject&body=$body',
+    );
+
+    final launched = await launchUrl(uri);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir la app de correo.')),
       );
     }
   }
@@ -1018,6 +1057,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
                 final pedido = data.pedido;
                 final total = pedido.total ?? 0.0;
+                final customerName = pedido.nombreCliente?.trim();
                 final customerEmail = pedido.clienteEmail?.trim();
                 final customerPhone = pedido.clientePhone?.trim();
                 final paymentMethod = pedido.metodoPago?.trim();
@@ -1254,55 +1294,263 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: surface,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: accent.withValues(alpha: 0.26),
+                        gradient: LinearGradient(
+                          colors: [
+                            surface,
+                            Color.lerp(surface, surfaceAlt, 0.55) ?? surface,
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: accent.withValues(alpha: 0.2),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.06),
+                            blurRadius: 16,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            data.comercioNombre,
-                            style: GoogleFonts.manrope(
-                              color: text,
-                              fontSize: 26,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'ORDER_ID: ${pedido.orderId ?? widget.orderId}',
-                            style: GoogleFonts.manrope(
-                              color: muted,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: SizedBox(
+                                  width: 46,
+                                  height: 46,
+                                  child:
+                                      (businessLogoUrl != null &&
+                                          businessLogoUrl.isNotEmpty)
+                                      ? Image.network(
+                                          businessLogoUrl,
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) =>
+                                                  Container(
+                                                    color: surfaceAlt,
+                                                    alignment: Alignment.center,
+                                                    child: Icon(
+                                                      Icons.storefront_rounded,
+                                                      size: 20,
+                                                      color: muted,
+                                                    ),
+                                                  ),
+                                        )
+                                      : Container(
+                                          color: surfaceAlt,
+                                          alignment: Alignment.center,
+                                          child: Icon(
+                                            Icons.storefront_rounded,
+                                            size: 20,
+                                            color: muted,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      data.comercioNombre,
+                                      style: GoogleFonts.manrope(
+                                        color: text,
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.w800,
+                                        height: 1.08,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _statusColor(
+                                    pedido.estado,
+                                  ).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: _statusColor(
+                                      pedido.estado,
+                                    ).withValues(alpha: 0.35),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.flag_rounded,
+                                      size: 14,
+                                      color: _statusColor(pedido.estado),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _statusLabel(pedido.estado),
+                                      style: GoogleFonts.manrope(
+                                        color: _statusColor(pedido.estado),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 14),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              _BadgeChip(
-                                label: _statusLabel(pedido.estado),
-                                color: _statusColor(pedido.estado),
-                                icon: Icons.flag_rounded,
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: surfaceAlt.withValues(alpha: 0.75),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: accent.withValues(alpha: 0.15),
                               ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'ID DEL PEDIDO',
+                                  style: GoogleFonts.manrope(
+                                    color: muted,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.45,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                SelectableText(
+                                  pedido.orderId ?? widget.orderId,
+                                  style: GoogleFonts.manrope(
+                                    color: text,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
                               if (paymentMethod != null &&
                                   paymentMethod.isNotEmpty)
-                                _BadgeChip(
-                                  label: paymentMethod,
-                                  color: success,
-                                  icon: Icons.payments_rounded,
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: success.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: success.withValues(alpha: 0.35),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.payments_rounded,
+                                        size: 14,
+                                        color: success,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        paymentMethod,
+                                        style: GoogleFonts.manrope(
+                                          color: success,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              _BadgeChip(
-                                label: _deliveryModeLabel(deliveryMode),
-                                color: accent,
-                                icon: Icons.local_shipping_rounded,
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: accent.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: accent.withValues(alpha: 0.32),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.local_shipping_rounded,
+                                      size: 14,
+                                      color: accent,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _deliveryModeLabel(deliveryMode),
+                                      style: GoogleFonts.manrope(
+                                        color: accent,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: text.withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: text.withValues(alpha: 0.12),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.receipt_long_rounded,
+                                      size: 14,
+                                      color: text.withValues(alpha: 0.78),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _formatAmount(total),
+                                      style: GoogleFonts.manrope(
+                                        color: text.withValues(alpha: 0.82),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
@@ -1329,45 +1577,136 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                               ),
                             ),
                             const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: surfaceAlt.withValues(alpha: 0.58),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: text.withValues(alpha: 0.1),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 30,
+                                    height: 30,
+                                    decoration: BoxDecoration(
+                                      color: accent.withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(9),
+                                    ),
+                                    child: Icon(
+                                      _isMapInteractionEnabled
+                                          ? Icons.pan_tool_alt_rounded
+                                          : Icons.lock_outline_rounded,
+                                      size: 17,
+                                      color: accent,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _isMapInteractionEnabled
+                                              ? 'Mover mapa: Activado'
+                                              : 'Mover mapa: Desactivado',
+                                          style: GoogleFonts.manrope(
+                                            color: text,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          _isMapInteractionEnabled
+                                              ? 'Puedes mover el mapa libremente.'
+                                              : 'Activalo solo si quieres explorar el mapa.',
+                                          style: GoogleFonts.manrope(
+                                            color: muted,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Switch.adaptive(
+                                    value: _isMapInteractionEnabled,
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _isMapInteractionEnabled = value;
+                                      });
+                                    },
+                                    activeColor: accent,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 10),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(14),
                               child: SizedBox(
                                 height: 250,
-                                child: GoogleMap(
-                                  initialCameraPosition: CameraPosition(
-                                    target: hasBusinessCoords
-                                        ? _midpoint(
-                                            businessPoint!,
-                                            deliveryPoint!,
-                                          )
-                                        : deliveryPoint!,
-                                    zoom: hasBusinessCoords ? 13.8 : 15.2,
-                                  ),
-                                  onMapCreated: (controller) async {
-                                    if (cameraPoints.length < 2) {
-                                      return;
-                                    }
-                                    await controller.animateCamera(
-                                      CameraUpdate.newLatLngBounds(
-                                        _buildBounds(cameraPoints),
-                                        60,
-                                      ),
-                                    );
-                                  },
-                                  myLocationEnabled: false,
-                                  myLocationButtonEnabled: false,
-                                  zoomControlsEnabled: false,
-                                  scrollGesturesEnabled: true,
-                                  zoomGesturesEnabled: true,
-                                  gestureRecognizers:
-                                      <Factory<OneSequenceGestureRecognizer>>{
-                                        Factory<OneSequenceGestureRecognizer>(
-                                          () => EagerGestureRecognizer(),
+                                child: IgnorePointer(
+                                  ignoring: !_isMapInteractionEnabled,
+                                  child: GoogleMap(
+                                    initialCameraPosition: CameraPosition(
+                                      target: hasBusinessCoords
+                                          ? _midpoint(
+                                              businessPoint!,
+                                              deliveryPoint!,
+                                            )
+                                          : deliveryPoint!,
+                                      zoom: hasBusinessCoords ? 13.8 : 15.2,
+                                    ),
+                                    onMapCreated: (controller) async {
+                                      if (cameraPoints.length < 2) {
+                                        return;
+                                      }
+                                      await controller.animateCamera(
+                                        CameraUpdate.newLatLngBounds(
+                                          _buildBounds(cameraPoints),
+                                          60,
                                         ),
-                                      },
-                                  mapToolbarEnabled: false,
-                                  markers: deliveryMarkers,
-                                  polylines: deliveryPolylines,
+                                      );
+                                    },
+                                    myLocationEnabled: false,
+                                    myLocationButtonEnabled: false,
+                                    zoomControlsEnabled: false,
+                                    scrollGesturesEnabled:
+                                        _isMapInteractionEnabled,
+                                    zoomGesturesEnabled:
+                                        _isMapInteractionEnabled,
+                                    rotateGesturesEnabled:
+                                        _isMapInteractionEnabled,
+                                    tiltGesturesEnabled:
+                                        _isMapInteractionEnabled,
+                                    gestureRecognizers: _isMapInteractionEnabled
+                                        ? <
+                                            Factory<
+                                              OneSequenceGestureRecognizer
+                                            >
+                                          >{
+                                            Factory<
+                                              OneSequenceGestureRecognizer
+                                            >(() => EagerGestureRecognizer()),
+                                          }
+                                        : <
+                                            Factory<
+                                              OneSequenceGestureRecognizer
+                                            >
+                                          >{},
+                                    mapToolbarEnabled: false,
+                                    markers: deliveryMarkers,
+                                    polylines: deliveryPolylines,
+                                  ),
                                 ),
                               ),
                             ),
@@ -1412,104 +1751,274 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     ],
                     if (!isReadOnly) ...[
                       Container(
-                        padding: const EdgeInsets.all(14),
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: surface,
-                          borderRadius: BorderRadius.circular(16),
+                          gradient: LinearGradient(
+                            colors: [
+                              surface,
+                              Color.lerp(surface, surfaceAlt, 0.42) ?? surface,
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: accent.withValues(alpha: 0.18),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.05),
+                              blurRadius: 14,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Cliente',
-                              style: GoogleFonts.manrope(
-                                color: muted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
+                            Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: accent.withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Icon(
+                                    Icons.person_rounded,
+                                    color: accent,
+                                    size: 22,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Cliente',
+                                        style: GoogleFonts.manrope(
+                                          color: text,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Contacto para coordinar entrega o retiro',
+                                        style: GoogleFonts.manrope(
+                                          color: muted,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              customerPhone != null && customerPhone.isNotEmpty
-                                  ? customerPhone
-                                  : customerEmail != null &&
-                                        customerEmail.isNotEmpty
-                                  ? customerEmail
-                                  : 'Sin contacto registrado',
-                              style: GoogleFonts.manrope(
-                                color: text,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
                               ),
-                            ),
-                            if (customerEmail != null &&
-                                customerEmail.isNotEmpty &&
-                                customerPhone != customerEmail) ...[
-                              const SizedBox(height: 6),
-                              Text(
-                                customerEmail,
-                                style: GoogleFonts.manrope(
-                                  color: muted,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                              decoration: BoxDecoration(
+                                color: surfaceAlt.withValues(alpha: 0.58),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: text.withValues(alpha: 0.1),
                                 ),
                               ),
-                            ],
-                            if (customerPhone != null &&
-                                customerPhone.isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              Row(
+                              child: Row(
                                 children: [
                                   Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: () => _copyValue(
-                                        customerPhone,
-                                        'WhatsApp copiado al portapapeles.',
-                                      ),
-                                      icon: const Icon(Icons.copy_rounded),
-                                      label: const Text('Copiar'),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: text,
-                                        side: BorderSide(
-                                          color: accent.withValues(alpha: 0.35),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.person_rounded,
+                                              size: 16,
+                                              color: muted,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                (customerName != null &&
+                                                        customerName.isNotEmpty)
+                                                    ? customerName
+                                                    : 'Cliente sin nombre registrado',
+                                                style: GoogleFonts.manrope(
+                                                  color: text,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 14,
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.alternate_email_rounded,
+                                              size: 16,
+                                              color: muted,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                (customerEmail != null &&
+                                                        customerEmail
+                                                            .isNotEmpty)
+                                                    ? customerEmail
+                                                    : 'Cliente sin correo registrado',
+                                                style: GoogleFonts.manrope(
+                                                  color: text,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      onPressed: () => _openCustomerWhatsapp(
-                                        customerPhone,
-                                        data.comercioNombre,
-                                      ),
-                                      icon: const Icon(Icons.chat_rounded),
-                                      label: const Text('WhatsApp'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: surfaceAlt,
-                                        foregroundColor: text,
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 14,
-                                        ),
-                                      ),
+                                      ],
                                     ),
                                   ),
                                 ],
                               ),
-                            ] else ...[
-                              const SizedBox(height: 10),
-                              Text(
-                                'Este pedido no tiene un numero de WhatsApp registrado.',
-                                style: GoogleFonts.manrope(
-                                  color: muted,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                            ),
+                            const SizedBox(height: 14),
+                            Column(
+                              children: [
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed:
+                                        (customerPhone != null &&
+                                            customerPhone.isNotEmpty)
+                                        ? () => _openCustomerWhatsapp(
+                                            customerPhone,
+                                            data.comercioNombre,
+                                          )
+                                        : null,
+                                    icon: const FaIcon(
+                                      FontAwesomeIcons.whatsapp,
+                                      size: 17,
+                                    ),
+                                    label: const Text('Enviar WhatsApp'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF16A34A),
+                                      foregroundColor: Colors.white,
+                                      disabledBackgroundColor: const Color(
+                                        0xFFDCFCE7,
+                                      ),
+                                      disabledForegroundColor: const Color(
+                                        0xFF86EFAC,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                        horizontal: 16,
+                                      ),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      textStyle: GoogleFonts.manrope(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed:
+                                        (customerPhone != null &&
+                                            customerPhone.isNotEmpty)
+                                        ? () => _openCustomerCall(customerPhone)
+                                        : null,
+                                    icon: const Icon(
+                                      Icons.call_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Llamar ahora'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF2563EB),
+                                      foregroundColor: Colors.white,
+                                      disabledBackgroundColor: const Color(
+                                        0xFFDBEAFE,
+                                      ),
+                                      disabledForegroundColor: const Color(
+                                        0xFF93C5FD,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                        horizontal: 16,
+                                      ),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      textStyle: GoogleFonts.manrope(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed:
+                                        (customerEmail != null &&
+                                            customerEmail.isNotEmpty)
+                                        ? () => _openCustomerEmail(
+                                            customerEmail,
+                                            data.comercioNombre,
+                                          )
+                                        : null,
+                                    icon: const Icon(
+                                      Icons.email_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Enviar email'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF7C3AED),
+                                      foregroundColor: Colors.white,
+                                      disabledBackgroundColor: const Color(
+                                        0xFFEDE9FE,
+                                      ),
+                                      disabledForegroundColor: const Color(
+                                        0xFFC4B5FD,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                        horizontal: 16,
+                                      ),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      textStyle: GoogleFonts.manrope(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
                       ),

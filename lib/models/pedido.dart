@@ -5,6 +5,7 @@ class PedidoModel {
   final String id;
   final String comercioId;
   final String? orderId;
+  final String? nombreCliente;
   final String? clienteEmail;
   final String? clientePhone;
   final String? estado;
@@ -29,6 +30,7 @@ class PedidoModel {
     required this.id,
     required this.comercioId,
     this.orderId,
+    this.nombreCliente,
     this.clienteEmail,
     this.clientePhone,
     this.estado,
@@ -102,6 +104,9 @@ class PedidoModel {
       id: map['id']?.toString() ?? '',
       comercioId: map['comercio_id']?.toString() ?? '',
       orderId: _resolveOrderId(detallesMap),
+      nombreCliente:
+          map['nombre_cliente']?.toString() ??
+          detallesMap['nombre_cliente']?.toString(),
       clienteEmail:
           map['cliente_email']?.toString() ??
           detallesMap['cliente_email']?.toString(),
@@ -147,6 +152,9 @@ class PedidoModel {
       id: fallbackId,
       comercioId: raw['comercio_id']?.toString() ?? '',
       orderId: _resolveOrderId(detallesMap),
+      nombreCliente:
+          raw['nombre_cliente']?.toString() ??
+          detallesMap['nombre_cliente']?.toString(),
       clienteEmail:
           raw['cliente_email']?.toString() ??
           detallesMap['cliente_email']?.toString(),
@@ -169,6 +177,7 @@ class PedidoModel {
     return {
       'id': id,
       'comercio_id': comercioId,
+      'nombre_cliente': nombreCliente,
       'cliente_email': clienteEmail,
       'telefono_cliente': clientePhone,
       'estado': estado,
@@ -181,6 +190,7 @@ class PedidoModel {
       'detalles': {
         ...detalles,
         'order_id': orderId,
+        'nombre_cliente': nombreCliente,
         'cliente_email': clienteEmail,
         'telefono_cliente': clientePhone,
         'metodo_pago': metodoPago,
