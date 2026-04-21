@@ -331,6 +331,7 @@ export async function POST(request: Request) {
       ? `https://kosmenu.vercel.app/v/${encodeURIComponent(resolvedComercioSlug)}/orders/${encodeURIComponent(orderId)}`
       : `https://kosmenu.vercel.app/orders/${encodeURIComponent(orderId)}`;
     let emailStatus: 'queued' | 'skipped' = 'skipped';
+    let whatsappStatus: 'queued' | 'skipped' = 'skipped';
 
     if (clientEmail && canSendOrderEmail()) {
       emailStatus = 'queued';
@@ -344,6 +345,10 @@ export async function POST(request: Request) {
       });
     }
 
+    if (clientWhatsapp) {
+      whatsappStatus = 'queued';
+    }
+
     return NextResponse.json(
       {
         ok: true,
@@ -355,6 +360,7 @@ export async function POST(request: Request) {
           total,
           trackingUrl,
           emailStatus,
+          whatsappStatus,
         },
       },
       { status: 201 },

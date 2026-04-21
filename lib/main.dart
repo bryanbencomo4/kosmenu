@@ -64,6 +64,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
   final deep_links.AppLinks _appLinks = deep_links.AppLinks();
   final PushNotificationService _pushNotifications =
       PushNotificationService.instance;
+  final OrderGateHandler _orderGateHandler = const OrderGateHandler();
 
   StreamSubscription<Uri>? _appLinkSubscription;
   StreamSubscription<String>? _pushTapSubscription;
@@ -100,16 +101,46 @@ class _KosmenuAppState extends State<KosmenuApp> {
           return;
         }
 
-        final uri = Uri.parse(
-          'https://kosmenu.vercel.app/orders/${Uri.encodeComponent(orderId)}',
-        );
-
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _openOrderLink(uri, replaceStack: true);
-        });
+        unawaited(_openOrderFromPush(orderId));
       });
     } catch (error) {
       debugPrint('Push notification setup error: $error');
+    }
+  }
+
+  Future<void> _openOrderFromPush(String orderId) async {
+    try {
+      final decision = await _orderGateHandler.resolve(orderId);
+      if (!mounted) {
+        return;
+      }
+
+      final navigator = _navigatorKey.currentState;
+      if (navigator == null) {
+        return;
+      }
+
+      late final String routeName;
+      switch (decision.target) {
+        case OrderGateTarget.app:
+          routeName = '/orders/view/${Uri.encodeComponent(decision.orderId)}';
+          break;
+        case OrderGateTarget.publicApp:
+        case OrderGateTarget.deniedApp:
+          routeName = '/orders/public/${Uri.encodeComponent(decision.orderId)}';
+          break;
+        case OrderGateTarget.web:
+          routeName = '/orders/${Uri.encodeComponent(decision.orderId)}';
+          break;
+      }
+
+      navigator.pushNamedAndRemoveUntil(
+        routeName,
+        (route) => route.isFirst,
+        arguments: 'push-notification',
+      );
+    } catch (error) {
+      debugPrint('Push order navigation error: $error');
     }
   }
 

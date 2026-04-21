@@ -6,6 +6,7 @@ class PedidoModel {
   final String comercioId;
   final String? orderId;
   final String? clienteEmail;
+  final String? clientePhone;
   final String? estado;
   final double? total;
   final DateTime? createdAt;
@@ -29,6 +30,7 @@ class PedidoModel {
     required this.comercioId,
     this.orderId,
     this.clienteEmail,
+    this.clientePhone,
     this.estado,
     this.total,
     this.createdAt,
@@ -57,15 +59,9 @@ class PedidoModel {
         name: 'PedidoModel',
         stackTrace: stackTrace,
       );
-      developer.log(
-        'DEBUG: JSON Crudo de Supabase: $map',
-        name: 'PedidoModel',
-      );
+      developer.log('DEBUG: JSON Crudo de Supabase: $map', name: 'PedidoModel');
 
-      return PedidoModel._malformed(
-        raw: map,
-        errorMessage: error.toString(),
-      );
+      return PedidoModel._malformed(raw: map, errorMessage: error.toString());
     }
   }
 
@@ -109,6 +105,9 @@ class PedidoModel {
       clienteEmail:
           map['cliente_email']?.toString() ??
           detallesMap['cliente_email']?.toString(),
+      clientePhone:
+          map['telefono_cliente']?.toString() ??
+          detallesMap['telefono_cliente']?.toString(),
       estado: map['estado']?.toString(),
       total: _toDouble(detallesMap['total']) > 0
           ? _toDouble(detallesMap['total'])
@@ -151,8 +150,13 @@ class PedidoModel {
       clienteEmail:
           raw['cliente_email']?.toString() ??
           detallesMap['cliente_email']?.toString(),
+      clientePhone:
+          raw['telefono_cliente']?.toString() ??
+          detallesMap['telefono_cliente']?.toString(),
       estado: 'error_parseo',
-      total: _toDoubleOrNull(raw['total']) ?? _toDoubleOrNull(detallesMap['total']),
+      total:
+          _toDoubleOrNull(raw['total']) ??
+          _toDoubleOrNull(detallesMap['total']),
       createdAt: _tryParseDate(raw['created_at']),
       metodoPago: _resolveMetodoPago(detallesMap['metodo_pago']),
       detalles: detallesMap,
@@ -166,6 +170,7 @@ class PedidoModel {
       'id': id,
       'comercio_id': comercioId,
       'cliente_email': clienteEmail,
+      'telefono_cliente': clientePhone,
       'estado': estado,
       'total': total,
       'created_at': createdAt?.toIso8601String(),
@@ -177,6 +182,7 @@ class PedidoModel {
         ...detalles,
         'order_id': orderId,
         'cliente_email': clienteEmail,
+        'telefono_cliente': clientePhone,
         'metodo_pago': metodoPago,
         'order_notes': orderNotes,
         'delivery_latitude': deliveryLatitude,

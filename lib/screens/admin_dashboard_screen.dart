@@ -831,12 +831,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     switch (bucket) {
       case OrderStatusBucket.pending:
-        nextEstado = 'en_proceso';
-        successMessage = 'Pedido movido a En proceso.';
+        nextEstado = 'confirmado';
+        successMessage = 'Pedido marcado como Confirmado.';
         break;
       case OrderStatusBucket.inProgress:
-        nextEstado = 'completado';
-        successMessage = 'Pedido marcado como Completado.';
+        nextEstado = 'entregado';
+        successMessage = 'Pedido marcado como Entregado.';
         break;
       case OrderStatusBucket.completed:
       case OrderStatusBucket.canceled:

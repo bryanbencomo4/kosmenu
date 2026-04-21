@@ -36,13 +36,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   late Future<_OrderViewData?> _orderFuture;
   late final AnimationController _successController;
   final TextEditingController _emailController = TextEditingController();
-  bool _isCompleting = false;
+  bool _isUpdatingStatus = false;
   bool _showSuccessOverlay = false;
   bool _rememberDevice = false;
   bool _emailVerified = false;
   bool _checkingTrustedDevice = false;
   bool _trustRestoreRequested = false;
   bool _showTopBar = false;
+  String? _pendingStatus;
+  String? _overlayStatus;
   String? _verificationError;
   bool _loadingMarkerIcons = false;
   String? _markerIconsKey;
@@ -269,14 +271,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     });
   }
 
-  Future<void> _markAsCompleted() async {
-    if (_isCompleting) return;
-    setState(() => _isCompleting = true);
+  Future<void> _updateOrderStatus(String nextStatus) async {
+    if (_isUpdatingStatus) return;
+
+    final normalizedStatus = _normalizeStatusValue(nextStatus);
+    setState(() {
+      _isUpdatingStatus = true;
+      _pendingStatus = normalizedStatus;
+    });
 
     try {
       var updatedRows = await Supabase.instance.client
           .from('pedidos')
-          .update({'estado': 'completado'})
+          .update({'estado': normalizedStatus})
           .contains('detalles', {'order_id': widget.orderId})
           .select('*')
           .limit(1);
@@ -284,7 +291,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if ((updatedRows as List).isEmpty) {
         updatedRows = await Supabase.instance.client
             .from('pedidos')
-            .update({'estado': 'completado'})
+            .update({'estado': normalizedStatus})
             .contains('detalles', {'codigo_orden': widget.orderId})
             .select('*')
             .limit(1);
@@ -301,13 +308,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       setState(() {
         _orderFuture = _fetchOrder();
+        _overlayStatus = normalizedStatus;
       });
 
       await _playSuccessOverlay();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pedido marcado como completado.')),
+        SnackBar(
+          content: Text(
+            'Pedido marcado como ${_statusLabel(normalizedStatus).toLowerCase()}.',
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) return;
@@ -316,7 +328,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       );
     } finally {
       if (mounted) {
-        setState(() => _isCompleting = false);
+        setState(() {
+          _isUpdatingStatus = false;
+          _pendingStatus = null;
+        });
       }
     }
   }
@@ -330,27 +345,98 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     _successController.reset();
   }
 
-  Future<void> _copyEmail(String email) async {
-    await Clipboard.setData(ClipboardData(text: email));
+  Future<void> _copyValue(String value, String message) async {
+    await Clipboard.setData(ClipboardData(text: value));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Correo copiado al portapapeles.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _emailCustomer(String email, String comercioNombre) async {
-    final subject = Uri.encodeComponent('Pedido en $comercioNombre');
-    final body = Uri.encodeComponent(
-      'Hola, te escribimos desde $comercioNombre por tu pedido.',
+  Future<void> _openCustomerWhatsapp(
+    String phone,
+    String comercioNombre,
+  ) async {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El pedido no tiene un WhatsApp valido.')),
+      );
+      return;
+    }
+
+    final text = Uri.encodeComponent(
+      'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.',
     );
-    final uri = Uri.parse('mailto:$email?subject=$subject&body=$body');
-    final launched = await launchUrl(uri);
+    final uri = Uri.parse('https://wa.me/$digits?text=$text');
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
 
     if (!launched && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo abrir el cliente de correo.')),
+        const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
       );
     }
+  }
+
+  String _normalizeStatusValue(String? estado) {
+    final raw = (estado ?? '').trim().toLowerCase();
+    if (raw.isEmpty) return 'pendiente';
+    if (raw == 'confirmado' || raw == 'aceptado') return 'confirmado';
+    if (raw == 'preparando' ||
+        raw == 'preparacion' ||
+        raw == 'preparación' ||
+        raw == 'en_proceso' ||
+        raw == 'en proceso' ||
+        raw == 'listo') {
+      return 'preparando';
+    }
+    if (raw == 'en_camino' || raw == 'en camino' || raw == 'despachado') {
+      return 'en_camino';
+    }
+    if (raw == 'entregado' || raw == 'completado' || raw == 'finalizado') {
+      return 'entregado';
+    }
+    if (raw == 'cancelado' || raw == 'anulado' || raw == 'rechazado') {
+      return 'cancelado';
+    }
+    return 'pendiente';
+  }
+
+  List<_OrderStatusAction> _buildStatusActions({required bool isDelivery}) {
+    return <_OrderStatusAction>[
+      const _OrderStatusAction(
+        status: 'confirmado',
+        label: 'Confirmar',
+        icon: Icons.thumb_up_alt_outlined,
+        color: Color(0xFF2563EB),
+      ),
+      const _OrderStatusAction(
+        status: 'preparando',
+        label: 'Preparando',
+        icon: Icons.restaurant_rounded,
+        color: Color(0xFFF59E0B),
+      ),
+      if (isDelivery)
+        const _OrderStatusAction(
+          status: 'en_camino',
+          label: 'En camino',
+          icon: Icons.delivery_dining_rounded,
+          color: Color(0xFF0EA5E9),
+        ),
+      _OrderStatusAction(
+        status: 'entregado',
+        label: isDelivery ? 'Entregado' : 'Retirado',
+        icon: Icons.check_circle_rounded,
+        color: const Color(0xFF16A34A),
+      ),
+      const _OrderStatusAction(
+        status: 'cancelado',
+        label: 'Cancelar',
+        icon: Icons.cancel_rounded,
+        color: Color(0xFFE11D48),
+      ),
+    ];
   }
 
   String? _extractComercioId(String orderId) {
@@ -502,9 +588,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   }
 
   String _statusLabel(String? estado) {
-    switch ((estado ?? 'pendiente').trim().toLowerCase()) {
-      case 'completado':
-        return 'Completado';
+    switch (_normalizeStatusValue(estado)) {
+      case 'confirmado':
+        return 'Confirmado';
+      case 'preparando':
+        return 'Preparando';
+      case 'en_camino':
+        return 'En camino';
+      case 'entregado':
+        return 'Entregado';
       case 'cancelado':
         return 'Cancelado';
       default:
@@ -513,8 +605,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   }
 
   Color _statusColor(String? estado) {
-    switch ((estado ?? 'pendiente').trim().toLowerCase()) {
-      case 'completado':
+    switch (_normalizeStatusValue(estado)) {
+      case 'confirmado':
+        return const Color(0xFF2563EB);
+      case 'preparando':
+        return const Color(0xFFF59E0B);
+      case 'en_camino':
+        return const Color(0xFF0EA5E9);
+      case 'entregado':
         return const Color(0xFF27C46B);
       case 'cancelado':
         return const Color(0xFFE3645B);
@@ -537,7 +635,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   String _paymentMethodHint(String? method) {
     final normalized = (method ?? '').trim().toLowerCase();
     if (normalized.contains('pago movil')) {
-      return 'Recibido por Pago Movil. Verifica referencia y banco antes de marcar completado.';
+      return 'Recibido por Pago Movil. Verifica referencia y banco antes de marcar entregado.';
     }
     if (normalized.contains('zelle')) {
       return 'Pago por Zelle. Confirma titular/memo y monto en USD.';
@@ -846,8 +944,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 final pedido = data.pedido;
                 final total = pedido.total ?? 0.0;
                 final customerEmail = pedido.clienteEmail?.trim();
+                final customerPhone = pedido.clientePhone?.trim();
                 final paymentMethod = pedido.metodoPago?.trim();
                 final deliveryMode = pedido.deliveryMode?.trim();
+                final isDeliveryOrder =
+                    (deliveryMode ?? '').trim().toLowerCase() == 'delivery';
+                final currentStatus = _normalizeStatusValue(pedido.estado);
                 final deliveryAddress = pedido.deliveryAddress?.trim();
                 final deliveryReference = pedido.deliveryReference?.trim();
                 final deliveryInstructions = pedido.deliveryInstructions
@@ -910,7 +1012,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                           _deliveryMarkerIcon ??
                           BitmapDescriptor.defaultMarkerWithHue(
                             BitmapDescriptor.hueRed,
-                          ),
+                  k        ),
                       infoWindow: const InfoWindow(title: 'Destino de Entrega'),
                     ),
                 };
@@ -1243,9 +1345,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              customerEmail != null && customerEmail.isNotEmpty
+                              customerPhone != null && customerPhone.isNotEmpty
+                                  ? customerPhone
+                                  : customerEmail != null &&
+                                        customerEmail.isNotEmpty
                                   ? customerEmail
-                                  : 'Sin correo registrado',
+                                  : 'Sin contacto registrado',
                               style: GoogleFonts.manrope(
                                 color: text,
                                 fontSize: 16,
@@ -1253,14 +1358,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                               ),
                             ),
                             if (customerEmail != null &&
-                                customerEmail.isNotEmpty) ...[
+                                customerEmail.isNotEmpty &&
+                                customerPhone != customerEmail) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                customerEmail,
+                                style: GoogleFonts.manrope(
+                                  color: muted,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                            if (customerPhone != null &&
+                                customerPhone.isNotEmpty) ...[
                               const SizedBox(height: 12),
                               Row(
                                 children: [
                                   Expanded(
                                     child: OutlinedButton.icon(
-                                      onPressed: () =>
-                                          _copyEmail(customerEmail),
+                                      onPressed: () => _copyValue(
+                                        customerPhone,
+                                        'WhatsApp copiado al portapapeles.',
+                                      ),
                                       icon: const Icon(Icons.copy_rounded),
                                       label: const Text('Copiar'),
                                       style: OutlinedButton.styleFrom(
@@ -1277,12 +1397,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: ElevatedButton.icon(
-                                      onPressed: () => _emailCustomer(
-                                        customerEmail,
+                                      onPressed: () => _openCustomerWhatsapp(
+                                        customerPhone,
                                         data.comercioNombre,
                                       ),
-                                      icon: const Icon(Icons.email_outlined),
-                                      label: const Text('Enviar Email'),
+                                      icon: const Icon(Icons.chat_rounded),
+                                      label: const Text('WhatsApp'),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: surfaceAlt,
                                         foregroundColor: text,
@@ -1293,6 +1413,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     ),
                                   ),
                                 ],
+                              ),
+                            ] else ...[
+                              const SizedBox(height: 10),
+                              Text(
+                                'Este pedido no tiene un numero de WhatsApp registrado.',
+                                style: GoogleFonts.manrope(
+                                  color: muted,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ],
                           ],
@@ -1665,44 +1795,120 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       ],
                     ] else ...[
                       const SizedBox(height: 18),
-                      SizedBox(
-                        height: 56,
-                        child: ElevatedButton.icon(
-                          onPressed:
-                              _isCompleting || pedido.estado == 'completado'
-                              ? null
-                              : _markAsCompleted,
-                          icon: _isCompleting
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                )
-                              : const Icon(Icons.check_circle_outline_rounded),
-                          label: Text(
-                            pedido.estado == 'completado'
-                                ? 'Pedido completado'
-                                : 'Marcar como Completado',
-                            style: GoogleFonts.manrope(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 15,
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Actualizar estado',
+                              style: GoogleFonts.manrope(
+                                color: text,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: success,
-                            disabledBackgroundColor: muted.withValues(
-                              alpha: 0.4,
+                            const SizedBox(height: 8),
+                            Text(
+                              currentStatus == 'entregado' ||
+                                      currentStatus == 'cancelado'
+                                  ? 'Este pedido ya esta cerrado y no requiere mas acciones.'
+                                  : 'Selecciona el siguiente estado operativo del pedido.',
+                              style: GoogleFonts.manrope(
+                                color: muted,
+                                fontSize: 13,
+                              ),
                             ),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(999),
+                            const SizedBox(height: 14),
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children:
+                                  _buildStatusActions(
+                                    isDelivery: isDeliveryOrder,
+                                  ).map((action) {
+                                    final isCurrent =
+                                        currentStatus == action.status;
+                                    final isDisabled =
+                                        _isUpdatingStatus ||
+                                        isCurrent ||
+                                        currentStatus == 'entregado' ||
+                                        currentStatus == 'cancelado';
+
+                                    return SizedBox(
+                                      width:
+                                          MediaQuery.of(context).size.width >
+                                              420
+                                          ? 176
+                                          : (MediaQuery.of(context).size.width -
+                                                    58) /
+                                                2,
+                                      child: ElevatedButton.icon(
+                                        onPressed: isDisabled
+                                            ? null
+                                            : () => _updateOrderStatus(
+                                                action.status,
+                                              ),
+                                        icon:
+                                            _isUpdatingStatus &&
+                                                _pendingStatus == action.status
+                                            ? const SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  valueColor:
+                                                      AlwaysStoppedAnimation<
+                                                        Color
+                                                      >(Colors.white),
+                                                ),
+                                              )
+                                            : Icon(action.icon),
+                                        label: Text(
+                                          isCurrent
+                                              ? '${action.label} actual'
+                                              : action.label,
+                                          style: GoogleFonts.manrope(
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: isCurrent
+                                              ? action.color.withValues(
+                                                  alpha: 0.24,
+                                                )
+                                              : action.color,
+                                          disabledBackgroundColor: isCurrent
+                                              ? action.color.withValues(
+                                                  alpha: 0.24,
+                                                )
+                                              : muted.withValues(alpha: 0.22),
+                                          disabledForegroundColor: isCurrent
+                                              ? action.color
+                                              : text.withValues(alpha: 0.65),
+                                          foregroundColor: isCurrent
+                                              ? action.color
+                                              : Colors.white,
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 14,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              16,
+                                            ),
+                                          ),
+                                          elevation: isCurrent ? 0 : 1,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
                             ),
-                          ),
+                          ],
                         ),
                       ),
                     ],
@@ -1748,7 +1954,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              'Pedido Completado',
+                              _overlayStatus == null
+                                  ? 'Pedido actualizado'
+                                  : 'Pedido ${_statusLabel(_overlayStatus)}',
                               style: GoogleFonts.manrope(
                                 color: Colors.white,
                                 fontSize: 24,
@@ -1797,6 +2005,20 @@ class _HistoryOrderViewData {
   final String orderId;
   final String estado;
   final double total;
+}
+
+class _OrderStatusAction {
+  const _OrderStatusAction({
+    required this.status,
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  final String status;
+  final String label;
+  final IconData icon;
+  final Color color;
 }
 
 class _BadgeChip extends StatelessWidget {
