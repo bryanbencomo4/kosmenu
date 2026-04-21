@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -32,6 +34,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   static const Duration _rememberDeviceTtl = Duration(hours: 24);
   static const String _fallbackBusinessLogoAsset =
       'assets/branding/logotipo.png';
+  static const Color _businessMarkerHeadColor = Color(0xFF8B5CF6);
+  static const Color _businessMarkerStemColor = Color(0xFF9CA3AF);
+  static const Color _deliveryFlagColor = Color(0xFF7C3AED);
+  static const Color _deliveryFlagPoleColor = Color(0xFF94A3B8);
+  static const Color _routeArcColor = Color(0xFF8B5CF6);
 
   late Future<_OrderViewData?> _orderFuture;
   late final AnimationController _successController;
@@ -702,40 +709,113 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
     }
 
-    const double width = 118;
-    const double height = 146;
+    return _buildPinMarkerIcon(
+      headColor: _businessMarkerHeadColor,
+      stemColor: _businessMarkerStemColor,
+      logo: logo,
+    );
+  }
+
+  Future<BitmapDescriptor> _buildDeliveryMarkerIcon() async {
+    return _buildFlagMarkerIcon(
+      flagColor: _deliveryFlagColor,
+      poleColor: _deliveryFlagPoleColor,
+    );
+  }
+
+  Future<BitmapDescriptor> _buildPinMarkerIcon({
+    required Color headColor,
+    required Color stemColor,
+    ui.Image? logo,
+    IconData? iconData,
+    Color iconColor = Colors.black,
+  }) async {
+    const double width = 64;
+    const double height = 82;
+    const Offset center = Offset(width / 2, 22);
+    const double headRadius = 16;
+    const double borderWidth = 2;
+    const double stemWidth = 4;
+    const double stemTop = 38;
+    const double stemBottom = 70;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
-    final pinPaint = Paint()..color = Colors.white;
-    final borderPaint = Paint()
-      ..color = const Color(0xFF1C2431)
+    final shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.14)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: const Offset(width / 2, 76),
+        width: 14,
+        height: 5,
+      ),
+      shadowPaint,
+    );
+
+    final stemPaint = Paint()..color = stemColor;
+    final stemBorderPaint = Paint()
+      ..color = stemColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 4;
+      ..strokeWidth = borderWidth;
+    final headPaint = Paint()..color = headColor;
+    final headBorderPaint = Paint()
+      ..color = headColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth;
 
-    final outer = Rect.fromLTWH(11, 10, 96, 96);
-    canvas.drawOval(outer, pinPaint);
-    canvas.drawOval(outer, borderPaint);
+    final stemRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        center.dx - (stemWidth / 2),
+        stemTop,
+        stemWidth,
+        stemBottom - stemTop,
+      ),
+      const Radius.circular(3),
+    );
+    canvas.drawRRect(stemRect, stemPaint);
+    canvas.drawRRect(stemRect, stemBorderPaint);
 
-    final clipPath = Path()..addOval(Rect.fromLTWH(17, 16, 84, 84));
+    canvas.drawCircle(center, headRadius, headPaint);
+    canvas.drawCircle(center, headRadius, headBorderPaint);
+
+    final contentRect = Rect.fromCircle(center: center, radius: 12);
+    final clipPath = Path()..addOval(contentRect);
     canvas.save();
     canvas.clipPath(clipPath);
-    paintImage(
-      canvas: canvas,
-      rect: const Rect.fromLTWH(17, 16, 84, 84),
-      image: logo,
-      fit: BoxFit.cover,
-      filterQuality: FilterQuality.high,
-    );
+    if (logo != null) {
+      paintImage(
+        canvas: canvas,
+        rect: contentRect,
+        image: logo,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
+      );
+    } else {
+      canvas.drawCircle(center, 13.5, Paint()..color = headColor);
+    }
     canvas.restore();
 
-    final pointerPath = Path()
-      ..moveTo(59, 141)
-      ..lineTo(44, 94)
-      ..lineTo(74, 94)
-      ..close();
-    canvas.drawPath(pointerPath, pinPaint);
-    canvas.drawPath(pointerPath, borderPaint);
+    if (iconData != null) {
+      final textPainter = TextPainter(
+        textDirection: TextDirection.ltr,
+        text: TextSpan(
+          text: String.fromCharCode(iconData.codePoint),
+          style: TextStyle(
+            fontSize: 15,
+            color: iconColor,
+            fontFamily: iconData.fontFamily,
+            package: iconData.fontPackage,
+          ),
+        ),
+      )..layout();
+
+      final offset = Offset(
+        center.dx - (textPainter.width / 2),
+        center.dy - (textPainter.height / 2),
+      );
+      textPainter.paint(canvas, offset);
+    }
 
     final image = await recorder.endRecording().toImage(
       width.toInt(),
@@ -745,59 +825,54 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
   }
 
-  Future<BitmapDescriptor> _buildDeliveryMarkerIcon() async {
-    const double size = 118;
+  Future<BitmapDescriptor> _buildFlagMarkerIcon({
+    required Color flagColor,
+    required Color poleColor,
+  }) async {
+    const double width = 52;
+    const double height = 72;
+    const double poleWidth = 4;
+    const double poleTop = 14;
+    const double poleBottom = 62;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
     final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.16)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-    canvas.drawCircle(const Offset(59, 102), 15, shadowPaint);
-
-    final outerPaint = Paint()..color = const Color(0xFFEF4444);
-    final outerBorderPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4;
-    final innerPaint = Paint()..color = Colors.white;
-    final innerBorderPaint = Paint()
-      ..color = const Color(0xFFEF4444)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5;
-
-    canvas.drawCircle(const Offset(59, 48), 28, outerPaint);
-    canvas.drawCircle(const Offset(59, 48), 28, outerBorderPaint);
-    canvas.drawCircle(const Offset(59, 48), 15, innerPaint);
-    canvas.drawCircle(const Offset(59, 48), 15, innerBorderPaint);
-
-    final pointerPath = Path()
-      ..moveTo(59, 104)
-      ..lineTo(45, 72)
-      ..lineTo(73, 72)
-      ..close();
-    canvas.drawPath(pointerPath, outerPaint);
-    canvas.drawPath(pointerPath, outerBorderPaint);
-
-    final textPainter = TextPainter(
-      textDirection: TextDirection.ltr,
-      text: TextSpan(
-        text: String.fromCharCode(Icons.flag_rounded.codePoint),
-        style: TextStyle(
-          fontSize: 24,
-          color: const Color(0xFFB91C1C),
-          fontFamily: Icons.flag_rounded.fontFamily,
-          package: Icons.flag_rounded.fontPackage,
-        ),
+      ..color = Colors.black.withValues(alpha: 0.12)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: const Offset(width / 2, 67),
+        width: 12,
+        height: 4,
       ),
-    )..layout();
+      shadowPaint,
+    );
 
-    final offset = Offset((size - textPainter.width) / 2, 36);
-    textPainter.paint(canvas, offset);
+    final poleRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        (width / 2) - (poleWidth / 2),
+        poleTop,
+        poleWidth,
+        poleBottom - poleTop,
+      ),
+      const Radius.circular(2),
+    );
+    final polePaint = Paint()..color = poleColor;
+    canvas.drawRRect(poleRect, polePaint);
+
+    final flagPath = Path()
+      ..moveTo((width / 2) + 1, 16)
+      ..quadraticBezierTo(34, 13, 42, 18)
+      ..quadraticBezierTo(37, 24, 42, 30)
+      ..quadraticBezierTo(32, 26, (width / 2) + 1, 30)
+      ..close();
+    final flagPaint = Paint()..color = flagColor;
+    canvas.drawPath(flagPath, flagPaint);
 
     final image = await recorder.endRecording().toImage(
-      size.toInt(),
-      size.toInt(),
+      width.toInt(),
+      height.toInt(),
     );
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
@@ -933,7 +1008,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Text(
-                        'Tu pedido está en proceso. Intenta de nuevo en unos segundos.\n\nORDER_ID: ${widget.orderId}',
+                        'Tu pedido esta en proceso. Intenta de nuevo en unos segundos.\n\nORDER_ID: ${widget.orderId}',
                         style: GoogleFonts.manrope(color: muted),
                         textAlign: TextAlign.center,
                       ),
@@ -997,6 +1072,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     Marker(
                       markerId: const MarkerId('business'),
                       position: businessPoint,
+                      anchor: const Offset(0.5, 0.85),
                       icon:
                           _businessMarkerIcon ??
                           BitmapDescriptor.defaultMarkerWithHue(
@@ -1008,11 +1084,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     Marker(
                       markerId: const MarkerId('delivery'),
                       position: deliveryPoint,
+                      anchor: const Offset(0.5, 0.85),
                       icon:
                           _deliveryMarkerIcon ??
                           BitmapDescriptor.defaultMarkerWithHue(
                             BitmapDescriptor.hueRed,
-                  k        ),
+                          ),
                       infoWindow: const InfoWindow(title: 'Destino de Entrega'),
                     ),
                 };
@@ -1028,7 +1105,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                         ),
                         Polyline(
                           polylineId: const PolylineId('route_arc'),
-                          color: Colors.purple,
+                          color: _routeArcColor,
                           width: 4,
                           zIndex: 2,
                           points: arcRoutePoints,
@@ -1280,6 +1357,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                   myLocationEnabled: false,
                                   myLocationButtonEnabled: false,
                                   zoomControlsEnabled: false,
+                                  scrollGesturesEnabled: true,
+                                  zoomGesturesEnabled: true,
+                                  gestureRecognizers:
+                                      <Factory<OneSequenceGestureRecognizer>>{
+                                        Factory<OneSequenceGestureRecognizer>(
+                                          () => EagerGestureRecognizer(),
+                                        ),
+                                      },
                                   mapToolbarEnabled: false,
                                   markers: deliveryMarkers,
                                   polylines: deliveryPolylines,
