@@ -20,12 +20,15 @@ type PedidoRecord = {
   cliente_email?: string;
   detalles?: {
     order_id?: string;
+    codigo_orden?: string;
     telefono_cliente?: string;
     cliente_nombre?: string;
+    nombre_cliente?: string;
     cliente_email?: string;
     notifications?: {
       whatsapp_enabled?: boolean;
     };
+    [key: string]: unknown;
   };
 };
 
@@ -165,22 +168,31 @@ function asPedidoRecord(value: unknown): PedidoRecord {
 
   const map = value as Record<string, unknown>;
   const detallesRaw = map['detalles'];
-  const detalles =
+  const detallesMap =
     detallesRaw && typeof detallesRaw === 'object'
+      ? (detallesRaw as Record<string, unknown>)
+      : null;
+  const notificationsRaw = detallesMap?.['notifications'];
+  const detalles =
+    detallesMap != null
       ? ({
-          order_id: (detallesRaw as Record<string, unknown>)['order_id']?.toString(),
-          telefono_cliente: (detallesRaw as Record<string, unknown>)['telefono_cliente']?.toString(),
-          cliente_nombre: (detallesRaw as Record<string, unknown>)['cliente_nombre']?.toString(),
-          cliente_email: (detallesRaw as Record<string, unknown>)['cliente_email']?.toString(),
-        } as {
-          order_id?: string;
-          telefono_cliente?: string;
-          cliente_nombre?: string;
-          cliente_email?: string;
-          notifications?: {
-            whatsapp_enabled?: boolean;
-          };
-        })
+          ...detallesMap,
+          order_id: detallesMap['order_id']?.toString(),
+          codigo_orden: detallesMap['codigo_orden']?.toString(),
+          telefono_cliente: detallesMap['telefono_cliente']?.toString(),
+          cliente_nombre: detallesMap['cliente_nombre']?.toString(),
+          nombre_cliente: detallesMap['nombre_cliente']?.toString(),
+          cliente_email: detallesMap['cliente_email']?.toString(),
+          notifications:
+              notificationsRaw != null && typeof notificationsRaw === 'object'
+          ? {
+              whatsapp_enabled:
+                  (notificationsRaw as Record<string, unknown>)['whatsapp_enabled'] === false
+                      ? false
+                      : undefined,
+            }
+          : undefined,
+        } as PedidoRecord['detalles'])
       : undefined;
 
   return {
@@ -195,7 +207,10 @@ function asPedidoRecord(value: unknown): PedidoRecord {
 }
 
 function resolveOrderId(record: PedidoRecord): string {
-  const detallesOrderId = (record.detalles?.order_id ?? '').trim();
+  const detallesOrderId =
+    (record.detalles?.order_id ?? record.detalles?.codigo_orden ?? '')
+      .toString()
+      .trim();
   if (detallesOrderId.length > 0) {
     return detallesOrderId;
   }
@@ -223,6 +238,7 @@ function resolveCustomerPhone(record: PedidoRecord): string {
 function resolveCustomerName(record: PedidoRecord): string {
   return (
     record.nombre_cliente?.toString().trim() ||
+    record.detalles?.nombre_cliente?.toString().trim() ||
     record.detalles?.cliente_nombre?.toString().trim() ||
     'cliente'
   );
