@@ -345,6 +345,36 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
+  Future<bool> _confirmCancelOrder() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Cancelar pedido'),
+          content: const Text(
+            'Esta accion cancelara el pedido y no se puede deshacer. Deseas continuar?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Volver'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE11D48),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Si, cancelar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return confirmed ?? false;
+  }
+
   Future<void> _playSuccessOverlay() async {
     setState(() => _showSuccessOverlay = true);
     await _successController.forward(from: 0);
@@ -449,40 +479,106 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return 'pendiente';
   }
 
-  List<_OrderStatusAction> _buildStatusActions({required bool isDelivery}) {
-    return <_OrderStatusAction>[
-      const _OrderStatusAction(
-        status: 'confirmado',
-        label: 'Confirmar',
-        icon: Icons.thumb_up_alt_outlined,
-        color: Color(0xFF2563EB),
-      ),
-      const _OrderStatusAction(
-        status: 'preparando',
-        label: 'Preparando',
-        icon: Icons.restaurant_rounded,
-        color: Color(0xFFF59E0B),
-      ),
-      if (isDelivery)
-        const _OrderStatusAction(
-          status: 'en_camino',
-          label: 'En camino',
-          icon: Icons.delivery_dining_rounded,
-          color: Color(0xFF0EA5E9),
-        ),
-      _OrderStatusAction(
-        status: 'entregado',
-        label: isDelivery ? 'Entregado' : 'Retirado',
-        icon: Icons.check_circle_rounded,
-        color: const Color(0xFF16A34A),
-      ),
-      const _OrderStatusAction(
-        status: 'cancelado',
-        label: 'Cancelar',
-        icon: Icons.cancel_rounded,
-        color: Color(0xFFE11D48),
-      ),
-    ];
+  List<_OrderStatusAction> _buildStatusActions({
+    required bool isDelivery,
+    required String currentStatus,
+  }) {
+    switch (currentStatus) {
+      case 'pendiente':
+        return const <_OrderStatusAction>[
+          _OrderStatusAction(
+            status: 'confirmado',
+            label: 'Confirmar pedido',
+            icon: Icons.thumb_up_alt_outlined,
+            color: Color(0xFF2563EB),
+          ),
+          _OrderStatusAction(
+            status: 'cancelado',
+            label: 'Cancelar pedido',
+            icon: Icons.cancel_rounded,
+            color: Color(0xFFE11D48),
+          ),
+        ];
+      case 'confirmado':
+        return const <_OrderStatusAction>[
+          _OrderStatusAction(
+            status: 'preparando',
+            label: 'Iniciar preparacion',
+            icon: Icons.restaurant_rounded,
+            color: Color(0xFFF59E0B),
+          ),
+          _OrderStatusAction(
+            status: 'cancelado',
+            label: 'Cancelar pedido',
+            icon: Icons.cancel_rounded,
+            color: Color(0xFFE11D48),
+          ),
+        ];
+      case 'preparando':
+        if (isDelivery) {
+          return const <_OrderStatusAction>[
+            _OrderStatusAction(
+              status: 'en_camino',
+              label: 'Marcar en camino',
+              icon: Icons.delivery_dining_rounded,
+              color: Color(0xFF0EA5E9),
+            ),
+            _OrderStatusAction(
+              status: 'cancelado',
+              label: 'Cancelar pedido',
+              icon: Icons.cancel_rounded,
+              color: Color(0xFFE11D48),
+            ),
+          ];
+        }
+        return const <_OrderStatusAction>[
+          _OrderStatusAction(
+            status: 'entregado',
+            label: 'Marcar retirado',
+            icon: Icons.check_circle_rounded,
+            color: Color(0xFF16A34A),
+          ),
+          _OrderStatusAction(
+            status: 'cancelado',
+            label: 'Cancelar pedido',
+            icon: Icons.cancel_rounded,
+            color: Color(0xFFE11D48),
+          ),
+        ];
+      case 'en_camino':
+        return const <_OrderStatusAction>[
+          _OrderStatusAction(
+            status: 'entregado',
+            label: 'Marcar entregado',
+            icon: Icons.check_circle_rounded,
+            color: Color(0xFF16A34A),
+          ),
+          _OrderStatusAction(
+            status: 'cancelado',
+            label: 'Cancelar pedido',
+            icon: Icons.cancel_rounded,
+            color: Color(0xFFE11D48),
+          ),
+        ];
+      case 'entregado':
+      case 'cancelado':
+        return const <_OrderStatusAction>[];
+      default:
+        return const <_OrderStatusAction>[
+          _OrderStatusAction(
+            status: 'confirmado',
+            label: 'Confirmar pedido',
+            icon: Icons.thumb_up_alt_outlined,
+            color: Color(0xFF2563EB),
+          ),
+          _OrderStatusAction(
+            status: 'cancelado',
+            label: 'Cancelar pedido',
+            icon: Icons.cancel_rounded,
+            color: Color(0xFFE11D48),
+          ),
+        ];
+    }
   }
 
   String? _extractComercioId(String orderId) {
@@ -1080,6 +1176,34 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     data.businessLatitude != null &&
                     data.businessLongitude != null;
                 final isReadOnly = widget.readOnlyView;
+                final nextStatusActions = _buildStatusActions(
+                  isDelivery: isDeliveryOrder,
+                  currentStatus: currentStatus,
+                );
+                final statusActionsForBar =
+                    List<_OrderStatusAction>.from(nextStatusActions)..sort((
+                      a,
+                      b,
+                    ) {
+                      if (a.status == 'cancelado' && b.status != 'cancelado') {
+                        return -1;
+                      }
+                      if (b.status == 'cancelado' && a.status != 'cancelado') {
+                        return 1;
+                      }
+                      return 0;
+                    });
+                String? primaryStatusForBar;
+                for (final action in statusActionsForBar) {
+                  if (action.status != 'cancelado') {
+                    primaryStatusForBar = action.status;
+                    break;
+                  }
+                }
+                if (primaryStatusForBar == null &&
+                    statusActionsForBar.isNotEmpty) {
+                  primaryStatusForBar = statusActionsForBar.first.status;
+                }
                 final LatLng? deliveryPoint = hasDeliveryCoords
                     ? LatLng(deliveryLat, deliveryLng)
                     : null;
@@ -1290,807 +1414,50 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   );
                 }
 
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                return Column(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(18),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            surface,
-                            Color.lerp(surface, surfaceAlt, 0.55) ?? surface,
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: accent.withValues(alpha: 0.2),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
                         children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(14),
-                                child: SizedBox(
-                                  width: 46,
-                                  height: 46,
-                                  child:
-                                      (businessLogoUrl != null &&
-                                          businessLogoUrl.isNotEmpty)
-                                      ? Image.network(
-                                          businessLogoUrl,
-                                          fit: BoxFit.cover,
-                                          errorBuilder:
-                                              (context, error, stackTrace) =>
-                                                  Container(
-                                                    color: surfaceAlt,
-                                                    alignment: Alignment.center,
-                                                    child: Icon(
-                                                      Icons.storefront_rounded,
-                                                      size: 20,
-                                                      color: muted,
-                                                    ),
-                                                  ),
-                                        )
-                                      : Container(
-                                          color: surfaceAlt,
-                                          alignment: Alignment.center,
-                                          child: Icon(
-                                            Icons.storefront_rounded,
-                                            size: 20,
-                                            color: muted,
-                                          ),
-                                        ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      data.comercioNombre,
-                                      style: GoogleFonts.manrope(
-                                        color: text,
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.w800,
-                                        height: 1.08,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _statusColor(
-                                    pedido.estado,
-                                  ).withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: _statusColor(
-                                      pedido.estado,
-                                    ).withValues(alpha: 0.35),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.flag_rounded,
-                                      size: 14,
-                                      color: _statusColor(pedido.estado),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _statusLabel(pedido.estado),
-                                      style: GoogleFonts.manrope(
-                                        color: _statusColor(pedido.estado),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
                           Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.all(18),
                             decoration: BoxDecoration(
-                              color: surfaceAlt.withValues(alpha: 0.75),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: accent.withValues(alpha: 0.15),
+                              gradient: LinearGradient(
+                                colors: [
+                                  surface,
+                                  Color.lerp(surface, surfaceAlt, 0.55) ??
+                                      surface,
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
                               ),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: accent.withValues(alpha: 0.2),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.06),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'ID DEL PEDIDO',
-                                  style: GoogleFonts.manrope(
-                                    color: muted,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.45,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                SelectableText(
-                                  pedido.orderId ?? widget.orderId,
-                                  style: GoogleFonts.manrope(
-                                    color: text,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.2,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              if (paymentMethod != null &&
-                                  paymentMethod.isNotEmpty)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: success.withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(
-                                      color: success.withValues(alpha: 0.35),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.payments_rounded,
-                                        size: 14,
-                                        color: success,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        paymentMethod,
-                                        style: GoogleFonts.manrope(
-                                          color: success,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: accent.withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: accent.withValues(alpha: 0.32),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.local_shipping_rounded,
-                                      size: 14,
-                                      color: accent,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _deliveryModeLabel(deliveryMode),
-                                      style: GoogleFonts.manrope(
-                                        color: accent,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: text.withValues(alpha: 0.06),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: text.withValues(alpha: 0.12),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.receipt_long_rounded,
-                                      size: 14,
-                                      color: text.withValues(alpha: 0.78),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _formatAmount(total),
-                                      style: GoogleFonts.manrope(
-                                        color: text.withValues(alpha: 0.82),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    if (hasDeliveryCoords) ...[
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: surface,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Mapa y ruta',
-                              style: GoogleFonts.manrope(
-                                color: text,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: surfaceAlt.withValues(alpha: 0.58),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: text.withValues(alpha: 0.1),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 30,
-                                    height: 30,
-                                    decoration: BoxDecoration(
-                                      color: accent.withValues(alpha: 0.14),
-                                      borderRadius: BorderRadius.circular(9),
-                                    ),
-                                    child: Icon(
-                                      _isMapInteractionEnabled
-                                          ? Icons.pan_tool_alt_rounded
-                                          : Icons.lock_outline_rounded,
-                                      size: 17,
-                                      color: accent,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          _isMapInteractionEnabled
-                                              ? 'Mover mapa: Activado'
-                                              : 'Mover mapa: Desactivado',
-                                          style: GoogleFonts.manrope(
-                                            color: text,
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          _isMapInteractionEnabled
-                                              ? 'Puedes mover el mapa libremente.'
-                                              : 'Activalo solo si quieres explorar el mapa.',
-                                          style: GoogleFonts.manrope(
-                                            color: muted,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Switch.adaptive(
-                                    value: _isMapInteractionEnabled,
-                                    onChanged: (value) {
-                                      setState(() {
-                                        _isMapInteractionEnabled = value;
-                                      });
-                                    },
-                                    activeColor: accent,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(14),
-                              child: SizedBox(
-                                height: 250,
-                                child: IgnorePointer(
-                                  ignoring: !_isMapInteractionEnabled,
-                                  child: GoogleMap(
-                                    initialCameraPosition: CameraPosition(
-                                      target: hasBusinessCoords
-                                          ? _midpoint(
-                                              businessPoint!,
-                                              deliveryPoint!,
-                                            )
-                                          : deliveryPoint!,
-                                      zoom: hasBusinessCoords ? 13.8 : 15.2,
-                                    ),
-                                    onMapCreated: (controller) async {
-                                      if (cameraPoints.length < 2) {
-                                        return;
-                                      }
-                                      await controller.animateCamera(
-                                        CameraUpdate.newLatLngBounds(
-                                          _buildBounds(cameraPoints),
-                                          60,
-                                        ),
-                                      );
-                                    },
-                                    myLocationEnabled: false,
-                                    myLocationButtonEnabled: false,
-                                    zoomControlsEnabled: false,
-                                    scrollGesturesEnabled:
-                                        _isMapInteractionEnabled,
-                                    zoomGesturesEnabled:
-                                        _isMapInteractionEnabled,
-                                    rotateGesturesEnabled:
-                                        _isMapInteractionEnabled,
-                                    tiltGesturesEnabled:
-                                        _isMapInteractionEnabled,
-                                    gestureRecognizers: _isMapInteractionEnabled
-                                        ? <
-                                            Factory<
-                                              OneSequenceGestureRecognizer
-                                            >
-                                          >{
-                                            Factory<
-                                              OneSequenceGestureRecognizer
-                                            >(() => EagerGestureRecognizer()),
-                                          }
-                                        : <
-                                            Factory<
-                                              OneSequenceGestureRecognizer
-                                            >
-                                          >{},
-                                    mapToolbarEnabled: false,
-                                    markers: deliveryMarkers,
-                                    polylines: deliveryPolylines,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            if (hasBusinessCoords) ...[
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: () =>
-                                      _openExternalGoogleMapsNavigation(
-                                        origin: businessPoint!,
-                                        destination: deliveryPoint,
-                                      ),
-                                  icon: const Icon(Icons.navigation_rounded),
-                                  label: const Text('Navegar en Google Maps'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: text,
-                                    side: BorderSide(
-                                      color: accent.withValues(alpha: 0.35),
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ] else ...[
-                              const SizedBox(height: 10),
-                              Text(
-                                'Mostrando solo el destino. Configura latitud y longitud del comercio para visualizar la ruta y navegar.',
-                                style: GoogleFonts.manrope(
-                                  color: muted,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                    ],
-                    if (!isReadOnly) ...[
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              surface,
-                              Color.lerp(surface, surfaceAlt, 0.42) ?? surface,
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: accent.withValues(alpha: 0.18),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
-                              blurRadius: 14,
-                              offset: const Offset(0, 6),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color: accent.withValues(alpha: 0.16),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Icon(
-                                    Icons.person_rounded,
-                                    color: accent,
-                                    size: 22,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Cliente',
-                                        style: GoogleFonts.manrope(
-                                          color: text,
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'Contacto para coordinar entrega o retiro',
-                                        style: GoogleFonts.manrope(
-                                          color: muted,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: surfaceAlt.withValues(alpha: 0.58),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: text.withValues(alpha: 0.1),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              Icons.person_rounded,
-                                              size: 16,
-                                              color: muted,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                (customerName != null &&
-                                                        customerName.isNotEmpty)
-                                                    ? customerName
-                                                    : 'Cliente sin nombre registrado',
-                                                style: GoogleFonts.manrope(
-                                                  color: text,
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w800,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              Icons.alternate_email_rounded,
-                                              size: 16,
-                                              color: muted,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                (customerEmail != null &&
-                                                        customerEmail
-                                                            .isNotEmpty)
-                                                    ? customerEmail
-                                                    : 'Cliente sin correo registrado',
-                                                style: GoogleFonts.manrope(
-                                                  color: text,
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            Column(
-                              children: [
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed:
-                                        (customerPhone != null &&
-                                            customerPhone.isNotEmpty)
-                                        ? () => _openCustomerWhatsapp(
-                                            customerPhone,
-                                            data.comercioNombre,
-                                          )
-                                        : null,
-                                    icon: const FaIcon(
-                                      FontAwesomeIcons.whatsapp,
-                                      size: 17,
-                                    ),
-                                    label: const Text('Enviar WhatsApp'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF16A34A),
-                                      foregroundColor: Colors.white,
-                                      disabledBackgroundColor: const Color(
-                                        0xFFDCFCE7,
-                                      ),
-                                      disabledForegroundColor: const Color(
-                                        0xFF86EFAC,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                        horizontal: 16,
-                                      ),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      textStyle: GoogleFonts.manrope(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed:
-                                        (customerPhone != null &&
-                                            customerPhone.isNotEmpty)
-                                        ? () => _openCustomerCall(customerPhone)
-                                        : null,
-                                    icon: const Icon(
-                                      Icons.call_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Llamar ahora'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF2563EB),
-                                      foregroundColor: Colors.white,
-                                      disabledBackgroundColor: const Color(
-                                        0xFFDBEAFE,
-                                      ),
-                                      disabledForegroundColor: const Color(
-                                        0xFF93C5FD,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                        horizontal: 16,
-                                      ),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      textStyle: GoogleFonts.manrope(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed:
-                                        (customerEmail != null &&
-                                            customerEmail.isNotEmpty)
-                                        ? () => _openCustomerEmail(
-                                            customerEmail,
-                                            data.comercioNombre,
-                                          )
-                                        : null,
-                                    icon: const Icon(
-                                      Icons.email_rounded,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Enviar email'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF7C3AED),
-                                      foregroundColor: Colors.white,
-                                      disabledBackgroundColor: const Color(
-                                        0xFFEDE9FE,
-                                      ),
-                                      disabledForegroundColor: const Color(
-                                        0xFFC4B5FD,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 14,
-                                        horizontal: 16,
-                                      ),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      textStyle: GoogleFonts.manrope(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                    ],
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: surface,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Resumen',
-                            style: GoogleFonts.manrope(
-                              color: text,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (pedido.items.isEmpty)
-                            Text(
-                              'No hay items disponibles todavía.',
-                              style: GoogleFonts.manrope(color: muted),
-                            )
-                          else
-                            ...pedido.items.map(
-                              (item) => Container(
-                                margin: const EdgeInsets.only(bottom: 10),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: surfaceAlt,
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Row(
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     ClipRRect(
-                                      borderRadius: BorderRadius.circular(10),
+                                      borderRadius: BorderRadius.circular(14),
                                       child: SizedBox(
-                                        width: 44,
-                                        height: 44,
+                                        width: 46,
+                                        height: 46,
                                         child:
-                                            (item.imageUrl?.trim().isNotEmpty ??
-                                                false)
-                                            ? Image.network(
-                                                item.imageUrl!.trim(),
-                                                fit: BoxFit.cover,
-                                                errorBuilder:
-                                                    (
-                                                      context,
-                                                      error,
-                                                      stackTrace,
-                                                    ) => Container(
-                                                      color: surface,
-                                                      alignment:
-                                                          Alignment.center,
-                                                      child: Icon(
-                                                        Icons
-                                                            .image_not_supported_rounded,
-                                                        size: 18,
-                                                        color: muted,
-                                                      ),
-                                                    ),
-                                              )
-                                            : (businessLogoUrl != null &&
-                                                  businessLogoUrl.isNotEmpty)
+                                            (businessLogoUrl != null &&
+                                                businessLogoUrl.isNotEmpty)
                                             ? Image.network(
                                                 businessLogoUrl,
                                                 fit: BoxFit.cover,
@@ -2100,6 +1467,835 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                       error,
                                                       stackTrace,
                                                     ) => Container(
+                                                      color: surfaceAlt,
+                                                      alignment:
+                                                          Alignment.center,
+                                                      child: Icon(
+                                                        Icons
+                                                            .storefront_rounded,
+                                                        size: 20,
+                                                        color: muted,
+                                                      ),
+                                                    ),
+                                              )
+                                            : Container(
+                                                color: surfaceAlt,
+                                                alignment: Alignment.center,
+                                                child: Icon(
+                                                  Icons.storefront_rounded,
+                                                  size: 20,
+                                                  color: muted,
+                                                ),
+                                              ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            data.comercioNombre,
+                                            style: GoogleFonts.manrope(
+                                              color: text,
+                                              fontSize: 24,
+                                              fontWeight: FontWeight.w800,
+                                              height: 1.08,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 8,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _statusColor(
+                                          pedido.estado,
+                                        ).withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: _statusColor(
+                                            pedido.estado,
+                                          ).withValues(alpha: 0.35),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.flag_rounded,
+                                            size: 14,
+                                            color: _statusColor(pedido.estado),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            _statusLabel(pedido.estado),
+                                            style: GoogleFonts.manrope(
+                                              color: _statusColor(
+                                                pedido.estado,
+                                              ),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 14),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: surfaceAlt.withValues(alpha: 0.75),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: accent.withValues(alpha: 0.15),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'ID DEL PEDIDO',
+                                        style: GoogleFonts.manrope(
+                                          color: muted,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 0.45,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      SelectableText(
+                                        pedido.orderId ?? widget.orderId,
+                                        style: GoogleFonts.manrope(
+                                          color: text,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.2,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    if (paymentMethod != null &&
+                                        paymentMethod.isNotEmpty)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 8,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: success.withValues(
+                                            alpha: 0.14,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          border: Border.all(
+                                            color: success.withValues(
+                                              alpha: 0.35,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.payments_rounded,
+                                              size: 14,
+                                              color: success,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              paymentMethod,
+                                              style: GoogleFonts.manrope(
+                                                color: success,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 8,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: accent.withValues(alpha: 0.14),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                        border: Border.all(
+                                          color: accent.withValues(alpha: 0.32),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.local_shipping_rounded,
+                                            size: 14,
+                                            color: accent,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            _deliveryModeLabel(deliveryMode),
+                                            style: GoogleFonts.manrope(
+                                              color: accent,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 8,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: text.withValues(alpha: 0.06),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                        border: Border.all(
+                                          color: text.withValues(alpha: 0.12),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.receipt_long_rounded,
+                                            size: 14,
+                                            color: text.withValues(alpha: 0.78),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            _formatAmount(total),
+                                            style: GoogleFonts.manrope(
+                                              color: text.withValues(
+                                                alpha: 0.82,
+                                              ),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          if (hasDeliveryCoords) ...[
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: surface,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Mapa y ruta',
+                                    style: GoogleFonts.manrope(
+                                      color: text,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: surfaceAlt.withValues(alpha: 0.58),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: text.withValues(alpha: 0.1),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 30,
+                                          height: 30,
+                                          decoration: BoxDecoration(
+                                            color: accent.withValues(
+                                              alpha: 0.14,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              9,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            _isMapInteractionEnabled
+                                                ? Icons.pan_tool_alt_rounded
+                                                : Icons.lock_outline_rounded,
+                                            size: 17,
+                                            color: accent,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                _isMapInteractionEnabled
+                                                    ? 'Mover mapa: Activado'
+                                                    : 'Mover mapa: Desactivado',
+                                                style: GoogleFonts.manrope(
+                                                  color: text,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                _isMapInteractionEnabled
+                                                    ? 'Puedes mover el mapa libremente.'
+                                                    : 'Activalo solo si quieres explorar el mapa.',
+                                                style: GoogleFonts.manrope(
+                                                  color: muted,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Switch.adaptive(
+                                          value: _isMapInteractionEnabled,
+                                          onChanged: (value) {
+                                            setState(() {
+                                              _isMapInteractionEnabled = value;
+                                            });
+                                          },
+                                          activeThumbColor: accent,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(14),
+                                    child: SizedBox(
+                                      height: 250,
+                                      child: IgnorePointer(
+                                        ignoring: !_isMapInteractionEnabled,
+                                        child: GoogleMap(
+                                          initialCameraPosition: CameraPosition(
+                                            target: hasBusinessCoords
+                                                ? _midpoint(
+                                                    businessPoint!,
+                                                    deliveryPoint!,
+                                                  )
+                                                : deliveryPoint!,
+                                            zoom: hasBusinessCoords
+                                                ? 13.8
+                                                : 15.2,
+                                          ),
+                                          onMapCreated: (controller) async {
+                                            if (cameraPoints.length < 2) {
+                                              return;
+                                            }
+                                            await controller.animateCamera(
+                                              CameraUpdate.newLatLngBounds(
+                                                _buildBounds(cameraPoints),
+                                                60,
+                                              ),
+                                            );
+                                          },
+                                          myLocationEnabled: false,
+                                          myLocationButtonEnabled: false,
+                                          zoomControlsEnabled: false,
+                                          scrollGesturesEnabled:
+                                              _isMapInteractionEnabled,
+                                          zoomGesturesEnabled:
+                                              _isMapInteractionEnabled,
+                                          rotateGesturesEnabled:
+                                              _isMapInteractionEnabled,
+                                          tiltGesturesEnabled:
+                                              _isMapInteractionEnabled,
+                                          gestureRecognizers:
+                                              _isMapInteractionEnabled
+                                              ? <
+                                                  Factory<
+                                                    OneSequenceGestureRecognizer
+                                                  >
+                                                >{
+                                                  Factory<
+                                                    OneSequenceGestureRecognizer
+                                                  >(
+                                                    () =>
+                                                        EagerGestureRecognizer(),
+                                                  ),
+                                                }
+                                              : <
+                                                  Factory<
+                                                    OneSequenceGestureRecognizer
+                                                  >
+                                                >{},
+                                          mapToolbarEnabled: false,
+                                          markers: deliveryMarkers,
+                                          polylines: deliveryPolylines,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  if (hasBusinessCoords) ...[
+                                    const SizedBox(height: 10),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        onPressed: () =>
+                                            _openExternalGoogleMapsNavigation(
+                                              origin: businessPoint!,
+                                              destination: deliveryPoint,
+                                            ),
+                                        icon: const Icon(
+                                          Icons.navigation_rounded,
+                                        ),
+                                        label: const Text(
+                                          'Navegar en Google Maps',
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: text,
+                                          side: BorderSide(
+                                            color: accent.withValues(
+                                              alpha: 0.35,
+                                            ),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ] else ...[
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      'Mostrando solo el destino. Configura latitud y longitud del comercio para visualizar la ruta y navegar.',
+                                      style: GoogleFonts.manrope(
+                                        color: muted,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                          if (!isReadOnly) ...[
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    surface,
+                                    Color.lerp(surface, surfaceAlt, 0.42) ??
+                                        surface,
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: accent.withValues(alpha: 0.18),
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.05),
+                                    blurRadius: 14,
+                                    offset: const Offset(0, 6),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 40,
+                                        height: 40,
+                                        decoration: BoxDecoration(
+                                          color: accent.withValues(alpha: 0.16),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Icon(
+                                          Icons.person_rounded,
+                                          color: accent,
+                                          size: 22,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Cliente',
+                                              style: GoogleFonts.manrope(
+                                                color: text,
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'Contacto para coordinar entrega o retiro',
+                                              style: GoogleFonts.manrope(
+                                                color: muted,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: surfaceAlt.withValues(alpha: 0.58),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: text.withValues(alpha: 0.1),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.person_rounded,
+                                                    size: 16,
+                                                    color: muted,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      (customerName != null &&
+                                                              customerName
+                                                                  .isNotEmpty)
+                                                          ? customerName
+                                                          : 'Cliente sin nombre registrado',
+                                                      style:
+                                                          GoogleFonts.manrope(
+                                                            color: text,
+                                                            fontSize: 13,
+                                                            fontWeight:
+                                                                FontWeight.w800,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons
+                                                        .alternate_email_rounded,
+                                                    size: 16,
+                                                    color: muted,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      (customerEmail != null &&
+                                                              customerEmail
+                                                                  .isNotEmpty)
+                                                          ? customerEmail
+                                                          : 'Cliente sin correo registrado',
+                                                      style:
+                                                          GoogleFonts.manrope(
+                                                            color: text,
+                                                            fontSize: 13,
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  Column(
+                                    children: [
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton.icon(
+                                          onPressed:
+                                              (customerPhone != null &&
+                                                  customerPhone.isNotEmpty)
+                                              ? () => _openCustomerWhatsapp(
+                                                  customerPhone,
+                                                  data.comercioNombre,
+                                                )
+                                              : null,
+                                          icon: const FaIcon(
+                                            FontAwesomeIcons.whatsapp,
+                                            size: 17,
+                                          ),
+                                          label: const Text('Enviar WhatsApp'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(
+                                              0xFF16A34A,
+                                            ),
+                                            foregroundColor: Colors.white,
+                                            disabledBackgroundColor:
+                                                const Color(0xFFDCFCE7),
+                                            disabledForegroundColor:
+                                                const Color(0xFF86EFAC),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 14,
+                                              horizontal: 16,
+                                            ),
+                                            elevation: 0,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            textStyle: GoogleFonts.manrope(
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton.icon(
+                                          onPressed:
+                                              (customerPhone != null &&
+                                                  customerPhone.isNotEmpty)
+                                              ? () => _openCustomerCall(
+                                                  customerPhone,
+                                                )
+                                              : null,
+                                          icon: const Icon(
+                                            Icons.call_rounded,
+                                            size: 18,
+                                          ),
+                                          label: const Text('Llamar ahora'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(
+                                              0xFF2563EB,
+                                            ),
+                                            foregroundColor: Colors.white,
+                                            disabledBackgroundColor:
+                                                const Color(0xFFDBEAFE),
+                                            disabledForegroundColor:
+                                                const Color(0xFF93C5FD),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 14,
+                                              horizontal: 16,
+                                            ),
+                                            elevation: 0,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            textStyle: GoogleFonts.manrope(
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton.icon(
+                                          onPressed:
+                                              (customerEmail != null &&
+                                                  customerEmail.isNotEmpty)
+                                              ? () => _openCustomerEmail(
+                                                  customerEmail,
+                                                  data.comercioNombre,
+                                                )
+                                              : null,
+                                          icon: const Icon(
+                                            Icons.email_rounded,
+                                            size: 18,
+                                          ),
+                                          label: const Text('Enviar email'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(
+                                              0xFF7C3AED,
+                                            ),
+                                            foregroundColor: Colors.white,
+                                            disabledBackgroundColor:
+                                                const Color(0xFFEDE9FE),
+                                            disabledForegroundColor:
+                                                const Color(0xFFC4B5FD),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 14,
+                                              horizontal: 16,
+                                            ),
+                                            elevation: 0,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            textStyle: GoogleFonts.manrope(
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: surface,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Resumen',
+                                  style: GoogleFonts.manrope(
+                                    color: text,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                if (pedido.items.isEmpty)
+                                  Text(
+                                    'No hay items disponibles todavía.',
+                                    style: GoogleFonts.manrope(color: muted),
+                                  )
+                                else
+                                  ...pedido.items.map(
+                                    (item) => Container(
+                                      margin: const EdgeInsets.only(bottom: 10),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: surfaceAlt,
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            child: SizedBox(
+                                              width: 44,
+                                              height: 44,
+                                              child:
+                                                  (item.imageUrl
+                                                          ?.trim()
+                                                          .isNotEmpty ??
+                                                      false)
+                                                  ? Image.network(
+                                                      item.imageUrl!.trim(),
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder:
+                                                          (
+                                                            context,
+                                                            error,
+                                                            stackTrace,
+                                                          ) => Container(
+                                                            color: surface,
+                                                            alignment: Alignment
+                                                                .center,
+                                                            child: Icon(
+                                                              Icons
+                                                                  .image_not_supported_rounded,
+                                                              size: 18,
+                                                              color: muted,
+                                                            ),
+                                                          ),
+                                                    )
+                                                  : (businessLogoUrl != null &&
+                                                        businessLogoUrl
+                                                            .isNotEmpty)
+                                                  ? Image.network(
+                                                      businessLogoUrl,
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder:
+                                                          (
+                                                            context,
+                                                            error,
+                                                            stackTrace,
+                                                          ) => Container(
+                                                            color: surface,
+                                                            alignment: Alignment
+                                                                .center,
+                                                            child: Icon(
+                                                              Icons
+                                                                  .storefront_rounded,
+                                                              size: 18,
+                                                              color: muted,
+                                                            ),
+                                                          ),
+                                                    )
+                                                  : Container(
                                                       color: surface,
                                                       alignment:
                                                           Alignment.center,
@@ -2110,402 +2306,531 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                         color: muted,
                                                       ),
                                                     ),
-                                              )
-                                            : Container(
-                                                color: surface,
-                                                alignment: Alignment.center,
-                                                child: Icon(
-                                                  Icons.storefront_rounded,
-                                                  size: 18,
-                                                  color: muted,
-                                                ),
-                                              ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        'x${item.cantidad} ${item.nombre}',
-                                        style: GoogleFonts.manrope(
-                                          color: text,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      _formatAmount(item.total),
-                                      style: GoogleFonts.manrope(
-                                        color: success,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Text(
-                                'Total de la orden',
-                                style: GoogleFonts.manrope(
-                                  color: muted,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                _formatAmount(total),
-                                style: GoogleFonts.manrope(
-                                  color: text,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: surface,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Metodo de pago',
-                            style: GoogleFonts.manrope(
-                              color: text,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            (paymentMethod != null && paymentMethod.isNotEmpty)
-                                ? paymentMethod
-                                : 'Sin especificar',
-                            style: GoogleFonts.manrope(
-                              color: text,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _paymentMethodHint(paymentMethod),
-                            style: GoogleFonts.manrope(
-                              color: muted,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: surface,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Entrega',
-                            style: GoogleFonts.manrope(
-                              color: text,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Tipo: ${_deliveryModeLabel(deliveryMode)}',
-                            style: GoogleFonts.manrope(
-                              color: muted,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if ((deliveryAddress ?? '').isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                'Direccion: $deliveryAddress',
-                                style: GoogleFonts.manrope(
-                                  color: text,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          if ((deliveryReference ?? '').isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                'Referencia: $deliveryReference',
-                                style: GoogleFonts.manrope(
-                                  color: muted,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          if ((deliveryInstructions ?? '').isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                'Indicaciones: $deliveryInstructions',
-                                style: GoogleFonts.manrope(
-                                  color: muted,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          if (deliveryLat != null && deliveryLng != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                'Coordenadas: ${deliveryLat.toStringAsFixed(6)}, ${deliveryLng.toStringAsFixed(6)}',
-                                style: GoogleFonts.manrope(
-                                  color: muted,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if ((orderNotes ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: surface,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Notas del pedido',
-                              style: GoogleFonts.manrope(
-                                color: text,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              orderNotes!,
-                              style: GoogleFonts.manrope(
-                                color: muted,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (isReadOnly) ...[
-                      const SizedBox(height: 18),
-                      Text(
-                        'El estado de este pedido solo puede ser actualizado por el vendedor.',
-                        style: GoogleFonts.manrope(color: muted, fontSize: 13),
-                      ),
-                      if (data.history.isNotEmpty) ...[
-                        const SizedBox(height: 18),
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: surface,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Tu historial reciente',
-                                style: GoogleFonts.manrope(
-                                  color: text,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              ...data.history.map(
-                                (historyItem) => Container(
-                                  margin: const EdgeInsets.only(bottom: 10),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: surfaceAlt,
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              historyItem.orderId,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              'x${item.cantidad} ${item.nombre}',
                                               style: GoogleFonts.manrope(
                                                 color: text,
                                                 fontWeight: FontWeight.w700,
                                               ),
                                             ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              historyItem.estado,
-                                              style: GoogleFonts.manrope(
-                                                color: muted,
-                                                fontSize: 12,
-                                              ),
+                                          ),
+                                          Text(
+                                            _formatAmount(item.total),
+                                            style: GoogleFonts.manrope(
+                                              color: success,
+                                              fontWeight: FontWeight.w700,
                                             ),
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ),
-                                      Text(
-                                        _formatAmount(historyItem.total),
-                                        style: GoogleFonts.manrope(
-                                          color: success,
-                                          fontWeight: FontWeight.w700,
-                                        ),
+                                    ),
+                                  ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Total de la orden',
+                                      style: GoogleFonts.manrope(
+                                        color: muted,
+                                        fontWeight: FontWeight.w600,
                                       ),
-                                    ],
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      _formatAmount(total),
+                                      style: GoogleFonts.manrope(
+                                        color: text,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: surface,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Metodo de pago',
+                                  style: GoogleFonts.manrope(
+                                    color: text,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 8),
+                                Text(
+                                  (paymentMethod != null &&
+                                          paymentMethod.isNotEmpty)
+                                      ? paymentMethod
+                                      : 'Sin especificar',
+                                  style: GoogleFonts.manrope(
+                                    color: text,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _paymentMethodHint(paymentMethod),
+                                  style: GoogleFonts.manrope(
+                                    color: muted,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ] else ...[
-                      const SizedBox(height: 18),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: surface,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Actualizar estado',
-                              style: GoogleFonts.manrope(
-                                color: text,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: surface,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Entrega',
+                                  style: GoogleFonts.manrope(
+                                    color: text,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Tipo: ${_deliveryModeLabel(deliveryMode)}',
+                                  style: GoogleFonts.manrope(
+                                    color: muted,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if ((deliveryAddress ?? '').isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                      'Direccion: $deliveryAddress',
+                                      style: GoogleFonts.manrope(
+                                        color: text,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                if ((deliveryReference ?? '').isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                      'Referencia: $deliveryReference',
+                                      style: GoogleFonts.manrope(
+                                        color: muted,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                if ((deliveryInstructions ?? '').isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                      'Indicaciones: $deliveryInstructions',
+                                      style: GoogleFonts.manrope(
+                                        color: muted,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                if (deliveryLat != null && deliveryLng != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                      'Coordenadas: ${deliveryLat.toStringAsFixed(6)}, ${deliveryLng.toStringAsFixed(6)}',
+                                      style: GoogleFonts.manrope(
+                                        color: muted,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if ((orderNotes ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: surface,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Notas del pedido',
+                                    style: GoogleFonts.manrope(
+                                      color: text,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    orderNotes!,
+                                    style: GoogleFonts.manrope(
+                                      color: muted,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 8),
+                          ],
+                          if (isReadOnly) ...[
+                            const SizedBox(height: 18),
                             Text(
-                              currentStatus == 'entregado' ||
-                                      currentStatus == 'cancelado'
-                                  ? 'Este pedido ya esta cerrado y no requiere mas acciones.'
-                                  : 'Selecciona el siguiente estado operativo del pedido.',
+                              'El estado de este pedido solo puede ser actualizado por el vendedor.',
                               style: GoogleFonts.manrope(
                                 color: muted,
                                 fontSize: 13,
                               ),
                             ),
-                            const SizedBox(height: 14),
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children:
-                                  _buildStatusActions(
-                                    isDelivery: isDeliveryOrder,
-                                  ).map((action) {
-                                    final isCurrent =
-                                        currentStatus == action.status;
-                                    final isDisabled =
-                                        _isUpdatingStatus ||
-                                        isCurrent ||
-                                        currentStatus == 'entregado' ||
-                                        currentStatus == 'cancelado';
-
-                                    return SizedBox(
-                                      width:
-                                          MediaQuery.of(context).size.width >
-                                              420
-                                          ? 176
-                                          : (MediaQuery.of(context).size.width -
-                                                    58) /
-                                                2,
-                                      child: ElevatedButton.icon(
-                                        onPressed: isDisabled
-                                            ? null
-                                            : () => _updateOrderStatus(
-                                                action.status,
-                                              ),
-                                        icon:
-                                            _isUpdatingStatus &&
-                                                _pendingStatus == action.status
-                                            ? const SizedBox(
-                                                width: 18,
-                                                height: 18,
-                                                child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  valueColor:
-                                                      AlwaysStoppedAnimation<
-                                                        Color
-                                                      >(Colors.white),
-                                                ),
-                                              )
-                                            : Icon(action.icon),
-                                        label: Text(
-                                          isCurrent
-                                              ? '${action.label} actual'
-                                              : action.label,
-                                          style: GoogleFonts.manrope(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 14,
+                            if (data.history.isNotEmpty) ...[
+                              const SizedBox(height: 18),
+                              Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: surface,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Tu historial reciente',
+                                      style: GoogleFonts.manrope(
+                                        color: text,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    ...data.history.map(
+                                      (historyItem) => Container(
+                                        margin: const EdgeInsets.only(
+                                          bottom: 10,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 12,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: surfaceAlt,
+                                          borderRadius: BorderRadius.circular(
+                                            14,
                                           ),
                                         ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: isCurrent
-                                              ? action.color.withValues(
-                                                  alpha: 0.24,
-                                                )
-                                              : action.color,
-                                          disabledBackgroundColor: isCurrent
-                                              ? action.color.withValues(
-                                                  alpha: 0.24,
-                                                )
-                                              : muted.withValues(alpha: 0.22),
-                                          disabledForegroundColor: isCurrent
-                                              ? action.color
-                                              : text.withValues(alpha: 0.65),
-                                          foregroundColor: isCurrent
-                                              ? action.color
-                                              : Colors.white,
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 14,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    historyItem.orderId,
+                                                    style: GoogleFonts.manrope(
+                                                      color: text,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    historyItem.estado,
+                                                    style: GoogleFonts.manrope(
+                                                      color: muted,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                          ),
-                                          elevation: isCurrent ? 0 : 1,
+                                            Text(
+                                              _formatAmount(historyItem.total),
+                                              style: GoogleFonts.manrope(
+                                                color: success,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                    );
-                                  }).toList(),
-                            ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ],
+                        ],
+                      ),
+                    ),
+                    if (!isReadOnly)
+                      SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                            decoration: BoxDecoration(
+                              color: surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: accent.withValues(alpha: 0.18),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.1),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Siguiente paso',
+                                  style: GoogleFonts.manrope(
+                                    color: text,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  nextStatusActions.isEmpty
+                                      ? 'Este pedido ya esta finalizado.'
+                                      : 'Selecciona la accion para continuar el pedido.',
+                                  style: GoogleFonts.manrope(
+                                    color: muted,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                if (statusActionsForBar.isEmpty)
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      onPressed: null,
+                                      icon: const Icon(
+                                        Icons.check_circle_outline_rounded,
+                                      ),
+                                      label: const Text(
+                                        'Sin acciones pendientes',
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  Row(
+                                    children: [
+                                      for (final entry
+                                          in statusActionsForBar
+                                              .asMap()
+                                              .entries)
+                                        Expanded(
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                            ),
+                                            child: Builder(
+                                              builder: (context) {
+                                                final action = entry.value;
+                                                final isPrimary =
+                                                    action.status ==
+                                                    primaryStatusForBar;
+                                                final isDisabled =
+                                                    _isUpdatingStatus &&
+                                                    _pendingStatus !=
+                                                        action.status;
+                                                final isLoading =
+                                                    _isUpdatingStatus &&
+                                                    _pendingStatus ==
+                                                        action.status;
+
+                                                if (isPrimary) {
+                                                  return ElevatedButton.icon(
+                                                    onPressed: isDisabled
+                                                        ? null
+                                                        : () async {
+                                                            if (action.status ==
+                                                                'cancelado') {
+                                                              final confirmed =
+                                                                  await _confirmCancelOrder();
+                                                              if (!confirmed ||
+                                                                  !mounted) {
+                                                                return;
+                                                              }
+                                                            }
+                                                            await _updateOrderStatus(
+                                                              action.status,
+                                                            );
+                                                          },
+                                                    icon: isLoading
+                                                        ? const SizedBox(
+                                                            width: 18,
+                                                            height: 18,
+                                                            child: CircularProgressIndicator(
+                                                              strokeWidth: 2,
+                                                              valueColor:
+                                                                  AlwaysStoppedAnimation<
+                                                                    Color
+                                                                  >(
+                                                                    Colors
+                                                                        .white,
+                                                                  ),
+                                                            ),
+                                                          )
+                                                        : Icon(
+                                                            action.icon,
+                                                            size: 18,
+                                                          ),
+                                                    label: Text(
+                                                      action.label,
+                                                      style:
+                                                          GoogleFonts.manrope(
+                                                            fontWeight:
+                                                                FontWeight.w800,
+                                                            fontSize: 13,
+                                                          ),
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor:
+                                                          action.color,
+                                                      disabledBackgroundColor:
+                                                          muted.withValues(
+                                                            alpha: 0.22,
+                                                          ),
+                                                      disabledForegroundColor:
+                                                          text.withValues(
+                                                            alpha: 0.65,
+                                                          ),
+                                                      foregroundColor:
+                                                          Colors.white,
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 12,
+                                                          ),
+                                                      shape: RoundedRectangleBorder(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              14,
+                                                            ),
+                                                      ),
+                                                      elevation: 1,
+                                                    ),
+                                                  );
+                                                }
+
+                                                return OutlinedButton.icon(
+                                                  onPressed: isDisabled
+                                                      ? null
+                                                      : () async {
+                                                          if (action.status ==
+                                                              'cancelado') {
+                                                            final confirmed =
+                                                                await _confirmCancelOrder();
+                                                            if (!confirmed ||
+                                                                !mounted) {
+                                                              return;
+                                                            }
+                                                          }
+                                                          await _updateOrderStatus(
+                                                            action.status,
+                                                          );
+                                                        },
+                                                  icon: isLoading
+                                                      ? SizedBox(
+                                                          width: 18,
+                                                          height: 18,
+                                                          child: CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            valueColor:
+                                                                AlwaysStoppedAnimation<
+                                                                  Color
+                                                                >(action.color),
+                                                          ),
+                                                        )
+                                                      : Icon(
+                                                          action.icon,
+                                                          size: 18,
+                                                        ),
+                                                  label: Text(
+                                                    action.label,
+                                                    style: GoogleFonts.manrope(
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      fontSize: 13,
+                                                    ),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                  style: OutlinedButton.styleFrom(
+                                                    foregroundColor:
+                                                        action.color,
+                                                    side: BorderSide(
+                                                      color: action.color
+                                                          .withValues(
+                                                            alpha: 0.55,
+                                                          ),
+                                                    ),
+                                                    disabledForegroundColor:
+                                                        text.withValues(
+                                                          alpha: 0.45,
+                                                        ),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          vertical: 12,
+                                                        ),
+                                                    shape: RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            14,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                    ],
                   ],
                 );
               },
@@ -2613,42 +2938,4 @@ class _OrderStatusAction {
   final String label;
   final IconData icon;
   final Color color;
-}
-
-class _BadgeChip extends StatelessWidget {
-  const _BadgeChip({
-    required this.label,
-    required this.color,
-    required this.icon,
-  });
-
-  final String label;
-  final Color color;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: GoogleFonts.manrope(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
