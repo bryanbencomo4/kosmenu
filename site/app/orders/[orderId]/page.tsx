@@ -12,7 +12,10 @@ type OrderStatus =
   | 'confirmado'
   | 'preparando'
   | 'en_camino'
+  | 'cancelado'
   | 'entregado';
+
+const CONFIRMATION_TIMEOUT_MS = 15 * 60 * 1000;
 
 type DeliveryPayload = {
   mode?: 'pickup' | 'delivery';
@@ -177,6 +180,7 @@ const ORDER_FLOW: Array<{ key: OrderStatus; label: string; short: string }> = [
   { key: 'confirmado', label: 'Pedido confirmado', short: 'Confirmado' },
   { key: 'preparando', label: 'Preparando tu pedido', short: 'Preparando' },
   { key: 'en_camino', label: 'Pedido en camino', short: 'En camino' },
+  { key: 'cancelado', label: 'Pedido cancelado', short: 'Cancelado' },
   { key: 'entregado', label: 'Pedido entregado', short: 'Entregado' },
 ];
 
@@ -198,6 +202,7 @@ function normalizeStatus(value: unknown): OrderStatus {
   if (status === 'preparando') return 'preparando';
   if (status === 'en_camino') return 'en_camino';
   if (status === 'entregado') return 'entregado';
+  if (status === 'cancelado' || status === 'rechazado' || status === 'anulado') return 'cancelado';
   return 'pendiente';
 }
 
@@ -208,6 +213,14 @@ function statusIndex(status: OrderStatus) {
 
 function statusLabel(status: OrderStatus) {
   return ORDER_FLOW.find((item) => item.key === status)?.label ?? 'Estado desconocido';
+}
+
+function formatCountdown(ms: number) {
+  const safeMs = Math.max(0, ms);
+  const totalSeconds = Math.ceil(safeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function formatCop(value: number | null | undefined) {
@@ -350,11 +363,15 @@ export default function OrderTrackingPage() {
   const [waReceiptUrl, setWaReceiptUrl] = useState('');
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
+  const [cancelMessage, setCancelMessage] = useState('');
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [nowTs, setNowTs] = useState(() => Date.now());
   const [syncMode, setSyncMode] = useState<'conectando' | 'realtime' | 'polling' | 'sin-senal'>('conectando');
   const [lastSyncAt, setLastSyncAt] = useState(0);
   const lastStatusRef = useRef<OrderStatus | null>(null);
   const trackedRowIdRef = useRef('');
   const realtimeConnectedRef = useRef(false);
+  const autoCancelAttemptedRef = useRef(false);
   const deliveryMapRef = useRef<HTMLDivElement | null>(null);
   const deliveryMapInstanceRef = useRef<any>(null);
   const deliveryMapMarkersRef = useRef<any[]>([]);
@@ -362,6 +379,16 @@ export default function OrderTrackingPage() {
   const [deliveryMapError, setDeliveryMapError] = useState('');
 
   const resolvedStatus = useMemo(() => normalizeStatus(order?.estado), [order?.estado]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowTs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -373,6 +400,55 @@ export default function OrderTrackingPage() {
       window.sessionStorage.removeItem(key);
     }
   }, [orderId]);
+
+  async function cancelOrder(source: 'cliente' | 'timeout') {
+    if (!orderId || cancelLoading) return;
+
+    setCancelLoading(true);
+    setCancelMessage('');
+
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'cancel',
+          source,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = (payload?.error ?? '').toString().trim();
+        throw new Error(message || 'No se pudo cancelar el pedido.');
+      }
+
+      const updatedOrder = (payload?.data?.order ?? null) as PedidoRow | null;
+      if (updatedOrder) {
+        setOrder((prev) => {
+          if (!prev) return updatedOrder;
+          return {
+            ...prev,
+            ...updatedOrder,
+            detalles: updatedOrder.detalles ?? prev.detalles,
+          };
+        });
+      }
+
+      setCancelMessage(
+        source === 'timeout'
+          ? 'El pedido fue cancelado por falta de confirmacion en 15 minutos.'
+          : 'Tu pedido fue cancelado correctamente.',
+      );
+    } catch (cancelError) {
+      const message = cancelError instanceof Error ? cancelError.message : 'No se pudo cancelar el pedido.';
+      setCancelMessage(message);
+    } finally {
+      setCancelLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!orderId) {
@@ -934,6 +1010,31 @@ export default function OrderTrackingPage() {
     }
   }
 
+  const displayStatus: OrderStatus = (!isDelivery && resolvedStatus === 'en_camino')
+    ? 'preparando'
+    : resolvedStatus;
+  const orderCreatedAtMs = order?.created_at ? Date.parse(order.created_at) : NaN;
+  const hasCreatedAt = Number.isFinite(orderCreatedAtMs);
+  const pendingElapsedMs = (displayStatus === 'pendiente' && hasCreatedAt)
+    ? Math.max(0, nowTs - orderCreatedAtMs)
+    : 0;
+  const confirmTimeLeftMs = Math.max(0, CONFIRMATION_TIMEOUT_MS - pendingElapsedMs);
+  const pendingExpired = displayStatus === 'pendiente' && hasCreatedAt && pendingElapsedMs >= CONFIRMATION_TIMEOUT_MS;
+  const canCustomerCancel = displayStatus === 'pendiente' && pendingExpired;
+  const cancellationMeta = (order?.detalles as any)?.cancellation ?? null;
+
+  useEffect(() => {
+    if (!pendingExpired || autoCancelAttemptedRef.current) return;
+    autoCancelAttemptedRef.current = true;
+    void cancelOrder('timeout');
+  }, [pendingExpired]);
+
+  useEffect(() => {
+    if (displayStatus !== 'pendiente') {
+      autoCancelAttemptedRef.current = false;
+    }
+  }, [displayStatus]);
+
   if (loading) {
     return (
       <main className="grid min-h-screen place-items-center px-6 text-slate-900" style={{ background: trackingBackground, fontFamily: bodyFontFamily }}>
@@ -971,9 +1072,6 @@ export default function OrderTrackingPage() {
     );
   }
 
-  const displayStatus: OrderStatus = (!isDelivery && resolvedStatus === 'en_camino')
-    ? 'preparando'
-    : resolvedStatus;
   const createdAtTime = order?.created_at
     ? new Intl.DateTimeFormat('es-CO', {
         hour: '2-digit',
@@ -986,6 +1084,8 @@ export default function OrderTrackingPage() {
   const statusTitle =
     displayStatus === 'entregado'
       ? 'ENTREGADO'
+      : displayStatus === 'cancelado'
+        ? 'CANCELADO'
       : displayStatus === 'en_camino'
         ? 'EN CAMINO'
         : displayStatus === 'preparando'
@@ -1068,6 +1168,29 @@ export default function OrderTrackingPage() {
                 <p className="text-sm font-semibold text-slate-700">{orderId ? `#${orderId.slice(-8).toUpperCase()}` : '#N/A'}</p>
               </div>
               <p className="mt-2 break-all text-[11px] text-slate-500">ID completo: {orderId || 'No disponible'}</p>
+
+              {displayStatus === 'pendiente' ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <p className="font-bold">Esperando confirmacion del comercio (maximo 15 min)</p>
+                  <p className="mt-1">
+                    {pendingExpired
+                      ? 'Se alcanzo el limite de confirmacion. Estamos cerrando este pedido automaticamente.'
+                      : `Tiempo restante para confirmar: ${formatCountdown(confirmTimeLeftMs)}`}
+                  </p>
+                </div>
+              ) : null}
+
+              {displayStatus === 'cancelado' ? (
+                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  <p className="font-bold">Este pedido fue cancelado.</p>
+                  {cancellationMeta?.reason === 'timeout_no_confirmacion'
+                    ? <p className="mt-1">Motivo: no fue confirmado por el comercio dentro de 15 minutos.</p>
+                    : null}
+                  {cancellationMeta?.reason === 'cancelado_por_cliente'
+                    ? <p className="mt-1">Motivo: cancelacion solicitada por el cliente.</p>
+                    : null}
+                </div>
+              ) : null}
 
               <div className="mt-4 space-y-2">
                 {timelineItems.map((item, index) => {
@@ -1189,6 +1312,35 @@ export default function OrderTrackingPage() {
             ) : null}
 
             <div className="mt-4 rounded-2xl border border-slate-200 p-4" style={{ backgroundColor: softTone }}>
+              {canCustomerCancel ? (
+                <button
+                  type="button"
+                  disabled={cancelLoading}
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      const accepted = window.confirm('Vas a cancelar este pedido. Esta accion no se puede deshacer.');
+                      if (!accepted) return;
+                    }
+                    void cancelOrder('cliente');
+                  }}
+                  className="mb-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-black"
+                  style={{
+                    borderColor: '#FCA5A5',
+                    color: '#B91C1C',
+                    backgroundColor: '#FEF2F2',
+                    opacity: cancelLoading ? 0.7 : 1,
+                  }}
+                >
+                  {cancelLoading ? 'Cancelando pedido...' : 'Cancelar pedido'}
+                </button>
+              ) : null}
+
+              {displayStatus === 'pendiente' && !pendingExpired ? (
+                <p className="mb-2 text-xs text-slate-600">
+                  Este pedido solo puede cancelarse automaticamente si el comercio no confirma en 15 minutos.
+                </p>
+              ) : null}
+
               <button
                 type="button"
                 onClick={() => void enableStatusNotifications()}
@@ -1199,6 +1351,7 @@ export default function OrderTrackingPage() {
                 Activar notificaciones
               </button>
               {notificationMessage ? <p className="mt-2 text-xs text-slate-600">{notificationMessage}</p> : null}
+              {cancelMessage ? <p className="mt-2 text-xs text-slate-600">{cancelMessage}</p> : null}
             </div>
           </div>
         </div>

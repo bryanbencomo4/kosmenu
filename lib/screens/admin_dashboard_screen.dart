@@ -26,6 +26,8 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
+
   late Future<_DashboardSnapshot> _snapshotFuture;
   late Stream<List<PedidoModel>> _ordersStream;
 
@@ -49,9 +51,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   bool _didPrimeOrderAlert = false;
   Set<String> _seenOrderIds = <String>{};
+  List<PedidoModel> _latestOrders = const <PedidoModel>[];
+  final Set<String> _autoCancelInFlight = <String>{};
 
   MagicOnboardingResult? _recentCatalogResult;
   Timer? _recentCatalogTimer;
+  Timer? _pendingAutoCancelTicker;
 
   bool get _hasComercioId => SupabaseConfig.hasCurrentComercioId;
 
@@ -61,6 +66,70 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _snapshotFuture = _fetchSnapshot();
     _ordersStream = _buildOrdersStream();
     _subscribeToOrders();
+    _startPendingAutoCancelTicker();
+  }
+
+  void _startPendingAutoCancelTicker() {
+    _pendingAutoCancelTicker?.cancel();
+    _pendingAutoCancelTicker = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!mounted) return;
+      unawaited(_autoCancelExpiredPendingOrders(_latestOrders));
+    });
+  }
+
+  bool _isPendingExpired(PedidoModel pedido) {
+    if (pedido.statusBucket != OrderStatusBucket.pending) return false;
+    final createdAt = pedido.createdAt;
+    if (createdAt == null) return false;
+    return DateTime.now().difference(createdAt) >= _pendingConfirmationWindow;
+  }
+
+  Future<void> _autoCancelExpiredPendingOrders(Iterable<PedidoModel> orders) async {
+    final expired = orders
+        .where((pedido) => !pedido.hasParseError)
+        .where(_isPendingExpired)
+        .where((pedido) => !_autoCancelInFlight.contains(pedido.id))
+        .toList(growable: false);
+
+    if (expired.isEmpty) return;
+
+    var canceledCount = 0;
+
+    for (final pedido in expired) {
+      _autoCancelInFlight.add(pedido.id);
+      try {
+        final detalles = Map<String, dynamic>.from(pedido.detalles);
+        detalles['cancellation'] = <String, dynamic>{
+          'source': 'timeout',
+          'reason': 'timeout_no_confirmacion',
+          'at': DateTime.now().toIso8601String(),
+        };
+
+        await Supabase.instance.client
+            .from('pedidos')
+            .update({'estado': 'cancelado', 'detalles': detalles})
+            .eq('id', pedido.id)
+            .eq('estado', 'pendiente');
+        canceledCount += 1;
+      } catch (error) {
+        debugPrint('No se pudo autocancelar pedido vencido ${pedido.id}: $error');
+      } finally {
+        _autoCancelInFlight.remove(pedido.id);
+      }
+    }
+
+    if (canceledCount > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            canceledCount == 1
+                ? 'Se canceló 1 pedido pendiente por tiempo agotado.'
+                : 'Se cancelaron $canceledCount pedidos pendientes por tiempo agotado.',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -72,6 +141,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _manualOrderNotesController.dispose();
     _manualOrderPaymentController.dispose();
     _recentCatalogTimer?.cancel();
+    _pendingAutoCancelTicker?.cancel();
     super.dispose();
   }
 
@@ -167,7 +237,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     _ordersSubscription = _ordersStream.listen(
       (orders) {
+        _latestOrders = orders;
         final validOrders = orders.where((order) => !order.hasParseError);
+        unawaited(_autoCancelExpiredPendingOrders(validOrders));
         final currentIds = validOrders.map((e) => e.id).toSet();
 
         if (!_didPrimeOrderAlert) {
@@ -1309,10 +1381,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 isDelayed:
                                     !_isOrderFinalized(pedido) &&
                                     pedido.createdAt != null &&
-                                    DateTime.now()
-                                            .difference(pedido.createdAt!)
-                                            .inMinutes >
-                                        20,
+                                DateTime.now().difference(pedido.createdAt!).inMinutes >
+                                  (pedido.statusBucket == OrderStatusBucket.pending
+                                    ? _pendingConfirmationWindow.inMinutes
+                                    : 20),
                                 onTap: () => _openOrderDetail(pedido),
                                 onQuickAdvance: () =>
                                     _handleQuickAdvance(pedido),
@@ -2345,7 +2417,9 @@ class _OrderSearchField extends StatelessWidget {
   }
 }
 
-class _OrderTile extends StatelessWidget {
+class _OrderTile extends StatefulWidget {
+  static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
+
   const _OrderTile({
     required this.pedido,
     required this.statusBucket,
@@ -2362,27 +2436,115 @@ class _OrderTile extends StatelessWidget {
   final Future<void> Function() onQuickAdvance;
   final Future<void> Function() onQuickCancel;
 
+  @override
+  State<_OrderTile> createState() => _OrderTileState();
+}
+
+class _OrderTileState extends State<_OrderTile> {
+  Timer? _ticker;
+  DateTime _now = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _now = DateTime.now();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
   String get _statusLabel {
-    return statusBucket.label;
+    return widget.statusBucket.label;
   }
 
   Color get _statusColor {
-    return statusBucket.color;
+    return widget.statusBucket.color;
   }
 
   IconData get _statusIcon {
-    return statusBucket.icon;
+    return widget.statusBucket.icon;
   }
 
-  String? get _waitingLabel {
-    final createdAt = pedido.createdAt;
-    if (createdAt == null ||
-        statusBucket == OrderStatusBucket.completed ||
-        statusBucket == OrderStatusBucket.canceled) {
+  String _formatCountdown(Duration value) {
+    final safe = value.inSeconds <= 0 ? Duration.zero : value;
+    final totalSeconds = safe.inSeconds;
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    final mm = minutes.toString().padLeft(2, '0');
+    final ss = seconds.toString().padLeft(2, '0');
+    return '$mm:$ss';
+  }
+
+  double get _pendingProgressValue {
+    final remaining = _pendingTimeLeft;
+    if (remaining == null) {
+      return 0;
+    }
+
+    final total = _OrderTile._pendingConfirmationWindow.inSeconds;
+    final remainingSeconds = remaining.inSeconds.clamp(0, total);
+    final elapsed = total - remainingSeconds;
+    if (total == 0) {
+      return 1;
+    }
+
+    return (elapsed / total).clamp(0, 1);
+  }
+
+  bool get _isPendingCritical {
+    final remaining = _pendingTimeLeft;
+    if (remaining == null) {
+      return false;
+    }
+
+    return remaining.inSeconds <= 120;
+  }
+
+  bool get _isPendingWarning {
+    final remaining = _pendingTimeLeft;
+    if (remaining == null) {
+      return false;
+    }
+
+    return remaining.inSeconds <= 300;
+  }
+
+  Duration? get _pendingTimeLeft {
+    if (widget.statusBucket != OrderStatusBucket.pending) {
       return null;
     }
 
-    final elapsed = DateTime.now().difference(createdAt);
+    final createdAt = widget.pedido.createdAt;
+    if (createdAt == null) {
+      return null;
+    }
+
+    final elapsed = _now.difference(createdAt);
+    final remaining = _OrderTile._pendingConfirmationWindow - elapsed;
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  String? get _waitingLabel {
+    if (widget.statusBucket == OrderStatusBucket.pending) {
+      return null;
+    }
+
+    final createdAt = widget.pedido.createdAt;
+    if (createdAt == null ||
+        widget.statusBucket == OrderStatusBucket.completed ||
+        widget.statusBucket == OrderStatusBucket.canceled) {
+      return null;
+    }
+
+    final elapsed = _now.difference(createdAt);
     if (elapsed.inMinutes < 1) {
       return 'Hace menos de 1 min';
     }
@@ -2400,12 +2562,14 @@ class _OrderTile extends StatelessWidget {
     final color = _statusColor;
     final label = _statusLabel;
     final waitingLabel = _waitingLabel;
-    final waitingColor = isDelayed
+    final pendingTimeLeft = _pendingTimeLeft;
+    final showPendingCountdownBadge = pendingTimeLeft != null;
+    final waitingColor = widget.isDelayed
         ? Theme.of(context).colorScheme.error
         : Theme.of(context).colorScheme.onSurfaceVariant;
 
     return Dismissible(
-      key: ValueKey('order-${pedido.id}-${pedido.estado ?? ''}'),
+      key: ValueKey('order-${widget.pedido.id}-${widget.pedido.estado ?? ''}'),
       direction: DismissDirection.horizontal,
       background: Container(
         alignment: Alignment.centerLeft,
@@ -2429,12 +2593,12 @@ class _OrderTile extends StatelessWidget {
         await HapticFeedback.mediumImpact();
 
         if (direction == DismissDirection.startToEnd) {
-          await onQuickAdvance();
+          await widget.onQuickAdvance();
           return false;
         }
 
         if (direction == DismissDirection.endToStart) {
-          await onQuickCancel();
+          await widget.onQuickCancel();
           return false;
         }
 
@@ -2446,18 +2610,25 @@ class _OrderTile extends StatelessWidget {
             horizontal: 12,
             vertical: 6,
           ),
-          onTap: onTap,
-          leading: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(_statusIcon, color: color),
-          ),
+          onTap: widget.onTap,
+          leading: showPendingCountdownBadge
+              ? _CircularCountdownBadge(
+                  label: _formatCountdown(pendingTimeLeft),
+                  progress: _pendingProgressValue,
+                  isCritical: _isPendingCritical,
+                  isWarning: _isPendingWarning,
+                )
+              : Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(_statusIcon, color: color),
+                ),
           title: Text(
-            'Pedido ${(pedido.orderId ?? pedido.id).substring(0, (pedido.orderId ?? pedido.id).length < 16 ? (pedido.orderId ?? pedido.id).length : 16)}',
+            'Pedido ${(widget.pedido.orderId ?? widget.pedido.id).substring(0, (widget.pedido.orderId ?? widget.pedido.id).length < 16 ? (widget.pedido.orderId ?? widget.pedido.id).length : 16)}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -2466,9 +2637,9 @@ class _OrderTile extends StatelessWidget {
             children: [
               const SizedBox(height: 2),
               Text(
-                pedido.clienteEmail?.trim().isNotEmpty == true
-                    ? '${pedido.clienteEmail} • ${pedido.metodoPago ?? 'Método no definido'}'
-                    : (pedido.createdAt?.toString() ?? 'Sin fecha disponible'),
+                widget.pedido.clienteEmail?.trim().isNotEmpty == true
+                    ? '${widget.pedido.clienteEmail} • ${widget.pedido.metodoPago ?? 'Método no definido'}'
+                    : (widget.pedido.createdAt?.toString() ?? 'Sin fecha disponible'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -2480,7 +2651,8 @@ class _OrderTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.poppins(
                     fontSize: 12,
-                    fontWeight: isDelayed ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight:
+                        widget.isDelayed ? FontWeight.w700 : FontWeight.w500,
                     color: waitingColor,
                   ),
                 ),
@@ -2490,15 +2662,79 @@ class _OrderTile extends StatelessWidget {
             ],
           ),
           trailing: Text(
-            pedido.total != null
-                ? '\$${pedido.total!.toStringAsFixed(2)}'
+            widget.pedido.total != null
+                ? '\$${widget.pedido.total!.toStringAsFixed(2)}'
                 : '--',
+            textAlign: TextAlign.right,
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w700,
               fontSize: 14,
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CircularCountdownBadge extends StatelessWidget {
+  const _CircularCountdownBadge({
+    required this.label,
+    required this.progress,
+    required this.isCritical,
+    required this.isWarning,
+  });
+
+  final String label;
+  final double progress;
+  final bool isCritical;
+  final bool isWarning;
+
+  Color get _ringColor {
+    if (isCritical) return const Color(0xFFDC2626);
+    if (isWarning) return const Color(0xFFD97706);
+    return const Color(0xFF475569);
+  }
+
+  Color get _bgColor {
+    if (isCritical) return const Color(0xFFFEF2F2);
+    if (isWarning) return const Color(0xFFFFFBEB);
+    return const Color(0xFFF8FAFC);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CircularProgressIndicator(
+            value: progress,
+            strokeWidth: 2.6,
+            backgroundColor: _bgColor,
+            valueColor: AlwaysStoppedAnimation<Color>(_ringColor),
+          ),
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: _bgColor,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: GoogleFonts.robotoMono(
+                fontSize: 7.6,
+                fontWeight: FontWeight.w700,
+                color: _ringColor,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

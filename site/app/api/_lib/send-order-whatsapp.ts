@@ -48,6 +48,12 @@ function messageLinesByStatus(status: string) {
         headline: 'Tu pedido fue entregado con exito.',
         detail: 'Gracias por confiar en elmenuxfa.com. Esperamos verte de nuevo pronto.',
       };
+    case 'cancelado':
+      return {
+        emoji: '⚠️',
+        headline: 'Tu pedido fue cancelado.',
+        detail: 'Si necesitas ayuda adicional, puedes comunicarte con el negocio desde el seguimiento.',
+      };
     case 'pendiente':
     default:
       return {

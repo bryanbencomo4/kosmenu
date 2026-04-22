@@ -68,10 +68,6 @@ class PedidoModel {
   }
 
   factory PedidoModel._fromMapUnsafe(Map<String, dynamic> map) {
-    developer.log(
-      'DEBUG: Llaves encontradas en el mapa: ${map.keys.toList()}',
-      name: 'PedidoModel',
-    );
     final totalValue = map['total'];
     final createdAtValue = map['created_at']?.toString();
     final confianzaValue = map['confianza_ia'];

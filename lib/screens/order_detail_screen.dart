@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -59,6 +60,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   BitmapDescriptor? _businessMarkerIcon;
   BitmapDescriptor? _deliveryMarkerIcon;
   bool _isMapInteractionEnabled = false;
+  Timer? _orderStatusSyncTimer;
+  bool _isSyncingOrderStatus = false;
+  String? _lastKnownStatus;
+  _OrderViewData? _cachedOrderData;
 
   @override
   void initState() {
@@ -68,10 +73,53 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
+    _startOrderStatusSync();
+  }
+
+  void _startOrderStatusSync() {
+    _orderStatusSyncTimer?.cancel();
+    _orderStatusSyncTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!mounted) return;
+      unawaited(_syncOrderStatusFromServer());
+    });
+    unawaited(_syncOrderStatusFromServer());
+  }
+
+  Future<void> _syncOrderStatusFromServer() async {
+    if (_isSyncingOrderStatus) return;
+
+    _isSyncingOrderStatus = true;
+    try {
+      final latest = await _fetchOrder();
+      if (!mounted || latest == null) return;
+
+      final latestStatus = _normalizeStatusValue(latest.pedido.estado);
+      final previousStatus = _lastKnownStatus;
+      _lastKnownStatus = latestStatus;
+
+      if (_cachedOrderData == null || previousStatus != latestStatus) {
+        setState(() {
+          _cachedOrderData = latest;
+        });
+      }
+
+      if (previousStatus != null && previousStatus != latestStatus && latestStatus == 'cancelado') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Este pedido fue cancelado por el cliente. Ya no admite cambios de estado.'),
+          ),
+        );
+      }
+    } catch (_) {
+      // Silent sync fallback: UI keeps last known state.
+    } finally {
+      _isSyncingOrderStatus = false;
+    }
   }
 
   @override
   void dispose() {
+    _orderStatusSyncTimer?.cancel();
     _emailController.dispose();
     _successController.dispose();
     super.dispose();
@@ -91,29 +139,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         .order('created_at', ascending: false)
         .limit(200);
     final response = (data: pedidosRows as List<dynamic>);
-    debugPrint('DEBUG: JSON CRUDO DE SUPABASE: ${response.data}');
 
     PedidoModel? foundPedido;
-    Map<String, dynamic>? foundPedidoRaw;
     for (final row in response.data) {
       final rawMap = Map<String, dynamic>.from(row as Map);
       final pedido = PedidoModel.fromMap(rawMap);
       if (pedido.orderId == widget.orderId) {
         foundPedido = pedido;
-        foundPedidoRaw = rawMap;
         break;
       }
     }
 
     if (foundPedido == null) return null;
-
-    debugPrint(
-      'DEBUG: Pedido Coords: ${foundPedido.deliveryLatitude}, ${foundPedido.deliveryLongitude}',
-    );
-    if (foundPedido.deliveryLatitude == null ||
-        foundPedido.deliveryLongitude == null) {
-      debugPrint('DEBUG: JSON Crudo de Supabase: $foundPedidoRaw');
-    }
 
     String comercioNombre = 'Kosmenu';
     double? businessLatitude;
@@ -284,6 +321,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     if (_isUpdatingStatus) return;
 
     final normalizedStatus = _normalizeStatusValue(nextStatus);
+
+    final latest = await _fetchOrder();
+    if (!mounted) return;
+
+    if (latest == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se encontro el pedido para actualizar.')),
+      );
+      return;
+    }
+
+    final latestStatus = _normalizeStatusValue(latest.pedido.estado);
+    _lastKnownStatus = latestStatus;
+
+    if (latestStatus == 'cancelado') {
+      setState(() {
+        _cachedOrderData = latest;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Este pedido ya fue cancelado por el cliente y no se puede actualizar.'),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isUpdatingStatus = true;
       _pendingStatus = normalizedStatus;
@@ -294,6 +357,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           .from('pedidos')
           .update({'estado': normalizedStatus})
           .contains('detalles', {'order_id': widget.orderId})
+          .neq('estado', 'cancelado')
           .select('*')
           .limit(1);
 
@@ -302,6 +366,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             .from('pedidos')
             .update({'estado': normalizedStatus})
             .contains('detalles', {'codigo_orden': widget.orderId})
+          .neq('estado', 'cancelado')
             .select('*')
             .limit(1);
       }
@@ -310,13 +375,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       if ((updatedRows as List).isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se pudo actualizar el pedido.')),
+          const SnackBar(
+            content: Text('No se pudo actualizar el pedido (puede haber sido cancelado).'),
+          ),
         );
         return;
       }
 
+      final refreshed = await _fetchOrder();
+      if (!mounted) return;
+
       setState(() {
-        _orderFuture = _fetchOrder();
+        _cachedOrderData = refreshed;
         _overlayStatus = normalizedStatus;
       });
 
@@ -1107,7 +1177,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             child: FutureBuilder<_OrderViewData?>(
               future: _orderFuture,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    snapshot.data == null &&
+                    _cachedOrderData == null) {
                   if (_showTopBar) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (!mounted) return;
@@ -1137,7 +1209,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   );
                 }
 
-                final data = snapshot.data;
+                final data = snapshot.data ?? _cachedOrderData;
+                if (snapshot.data != null) {
+                  _cachedOrderData = snapshot.data;
+                }
                 if (data == null) {
                   return Center(
                     child: Padding(
