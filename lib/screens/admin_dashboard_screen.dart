@@ -32,15 +32,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   late Stream<List<PedidoModel>> _ordersStream;
 
   StreamSubscription<List<PedidoModel>>? _ordersSubscription;
+  StreamSubscription<AuthState>? _authStateSubscription;
   final TextEditingController _ordersSearchController = TextEditingController();
-  final TextEditingController _manualOrderEmailController =
-      TextEditingController();
-  final TextEditingController _manualOrderTotalController =
-      TextEditingController();
-  final TextEditingController _manualOrderNotesController =
-      TextEditingController();
-  final TextEditingController _manualOrderPaymentController =
-      TextEditingController();
 
   _OrderFilter _orderFilter = _OrderFilter.all;
   String _ordersSearchQuery = '';
@@ -52,11 +45,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _didPrimeOrderAlert = false;
   Set<String> _seenOrderIds = <String>{};
   List<PedidoModel> _latestOrders = const <PedidoModel>[];
+  final Map<String, String> _optimisticStatusByOrderId =
+      <String, String>{};
   final Set<String> _autoCancelInFlight = <String>{};
 
   MagicOnboardingResult? _recentCatalogResult;
   Timer? _recentCatalogTimer;
   Timer? _pendingAutoCancelTicker;
+  bool _isRecoveringOrdersAuth = false;
 
   bool get _hasComercioId => SupabaseConfig.hasCurrentComercioId;
 
@@ -65,8 +61,107 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     super.initState();
     _snapshotFuture = _fetchSnapshot();
     _ordersStream = _buildOrdersStream();
+    _bindAuthStateRecovery();
     _subscribeToOrders();
     _startPendingAutoCancelTicker();
+  }
+
+  void _bindAuthStateRecovery() {
+    _authStateSubscription?.cancel();
+    _authStateSubscription = Supabase.instance.client.auth.onAuthStateChange
+        .listen((event) {
+          if (!mounted || !_hasComercioId) return;
+
+          final authEvent = event.event;
+          if (authEvent == AuthChangeEvent.signedIn ||
+              authEvent == AuthChangeEvent.tokenRefreshed) {
+            unawaited(_restartOrdersRealtime());
+          }
+        });
+  }
+
+  bool _isRealtimeJwtExpiredError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('invalidjwttoken') ||
+        message.contains('token has expired') ||
+        (message.contains('realtimesubscribestatus.channelerror') &&
+            message.contains('jwt'));
+  }
+
+  bool _isUnrecoverableAuthError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('refresh token') ||
+        message.contains('invalid_grant') ||
+        message.contains('invalid refresh token') ||
+        message.contains('jwt expired');
+  }
+
+  String _ordersErrorSubtitle(Object? error) {
+    if (error == null) {
+      return 'Intenta de nuevo en unos segundos.';
+    }
+
+    if (_isRealtimeJwtExpiredError(error)) {
+      return 'La sesion de tiempo real expiro. Reintentaremos conectar automaticamente.';
+    }
+
+    return '$error';
+  }
+
+  Future<void> _restartOrdersRealtime() async {
+    if (!mounted || !_hasComercioId) return;
+    setState(() {
+      _ordersStream = _buildOrdersStream();
+    });
+    _subscribeToOrders();
+  }
+
+  Future<void> _forceSignOutAfterAuthFailure(String reason) async {
+    debugPrint('Cerrando sesion por error de auth realtime: $reason');
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              'Tu sesion expiro. Inicia sesion nuevamente para continuar.',
+            ),
+          ),
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      await Supabase.instance.client.auth.signOut();
+    } catch (signOutError) {
+      debugPrint('No se pudo cerrar sesion automaticamente: $signOutError');
+    }
+  }
+
+  Future<void> _recoverOrdersAuthIfNeeded(Object error) async {
+    if (_isRecoveringOrdersAuth || !_hasComercioId) return;
+    if (!_isRealtimeJwtExpiredError(error)) return;
+
+    _isRecoveringOrdersAuth = true;
+    try {
+      final client = Supabase.instance.client;
+      final session = client.auth.currentSession;
+      final refreshToken = session?.refreshToken ?? '';
+
+      if (refreshToken.isEmpty) {
+        await _forceSignOutAfterAuthFailure('refresh-token-missing');
+        return;
+      }
+
+      await client.auth.refreshSession();
+
+      await _restartOrdersRealtime();
+    } catch (recoverError) {
+      debugPrint('No se pudo recuperar auth realtime: $recoverError');
+      if (_isUnrecoverableAuthError(recoverError)) {
+        await _forceSignOutAfterAuthFailure(recoverError.toString());
+      }
+    } finally {
+      _isRecoveringOrdersAuth = false;
+    }
   }
 
   void _startPendingAutoCancelTicker() {
@@ -135,11 +230,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   void dispose() {
     _ordersSubscription?.cancel();
+    _authStateSubscription?.cancel();
     _ordersSearchController.dispose();
-    _manualOrderEmailController.dispose();
-    _manualOrderTotalController.dispose();
-    _manualOrderNotesController.dispose();
-    _manualOrderPaymentController.dispose();
     _recentCatalogTimer?.cancel();
     _pendingAutoCancelTicker?.cancel();
     super.dispose();
@@ -237,6 +329,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     _ordersSubscription = _ordersStream.listen(
       (orders) {
+        if (_optimisticStatusByOrderId.isNotEmpty) {
+          for (final pedido in orders) {
+            final optimistic = _optimisticStatusByOrderId[pedido.id];
+            if (optimistic == null) continue;
+
+            final serverStatus = _normalizeStatusString(pedido.estado);
+            final optimisticStatus = _normalizeStatusString(optimistic);
+            if (serverStatus == optimisticStatus) {
+              _optimisticStatusByOrderId.remove(pedido.id);
+            }
+          }
+        }
+
         _latestOrders = orders;
         final validOrders = orders.where((order) => !order.hasParseError);
         unawaited(_autoCancelExpiredPendingOrders(validOrders));
@@ -270,6 +375,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       },
       onError: (Object error, StackTrace stackTrace) {
         debugPrint('Orders stream error: $error');
+        unawaited(_recoverOrdersAuthIfNeeded(error));
       },
     );
   }
@@ -540,208 +646,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  String _generateManualOrderCode() {
-    final now = DateTime.now();
-    final seed = now.microsecondsSinceEpoch.toString();
-    final suffix = seed.substring(seed.length - 6);
-    return 'MAN-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-$suffix';
-  }
-
-  Future<void> _openCreateManualOrderSheet() async {
-    if (!_hasComercioId) {
-      _showInfo('No hay comercio configurado para crear pedidos.');
-      return;
-    }
-
-    _manualOrderEmailController.clear();
-    _manualOrderTotalController.clear();
-    _manualOrderNotesController.clear();
-    _manualOrderPaymentController.text = 'Efectivo';
-    var isSaving = false;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      isDismissible: false,
-      enableDrag: false,
-      showDragHandle: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              top: false,
-              child: AnimatedPadding(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewInsets.bottom,
-                ),
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(
-                    16,
-                    6,
-                    16,
-                    16 + MediaQuery.of(context).viewPadding.bottom,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Crear pedido manual',
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _manualOrderTotalController,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Total',
-                          hintText: 'Ej: 120000 o 25.50',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _manualOrderPaymentController,
-                        decoration: const InputDecoration(
-                          labelText: 'Metodo de pago',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _manualOrderEmailController,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: const InputDecoration(
-                          labelText: 'Email cliente (opcional)',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _manualOrderNotesController,
-                        minLines: 2,
-                        maxLines: 4,
-                        decoration: const InputDecoration(
-                          labelText: 'Notas internas (opcional)',
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: isSaving
-                                  ? null
-                                  : () => Navigator.of(context).pop(),
-                              child: const Text('Cancelar'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: isSaving
-                                  ? null
-                                  : () async {
-                                      final totalValue = double.tryParse(
-                                        _manualOrderTotalController.text
-                                            .trim()
-                                            .replaceAll(',', '.'),
-                                      );
-                                      if (totalValue == null ||
-                                          totalValue <= 0) {
-                                        _showInfo(
-                                          'Ingresa un total valido mayor a 0.',
-                                        );
-                                        return;
-                                      }
-
-                                      final orderCode =
-                                          _generateManualOrderCode();
-                                      final email = _manualOrderEmailController
-                                          .text
-                                          .trim();
-                                      final method =
-                                          _manualOrderPaymentController.text
-                                              .trim()
-                                              .isEmpty
-                                          ? 'Efectivo'
-                                          : _manualOrderPaymentController.text
-                                                .trim();
-
-                                      setModalState(() => isSaving = true);
-                                      try {
-                                        final payload = <String, dynamic>{
-                                          'comercio_id':
-                                              SupabaseConfig.currentComercioId,
-                                          'estado': 'pendiente',
-                                          'total': totalValue,
-                                          if (email.isNotEmpty)
-                                            'cliente_email': email,
-                                          'detalles': {
-                                            'order_id': orderCode,
-                                            if (email.isNotEmpty)
-                                              'cliente_email': email,
-                                            'metodo_pago': method,
-                                            'origen': 'manual_dashboard',
-                                            if (_manualOrderNotesController.text
-                                                .trim()
-                                                .isNotEmpty)
-                                              'notas':
-                                                  _manualOrderNotesController
-                                                      .text
-                                                      .trim(),
-                                            'items':
-                                                const <Map<String, dynamic>>[],
-                                            'total': totalValue,
-                                          },
-                                        };
-
-                                        await Supabase.instance.client
-                                            .from('pedidos')
-                                            .insert(payload);
-
-                                        if (!context.mounted || !mounted) {
-                                          return;
-                                        }
-                                        Navigator.of(context).pop();
-                                        _showInfo(
-                                          'Pedido manual creado: $orderCode',
-                                        );
-                                        await _refreshDashboard();
-                                      } catch (error) {
-                                        if (!mounted) return;
-                                        _showInfo(
-                                          'No se pudo crear el pedido: $error',
-                                        );
-                                        if (context.mounted) {
-                                          setModalState(() => isSaving = false);
-                                        }
-                                      }
-                                    },
-                              icon: const Icon(Icons.add_task_rounded),
-                              label: Text(
-                                isSaving ? 'Guardando...' : 'Crear pedido',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   Future<void> _editBusinessInfo(ComercioModel comercio) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -844,6 +748,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         date.day == now.day;
   }
 
+  String _normalizeStatusString(String? value) {
+    final raw = (value ?? '').trim().toLowerCase();
+    if (raw.isEmpty) return 'pendiente';
+    return raw;
+  }
+
+  PedidoModel _pedidoWithOptimisticStatus(PedidoModel pedido) {
+    final overrideStatus = _optimisticStatusByOrderId[pedido.id];
+    if (overrideStatus == null || overrideStatus.trim().isEmpty) {
+      return pedido;
+    }
+
+    final map = Map<String, dynamic>.from(pedido.toMap());
+    map['estado'] = overrideStatus;
+    return PedidoModel.fromMap(map);
+  }
+
+  List<PedidoModel> _applyOptimisticStatuses(Iterable<PedidoModel> orders) {
+    return orders.map(_pedidoWithOptimisticStatus).toList(growable: false);
+  }
+
   bool _matchesFilter(PedidoModel pedido) {
     if (pedido.hasParseError) {
       return true;
@@ -922,6 +847,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
 
     try {
+      if (mounted) {
+        setState(() {
+          _optimisticStatusByOrderId[pedido.id] = nextEstado!;
+        });
+      }
+
       await Supabase.instance.client
           .from('pedidos')
           .update({'estado': nextEstado})
@@ -936,6 +867,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       );
     } catch (error) {
       if (!mounted) return;
+      setState(() {
+        _optimisticStatusByOrderId.remove(pedido.id);
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
@@ -982,6 +916,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
 
     try {
+      if (mounted) {
+        setState(() {
+          _optimisticStatusByOrderId[pedido.id] = 'cancelado';
+        });
+      }
+
       await Supabase.instance.client
           .from('pedidos')
           .update({'estado': 'cancelado'})
@@ -996,6 +936,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       );
     } catch (error) {
       if (!mounted) return;
+      setState(() {
+        _optimisticStatusByOrderId.remove(pedido.id);
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
@@ -1126,21 +1069,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ],
           ),
           floatingActionButton: dashboardData == null
-              ? FloatingActionButton.extended(
-                  onPressed: _openCreateManualOrderSheet,
-                  icon: const Icon(Icons.receipt_long_rounded),
-                  label: const Text('Pedido manual'),
-                )
+              ? null
               : Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    FloatingActionButton.small(
-                      heroTag: 'manual-order-fab',
-                      tooltip: 'Pedido manual',
-                      onPressed: _openCreateManualOrderSheet,
-                      child: const Icon(Icons.edit_note_rounded),
-                    ),
-                    const SizedBox(width: 12),
                     FloatingActionButton.extended(
                       heroTag: 'assisted-order-fab',
                       onPressed: () =>
@@ -1198,8 +1130,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 return StreamBuilder<List<PedidoModel>>(
                   stream: _ordersStream,
                   builder: (context, ordersSnapshot) {
-                    final allOrders =
-                        ordersSnapshot.data ?? const <PedidoModel>[];
+                    final allOrders = _applyOptimisticStatuses(
+                      ordersSnapshot.data ?? const <PedidoModel>[],
+                    );
                     final malformedOrders = allOrders
                         .where((pedido) => pedido.hasParseError)
                         .toList(growable: false);
@@ -1360,8 +1293,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           if (ordersSnapshot.hasError)
                             _EmptyStateCard(
                               title: 'No se pudieron cargar los pedidos',
-                              subtitle: '${ordersSnapshot.error}',
+                              subtitle: _ordersErrorSubtitle(
+                                ordersSnapshot.error,
+                              ),
                               icon: Icons.error_outline_rounded,
+                              actionLabel: 'Reintentar',
+                              onAction: _refreshDashboard,
                             )
                           else if (filteredOrders.isEmpty &&
                               malformedOrders.isEmpty)
@@ -2805,11 +2742,15 @@ class _EmptyStateCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.icon,
+    this.actionLabel,
+    this.onAction,
   });
 
   final String title;
   final String subtitle;
   final IconData icon;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -2838,6 +2779,15 @@ class _EmptyStateCard extends StatelessWidget {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            if (onAction != null &&
+                (actionLabel ?? '').trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: onAction,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(actionLabel!),
+              ),
+            ],
           ],
         ),
       ),

@@ -23,6 +23,9 @@ type PedidoRecord = {
     telefono_cliente?: string;
     cliente_nombre?: string;
     cliente_email?: string;
+    notifications?: {
+      whatsapp_enabled?: boolean;
+    };
   };
 };
 
@@ -174,6 +177,9 @@ function asPedidoRecord(value: unknown): PedidoRecord {
           telefono_cliente?: string;
           cliente_nombre?: string;
           cliente_email?: string;
+          notifications?: {
+            whatsapp_enabled?: boolean;
+          };
         })
       : undefined;
 
@@ -220,6 +226,10 @@ function resolveCustomerName(record: PedidoRecord): string {
     record.detalles?.cliente_nombre?.toString().trim() ||
     'cliente'
   );
+}
+
+function isWhatsappNotificationsEnabled(record: PedidoRecord): boolean {
+  return record.detalles?.notifications?.whatsapp_enabled !== false;
 }
 
 function normalizeOrderStatus(value: unknown): string {
@@ -396,6 +406,10 @@ async function maybeSendWhatsappNotification(params: {
   orderId: string;
   commerce: CommerceInfo;
 }) {
+  if (!isWhatsappNotificationsEnabled(params.record)) {
+    return { ok: true, skipped: true, reason: 'whatsapp-disabled-by-customer' };
+  }
+
   if (!params.apiKey) {
     return { ok: true, skipped: true, reason: 'wasender-key-missing' };
   }

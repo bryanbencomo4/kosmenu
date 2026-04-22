@@ -98,14 +98,9 @@ export async function PATCH(request: Request, { params }: Params) {
 
     const body = await request.json().catch(() => ({}));
     const action = (body?.action ?? '').toString().trim().toLowerCase();
-    const source = (body?.source ?? '').toString().trim().toLowerCase();
 
-    if (action !== 'cancel') {
+    if (action !== 'cancel' && action !== 'set_whatsapp_notifications') {
       return NextResponse.json({ error: 'Unsupported action.' }, { status: 400 });
-    }
-
-    if (source !== 'cliente' && source !== 'timeout') {
-      return NextResponse.json({ error: 'Invalid cancel source.' }, { status: 400 });
     }
 
     const supabase = getServerSupabaseClient();
@@ -113,6 +108,63 @@ export async function PATCH(request: Request, { params }: Params) {
 
     if (!order) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
+    }
+
+    if (action === 'set_whatsapp_notifications') {
+      const enabled = body?.enabled;
+      if (typeof enabled !== 'boolean') {
+        return NextResponse.json(
+          { error: 'Invalid enabled value for whatsapp notifications.' },
+          { status: 400 },
+        );
+      }
+
+      const currentDetalles =
+        order?.detalles && typeof order.detalles === 'object'
+          ? { ...(order.detalles as Record<string, unknown>) }
+          : {};
+      const currentNotifications =
+        currentDetalles.notifications && typeof currentDetalles.notifications === 'object'
+          ? { ...(currentDetalles.notifications as Record<string, unknown>) }
+          : {};
+
+      const nextDetalles = {
+        ...currentDetalles,
+        notifications: {
+          ...currentNotifications,
+          whatsapp_enabled: enabled,
+          updated_at: new Date().toISOString(),
+        },
+      };
+
+      const attempt = await supabase
+        .from('pedidos')
+        .update({
+          detalles: nextDetalles,
+        })
+        .eq('id', order.id)
+        .select('*')
+        .maybeSingle();
+
+      if (attempt.error) {
+        throw new Error(attempt.error.message);
+      }
+
+      return NextResponse.json(
+        {
+          ok: true,
+          data: {
+            order: attempt.data ?? order,
+          },
+        },
+        { status: 200 },
+      );
+    }
+
+    const source = (body?.source ?? '').toString().trim().toLowerCase();
+
+    if (source !== 'cliente' && source !== 'timeout') {
+      return NextResponse.json({ error: 'Invalid cancel source.' }, { status: 400 });
     }
 
     const currentStatus = normalizeStatus(order?.estado);

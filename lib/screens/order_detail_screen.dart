@@ -34,6 +34,7 @@ class OrderDetailScreen extends StatefulWidget {
 class _OrderDetailScreenState extends State<OrderDetailScreen>
     with SingleTickerProviderStateMixin {
   static const Duration _rememberDeviceTtl = Duration(hours: 24);
+  static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
   static const String _fallbackBusinessLogoAsset =
       'assets/branding/logotipo.png';
   static const Color _businessMarkerHeadColor = Color(0xFF8B5CF6);
@@ -61,7 +62,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   BitmapDescriptor? _deliveryMarkerIcon;
   bool _isMapInteractionEnabled = false;
   Timer? _orderStatusSyncTimer;
+  Timer? _countdownTicker;
+  DateTime _now = DateTime.now();
   bool _isSyncingOrderStatus = false;
+  bool _isAutoCancelingExpiredPending = false;
   String? _lastKnownStatus;
   _OrderViewData? _cachedOrderData;
 
@@ -74,6 +78,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       duration: const Duration(milliseconds: 700),
     );
     _startOrderStatusSync();
+    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _now = DateTime.now();
+      });
+    });
+  }
+
+  String _formatCountdown(Duration value) {
+    final totalSeconds = value.inSeconds < 0 ? 0 : value.inSeconds;
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
   void _startOrderStatusSync() {
@@ -83,6 +100,35 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       unawaited(_syncOrderStatusFromServer());
     });
     unawaited(_syncOrderStatusFromServer());
+  }
+
+  bool _isPendingExpired(PedidoModel pedido) {
+    final status = _normalizeStatusValue(pedido.estado);
+    if (status != 'pendiente') return false;
+    final createdAt = pedido.createdAt;
+    if (createdAt == null) return false;
+    return DateTime.now().difference(createdAt) >= _pendingConfirmationWindow;
+  }
+
+  Future<void> _autoCancelExpiredPendingOrder(PedidoModel pedido) async {
+    if (_isAutoCancelingExpiredPending) return;
+    _isAutoCancelingExpiredPending = true;
+    try {
+      final detalles = Map<String, dynamic>.from(pedido.detalles);
+      detalles['cancellation'] = <String, dynamic>{
+        'source': 'timeout',
+        'reason': 'timeout_no_confirmacion',
+        'at': DateTime.now().toIso8601String(),
+      };
+
+      await Supabase.instance.client
+          .from('pedidos')
+          .update({'estado': 'cancelado', 'detalles': detalles})
+          .eq('id', pedido.id)
+          .eq('estado', 'pendiente');
+    } finally {
+      _isAutoCancelingExpiredPending = false;
+    }
   }
 
   Future<void> _syncOrderStatusFromServer() async {
@@ -95,6 +141,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       final latestStatus = _normalizeStatusValue(latest.pedido.estado);
       final previousStatus = _lastKnownStatus;
+
+      if (latestStatus == 'pendiente' && _isPendingExpired(latest.pedido)) {
+        await _autoCancelExpiredPendingOrder(latest.pedido);
+        final refreshed = await _fetchOrder();
+        if (mounted && refreshed != null) {
+          final refreshedStatus = _normalizeStatusValue(refreshed.pedido.estado);
+          _lastKnownStatus = refreshedStatus;
+          setState(() {
+            _cachedOrderData = refreshed;
+          });
+        }
+        return;
+      }
+
       _lastKnownStatus = latestStatus;
 
       if (_cachedOrderData == null || previousStatus != latestStatus) {
@@ -120,6 +180,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   @override
   void dispose() {
     _orderStatusSyncTimer?.cancel();
+    _countdownTicker?.cancel();
     _emailController.dispose();
     _successController.dispose();
     super.dispose();
@@ -1152,6 +1213,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     final muted = colorScheme.onSurfaceVariant;
     final accent = colorScheme.primary;
     const success = Color(0xFF16A34A);
+    final appBarPedido = _cachedOrderData?.pedido;
+    final appBarStatus = _normalizeStatusValue(appBarPedido?.estado);
+    final appBarCreatedAt = appBarPedido?.createdAt;
+    final showPendingClock =
+      appBarStatus == 'pendiente' && appBarCreatedAt != null;
+    final appBarPendingLeftRaw = showPendingClock
+      ? _pendingConfirmationWindow - _now.difference(appBarCreatedAt)
+      : Duration.zero;
+    final appBarPendingLeft = appBarPendingLeftRaw.isNegative
+      ? Duration.zero
+      : appBarPendingLeftRaw;
+    final totalSeconds = _pendingConfirmationWindow.inSeconds;
+    final remainingSeconds = appBarPendingLeft.inSeconds.clamp(0, totalSeconds);
+    final appBarProgress = totalSeconds == 0
+      ? 1.0
+      : (totalSeconds - remainingSeconds) / totalSeconds;
 
     final overlayAnimation = CurvedAnimation(
       parent: _successController,
@@ -1169,6 +1246,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     ? 'Estado de tu pedido'
                     : 'Detalle de pedido',
               ),
+              actions: showPendingClock
+                  ? [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: _AppBarPendingCountdownBadge(
+                          label: _formatCountdown(appBarPendingLeft),
+                          progress: appBarProgress,
+                        ),
+                      ),
+                    ]
+                  : null,
             )
           : null,
       body: Stack(
@@ -1209,8 +1297,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   );
                 }
 
-                final data = snapshot.data ?? _cachedOrderData;
-                if (snapshot.data != null) {
+                final data = _cachedOrderData ?? snapshot.data;
+                if (_cachedOrderData == null && snapshot.data != null) {
                   _cachedOrderData = snapshot.data;
                 }
                 if (data == null) {
@@ -1231,6 +1319,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 final customerName = pedido.nombreCliente?.trim();
                 final customerEmail = pedido.clienteEmail?.trim();
                 final customerPhone = pedido.clientePhone?.trim();
+                final notificationsMap = _asMap(pedido.detalles['notifications']);
+                final whatsappNotificationsEnabled =
+                  notificationsMap['whatsapp_enabled'] is bool
+                  ? notificationsMap['whatsapp_enabled'] as bool
+                  : true;
                 final paymentMethod = pedido.metodoPago?.trim();
                 final deliveryMode = pedido.deliveryMode?.trim();
                 final isDeliveryOrder =
@@ -2152,7 +2245,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         child: ElevatedButton.icon(
                                           onPressed:
                                               (customerPhone != null &&
-                                                  customerPhone.isNotEmpty)
+                                                  customerPhone.isNotEmpty &&
+                                                  whatsappNotificationsEnabled)
                                               ? () => _openCustomerWhatsapp(
                                                   customerPhone,
                                                   data.comercioNombre,
@@ -2162,7 +2256,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                             FontAwesomeIcons.whatsapp,
                                             size: 17,
                                           ),
-                                          label: const Text('Enviar WhatsApp'),
+                                          label: Text(
+                                            whatsappNotificationsEnabled
+                                                ? 'Enviar WhatsApp'
+                                                : 'WhatsApp desactivado por cliente',
+                                          ),
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: const Color(
                                               0xFF16A34A,
@@ -2188,6 +2286,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                           ),
                                         ),
                                       ),
+                                      if (!whatsappNotificationsEnabled)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 8,
+                                            bottom: 2,
+                                          ),
+                                          child: Text(
+                                            'El cliente desactivo notificaciones por WhatsApp para este pedido.',
+                                            style: GoogleFonts.manrope(
+                                              color: muted,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
                                       const SizedBox(height: 8),
                                       SizedBox(
                                         width: double.infinity,
@@ -2661,7 +2774,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                         ],
                       ),
                     ),
-                    if (!isReadOnly)
+                    if (!isReadOnly &&
+                        currentStatus != 'entregado' &&
+                        currentStatus != 'cancelado')
                       SafeArea(
                         top: false,
                         child: Padding(
@@ -2965,6 +3080,65 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AppBarPendingCountdownBadge extends StatelessWidget {
+  const _AppBarPendingCountdownBadge({
+    required this.label,
+    required this.progress,
+  });
+
+  final String label;
+  final double progress;
+
+  Color get _ringColor {
+    if (progress >= 1) return const Color(0xFFDC2626);
+    if (progress >= 0.67) return const Color(0xFFD97706);
+    return const Color(0xFF475569);
+  }
+
+  Color get _backgroundColor {
+    if (progress >= 1) return const Color(0xFFFEF2F2);
+    if (progress >= 0.67) return const Color(0xFFFFFBEB);
+    return const Color(0xFFF8FAFC);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CircularProgressIndicator(
+            value: progress.clamp(0.0, 1.0),
+            strokeWidth: 2.8,
+            backgroundColor: _backgroundColor,
+            valueColor: AlwaysStoppedAnimation<Color>(_ringColor),
+          ),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: _backgroundColor,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: GoogleFonts.robotoMono(
+                fontSize: 8,
+                fontWeight: FontWeight.w700,
+                color: _ringColor,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ),
         ],
       ),
     );

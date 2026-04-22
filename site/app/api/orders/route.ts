@@ -250,6 +250,10 @@ export async function POST(request: Request) {
     }));
     const paymentMethod = normalizePaymentMethod(body.paymentMethod ?? incomingDetalles.metodo_pago);
     const orderNotes = normalizeText(body.orderNotes ?? incomingDetalles.order_notes);
+    const whatsappNotificationsEnabled =
+      typeof (incomingDetalles as any)?.notifications?.whatsapp_enabled === 'boolean'
+        ? Boolean((incomingDetalles as any).notifications.whatsapp_enabled)
+        : true;
     const paymentReferenceLast4 = normalizeDigits(body.paymentReferenceLast4 ?? incomingDetalles.referencia_pago).slice(-4);
     const paymentProofUrl = normalizeText(body.paymentProofUrl ?? incomingDetalles.comprobante_url);
     const cashPaymentAmount = Number(body.cashPaymentAmount ?? incomingDetalles.pago_con ?? 0);
@@ -294,6 +298,10 @@ export async function POST(request: Request) {
       moneda_checkout: currency,
       tasa_cambio_snapshot: exchangeRate,
       metodo_pago: paymentMethod,
+      notifications: {
+        whatsapp_enabled: whatsappNotificationsEnabled,
+        updated_at: new Date().toISOString(),
+      },
       referencia_pago: paymentReferenceLast4 || null,
       comprobante_url: paymentProofUrl || null,
       delivery,

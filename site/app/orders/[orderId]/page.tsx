@@ -2,7 +2,7 @@
 'use client';
 
 import { createClient } from '@supabase/supabase-js';
-import { Bell, CreditCard, MapPin, MessageCircle, Package, Phone, Store, User } from 'lucide-react';
+import { CreditCard, MapPin, MessageCircle, Package, Phone, Store, User } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -63,6 +63,10 @@ type PedidoRow = {
       id?: string;
       nombre?: string;
       datos?: string[];
+    } | null;
+    notifications?: {
+      whatsapp_enabled?: boolean;
+      updated_at?: string;
     } | null;
     items?: Array<{
       nombre?: string;
@@ -343,6 +347,11 @@ function buildWhatsAppLink(orderId: string, status: OrderStatus, comercio: Comer
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
+function resolveWhatsappNotificationsEnabled(order: PedidoRow | null | undefined) {
+  const value = (order?.detalles as any)?.notifications?.whatsapp_enabled;
+  return value !== false;
+}
+
 export default function OrderTrackingPage() {
   const params = useParams<{ orderId: string }>();
   const pathname = usePathname();
@@ -361,8 +370,9 @@ export default function OrderTrackingPage() {
   const [order, setOrder] = useState<PedidoRow | null>(null);
   const [comercio, setComercio] = useState<ComercioRow | null>(null);
   const [waReceiptUrl, setWaReceiptUrl] = useState('');
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
+  const [whatsappNotificationsEnabled, setWhatsappNotificationsEnabled] = useState(true);
+  const [whatsappPreferenceSaving, setWhatsappPreferenceSaving] = useState(false);
   const [cancelMessage, setCancelMessage] = useState('');
   const [cancelLoading, setCancelLoading] = useState(false);
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -450,6 +460,55 @@ export default function OrderTrackingPage() {
     }
   }
 
+  async function updateWhatsappNotificationsPreference(enabled: boolean) {
+    if (!orderId || whatsappPreferenceSaving) return;
+
+    const previous = whatsappNotificationsEnabled;
+    setWhatsappNotificationsEnabled(enabled);
+    setWhatsappPreferenceSaving(true);
+    setNotificationMessage('');
+
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'set_whatsapp_notifications',
+          enabled,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = (payload?.error ?? '').toString().trim();
+        throw new Error(message || 'No se pudo actualizar la preferencia de WhatsApp.');
+      }
+
+      const updatedOrder = (payload?.data?.order ?? null) as PedidoRow | null;
+      if (updatedOrder) {
+        setOrder((prev) => {
+          if (!prev) return updatedOrder;
+          return {
+            ...prev,
+            ...updatedOrder,
+            detalles: updatedOrder.detalles ?? prev.detalles,
+          };
+        });
+        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(updatedOrder));
+      }
+    } catch (preferenceError) {
+      setWhatsappNotificationsEnabled(previous);
+      const message = preferenceError instanceof Error
+        ? preferenceError.message
+        : 'No se pudo actualizar la preferencia de WhatsApp.';
+      setNotificationMessage(message);
+    } finally {
+      setWhatsappPreferenceSaving(false);
+    }
+  }
+
   useEffect(() => {
     if (!orderId) {
       setLoading(false);
@@ -505,23 +564,11 @@ export default function OrderTrackingPage() {
           detalles: incoming.detalles ?? prev.detalles,
         };
       });
+      setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(incoming));
 
       const nextStatus = normalizeStatus(incoming.estado);
       const previousStatus = lastStatusRef.current;
       lastStatusRef.current = nextStatus;
-
-      if (
-        notificationsEnabled &&
-        typeof window !== 'undefined' &&
-        'Notification' in window &&
-        Notification.permission === 'granted' &&
-        previousStatus &&
-        previousStatus !== nextStatus
-      ) {
-        new Notification('Actualizacion de pedido', {
-          body: `Tu pedido ${orderId} ahora esta en: ${statusLabel(nextStatus)}.`,
-        });
-      }
 
       const comercioId = (incoming.comercio_id ?? '').toString().trim();
       if (comercioId && comercioId !== currentComercioId) {
@@ -624,6 +671,7 @@ export default function OrderTrackingPage() {
         currentComercioId = (found.comercio_id ?? '').toString().trim();
         trackedRowIdRef.current = (found.id ?? '').toString().trim();
         setOrder(found);
+        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(found));
         lastStatusRef.current = normalizeStatus(found.estado);
 
         let resolvedComercio: ComercioRow | null = null;
@@ -710,7 +758,7 @@ export default function OrderTrackingPage() {
       window.clearInterval(pollingIntervalId);
       supabase.removeChannel(channel);
     };
-  }, [comercioSlugHint, notificationsEnabled, orderId]);
+  }, [comercioSlugHint, orderId]);
 
   const delivery = order?.detalles?.delivery ?? null;
   const isDelivery = (delivery?.mode ?? 'pickup') === 'delivery';
@@ -983,32 +1031,6 @@ export default function OrderTrackingPage() {
     if (!slug || !orderId || !pathname?.startsWith('/orders/')) return;
     router.replace(`/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}`);
   }, [comercio?.slug, orderId, pathname, router]);
-
-  async function enableStatusNotifications() {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      setNotificationMessage('Tu navegador no soporta notificaciones.');
-      return;
-    }
-
-    if (Notification.permission === 'granted') {
-      setNotificationsEnabled(true);
-      setNotificationMessage('Notificaciones activadas.');
-      return;
-    }
-
-    if (Notification.permission === 'denied') {
-      setNotificationMessage('Notificaciones bloqueadas. Activalas en la configuracion del navegador.');
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      setNotificationsEnabled(true);
-      setNotificationMessage('Notificaciones activadas.');
-    } else {
-      setNotificationMessage('No fue posible activar notificaciones.');
-    }
-  }
 
   const displayStatus: OrderStatus = (!isDelivery && resolvedStatus === 'en_camino')
     ? 'preparando'
@@ -1341,15 +1363,33 @@ export default function OrderTrackingPage() {
                 </p>
               ) : null}
 
-              <button
-                type="button"
-                onClick={() => void enableStatusNotifications()}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black"
-                style={{ backgroundColor: trackingPrimary, color: trackingOnPrimary }}
-              >
-                <Bell className="h-4 w-4" strokeWidth={2.2} />
-                Activar notificaciones
-              </button>
+              <div className="mt-1 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                <div className="pr-3">
+                  <p className="text-xs font-black text-slate-800">Notificaciones WhatsApp</p>
+                  <p className="text-[11px] text-slate-500">
+                    {whatsappNotificationsEnabled ? 'Activadas' : 'Desactivadas'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={whatsappNotificationsEnabled}
+                  disabled={whatsappPreferenceSaving}
+                  onClick={() => void updateWhatsappNotificationsPreference(!whatsappNotificationsEnabled)}
+                  className="relative inline-flex h-7 w-12 items-center rounded-full transition-colors"
+                  style={{
+                    backgroundColor: whatsappNotificationsEnabled ? trackingPrimary : '#CBD5E1',
+                    opacity: whatsappPreferenceSaving ? 0.7 : 1,
+                  }}
+                >
+                  <span
+                    className="inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform"
+                    style={{
+                      translate: whatsappNotificationsEnabled ? '22px 0' : '3px 0',
+                    }}
+                  />
+                </button>
+              </div>
               {notificationMessage ? <p className="mt-2 text-xs text-slate-600">{notificationMessage}</p> : null}
               {cancelMessage ? <p className="mt-2 text-xs text-slate-600">{cancelMessage}</p> : null}
             </div>
