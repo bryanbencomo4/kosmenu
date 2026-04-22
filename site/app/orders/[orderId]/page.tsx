@@ -350,7 +350,11 @@ export default function OrderTrackingPage() {
   const [waReceiptUrl, setWaReceiptUrl] = useState('');
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
+  const [syncMode, setSyncMode] = useState<'conectando' | 'realtime' | 'polling' | 'sin-senal'>('conectando');
+  const [lastSyncAt, setLastSyncAt] = useState(0);
   const lastStatusRef = useRef<OrderStatus | null>(null);
+  const trackedRowIdRef = useRef('');
+  const realtimeConnectedRef = useRef(false);
   const deliveryMapRef = useRef<HTMLDivElement | null>(null);
   const deliveryMapInstanceRef = useRef<any>(null);
   const deliveryMapMarkersRef = useRef<any[]>([]);
@@ -390,6 +394,74 @@ export default function OrderTrackingPage() {
     let active = true;
     let currentComercioId = '';
 
+    const applyIncomingOrder = async (
+      incoming: PedidoRow | null | undefined,
+      source: 'realtime' | 'polling' | 'hydrate' = 'realtime',
+    ) => {
+      if (!active || !incoming) return;
+
+      const incomingRowId = (incoming.id ?? '').toString().trim();
+      const incomingOrderId = resolveOrderIdFromRow(incoming);
+      const trackedRowId = trackedRowIdRef.current;
+      const matchesTrackedOrder = incomingOrderId === orderId || (trackedRowId && incomingRowId === trackedRowId);
+      if (!matchesTrackedOrder) return;
+
+      if (incomingRowId) {
+        trackedRowIdRef.current = incomingRowId;
+      }
+
+      const now = Date.now();
+      if (source === 'realtime') {
+        realtimeConnectedRef.current = true;
+        setSyncMode('realtime');
+      } else if (source === 'polling') {
+        if (!realtimeConnectedRef.current) {
+          setSyncMode('polling');
+        }
+      }
+      setLastSyncAt(now);
+
+      setOrder((prev) => {
+        if (!prev) return incoming;
+        return {
+          ...prev,
+          ...incoming,
+          detalles: incoming.detalles ?? prev.detalles,
+        };
+      });
+
+      const nextStatus = normalizeStatus(incoming.estado);
+      const previousStatus = lastStatusRef.current;
+      lastStatusRef.current = nextStatus;
+
+      if (
+        notificationsEnabled &&
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted' &&
+        previousStatus &&
+        previousStatus !== nextStatus
+      ) {
+        new Notification('Actualizacion de pedido', {
+          body: `Tu pedido ${orderId} ahora esta en: ${statusLabel(nextStatus)}.`,
+        });
+      }
+
+      const comercioId = (incoming.comercio_id ?? '').toString().trim();
+      if (comercioId && comercioId !== currentComercioId) {
+        currentComercioId = comercioId;
+        const { data: comercioRow } = await supabase
+          .from('comercios')
+          .select('id,nombre,slug,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular,logo_url,branding_ia')
+          .eq('id', comercioId)
+          .maybeSingle<ComercioRow>();
+
+        if (active) {
+          setComercio(comercioRow ?? null);
+        }
+      }
+    };
+
     const loadComercioBySlug = async (slug: string) => {
       const safeSlug = slug.trim();
       if (!safeSlug) return null;
@@ -426,7 +498,14 @@ export default function OrderTrackingPage() {
         if (!active) return;
 
         if (apiOrder) {
-          setOrder((prev) => prev ?? apiOrder);
+          const apiRowId = (apiOrder.id ?? '').toString().trim();
+          if (apiRowId) {
+            trackedRowIdRef.current = apiRowId;
+          }
+          await applyIncomingOrder(apiOrder, 'hydrate');
+          if (!lastStatusRef.current) {
+            lastStatusRef.current = normalizeStatus(apiOrder.estado);
+          }
         }
 
         if (apiComercio) {
@@ -467,6 +546,7 @@ export default function OrderTrackingPage() {
         }
 
         currentComercioId = (found.comercio_id ?? '').toString().trim();
+        trackedRowIdRef.current = (found.id ?? '').toString().trim();
         setOrder(found);
         lastStatusRef.current = normalizeStatus(found.estado);
 
@@ -516,47 +596,42 @@ export default function OrderTrackingPage() {
       .on('postgres_changes', realtimeConfig, async (payload: any) => {
         if (!active) return;
         const candidate = (payload?.new ?? payload?.record ?? null) as PedidoRow | null;
-        if (!candidate) return;
-
-        const candidateOrderId = resolveOrderIdFromRow(candidate);
-        if (candidateOrderId !== orderId) return;
-
-        setOrder(candidate);
-
-        const nextStatus = normalizeStatus(candidate.estado);
-        const previousStatus = lastStatusRef.current;
-        lastStatusRef.current = nextStatus;
-
-        if (
-          notificationsEnabled &&
-          typeof window !== 'undefined' &&
-          'Notification' in window &&
-          Notification.permission === 'granted' &&
-          previousStatus &&
-          previousStatus !== nextStatus
-        ) {
-          new Notification('Actualizacion de pedido', {
-            body: `Tu pedido ${orderId} ahora esta en: ${statusLabel(nextStatus)}.`,
-          });
-        }
-
-        const comercioId = (candidate.comercio_id ?? '').toString().trim();
-        if (comercioId && comercioId !== currentComercioId) {
-          currentComercioId = comercioId;
-          const { data: comercioRow } = await supabase
-            .from('comercios')
-            .select('id,nombre,slug,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular,logo_url,branding_ia')
-            .eq('id', comercioId)
-            .maybeSingle<ComercioRow>();
-          if (active) {
-            setComercio(comercioRow ?? null);
-          }
-        }
+        await applyIncomingOrder(candidate, 'realtime');
       })
-      .subscribe();
+      .subscribe((status: string) => {
+        if (!active) return;
+        if (status === 'SUBSCRIBED') {
+          realtimeConnectedRef.current = true;
+          setSyncMode('realtime');
+          return;
+        }
+
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          realtimeConnectedRef.current = false;
+          setSyncMode('sin-senal');
+        }
+      });
+
+    const pollingIntervalId = window.setInterval(async () => {
+      if (!active) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+
+      const trackedRowId = trackedRowIdRef.current;
+      if (!trackedRowId) return;
+
+      const { data: polledOrder } = await supabase
+        .from('pedidos')
+        .select('*')
+        .eq('id', trackedRowId)
+        .maybeSingle<PedidoRow>();
+
+      if (!active || !polledOrder) return;
+      await applyIncomingOrder(polledOrder, 'polling');
+    }, 8000);
 
     return () => {
       active = false;
+      window.clearInterval(pollingIntervalId);
       supabase.removeChannel(channel);
     };
   }, [comercioSlugHint, notificationsEnabled, orderId]);
@@ -924,6 +999,29 @@ export default function OrderTrackingPage() {
   const activeMapLng = isDelivery ? deliveryLng : businessLng;
   const hasActiveMapCoords = activeMapLat !== null && activeMapLng !== null;
   const activeCoordsLabel = hasActiveMapCoords ? `${activeMapLat.toFixed(6)}, ${activeMapLng.toFixed(6)}` : '';
+  const syncLabel =
+    syncMode === 'realtime'
+      ? 'Realtime activo'
+      : syncMode === 'polling'
+        ? 'Fallback por polling'
+        : syncMode === 'sin-senal'
+          ? 'Sin senal realtime'
+          : 'Conectando...';
+  const syncColor =
+    syncMode === 'realtime'
+      ? '#16A34A'
+      : syncMode === 'polling'
+        ? '#D97706'
+        : syncMode === 'sin-senal'
+          ? '#DC2626'
+          : '#64748B';
+  const lastSyncLabel = lastSyncAt
+    ? new Intl.DateTimeFormat('es-CO', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }).format(new Date(lastSyncAt))
+    : '';
   const timelineItemsBase = [
     { key: 'pendiente', label: 'Peticion', icon: MessageCircle },
     { key: 'confirmado', label: 'Confirmado', icon: CreditCard },
@@ -970,6 +1068,13 @@ export default function OrderTrackingPage() {
                 <p className="text-sm font-semibold text-slate-700">{orderId ? `#${orderId.slice(-8).toUpperCase()}` : '#N/A'}</p>
               </div>
               <p className="mt-2 break-all text-[11px] text-slate-500">ID completo: {orderId || 'No disponible'}</p>
+              <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 font-semibold" style={{ backgroundColor: `color-mix(in srgb, ${syncColor} 14%, white)`, color: syncColor }}>
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: syncColor }} />
+                  {syncLabel}
+                </span>
+                {lastSyncLabel ? <span className="text-slate-500">Ult. sync: {lastSyncLabel}</span> : null}
+              </div>
 
               <div className="mt-4 space-y-2">
                 {timelineItems.map((item, index) => {
