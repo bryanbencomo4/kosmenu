@@ -97,6 +97,80 @@ type ComercioRow = {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
+
+let googleMapsScriptPromise: Promise<any> | null = null;
+
+function waitForGoogleMapsReady(timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      resolve(null);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const tick = () => {
+      if ((window as any).google?.maps) {
+        resolve((window as any).google);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error('Google Maps API no termino de cargar.'));
+        return;
+      }
+
+      window.setTimeout(tick, 60);
+    };
+
+    tick();
+  });
+}
+
+function loadGoogleMapsApi() {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  if ((window as any).google?.maps) return Promise.resolve((window as any).google);
+  if (!googleMapsJsApiKey) return Promise.resolve(null);
+  if (googleMapsScriptPromise) return googleMapsScriptPromise;
+
+  googleMapsScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-kosmenu-google-maps="1"]') as HTMLScriptElement | null;
+    if (existing) {
+      waitForGoogleMapsReady().then(resolve).catch(reject);
+      existing.addEventListener('load', () => {
+        waitForGoogleMapsReady().then(resolve).catch(reject);
+      });
+      existing.addEventListener('error', reject);
+      return;
+    }
+
+    const callbackName = '__kosmenuOrderTrackingGoogleMapsReady';
+    (window as any)[callbackName] = () => {
+      waitForGoogleMapsReady()
+        .then((google) => {
+          delete (window as any)[callbackName];
+          resolve(google);
+        })
+        .catch((error) => {
+          delete (window as any)[callbackName];
+          reject(error);
+        });
+    };
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsJsApiKey)}&loading=async&callback=${callbackName}`;
+    script.async = true;
+    script.defer = true;
+    script.dataset.kosmenuGoogleMaps = '1';
+    script.onerror = (error) => {
+      delete (window as any)[callbackName];
+      reject(error);
+    };
+    document.head.appendChild(script);
+  });
+
+  return googleMapsScriptPromise;
+}
 
 const ORDER_FLOW: Array<{ key: OrderStatus; label: string; short: string }> = [
   { key: 'pendiente', label: 'Pedido recibido', short: 'Pendiente' },
@@ -190,6 +264,60 @@ function resolveOrderIdFromRow(row: PedidoRow | null | undefined) {
   return (row.detalles?.order_id ?? row.id ?? '').toString().trim();
 }
 
+function buildPerpendicularArcControlPoint(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+  lateralOffset = 0.02,
+) {
+  const midLat = (origin.lat + destination.lat) / 2;
+  const midLng = (origin.lng + destination.lng) / 2;
+  const deltaLng = destination.lng - origin.lng;
+  const deltaLat = destination.lat - origin.lat;
+  const length = Math.sqrt((deltaLng * deltaLng) + (deltaLat * deltaLat));
+
+  if (!length) {
+    return { lat: midLat, lng: midLng };
+  }
+
+  const unitPerpLat = deltaLng / length;
+  const unitPerpLng = -deltaLat / length;
+
+  return {
+    lat: midLat + (unitPerpLat * lateralOffset),
+    lng: midLng + (unitPerpLng * lateralOffset),
+  };
+}
+
+function generateArcPath(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+  pointCount = 100,
+  lateralOffset = 0.02,
+) {
+  if (pointCount < 2) {
+    return [origin, destination];
+  }
+
+  const control = buildPerpendicularArcControlPoint(origin, destination, lateralOffset);
+  const points: Array<{ lat: number; lng: number }> = [];
+
+  for (let i = 0; i < pointCount; i += 1) {
+    const t = i / (pointCount - 1);
+    const oneMinusT = 1 - t;
+    const lat =
+      (oneMinusT * oneMinusT * origin.lat) +
+      (2 * oneMinusT * t * control.lat) +
+      (t * t * destination.lat);
+    const lng =
+      (oneMinusT * oneMinusT * origin.lng) +
+      (2 * oneMinusT * t * control.lng) +
+      (t * t * destination.lng);
+    points.push({ lat, lng });
+  }
+
+  return points;
+}
+
 function buildWhatsAppLink(orderId: string, status: OrderStatus, comercio: ComercioRow | null) {
   const phone = normalizePhone(
     comercio?.whatsapp ?? comercio?.telefono ?? comercio?.telefonos ?? comercio?.celular,
@@ -207,6 +335,13 @@ export default function OrderTrackingPage() {
   const pathname = usePathname();
   const router = useRouter();
   const orderId = decodeURIComponent(params?.orderId ?? '').trim();
+  const comercioSlugHint = useMemo(() => {
+    const segments = (pathname ?? '').split('/').filter(Boolean);
+    if (segments.length >= 4 && segments[0] === 'v' && segments[2] === 'orders') {
+      return decodeURIComponent(segments[1] ?? '').trim();
+    }
+    return '';
+  }, [pathname]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -216,6 +351,11 @@ export default function OrderTrackingPage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
   const lastStatusRef = useRef<OrderStatus | null>(null);
+  const deliveryMapRef = useRef<HTMLDivElement | null>(null);
+  const deliveryMapInstanceRef = useRef<any>(null);
+  const deliveryMapMarkersRef = useRef<any[]>([]);
+  const deliveryMapPolylinesRef = useRef<any[]>([]);
+  const [deliveryMapError, setDeliveryMapError] = useState('');
 
   const resolvedStatus = useMemo(() => normalizeStatus(order?.estado), [order?.estado]);
 
@@ -250,6 +390,53 @@ export default function OrderTrackingPage() {
     let active = true;
     let currentComercioId = '';
 
+    const loadComercioBySlug = async (slug: string) => {
+      const safeSlug = slug.trim();
+      if (!safeSlug) return null;
+
+      try {
+        const response = await fetch(`/api/menu/${encodeURIComponent(safeSlug)}`, { cache: 'no-store' });
+        if (response.ok) {
+          const payload = await response.json();
+          const apiComercio = (payload?.data?.comercio ?? null) as ComercioRow | null;
+          if (apiComercio) return apiComercio;
+        }
+      } catch {
+        // Keep fallback chain going if menu API is unavailable.
+      }
+
+      const { data } = await supabase
+        .from('comercios')
+        .select('id,nombre,slug,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular,logo_url,branding_ia')
+        .eq('slug', safeSlug)
+        .maybeSingle<ComercioRow>();
+
+      return data ?? null;
+    };
+
+    const hydrateFromApi = async () => {
+      try {
+        const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, { cache: 'no-store' });
+        if (!response.ok) return;
+
+        const payload = await response.json();
+        const apiOrder = (payload?.data?.order ?? null) as PedidoRow | null;
+        const apiComercio = (payload?.data?.comercio ?? null) as ComercioRow | null;
+
+        if (!active) return;
+
+        if (apiOrder) {
+          setOrder((prev) => prev ?? apiOrder);
+        }
+
+        if (apiComercio) {
+          setComercio(apiComercio);
+        }
+      } catch {
+        // Silent fallback: Supabase client query remains the primary source.
+      }
+    };
+
     const loadInitial = async () => {
       try {
         setLoading(true);
@@ -283,6 +470,7 @@ export default function OrderTrackingPage() {
         setOrder(found);
         lastStatusRef.current = normalizeStatus(found.estado);
 
+        let resolvedComercio: ComercioRow | null = null;
         if (currentComercioId) {
           const { data: comercioRow } = await supabase
             .from('comercios')
@@ -291,8 +479,16 @@ export default function OrderTrackingPage() {
             .maybeSingle<ComercioRow>();
 
           if (!active) return;
-          setComercio(comercioRow ?? null);
+          resolvedComercio = comercioRow ?? null;
         }
+
+        if (!resolvedComercio && comercioSlugHint) {
+          resolvedComercio = await loadComercioBySlug(comercioSlugHint);
+          if (!active) return;
+        }
+
+        setComercio(resolvedComercio);
+        void hydrateFromApi();
 
         setLoading(false);
       } catch (loadError) {
@@ -363,7 +559,7 @@ export default function OrderTrackingPage() {
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [notificationsEnabled, orderId]);
+  }, [comercioSlugHint, notificationsEnabled, orderId]);
 
   const delivery = order?.detalles?.delivery ?? null;
   const isDelivery = (delivery?.mode ?? 'pickup') === 'delivery';
@@ -380,13 +576,21 @@ export default function OrderTrackingPage() {
     toNumberOrNull(delivery?.longitud);
   const hasDeliveryCoords = deliveryLat !== null && deliveryLng !== null;
 
-  const businessLat = toNumberOrNull(comercio?.latitud);
-  const businessLng = toNumberOrNull(comercio?.longitud);
+  const businessLat =
+    toNumberOrNull(comercio?.latitud) ??
+    toNumberOrNull((order?.detalles as any)?.comercio_latitud) ??
+    toNumberOrNull((order?.detalles as any)?.latitud_comercio) ??
+    toNumberOrNull((order?.detalles as any)?.business_latitude);
+  const businessLng =
+    toNumberOrNull(comercio?.longitud) ??
+    toNumberOrNull((order?.detalles as any)?.comercio_longitud) ??
+    toNumberOrNull((order?.detalles as any)?.longitud_comercio) ??
+    toNumberOrNull((order?.detalles as any)?.business_longitude);
   const hasBusinessCoords = businessLat !== null && businessLng !== null;
 
   const businessMapSrc = hasBusinessCoords
     ? `https://www.google.com/maps?q=${encodeURIComponent(`${businessLat},${businessLng}`)}&z=15&output=embed`
-    : `https://www.google.com/maps?q=${encodeURIComponent(comercio?.direccion ?? comercio?.nombre ?? 'elmenuxfa.com')}&z=15&output=embed`;
+    : `https://www.google.com/maps?q=${encodeURIComponent((comercio?.direccion ?? (order?.detalles as any)?.comercio_direccion ?? comercio?.nombre ?? (order?.detalles as any)?.comercio_nombre ?? 'elmenuxfa.com').toString())}&z=15&output=embed`;
 
   const deliveryMapSrc = hasDeliveryCoords
     ? `https://www.google.com/maps?q=${encodeURIComponent(`${deliveryLat},${deliveryLng}`)}&z=15&output=embed`
@@ -435,6 +639,31 @@ export default function OrderTrackingPage() {
   const contactName = (order?.nombre_cliente ?? order?.detalles?.cliente_nombre ?? '').toString().trim();
   const contactPhone = (order?.telefono_cliente ?? order?.detalles?.telefono_cliente ?? '').toString().trim();
   const contactEmail = (order?.cliente_email ?? order?.detalles?.cliente_email ?? '').toString().trim();
+  const businessName = (
+    comercio?.nombre ??
+    (order?.detalles as any)?.comercio_nombre ??
+    (order?.detalles as any)?.nombre_comercio ??
+    (order?.detalles as any)?.business_name ??
+    (order?.detalles as any)?.nombre_negocio ??
+    ''
+  ).toString().trim();
+  const businessAddress = (
+    comercio?.direccion ??
+    (order?.detalles as any)?.comercio_direccion ??
+    (order?.detalles as any)?.direccion_comercio ??
+    (order?.detalles as any)?.business_address ??
+    ''
+  ).toString().trim();
+  const businessPhoneRaw = (
+    comercio?.whatsapp ??
+    comercio?.telefono ??
+    comercio?.telefonos ??
+    comercio?.celular ??
+    (order?.detalles as any)?.telefono_comercio ??
+    (order?.detalles as any)?.comercio_telefono ??
+    (order?.detalles as any)?.business_phone ??
+    ''
+  ).toString().trim();
 
   const fallbackWaLink = useMemo(
     () => buildWhatsAppLink(orderId, resolvedStatus, comercio),
@@ -449,6 +678,154 @@ export default function OrderTrackingPage() {
   const trackingOnPrimary = normalizeHexColor(branding?.colores_personalizados?.text_on_primary, '#FFFFFF');
   const titleFontFamily = fontFamilyCssValue(branding?.fuente_titulos, 'Montserrat, sans-serif');
   const bodyFontFamily = fontFamilyCssValue(branding?.fuente_cuerpo, 'Roboto, sans-serif');
+
+  useEffect(() => {
+    const clearMapLayers = () => {
+      for (const marker of deliveryMapMarkersRef.current) {
+        marker.setMap(null);
+      }
+      for (const polyline of deliveryMapPolylinesRef.current) {
+        polyline.setMap(null);
+      }
+      deliveryMapMarkersRef.current = [];
+      deliveryMapPolylinesRef.current = [];
+    };
+
+    if (!isDelivery) {
+      clearMapLayers();
+      deliveryMapInstanceRef.current = null;
+      setDeliveryMapError('');
+      return;
+    }
+
+    if (!hasDeliveryCoords) {
+      clearMapLayers();
+      deliveryMapInstanceRef.current = null;
+      setDeliveryMapError('Coordenadas de entrega no disponibles para mostrar la ruta.');
+      return;
+    }
+
+    let disposed = false;
+
+    const mountMap = async () => {
+      try {
+        setDeliveryMapError('');
+        const google = await loadGoogleMapsApi();
+        if (disposed || !deliveryMapRef.current) return;
+
+        if (!google?.maps) {
+          setDeliveryMapError('No fue posible cargar Google Maps en este dispositivo.');
+          return;
+        }
+
+        const deliveryPoint = { lat: deliveryLat as number, lng: deliveryLng as number };
+        const businessPoint = (businessLat !== null && businessLng !== null)
+          ? { lat: businessLat, lng: businessLng }
+          : null;
+
+        const map = new google.maps.Map(deliveryMapRef.current, {
+          center: businessPoint
+            ? { lat: (businessPoint.lat + deliveryPoint.lat) / 2, lng: (businessPoint.lng + deliveryPoint.lng) / 2 }
+            : deliveryPoint,
+          zoom: businessPoint ? 13.8 : 15.2,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          rotateControl: false,
+          gestureHandling: 'cooperative',
+        });
+
+        clearMapLayers();
+        deliveryMapInstanceRef.current = map;
+
+        const deliveryMarker = new google.maps.Marker({
+          map,
+          position: deliveryPoint,
+          title: 'Destino de entrega',
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#7C3AED',
+            fillOpacity: 1,
+            strokeColor: '#FFFFFF',
+            strokeWeight: 2,
+          },
+        });
+        deliveryMapMarkersRef.current.push(deliveryMarker);
+
+        const cameraPoints = [deliveryPoint];
+
+        if (businessPoint) {
+          const businessMarker = new google.maps.Marker({
+            map,
+            position: businessPoint,
+            title: businessName || 'Comercio',
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 8,
+              fillColor: '#F59E0B',
+              fillOpacity: 1,
+              strokeColor: '#FFFFFF',
+              strokeWeight: 2,
+            },
+          });
+          deliveryMapMarkersRef.current.push(businessMarker);
+
+          const arcPoints = generateArcPath(businessPoint, deliveryPoint);
+          const arcPeak = arcPoints[Math.floor(arcPoints.length / 2)] ?? null;
+
+          const shadowLine = new google.maps.Polyline({
+            map,
+            path: [businessPoint, deliveryPoint],
+            strokeColor: '#9CA3AF',
+            strokeOpacity: 0.4,
+            strokeWeight: 2,
+            zIndex: 1,
+          });
+
+          const arcLine = new google.maps.Polyline({
+            map,
+            path: arcPoints,
+            strokeColor: '#7C3AED',
+            strokeOpacity: 1,
+            strokeWeight: 4,
+            zIndex: 2,
+          });
+
+          deliveryMapPolylinesRef.current.push(shadowLine, arcLine);
+          cameraPoints.push(businessPoint);
+          if (arcPeak) cameraPoints.push(arcPeak);
+        }
+
+        const bounds = new google.maps.LatLngBounds();
+        for (const point of cameraPoints) {
+          bounds.extend(point);
+        }
+        if (cameraPoints.length > 1) {
+          map.fitBounds(bounds, 60);
+        }
+      } catch {
+        if (!disposed) {
+          setDeliveryMapError('No fue posible renderizar el mapa de ruta.');
+        }
+      }
+    };
+
+    void mountMap();
+
+    return () => {
+      disposed = true;
+      clearMapLayers();
+    };
+  }, [
+    businessLat,
+    businessLng,
+    businessName,
+    deliveryLat,
+    deliveryLng,
+    hasDeliveryCoords,
+    isDelivery,
+  ]);
 
   useEffect(() => {
     const slug = (comercio?.slug ?? '').trim();
@@ -519,284 +896,216 @@ export default function OrderTrackingPage() {
     );
   }
 
-  const currentStep = statusIndex(resolvedStatus);
-  const createdAtLabel = order?.created_at
+  const displayStatus: OrderStatus = (!isDelivery && resolvedStatus === 'en_camino')
+    ? 'preparando'
+    : resolvedStatus;
+  const createdAtTime = order?.created_at
     ? new Intl.DateTimeFormat('es-CO', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
       }).format(new Date(order.created_at))
-    : '';
-  const borderTone = `color-mix(in srgb, ${trackingPrimary} 18%, white)`;
+    : '--:--';
+  const borderTone = `color-mix(in srgb, ${trackingSecondary} 12%, white)`;
   const softTone = `color-mix(in srgb, ${trackingPrimary} 8%, white)`;
-  const softerTone = `color-mix(in srgb, ${trackingPrimary} 12%, white)`;
-  const mutedTone = `color-mix(in srgb, ${trackingSecondary} 12%, white)`;
-  const cardStyle = {
-    backgroundColor: trackingSurface,
-    border: `1px solid ${borderTone}`,
-  } as React.CSSProperties;
-  const mutedCardStyle = {
-    backgroundColor: softTone,
-    border: `1px solid ${borderTone}`,
-  } as React.CSSProperties;
+  const mutedTone = `color-mix(in srgb, ${trackingSecondary} 8%, white)`;
+  const statusTitle =
+    displayStatus === 'entregado'
+      ? 'ENTREGADO'
+      : displayStatus === 'en_camino'
+        ? 'EN CAMINO'
+        : displayStatus === 'preparando'
+          ? 'EN PREPARACION'
+          : displayStatus === 'confirmado'
+            ? 'CONFIRMADO'
+            : 'RECIBIDO';
+  const callPhone = normalizePhone(businessPhoneRaw);
+  const callHref = callPhone ? `tel:+${callPhone}` : '';
+  const activeMapLat = isDelivery ? deliveryLat : businessLat;
+  const activeMapLng = isDelivery ? deliveryLng : businessLng;
+  const hasActiveMapCoords = activeMapLat !== null && activeMapLng !== null;
+  const activeCoordsLabel = hasActiveMapCoords ? `${activeMapLat.toFixed(6)}, ${activeMapLng.toFixed(6)}` : '';
+  const timelineItemsBase = [
+    { key: 'pendiente', label: 'Peticion', icon: MessageCircle },
+    { key: 'confirmado', label: 'Confirmado', icon: CreditCard },
+    { key: 'preparando', label: 'En preparacion', icon: Store },
+    { key: 'en_camino', label: 'En camino', icon: MapPin },
+    { key: 'entregado', label: 'Entregado', icon: Package },
+  ] as const;
+  const timelineItems = isDelivery
+    ? timelineItemsBase
+    : timelineItemsBase.filter((item) => item.key !== 'en_camino');
+  const currentStep = Math.max(0, timelineItems.findIndex((item) => item.key === displayStatus));
 
   return (
     <main
-      className="min-h-screen px-4 py-8 text-slate-900 sm:px-6"
+      className="min-h-screen px-3 py-6 text-slate-900 sm:px-6"
       style={{
-        background: `radial-gradient(circle at 10% 0%, color-mix(in srgb, ${trackingPrimary} 16%, white) 0%, transparent 34%), radial-gradient(circle at 90% 0%, color-mix(in srgb, ${trackingSecondary} 10%, white) 0%, transparent 28%), linear-gradient(180deg, color-mix(in srgb, ${trackingPrimary} 4%, white) 0%, transparent 22%), ${trackingBackground}`,
+        background: `linear-gradient(180deg, color-mix(in srgb, ${trackingPrimary} 4%, white) 0%, #F3F4F6 32%, #F3F4F6 100%)`,
         fontFamily: bodyFontFamily,
       }}
     >
-      <section className="mx-auto max-w-5xl space-y-5">
-        <div className="overflow-hidden rounded-[32px] p-6 shadow-[0_26px_60px_rgba(15,23,42,0.12)] sm:p-8" style={{ ...cardStyle, background: `linear-gradient(145deg, color-mix(in srgb, ${trackingPrimary} 12%, white) 0%, ${trackingSurface} 38%, ${trackingSurface} 100%)` }}>
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em]" style={{ backgroundColor: softerTone, color: trackingPrimary }}>
-                  Seguimiento
-                </span>
-                <span className="rounded-full px-3 py-1 text-[11px] font-black" style={{ backgroundColor: resolvedStatus === 'entregado' ? 'color-mix(in srgb, #10B981 14%, white)' : softTone, color: resolvedStatus === 'entregado' ? '#047857' : trackingPrimary }}>
-                  {statusLabel(resolvedStatus)}
-                </span>
-              </div>
-              <h1 className="mt-4 text-3xl font-black leading-tight text-slate-950 sm:text-4xl" style={{ fontFamily: titleFontFamily }}>
-                Tu pedido ya esta en seguimiento
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
-                Sigue el estado, revisa el resumen y mantente conectado con {(comercio?.nombre ?? 'el negocio').trim()} desde una sola vista.
+      <section className="mx-auto max-w-xl">
+        <div className="mx-auto w-full overflow-hidden rounded-[34px] bg-white shadow-[0_30px_80px_rgba(15,23,42,0.18)]" style={{ border: `1px solid ${borderTone}`, maxWidth: 400 }}>
+          <div className="h-2 w-full" style={{ backgroundColor: '#E5E7EB' }} />
+          <div className="px-4 pb-6 pt-2 sm:px-5">
+            <div className="rounded-t-[18px] rounded-b-md px-4 py-2 text-center text-lg font-black tracking-wide" style={{ backgroundColor: trackingPrimary, color: trackingOnPrimary, fontFamily: titleFontFamily }}>
+              {statusTitle}
+            </div>
+
+            <div className="mt-2 rounded-b-2xl border border-slate-200 px-4 py-3">
+              <p className="text-center text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Hora del pedido</p>
+              <p className="mt-1 text-center text-3xl font-black text-slate-950" style={{ fontFamily: titleFontFamily }}>
+                {createdAtTime}
               </p>
-              <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
-                <span className="rounded-full bg-white px-3 py-1.5" style={{ border: `1px solid ${borderTone}` }}>
-                  {(comercio?.nombre ?? 'Kosmenu').trim()}
-                </span>
-                {comercio?.slug ? (
-                  <span className="rounded-full bg-white px-3 py-1.5" style={{ border: `1px solid ${borderTone}` }}>
-                    @{comercio.slug}
-                  </span>
-                ) : null}
-                {createdAtLabel ? (
-                  <span className="rounded-full bg-white px-3 py-1.5" style={{ border: `1px solid ${borderTone}` }}>
-                    {createdAtLabel}
-                  </span>
-                ) : null}
-              </div>
-            </div>
 
-            <div className="flex items-start gap-3">
-              <div className="min-w-0 rounded-[24px] bg-white/90 px-4 py-3 shadow-sm" style={{ border: `1px solid ${borderTone}` }}>
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Codigo</p>
-                <p className="mt-2 max-w-[260px] break-all text-sm font-black text-slate-950">{orderId}</p>
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  {comercio?.logo_url ? (
+                    <img src={comercio.logo_url} alt={comercio?.nombre ?? 'Comercio'} className="h-7 w-7 rounded-md object-cover" />
+                  ) : (
+                    <span className="grid h-7 w-7 place-items-center rounded-md bg-slate-100 text-[11px] font-black text-slate-600">KM</span>
+                  )}
+                  <p className="truncate text-base font-black text-slate-900">{businessName || 'Comercio'}</p>
+                </div>
+                <p className="text-sm font-semibold text-slate-700">{orderId ? `#${orderId.slice(-8).toUpperCase()}` : '#N/A'}</p>
               </div>
-              {comercio?.logo_url ? (
-                <img src={comercio.logo_url} alt={comercio?.nombre ?? 'Comercio'} className="h-16 w-16 rounded-[22px] object-cover shadow-sm" style={{ border: `1px solid ${borderTone}` }} />
-              ) : null}
-            </div>
-          </div>
-        </div>
+              <p className="mt-2 break-all text-[11px] text-slate-500">ID completo: {orderId || 'No disponible'}</p>
 
-        <div className="rounded-[28px] p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] sm:p-6" style={cardStyle}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Estado</p>
-              <p className="mt-1 text-sm text-slate-600">El negocio actualizara este progreso a medida que avance tu pedido.</p>
-            </div>
-          </div>
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-5">
-            {ORDER_FLOW.map((step, index) => {
-              const isDone = index <= currentStep;
-              const isCurrent = index === currentStep;
-              return (
-                <div key={step.key} className="relative min-w-0">
-                  {index < ORDER_FLOW.length - 1 ? (
-                    <div className="absolute left-7 top-6 hidden h-[2px] w-[calc(100%-1rem)] sm:block" style={{ backgroundColor: isDone ? trackingPrimary : mutedTone }} />
-                  ) : null}
-                  <div className="relative rounded-[24px] px-4 py-4" style={{ backgroundColor: isCurrent ? softTone : '#FFFFFF', border: `1px solid ${isDone ? trackingPrimary : borderTone}` }}>
-                    <div className="flex items-center gap-3 sm:flex-col sm:items-start">
+              <div className="mt-4 space-y-2">
+                {timelineItems.map((item, index) => {
+                  const isDone = index <= currentStep;
+                  const isCurrent = index === currentStep;
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.key} className="flex items-center gap-3 text-sm">
                       <span
-                        className="grid h-10 w-10 place-items-center rounded-full text-sm font-black"
+                        className="grid h-7 w-7 place-items-center rounded-full border text-xs font-black"
                         style={{
-                          backgroundColor: isDone ? trackingPrimary : '#FFFFFF',
-                          color: isDone ? trackingOnPrimary : '#64748B',
-                          border: `1px solid ${isDone ? trackingPrimary : borderTone}`,
-                          boxShadow: isCurrent ? `0 14px 30px -18px ${trackingPrimary}` : 'none',
+                          borderColor: isDone ? trackingPrimary : '#D1D5DB',
+                          backgroundColor: isCurrent ? softTone : '#FFFFFF',
+                          color: isDone ? trackingPrimary : '#64748B',
                         }}
                       >
-                        {isDone && index < currentStep ? '✓' : index + 1}
+                        <Icon className="h-3.5 w-3.5" strokeWidth={2.4} />
                       </span>
-                      <div>
-                        <p className={`text-sm font-black ${isCurrent || isDone ? 'text-slate-950' : 'text-slate-500'}`}>{step.short}</p>
-                        <p className="mt-1 text-xs text-slate-500">{step.label}</p>
-                      </div>
+                      <p className="font-semibold" style={{ color: isCurrent ? trackingPrimary : isDone ? '#111827' : '#6B7280' }}>
+                        {index + 1}. {item.label}
+                      </p>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                  );
+                })}
+              </div>
+            </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
-                <div className="flex items-center gap-3">
-                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: softTone, color: trackingPrimary }}>
-                    <User className="h-5 w-5" strokeWidth={2.2} />
-                  </span>
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Cliente</p>
-                    <p className="mt-1 text-base font-black text-slate-950">{contactName || 'Sin nombre registrado'}</p>
-                  </div>
+            {isDelivery ? (
+              <>
+                <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                  {deliveryMapError ? (
+                    <div className="grid h-56 place-items-center px-4 text-center text-sm text-slate-600">
+                      {deliveryMapError}
+                    </div>
+                  ) : (
+                    <div ref={deliveryMapRef} className="h-56 w-full" />
+                  )}
                 </div>
-                <div className="mt-4 space-y-3 text-sm text-slate-600">
-                  <p className="flex items-center gap-2"><Phone className="h-4 w-4" strokeWidth={2.1} /> {contactPhone || 'Sin telefono registrado'}</p>
-                  <p className="flex items-center gap-2"><MessageCircle className="h-4 w-4" strokeWidth={2.1} /> {contactEmail || 'Sin correo registrado'}</p>
+                <p className="mt-2 text-xs text-slate-600">
+                  {hasActiveMapCoords
+                    ? `Coordenadas del mapa: ${activeCoordsLabel}`
+                    : 'Coordenadas no disponibles para este pedido.'}
+                </p>
+              </>
+            ) : null}
+
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Contacto del comercio</p>
+              <div className="mt-3 flex items-center gap-3">
+                <div className="grid h-14 w-14 place-items-center rounded-full text-base font-black" style={{ backgroundColor: mutedTone, color: trackingPrimary }}>
+                  {(businessName || 'C').slice(0, 1).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-2xl font-black text-slate-950" style={{ fontFamily: titleFontFamily }}>{businessName || 'Comercio'}</p>
+                  <p className="truncate text-sm text-slate-600">{businessPhoneRaw || 'Sin telefono de contacto'}</p>
                 </div>
               </div>
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {callHref ? (
+                  <a href={callHref} className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black" style={{ backgroundColor: '#D97706', color: '#FFFFFF' }}>
+                    <Phone className="h-4 w-4" strokeWidth={2.2} />
+                    Llamar
+                  </a>
+                ) : null}
+                {finalWaLink ? (
+                  <a href={finalWaLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black" style={{ backgroundColor: '#D97706', color: '#FFFFFF' }}>
+                    <MessageCircle className="h-4 w-4" strokeWidth={2.2} />
+                    Chat/WhatsApp
+                  </a>
+                ) : null}
+              </div>
+            </div>
 
-              <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={mutedCardStyle}>
-                <div className="flex items-center gap-3">
-                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white" style={{ color: trackingPrimary, border: `1px solid ${borderTone}` }}>
-                    <CreditCard className="h-5 w-5" strokeWidth={2.2} />
-                  </span>
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Resumen</p>
-                    <p className="mt-1 text-base font-black text-slate-950">{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</p>
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Resumen de la orden</p>
+              <div className="mt-3 space-y-2 text-sm text-slate-700">
+                {orderItems.map((item, index) => (
+                  <div key={`order-item-${index}`} className="flex items-center justify-between gap-3">
+                    <p className="min-w-0 truncate">{item.cantidad}x {item.nombre}</p>
+                    <p className="whitespace-nowrap font-semibold">{formatAmountByCurrency(item.subtotal, checkoutCurrency)}</p>
                   </div>
-                </div>
-                <div className="mt-4 space-y-2 text-sm text-slate-700">
+                ))}
+                <div className="mt-2 border-t border-slate-200 pt-2">
                   <p className="flex items-center justify-between"><span>Subtotal</span><span className="font-semibold">{formatAmountByCurrency(subtotalCheckout, checkoutCurrency)}</span></p>
                   <p className="flex items-center justify-between"><span>Entrega</span><span className="font-semibold">{formatAmountByCurrency(deliveryCheckout, checkoutCurrency)}</span></p>
-                  <p className="flex items-center justify-between border-t pt-3 text-base font-black text-slate-950" style={{ borderColor: borderTone }}><span>Total</span><span>{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</span></p>
-                  <p className="text-[11px] text-slate-500">
-                    {checkoutCurrency !== 'COP'
-                      ? `Tasa snapshot: 1 ${checkoutCurrency} = ${exchangeRate} COP`
-                      : `Base COP: ${formatCop(total)}`}
-                  </p>
+                  {cashChangeAmount > 0 ? <p className="flex items-center justify-between"><span>Cambio de</span><span className="font-semibold">{formatAmountByCurrency(cashChangeAmount, checkoutCurrency)}</span></p> : null}
+                  <p className="mt-2 flex items-center justify-between text-base font-black text-slate-950"><span>TOTAL</span><span>{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</span></p>
                 </div>
               </div>
             </div>
 
-            {orderItems.length > 0 ? (
-              <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
-                <div className="flex items-center gap-3">
-                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: softTone, color: trackingPrimary }}>
-                    <Package className="h-5 w-5" strokeWidth={2.2} />
-                  </span>
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Productos</p>
-                    <p className="mt-1 text-sm text-slate-600">Resumen del pedido confirmado.</p>
-                  </div>
-                </div>
-                <div className="mt-4 space-y-3">
-                  {orderItems.map((item, index) => (
-                    <div key={`order-item-${index}`} className="flex items-center justify-between gap-3 rounded-[22px] bg-white px-4 py-3" style={{ border: `1px solid ${borderTone}` }}>
-                      <div className="min-w-0 flex items-center gap-3">
-                        <span className="grid h-9 w-9 place-items-center rounded-full text-sm font-black" style={{ backgroundColor: softTone, color: trackingPrimary }}>{item.cantidad}</span>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-black text-slate-950">{item.nombre}</p>
-                          <p className="mt-1 text-xs text-slate-500">Unitario {formatAmountByCurrency(item.precioUnitario, checkoutCurrency)}</p>
-                        </div>
-                      </div>
-                      <p className="whitespace-nowrap text-sm font-black text-slate-950">{formatAmountByCurrency(item.subtotal, checkoutCurrency)}</p>
-                    </div>
-                  ))}
-                </div>
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Metodo de pago</p>
+              <p className="mt-2 text-sm text-slate-700">{paymentMethodName || 'No especificado'} · {paymentReference ? `****${paymentReference.slice(-4)}` : 'Sin referencia'}</p>
+              {paymentMethodDetails.length > 0 ? <p className="mt-1 text-xs text-slate-500">{paymentMethodDetails.slice(0, 2).join(' · ')}</p> : null}
+              {paymentProofUrl ? (
+                <a href={paymentProofUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex rounded-lg px-3 py-2 text-xs font-bold" style={{ backgroundColor: softTone, color: trackingPrimary }}>
+                  Ver comprobante
+                </a>
+              ) : null}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">{isDelivery ? 'Direccion de entrega' : 'Direccion del comercio'}</p>
+              <p className="mt-2 text-sm text-slate-700">{isDelivery ? (deliveryAddress || 'Direccion no disponible') : (businessAddress || 'Direccion no disponible')}</p>
+              {deliveryReference ? <p className="mt-1 text-sm text-slate-600">Referencia: {deliveryReference}</p> : null}
+              {deliveryInstructions ? <p className="mt-1 text-sm text-slate-600">Notas: {deliveryInstructions}</p> : null}
+            </div>
+
+            {(contactName || contactPhone || contactEmail) ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Datos del cliente</p>
+                {contactName ? <p className="mt-2 text-sm text-slate-700">{contactName}</p> : null}
+                {contactPhone ? <p className="mt-1 text-sm text-slate-700">{contactPhone}</p> : null}
+                {contactEmail ? <p className="mt-1 text-sm text-slate-700">{contactEmail}</p> : null}
               </div>
             ) : null}
 
             {orderNotes ? (
-              <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Notas del pedido</p>
-                <p className="mt-3 text-sm leading-6 text-slate-700">{orderNotes}</p>
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Notas del pedido</p>
+                <p className="mt-2 text-sm text-slate-700">{orderNotes}</p>
               </div>
             ) : null}
-          </div>
 
-          <div className="space-y-4">
-            <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
-              <div className="flex items-center gap-3">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: softTone, color: trackingPrimary }}>
-                  <CreditCard className="h-5 w-5" strokeWidth={2.2} />
-                </span>
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Pago</p>
-                  <p className="mt-1 text-base font-black text-slate-950">{paymentMethodName || 'No especificado'}</p>
-                </div>
-              </div>
-              <div className="mt-4 space-y-3 text-sm text-slate-700">
-                {paymentMethodDetails.length > 0 ? <p>{paymentMethodDetails.slice(0, 2).join(' · ')}</p> : null}
-                <p className="flex items-center justify-between gap-3"><span>Referencia</span><span className="font-semibold">{paymentReference ? `****${paymentReference.slice(-4)}` : 'No registrada'}</span></p>
-                <p className="flex items-center justify-between gap-3"><span>Comprobante</span><span className="font-semibold">{paymentProofUrl ? 'Cargado' : 'No cargado'}</span></p>
-                <p className="flex items-center justify-between gap-3"><span>Total pagado</span><span className="font-semibold">{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</span></p>
-                {cashPaymentAmount !== null ? <p className="flex items-center justify-between gap-3"><span>Pago con</span><span className="font-semibold">{formatAmountByCurrency(cashPaymentAmount, checkoutCurrency)}</span></p> : null}
-                {cashChangeAmount > 0 ? <p className="flex items-center justify-between gap-3"><span>Cambio</span><span className="font-semibold">{formatAmountByCurrency(cashChangeAmount, checkoutCurrency)}</span></p> : null}
-                {paymentProofUrl ? (
-                  <a href={paymentProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-full px-4 py-2 text-xs font-black" style={{ backgroundColor: softTone, color: trackingPrimary }}>
-                    Ver comprobante
-                  </a>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={cardStyle}>
-              <div className="flex items-center gap-3">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl" style={{ backgroundColor: softTone, color: trackingPrimary }}>
-                  {isDelivery ? <MapPin className="h-5 w-5" strokeWidth={2.2} /> : <Store className="h-5 w-5" strokeWidth={2.2} />}
-                </span>
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">{isDelivery ? 'Entrega' : 'Retiro'}</p>
-                  <p className="mt-1 text-base font-black text-slate-950">{isDelivery ? 'Delivery confirmado' : 'Retiro en local'}</p>
-                </div>
-              </div>
-              {isDelivery ? (
-                <div className="mt-4 space-y-3 text-sm text-slate-700">
-                  <p className="leading-6">{deliveryAddress || 'Direccion no disponible'}</p>
-                  {deliveryReference ? <p><span className="font-semibold">Referencia:</span> {deliveryReference}</p> : null}
-                  {deliveryInstructions ? <p><span className="font-semibold">Indicaciones:</span> {deliveryInstructions}</p> : null}
-                  <div className="overflow-hidden rounded-[22px]" style={{ border: `1px solid ${borderTone}` }}>
-                    <iframe src={deliveryMapSrc} title="Mapa de entrega" className="h-52 w-full" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-4 space-y-3 text-sm text-slate-700">
-                  <p>{(comercio?.nombre ?? 'elmenuxfa.com').trim()}</p>
-                  <p>{(comercio?.direccion ?? 'Direccion no disponible').trim()}</p>
-                  <div className="overflow-hidden rounded-[22px]" style={{ border: `1px solid ${borderTone}` }}>
-                    <iframe src={businessMapSrc} title="Mapa del comercio" className="h-52 w-full" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-[28px] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]" style={mutedCardStyle}>
-              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Acciones</p>
-              <div className="mt-4 flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => void enableStatusNotifications()}
-                  className="inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-black"
-                  style={{ backgroundColor: trackingPrimary, color: trackingOnPrimary }}
-                >
-                  <Bell className="h-4 w-4" strokeWidth={2.2} />
-                  Activar notificaciones
-                </button>
-                {finalWaLink ? (
-                  <a
-                    href={finalWaLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-4 py-3 text-sm font-black text-slate-700"
-                    style={{ border: `1px solid ${borderTone}` }}
-                  >
-                    <MessageCircle className="h-4 w-4" strokeWidth={2.2} />
-                    Abrir WhatsApp
-                  </a>
-                ) : null}
-              </div>
-              {notificationMessage ? (
-                <p className="mt-3 text-xs text-slate-600">{notificationMessage}</p>
-              ) : null}
+            <div className="mt-4 rounded-2xl border border-slate-200 p-4" style={{ backgroundColor: softTone }}>
+              <button
+                type="button"
+                onClick={() => void enableStatusNotifications()}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black"
+                style={{ backgroundColor: trackingPrimary, color: trackingOnPrimary }}
+              >
+                <Bell className="h-4 w-4" strokeWidth={2.2} />
+                Activar notificaciones
+              </button>
+              {notificationMessage ? <p className="mt-2 text-xs text-slate-600">{notificationMessage}</p> : null}
             </div>
           </div>
         </div>
