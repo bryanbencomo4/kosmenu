@@ -1068,13 +1068,6 @@ export default function OrderTrackingPage() {
                 <p className="text-sm font-semibold text-slate-700">{orderId ? `#${orderId.slice(-8).toUpperCase()}` : '#N/A'}</p>
               </div>
               <p className="mt-2 break-all text-[11px] text-slate-500">ID completo: {orderId || 'No disponible'}</p>
-              <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
-                <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 font-semibold" style={{ backgroundColor: `color-mix(in srgb, ${syncColor} 14%, white)`, color: syncColor }}>
-                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: syncColor }} />
-                  {syncLabel}
-                </span>
-                {lastSyncLabel ? <span className="text-slate-500">Ult. sync: {lastSyncLabel}</span> : null}
-              </div>
 
               <div className="mt-4 space-y-2">
                 {timelineItems.map((item, index) => {
@@ -1113,11 +1106,6 @@ export default function OrderTrackingPage() {
                     <div ref={deliveryMapRef} className="h-56 w-full" />
                   )}
                 </div>
-                <p className="mt-2 text-xs text-slate-600">
-                  {hasActiveMapCoords
-                    ? `Coordenadas del mapa: ${activeCoordsLabel}`
-                    : 'Coordenadas no disponibles para este pedido.'}
-                </p>
               </>
             ) : null}
 
