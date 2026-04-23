@@ -99,7 +99,11 @@ export async function PATCH(request: Request, { params }: Params) {
     const body = await request.json().catch(() => ({}));
     const action = (body?.action ?? '').toString().trim().toLowerCase();
 
-    if (action !== 'cancel' && action !== 'set_whatsapp_notifications') {
+    if (
+      action !== 'cancel' &&
+      action !== 'set_whatsapp_notifications' &&
+      action !== 'confirm_received'
+    ) {
       return NextResponse.json({ error: 'Unsupported action.' }, { status: 400 });
     }
 
@@ -148,6 +152,111 @@ export async function PATCH(request: Request, { params }: Params) {
 
       if (attempt.error) {
         throw new Error(attempt.error.message);
+      }
+
+      return NextResponse.json(
+        {
+          ok: true,
+          data: {
+            order: attempt.data ?? order,
+          },
+        },
+        { status: 200 },
+      );
+    }
+
+    if (action === 'confirm_received') {
+      const currentStatus = normalizeStatus(order?.estado);
+      if (currentStatus === 'cancelado') {
+        return NextResponse.json(
+          { error: 'Este pedido esta cancelado y no puede confirmarse.' },
+          { status: 409 },
+        );
+      }
+
+      if (currentStatus === 'entregado') {
+        return NextResponse.json(
+          { ok: true, data: { order, alreadyDelivered: true } },
+          { status: 200 },
+        );
+      }
+
+      const detalles =
+        order?.detalles && typeof order.detalles === 'object'
+          ? { ...(order.detalles as Record<string, unknown>) }
+          : {};
+      const delegate =
+        detalles.delivery_delegate && typeof detalles.delivery_delegate === 'object'
+          ? { ...(detalles.delivery_delegate as Record<string, unknown>) }
+          : {};
+
+      const delegateStatus = (delegate.status ?? '').toString().trim().toLowerCase();
+      if (delegateStatus !== 'arrived' && delegateStatus !== 'completed') {
+        return NextResponse.json(
+          {
+            error:
+              'La confirmacion del cliente solo esta disponible cuando el repartidor reporta llegada.',
+          },
+          { status: 409 },
+        );
+      }
+
+      const nowIso = new Date().toISOString();
+      const invitationId = (delegate.invitation_id ?? '').toString().trim();
+
+      const nextDetalles = {
+        ...detalles,
+        delivery_delegate: {
+          ...delegate,
+          status: 'completed',
+          completed_at: nowIso,
+          customer_confirmed_at: nowIso,
+          updated_at: nowIso,
+        },
+        delivery_confirmation: {
+          source: 'cliente',
+          confirmed_at: nowIso,
+        },
+      };
+
+      const attempt = await supabase
+        .from('pedidos')
+        .update({
+          estado: 'entregado',
+          detalles: nextDetalles,
+        })
+        .eq('id', order.id)
+        .neq('estado', 'cancelado')
+        .select('*')
+        .maybeSingle();
+
+      if (attempt.error) {
+        throw new Error(attempt.error.message);
+      }
+
+      if (invitationId) {
+        const invitationUpdate = await supabase
+          .from('delivery_invitations')
+          .update({
+            status: 'completed',
+            completed_at: nowIso,
+            last_seen_at: nowIso,
+          })
+          .eq('id', invitationId)
+          .in('status', ['accepted', 'arrived', 'completed']);
+
+        if (invitationUpdate.error) {
+          throw new Error(invitationUpdate.error.message);
+        }
+
+        await supabase.rpc('log_delivery_invitation_event', {
+          p_invitation_id: invitationId,
+          p_pedido_id: order.id,
+          p_order_id: orderId,
+          p_event_type: 'completed',
+          p_actor: 'customer_confirmation',
+          p_payload: { confirmed_at: nowIso },
+        });
       }
 
       return NextResponse.json(

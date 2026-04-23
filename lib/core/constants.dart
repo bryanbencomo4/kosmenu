@@ -70,4 +70,12 @@ class AppLinks {
     final suffix = forceWebView ? '?view=web' : '';
     return '$base/orders/$encodedId$suffix';
   }
+
+  static String deliveryInviteByToken(String token) {
+    final base = productionUrl.endsWith('/')
+        ? productionUrl.substring(0, productionUrl.length - 1)
+        : productionUrl;
+    final encodedToken = Uri.encodeComponent(token.trim());
+    return '$base/delivery/invite/$encodedToken';
+  }
 }

@@ -375,6 +375,8 @@ export default function OrderTrackingPage() {
   const [whatsappPreferenceSaving, setWhatsappPreferenceSaving] = useState(false);
   const [cancelMessage, setCancelMessage] = useState('');
   const [cancelLoading, setCancelLoading] = useState(false);
+  const [deliveryConfirmationLoading, setDeliveryConfirmationLoading] = useState(false);
+  const [deliveryConfirmationMessage, setDeliveryConfirmationMessage] = useState('');
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [syncMode, setSyncMode] = useState<'conectando' | 'realtime' | 'polling' | 'sin-senal'>('conectando');
   const [lastSyncAt, setLastSyncAt] = useState(0);
@@ -457,6 +459,53 @@ export default function OrderTrackingPage() {
       setCancelMessage(message);
     } finally {
       setCancelLoading(false);
+    }
+  }
+
+  async function confirmDeliveryReceived() {
+    if (!orderId || deliveryConfirmationLoading) return;
+
+    setDeliveryConfirmationLoading(true);
+    setDeliveryConfirmationMessage('');
+
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'confirm_received',
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = (payload?.error ?? '').toString().trim();
+        throw new Error(message || 'No se pudo confirmar la entrega.');
+      }
+
+      const updatedOrder = (payload?.data?.order ?? null) as PedidoRow | null;
+      if (updatedOrder) {
+        setOrder((prev) => {
+          if (!prev) return updatedOrder;
+          return {
+            ...prev,
+            ...updatedOrder,
+            detalles: updatedOrder.detalles ?? prev.detalles,
+          };
+        });
+      }
+
+      setDeliveryConfirmationMessage('Gracias por confirmar. El pedido fue completado.');
+    } catch (confirmationError) {
+      const message =
+        confirmationError instanceof Error
+          ? confirmationError.message
+          : 'No se pudo confirmar la entrega.';
+      setDeliveryConfirmationMessage(message);
+    } finally {
+      setDeliveryConfirmationLoading(false);
     }
   }
 
@@ -815,6 +864,25 @@ export default function OrderTrackingPage() {
   const cashPaymentAmount = toNumberOrNull(order?.detalles?.pago_con);
   const cashChangeAmount = toNumberOrNull(order?.detalles?.cambio_de) ?? 0;
   const orderNotes = (order?.detalles?.order_notes ?? '').toString().trim();
+  const deliveryDelegate = ((order?.detalles as any)?.delivery_delegate ?? null) as Record<string, unknown> | null;
+  const deliveryDelegateStatus = (deliveryDelegate?.status ?? '').toString().trim().toLowerCase();
+  const deliveryDelegateAcceptedAt = (deliveryDelegate?.accepted_at ?? '').toString().trim();
+  const deliveryDelegateArrivedAt = (deliveryDelegate?.arrived_at ?? '').toString().trim();
+  const deliveryDelegateCompletedAt = (deliveryDelegate?.completed_at ?? '').toString().trim();
+  const deliveryDelegateLabel =
+    deliveryDelegateStatus === 'pending'
+      ? 'Pedido delegado. Esperando aceptacion del repartidor.'
+      : deliveryDelegateStatus === 'accepted'
+        ? 'Repartidor asignado y en ruta.'
+        : deliveryDelegateStatus === 'arrived'
+          ? 'Repartidor reporto llegada al punto.'
+          : deliveryDelegateStatus === 'completed'
+            ? 'Repartidor marco la entrega como completada.'
+            : deliveryDelegateStatus === 'revoked'
+              ? 'La delegacion del repartidor fue revocada por el comercio.'
+              : deliveryDelegateStatus === 'expired'
+                ? 'La delegacion del repartidor expiro.'
+                : '';
   const paymentMethodName = (order?.detalles?.metodo_pago?.nombre ?? '').toString().trim();
   const paymentMethodDetails = Array.isArray(order?.detalles?.metodo_pago?.datos)
     ? order?.detalles?.metodo_pago?.datos ?? []
@@ -1043,6 +1111,11 @@ export default function OrderTrackingPage() {
   const confirmTimeLeftMs = Math.max(0, CONFIRMATION_TIMEOUT_MS - pendingElapsedMs);
   const pendingExpired = displayStatus === 'pendiente' && hasCreatedAt && pendingElapsedMs >= CONFIRMATION_TIMEOUT_MS;
   const canCustomerCancel = displayStatus === 'pendiente' && pendingExpired;
+  const canCustomerConfirmDelegatedDelivery =
+    isDelivery &&
+    deliveryDelegateStatus === 'arrived' &&
+    displayStatus !== 'cancelado' &&
+    displayStatus !== 'entregado';
   const cancellationMeta = (order?.detalles as any)?.cancellation ?? null;
 
   useEffect(() => {
@@ -1317,6 +1390,16 @@ export default function OrderTrackingPage() {
               {deliveryInstructions ? <p className="mt-1 text-sm text-slate-600">Notas: {deliveryInstructions}</p> : null}
             </div>
 
+            {deliveryDelegateLabel ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Delivery delegado</p>
+                <p className="mt-2 text-sm font-semibold text-slate-700">{deliveryDelegateLabel}</p>
+                {deliveryDelegateAcceptedAt ? <p className="mt-1 text-xs text-slate-500">Aceptado: {new Date(deliveryDelegateAcceptedAt).toLocaleString('es-CO')}</p> : null}
+                {deliveryDelegateArrivedAt ? <p className="mt-1 text-xs text-slate-500">Llegada reportada: {new Date(deliveryDelegateArrivedAt).toLocaleString('es-CO')}</p> : null}
+                {deliveryDelegateCompletedAt ? <p className="mt-1 text-xs text-slate-500">Completado: {new Date(deliveryDelegateCompletedAt).toLocaleString('es-CO')}</p> : null}
+              </div>
+            ) : null}
+
             {(contactName || contactPhone || contactEmail) ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Datos del cliente</p>
@@ -1334,6 +1417,37 @@ export default function OrderTrackingPage() {
             ) : null}
 
             <div className="mt-4 rounded-2xl border border-slate-200 p-4" style={{ backgroundColor: softTone }}>
+              {canCustomerConfirmDelegatedDelivery ? (
+                <button
+                  type="button"
+                  disabled={deliveryConfirmationLoading}
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      const accepted = window.confirm(
+                        'Confirma que recibiste todo correctamente para completar el pedido.',
+                      );
+                      if (!accepted) return;
+                    }
+                    void confirmDeliveryReceived();
+                  }}
+                  className="mb-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-black"
+                  style={{
+                    borderColor: '#86EFAC',
+                    color: '#166534',
+                    backgroundColor: '#ECFDF5',
+                    opacity: deliveryConfirmationLoading ? 0.7 : 1,
+                  }}
+                >
+                  {deliveryConfirmationLoading
+                    ? 'Confirmando entrega...'
+                    : 'Confirmar que recibi mi pedido'}
+                </button>
+              ) : null}
+
+              {deliveryConfirmationMessage ? (
+                <p className="mb-2 text-xs text-slate-600">{deliveryConfirmationMessage}</p>
+              ) : null}
+
               {canCustomerCancel ? (
                 <button
                   type="button"

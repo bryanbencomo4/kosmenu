@@ -2399,15 +2399,19 @@ class _OrderTileState extends State<_OrderTile> {
   }
 
   String get _statusLabel {
-    return widget.statusBucket.label;
+    return OrderManagerService.visualStatusLabelForPedido(widget.pedido);
+  }
+
+  String _deliveryDelegateLabel() {
+    return OrderManagerService.deliveryDelegateLabelForPedido(widget.pedido);
   }
 
   Color get _statusColor {
-    return widget.statusBucket.color;
+    return OrderManagerService.visualStatusColorForPedido(widget.pedido);
   }
 
   IconData get _statusIcon {
-    return widget.statusBucket.icon;
+    return OrderManagerService.visualStatusIconForPedido(widget.pedido);
   }
 
   String _formatCountdown(Duration value) {
@@ -2499,6 +2503,7 @@ class _OrderTileState extends State<_OrderTile> {
     final color = _statusColor;
     final label = _statusLabel;
     final waitingLabel = _waitingLabel;
+    final delegateLabel = _deliveryDelegateLabel();
     final pendingTimeLeft = _pendingTimeLeft;
     final showPendingCountdownBadge = pendingTimeLeft != null;
     final waitingColor = widget.isDelayed
@@ -2591,6 +2596,19 @@ class _OrderTileState extends State<_OrderTile> {
                     fontWeight:
                         widget.isDelayed ? FontWeight.w700 : FontWeight.w500,
                     color: waitingColor,
+                  ),
+                ),
+              ],
+              if (delegateLabel.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  delegateLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF7C3AED),
                   ),
                 ),
               ],

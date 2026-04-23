@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders'];
+const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery'];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml']);
 
 function hasFileExtension(pathname: string) {

@@ -11,7 +11,9 @@ import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -53,9 +55,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   bool _checkingTrustedDevice = false;
   bool _trustRestoreRequested = false;
   bool _showTopBar = false;
+  bool _isManagingDeliveryInvite = false;
   String? _pendingStatus;
   String? _overlayStatus;
   String? _verificationError;
+  String? _latestDeliveryInviteUrl;
+  String? _deliveryInviteFeedback;
   bool _loadingMarkerIcons = false;
   String? _markerIconsKey;
   BitmapDescriptor? _businessMarkerIcon;
@@ -141,6 +146,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       final latestStatus = _normalizeStatusValue(latest.pedido.estado);
       final previousStatus = _lastKnownStatus;
+        final previousSyncSignature = _cachedOrderData == null
+          ? null
+          : _orderSyncSignature(_cachedOrderData!.pedido);
+        final latestSyncSignature = _orderSyncSignature(latest.pedido);
 
       if (latestStatus == 'pendiente' && _isPendingExpired(latest.pedido)) {
         await _autoCancelExpiredPendingOrder(latest.pedido);
@@ -157,7 +166,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       _lastKnownStatus = latestStatus;
 
-      if (_cachedOrderData == null || previousStatus != latestStatus) {
+      if (_cachedOrderData == null ||
+          previousStatus != latestStatus ||
+          previousSyncSignature != latestSyncSignature) {
         setState(() {
           _cachedOrderData = latest;
         });
@@ -175,6 +186,26 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     } finally {
       _isSyncingOrderStatus = false;
     }
+  }
+
+  String _orderSyncSignature(PedidoModel pedido) {
+    final delegate = _asMap(pedido.detalles['delivery_delegate']);
+    final delegateStatus =
+        (delegate['status'] ?? '').toString().trim().toLowerCase();
+    final acceptedAt = (delegate['accepted_at'] ?? '').toString().trim();
+    final arrivedAt = (delegate['arrived_at'] ?? '').toString().trim();
+    final completedAt = (delegate['completed_at'] ?? '').toString().trim();
+    final customerConfirmedAt =
+        (delegate['customer_confirmed_at'] ?? '').toString().trim();
+    final baseStatus = _normalizeStatusValue(pedido.estado);
+    return [
+      baseStatus,
+      delegateStatus,
+      acceptedAt,
+      arrivedAt,
+      completedAt,
+      customerConfirmedAt,
+    ].join('|');
   }
 
   @override
@@ -586,28 +617,300 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
+  String _normalizeWhatsappDigits(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return '';
+
+    if (RegExp(r'^(?:58)?4\d{9}$').hasMatch(digits)) {
+      final local = digits.startsWith('58') ? digits.substring(2) : digits;
+      return '58$local';
+    }
+
+    if (RegExp(r'^0?4\d{9}$').hasMatch(digits)) {
+      return '58${digits.replaceFirst(RegExp(r'^0'), '')}';
+    }
+
+    if (RegExp(r'^\d{10,15}$').hasMatch(digits)) {
+      return digits;
+    }
+
+    return '';
+  }
+
+  String _deliveryDelegateStatusLabel(String? status) {
+    switch ((status ?? '').trim().toLowerCase()) {
+      case 'pending':
+        return 'Pedido delegado: esperando aceptacion';
+      case 'accepted':
+        return 'Repartidor acepto delivery';
+      case 'arrived':
+        return 'Repartidor reporto llegada. En espera de confirmacion del cliente';
+      case 'completed':
+        return 'Entrega confirmada por cliente';
+      case 'revoked':
+        return 'Delegacion revocada';
+      case 'expired':
+        return 'Delegacion expirada';
+      default:
+        return '';
+    }
+  }
+
+  String _formatDateTimeShort(String? value) {
+    if (value == null || value.trim().isEmpty) return '';
+    final parsed = DateTime.tryParse(value.trim());
+    if (parsed == null) return '';
+    final local = parsed.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$day/$month $hour:$minute';
+  }
+
+  Future<String?> _promptCourierPhone({String initialValue = ''}) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return _CourierPhoneDialog(initialValue: initialValue);
+      },
+    );
+
+    return result?.trim();
+  }
+
+  Future<String?> _createDeliveryInviteLink({String? invitedPhone}) async {
+    final response = await Supabase.instance.client.rpc(
+      'create_delivery_invitation',
+      params: {
+        'p_order_id': widget.orderId,
+        'p_expires_in_minutes': 180,
+        'p_phone': invitedPhone,
+      },
+    );
+
+    if (response is! List || response.isEmpty) {
+      return null;
+    }
+
+    final row = Map<String, dynamic>.from(response.first as Map);
+    final token = (row['token'] ?? '').toString().trim();
+    if (token.isEmpty) {
+      return null;
+    }
+
+    return AppLinks.deliveryInviteByToken(token);
+  }
+
+  Future<void> _generateAndCopyDeliveryInvite({String? invitedPhone}) async {
+    if (_isManagingDeliveryInvite) return;
+
+    setState(() {
+      _isManagingDeliveryInvite = true;
+      _deliveryInviteFeedback = null;
+    });
+
+    try {
+      final inviteUrl = await _createDeliveryInviteLink(invitedPhone: invitedPhone);
+      if (inviteUrl == null || inviteUrl.trim().isEmpty) {
+        throw Exception('No fue posible generar un enlace valido.');
+      }
+
+      await Clipboard.setData(ClipboardData(text: inviteUrl));
+      if (!mounted) return;
+
+      final refreshed = await _fetchOrder();
+      if (!mounted) return;
+
+      setState(() {
+        _latestDeliveryInviteUrl = inviteUrl;
+        _cachedOrderData = refreshed ?? _cachedOrderData;
+        _deliveryInviteFeedback = 'Enlace generado y copiado.';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Enlace de delivery copiado al portapapeles.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _deliveryInviteFeedback = 'No se pudo generar el enlace.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Error al generar enlace de delivery: $error'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isManagingDeliveryInvite = false);
+      }
+    }
+  }
+
+  Future<void> _generateAndSendDeliveryInviteWhatsapp({
+    required String comercioNombre,
+    String? initialPhone,
+  }) async {
+    if (_isManagingDeliveryInvite) return;
+
+    final promptedPhone = await _promptCourierPhone(
+      initialValue: initialPhone ?? '',
+    );
+    if (!mounted || promptedPhone == null) return;
+
+    final waDigits = _normalizeWhatsappDigits(promptedPhone);
+    if (waDigits.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Ingresa un WhatsApp valido para compartir el enlace.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isManagingDeliveryInvite = true;
+      _deliveryInviteFeedback = null;
+    });
+
+    try {
+      final inviteUrl = await _createDeliveryInviteLink(invitedPhone: waDigits);
+      if (inviteUrl == null || inviteUrl.trim().isEmpty) {
+        throw Exception('No fue posible generar un enlace valido.');
+      }
+
+      final message = Uri.encodeComponent(
+        'Hola. Te asignaron una entrega de $comercioNombre.\n'
+        'Pedido: ${widget.orderId}.\n'
+        'Abre este enlace para aceptar y gestionar la entrega:\n$inviteUrl',
+      );
+
+      final waUri = Uri.parse('https://wa.me/$waDigits?text=$message');
+      final launched = await launchUrl(
+        waUri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched) {
+        throw Exception('No se pudo abrir WhatsApp en este dispositivo.');
+      }
+
+      if (!mounted) return;
+      final refreshed = await _fetchOrder();
+      if (!mounted) return;
+
+      setState(() {
+        _latestDeliveryInviteUrl = inviteUrl;
+        _cachedOrderData = refreshed ?? _cachedOrderData;
+        _deliveryInviteFeedback = 'Enlace enviado por WhatsApp.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _deliveryInviteFeedback = 'No se pudo enviar por WhatsApp.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Error enviando enlace por WhatsApp: $error'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isManagingDeliveryInvite = false);
+      }
+    }
+  }
+
+  Future<void> _revokeDeliveryInvite() async {
+    if (_isManagingDeliveryInvite) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Revocar enlace de repartidor'),
+          content: const Text(
+            'Esta accion invalida el enlace actual de delivery. Podras generar uno nuevo cuando quieras.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Revocar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isManagingDeliveryInvite = true;
+      _deliveryInviteFeedback = null;
+    });
+
+    try {
+      await Supabase.instance.client.rpc(
+        'revoke_delivery_invitation',
+        params: {'p_order_id': widget.orderId},
+      );
+
+      final refreshed = await _fetchOrder();
+      if (!mounted) return;
+
+      setState(() {
+        _latestDeliveryInviteUrl = null;
+        _cachedOrderData = refreshed ?? _cachedOrderData;
+        _deliveryInviteFeedback = 'Enlace revocado.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('No se pudo revocar el enlace: $error'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isManagingDeliveryInvite = false);
+      }
+    }
+  }
+
   String _normalizeStatusValue(String? estado) {
-    final raw = (estado ?? '').trim().toLowerCase();
-    if (raw.isEmpty) return 'pendiente';
-    if (raw == 'confirmado' || raw == 'aceptado') return 'confirmado';
-    if (raw == 'preparando' ||
-        raw == 'preparacion' ||
-        raw == 'preparación' ||
-        raw == 'en_proceso' ||
-        raw == 'en proceso' ||
-        raw == 'listo') {
-      return 'preparando';
-    }
-    if (raw == 'en_camino' || raw == 'en camino' || raw == 'despachado') {
-      return 'en_camino';
-    }
-    if (raw == 'entregado' || raw == 'completado' || raw == 'finalizado') {
+    return OrderManagerService.normalizedRawStatus(estado);
+  }
+
+  String _effectiveStatusFromDelegate({
+    required String baseStatus,
+    required String delegateStatus,
+  }) {
+    final normalizedBase = _normalizeStatusValue(baseStatus);
+    final normalizedDelegate = delegateStatus.trim().toLowerCase();
+
+    if (normalizedDelegate == 'completed') {
       return 'entregado';
     }
-    if (raw == 'cancelado' || raw == 'anulado' || raw == 'rechazado') {
-      return 'cancelado';
+
+    if (normalizedDelegate == 'accepted' || normalizedDelegate == 'arrived') {
+      if (normalizedBase != 'cancelado' && normalizedBase != 'entregado') {
+        return 'en_camino';
+      }
     }
-    return 'pendiente';
+
+    return normalizedBase;
   }
 
   List<_OrderStatusAction> _buildStatusActions({
@@ -1329,6 +1632,33 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 final isDeliveryOrder =
                     (deliveryMode ?? '').trim().toLowerCase() == 'delivery';
                 final currentStatus = _normalizeStatusValue(pedido.estado);
+                final deliveryDelegate = _asMap(
+                  pedido.detalles['delivery_delegate'],
+                );
+                final deliveryDelegateStatus =
+                  (deliveryDelegate['status'] ?? '').toString().trim();
+                final deliveryDelegateStatusNormalized =
+                    deliveryDelegateStatus.toLowerCase();
+                final deliveryDelegateInvitationId =
+                    (deliveryDelegate['invitation_id'] ?? '')
+                        .toString()
+                        .trim();
+                final deliveryDelegateInvitedPhone =
+                  (deliveryDelegate['invited_phone'] ?? '')
+                    .toString()
+                    .trim();
+                final deliveryDelegateAcceptedAt =
+                  (deliveryDelegate['accepted_at'] ?? '')
+                    .toString()
+                    .trim();
+                final deliveryDelegateArrivedAt =
+                  (deliveryDelegate['arrived_at'] ?? '')
+                    .toString()
+                    .trim();
+                final deliveryDelegateExpiresAt =
+                  (deliveryDelegate['expires_at'] ?? '')
+                    .toString()
+                    .trim();
                 final deliveryAddress = pedido.deliveryAddress?.trim();
                 final deliveryReference = pedido.deliveryReference?.trim();
                 final deliveryInstructions = pedido.deliveryInstructions
@@ -1344,9 +1674,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     data.businessLatitude != null &&
                     data.businessLongitude != null;
                 final isReadOnly = widget.readOnlyView;
+                final effectiveStatus =
+                  OrderManagerService.effectiveRawStatusForPedido(pedido);
+                final visualStatusCode =
+                  OrderManagerService.visualStatusCodeForPedido(pedido);
+                final visualStatusLabel =
+                  OrderManagerService.visualStatusLabelForPedido(pedido);
+                final visualStatusColor =
+                  OrderManagerService.visualStatusColorForPedido(pedido);
                 final nextStatusActions = _buildStatusActions(
                   isDelivery: isDeliveryOrder,
-                  currentStatus: currentStatus,
+                  currentStatus: effectiveStatus,
+                );
+                final isDelegatedDelivery =
+                    isDeliveryOrder &&
+                    (deliveryDelegateInvitationId.isNotEmpty ||
+                        deliveryDelegateStatusNormalized.isNotEmpty) &&
+                    deliveryDelegateStatusNormalized != 'revoked' &&
+                    deliveryDelegateStatusNormalized != 'expired';
+                final isAwaitingCustomerConfirmation =
+                  visualStatusCode == 'espera_cliente';
+                final canTransitionToEnCamino = nextStatusActions.any(
+                  (action) => action.status == 'en_camino',
                 );
                 final statusActionsForBar =
                     List<_OrderStatusAction>.from(nextStatusActions)..sort((
@@ -1361,6 +1710,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       }
                       return 0;
                     });
+                if (isDelegatedDelivery) {
+                  statusActionsForBar.removeWhere(
+                    (action) =>
+                        action.status == 'en_camino' ||
+                        action.status == 'entregado',
+                  );
+                }
                 String? primaryStatusForBar;
                 for (final action in statusActionsForBar) {
                   if (action.status != 'cancelado') {
@@ -1372,6 +1728,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     statusActionsForBar.isNotEmpty) {
                   primaryStatusForBar = statusActionsForBar.first.status;
                 }
+                final hasNonCancelAction = statusActionsForBar.any(
+                  (action) => action.status != 'cancelado',
+                );
+                final isOrderFinalized =
+                    visualStatusCode == 'entregado' ||
+                    visualStatusCode == 'cancelado' ||
+                    deliveryDelegateStatusNormalized == 'completed';
+                final shouldShowNextStepCard =
+                    !isReadOnly &&
+                    !isOrderFinalized &&
+                    statusActionsForBar.isNotEmpty;
                 final LatLng? deliveryPoint = hasDeliveryCoords
                     ? LatLng(deliveryLat, deliveryLng)
                     : null;
@@ -1683,14 +2050,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         vertical: 8,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: _statusColor(
-                                          pedido.estado,
-                                        ).withValues(alpha: 0.15),
+                                        color: visualStatusColor.withValues(
+                                          alpha: 0.15,
+                                        ),
                                         borderRadius: BorderRadius.circular(12),
                                         border: Border.all(
-                                          color: _statusColor(
-                                            pedido.estado,
-                                          ).withValues(alpha: 0.35),
+                                          color: visualStatusColor.withValues(
+                                            alpha: 0.35,
+                                          ),
                                         ),
                                       ),
                                       child: Row(
@@ -1699,15 +2066,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                           Icon(
                                             Icons.flag_rounded,
                                             size: 14,
-                                            color: _statusColor(pedido.estado),
+                                            color: visualStatusColor,
                                           ),
                                           const SizedBox(width: 6),
                                           Text(
-                                            _statusLabel(pedido.estado),
+                                            visualStatusLabel,
                                             style: GoogleFonts.manrope(
-                                              color: _statusColor(
-                                                pedido.estado,
-                                              ),
+                                              color: visualStatusColor,
                                               fontSize: 12,
                                               fontWeight: FontWeight.w800,
                                             ),
@@ -1717,6 +2082,35 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     ),
                                   ],
                                 ),
+                                if (isAwaitingCustomerConfirmation) ...[
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(
+                                        0xFFF59E0B,
+                                      ).withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: const Color(
+                                          0xFFF59E0B,
+                                        ).withValues(alpha: 0.34),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'Repartidor reporto llegada. En espera de confirmacion del cliente para completar el pedido.',
+                                      style: GoogleFonts.manrope(
+                                        color: const Color(0xFF92400E),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 const SizedBox(height: 14),
                                 Container(
                                   width: double.infinity,
@@ -2077,6 +2471,256 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                       ),
                                     ),
                                   ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                            if (!isReadOnly &&
+                              isDeliveryOrder &&
+                              canTransitionToEnCamino) ...[
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: surface,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: accent.withValues(alpha: 0.18),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 34,
+                                        height: 34,
+                                        decoration: BoxDecoration(
+                                          color: accent.withValues(alpha: 0.14),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          Icons.delivery_dining_rounded,
+                                          color: accent,
+                                          size: 18,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Delegar repartidor',
+                                              style: GoogleFonts.manrope(
+                                                color: text,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'Genera un enlace unico y compartelo por WhatsApp.',
+                                              style: GoogleFonts.manrope(
+                                                color: muted,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: surfaceAlt.withValues(alpha: 0.58),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: text.withValues(alpha: 0.1),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Estado: ${_deliveryDelegateStatusLabel(deliveryDelegateStatus)}',
+                                          style: GoogleFonts.manrope(
+                                            color: text,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        if (deliveryDelegateExpiresAt.isNotEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 4,
+                                            ),
+                                            child: Text(
+                                              'Expira: ${_formatDateTimeShort(deliveryDelegateExpiresAt)}',
+                                              style: GoogleFonts.manrope(
+                                                color: muted,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        if (deliveryDelegateAcceptedAt.isNotEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 4,
+                                            ),
+                                            child: Text(
+                                              'Aceptado: ${_formatDateTimeShort(deliveryDelegateAcceptedAt)}',
+                                              style: GoogleFonts.manrope(
+                                                color: muted,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        if (deliveryDelegateArrivedAt.isNotEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 4,
+                                            ),
+                                            child: Text(
+                                              'Llegada: ${_formatDateTimeShort(deliveryDelegateArrivedAt)}',
+                                              style: GoogleFonts.manrope(
+                                                color: muted,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        if (isAwaitingCustomerConfirmation)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 6,
+                                            ),
+                                            child: Text(
+                                              'En espera de confirmacion del cliente para completar la entrega.',
+                                              style: GoogleFonts.manrope(
+                                                color: const Color(0xFFB45309),
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      onPressed: _isManagingDeliveryInvite
+                                          ? null
+                                          : () => _generateAndSendDeliveryInviteWhatsapp(
+                                              comercioNombre:
+                                                  data.comercioNombre,
+                                              initialPhone:
+                                                  deliveryDelegateInvitedPhone,
+                                            ),
+                                      icon: const FaIcon(
+                                        FontAwesomeIcons.whatsapp,
+                                        size: 16,
+                                      ),
+                                      label: Text(
+                                        _isManagingDeliveryInvite
+                                            ? 'Procesando...'
+                                            : 'Generar y enviar por WhatsApp',
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(
+                                          0xFF16A34A,
+                                        ),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton.icon(
+                                          onPressed: _isManagingDeliveryInvite
+                                              ? null
+                                              : () => _generateAndCopyDeliveryInvite(
+                                                  invitedPhone:
+                                                      deliveryDelegateInvitedPhone.isEmpty
+                                                      ? null
+                                                      : deliveryDelegateInvitedPhone,
+                                                ),
+                                          icon: const Icon(
+                                            Icons.copy_all_rounded,
+                                            size: 17,
+                                          ),
+                                          label: const Text('Copiar enlace'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: OutlinedButton.icon(
+                                          onPressed: _isManagingDeliveryInvite ||
+                                                  (deliveryDelegateStatus
+                                                              .toLowerCase() !=
+                                                          'pending' &&
+                                                      deliveryDelegateStatus
+                                                              .toLowerCase() !=
+                                                          'accepted' &&
+                                                      deliveryDelegateStatus
+                                                              .toLowerCase() !=
+                                                          'arrived')
+                                              ? null
+                                              : _revokeDeliveryInvite,
+                                          icon: const Icon(
+                                            Icons.block_rounded,
+                                            size: 17,
+                                          ),
+                                          label: const Text('Revocar'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if ((_latestDeliveryInviteUrl ?? '').isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 8),
+                                      child: SelectableText(
+                                        _latestDeliveryInviteUrl!,
+                                        style: GoogleFonts.manrope(
+                                          color: muted,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  if ((_deliveryInviteFeedback ?? '').isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 8),
+                                      child: Text(
+                                        _deliveryInviteFeedback!,
+                                        style: GoogleFonts.manrope(
+                                          color: muted,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -2774,9 +3418,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                         ],
                       ),
                     ),
-                    if (!isReadOnly &&
-                        currentStatus != 'entregado' &&
-                        currentStatus != 'cancelado')
+                    if (shouldShowNextStepCard)
                       SafeArea(
                         top: false,
                         child: Padding(
@@ -2802,7 +3444,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Siguiente paso',
+                                  hasNonCancelAction
+                                      ? 'Siguiente paso'
+                                      : 'Acciones disponibles',
                                   style: GoogleFonts.manrope(
                                     color: text,
                                     fontSize: 14,
@@ -2811,15 +3455,53 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  nextStatusActions.isEmpty
-                                      ? 'Este pedido ya esta finalizado.'
-                                      : 'Selecciona la accion para continuar el pedido.',
+                                  isDelegatedDelivery
+                                          ? isAwaitingCustomerConfirmation
+                                          ? 'Repartidor reporto llegada. En espera de confirmacion del cliente.'
+                                          : 'Pedido delegado a repartidor: el avance de ruta depende del repartidor.'
+                                          : hasNonCancelAction
+                                          ? 'Selecciona la accion para continuar el pedido.'
+                                          : 'Solo puedes cancelar este pedido en este momento.',
                                   style: GoogleFonts.manrope(
                                     color: muted,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
+                                if (isDelegatedDelivery) ...[
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: accent.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: accent.withValues(alpha: 0.28),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.info_outline_rounded,
+                                          size: 16,
+                                          color: accent,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'El estado del repartidor se actualiza desde el enlace delegado.',
+                                            style: GoogleFonts.manrope(
+                                              color: text,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                                 const SizedBox(height: 10),
                                 if (statusActionsForBar.isEmpty)
                                   SizedBox(
@@ -3187,4 +3869,54 @@ class _OrderStatusAction {
   final String label;
   final IconData icon;
   final Color color;
+}
+
+class _CourierPhoneDialog extends StatefulWidget {
+  const _CourierPhoneDialog({required this.initialValue});
+
+  final String initialValue;
+
+  @override
+  State<_CourierPhoneDialog> createState() => _CourierPhoneDialogState();
+}
+
+class _CourierPhoneDialogState extends State<_CourierPhoneDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Enviar a WhatsApp del repartidor'),
+      content: TextField(
+        controller: _controller,
+        keyboardType: TextInputType.phone,
+        decoration: const InputDecoration(
+          labelText: 'Telefono WhatsApp',
+          hintText: 'Ejemplo: +58 4121234567',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('Continuar'),
+        ),
+      ],
+    );
+  }
 }
