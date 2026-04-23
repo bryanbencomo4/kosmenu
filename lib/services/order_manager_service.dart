@@ -41,6 +41,20 @@ class OrderManagerService {
     return (delegate['status'] ?? '').toString().trim().toLowerCase();
   }
 
+  static bool isDelegationActiveStatus(String status) {
+    return status == 'pending' || status == 'accepted' || status == 'arrived';
+  }
+
+  static bool hasActiveDelegationForPedido(PedidoModel pedido) {
+    final status = delegateStatusForPedido(pedido);
+    return isDelegationActiveStatus(status);
+  }
+
+  static bool isDelegationControlTransferredForPedido(PedidoModel pedido) {
+    final status = delegateStatusForPedido(pedido);
+    return status == 'accepted' || status == 'arrived';
+  }
+
   static String effectiveRawStatusForPedido(PedidoModel pedido) {
     final rawStatus = normalizedRawStatus(pedido.estado);
     final delegateStatus = delegateStatusForPedido(pedido);

@@ -822,6 +822,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _handleQuickAdvance(PedidoModel pedido) async {
+    final delegatedControlTransferred =
+        OrderManagerService.isDelegationControlTransferredForPedido(pedido);
+    if (delegatedControlTransferred) {
+      _showInfo(
+        'Este pedido esta delegado. El avance de ruta depende del repartidor y la confirmacion del cliente.',
+      );
+      return;
+    }
+
     final bucket = pedido.statusBucket;
     String? nextEstado;
     String? successMessage;
@@ -2406,6 +2415,12 @@ class _OrderTileState extends State<_OrderTile> {
     return OrderManagerService.deliveryDelegateLabelForPedido(widget.pedido);
   }
 
+  bool get _isDelegationControlTransferred {
+    return OrderManagerService.isDelegationControlTransferredForPedido(
+      widget.pedido,
+    );
+  }
+
   Color get _statusColor {
     return OrderManagerService.visualStatusColorForPedido(widget.pedido);
   }
@@ -2532,9 +2547,23 @@ class _OrderTileState extends State<_OrderTile> {
         child: const Icon(Icons.block_flipped, color: Colors.white),
       ),
       confirmDismiss: (direction) async {
+        final messenger = ScaffoldMessenger.of(context);
         await HapticFeedback.mediumImpact();
 
         if (direction == DismissDirection.startToEnd) {
+          if (_isDelegationControlTransferred) {
+            if (mounted) {
+              messenger.showSnackBar(
+                const SnackBar(
+                  behavior: SnackBarBehavior.floating,
+                  content: Text(
+                    'Pedido delegado: el repartidor/cliente deben completar la entrega.',
+                  ),
+                ),
+              );
+            }
+            return false;
+          }
           await widget.onQuickAdvance();
           return false;
         }

@@ -48,6 +48,8 @@
 		<string>elmenuxfa.com necesita acceso a la cámara para capturar el logo de tu negocio.</string>
 		<key>NSLocationWhenInUseUsageDescription</key>
 		<string>elmenuxfa.com usa tu ubicacion para centrar el mapa al elegir la ubicacion del negocio.</string>
+		<key>NSContactsUsageDescription</key>
+		<string>elmenuxfa.com necesita acceso a tus contactos para seleccionar rapidamente un repartidor.</string>
 		<key>UIBackgroundModes</key>
 		<array>
 			<string>remote-notification</string>

@@ -13,7 +13,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/services/delivery_courier_service.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
+import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -73,6 +75,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   bool _isAutoCancelingExpiredPending = false;
   String? _lastKnownStatus;
   _OrderViewData? _cachedOrderData;
+  final Map<String, String> _delegatedCourierAliasCache =
+      <String, String>{};
 
   @override
   void initState() {
@@ -248,6 +252,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     double? businessLatitude;
     double? businessLongitude;
     String? businessLogoUrl;
+    String? delegatedCourierAlias;
     if (foundPedido.comercioId.isNotEmpty) {
       final comercioRow = await client
           .from('comercios')
@@ -263,6 +268,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       businessLatitude = _toDoubleOrNull(comercioMap['latitud']);
       businessLongitude = _toDoubleOrNull(comercioMap['longitud']);
       businessLogoUrl = _resolveComercioLogoUrl(comercioMap);
+
+      final delegate = _asMap(foundPedido.detalles['delivery_delegate']);
+      final invitedPhone = (delegate['invited_phone'] ?? '').toString().trim();
+      final invitedAlias =
+          (delegate['invited_alias'] ??
+                  delegate['invited_name'] ??
+                  delegate['invited_note'] ??
+                  '')
+              .toString()
+              .trim();
+      if (invitedAlias.isNotEmpty) {
+        delegatedCourierAlias = invitedAlias;
+      } else {
+        delegatedCourierAlias = await _resolveDelegatedCourierAliasByPhone(
+          comercioId: foundPedido.comercioId,
+          invitedPhone: invitedPhone,
+        );
+      }
     }
 
     return _OrderViewData(
@@ -271,12 +294,72 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       businessLatitude: businessLatitude,
       businessLongitude: businessLongitude,
       businessLogoUrl: businessLogoUrl,
+      delegatedCourierAlias: delegatedCourierAlias,
       history: _buildOrderHistory(
         pedidosRows,
         currentOrderId: widget.orderId,
         email: foundPedido.clienteEmail,
       ),
     );
+  }
+
+  Future<String> _resolveDelegatedCourierAliasByPhone({
+    required String comercioId,
+    required String invitedPhone,
+  }) async {
+    final normalizedInvited = DeliveryCourierService.normalizeDigits(invitedPhone);
+    if (comercioId.trim().isEmpty || normalizedInvited.isEmpty) {
+      return '';
+    }
+
+    final cacheKey = '${comercioId.trim()}|$normalizedInvited';
+    final cachedAlias = (_delegatedCourierAliasCache[cacheKey] ?? '').trim();
+    if (cachedAlias.isNotEmpty) {
+      return cachedAlias;
+    }
+
+    var couriers = await DeliveryCourierService.listByComercio(
+      comercioId: comercioId,
+      query: normalizedInvited,
+      limit: 40,
+    );
+    if (couriers.isEmpty) {
+      couriers = await DeliveryCourierService.listByComercio(
+        comercioId: comercioId,
+        query: '',
+        limit: 120,
+      );
+    }
+    if (couriers.isEmpty) return '';
+
+    for (final courier in couriers) {
+      final normalizedCourier = DeliveryCourierService.normalizeDigits(
+        courier.normalizedPhone,
+      );
+      if (normalizedCourier == normalizedInvited) {
+        final resolved = courier.alias.trim();
+        if (resolved.isNotEmpty) {
+          _delegatedCourierAliasCache[cacheKey] = resolved;
+        }
+        return resolved;
+      }
+    }
+
+    for (final courier in couriers) {
+      final normalizedCourier = DeliveryCourierService.normalizeDigits(
+        courier.normalizedPhone,
+      );
+      if (normalizedCourier.endsWith(normalizedInvited) ||
+          normalizedInvited.endsWith(normalizedCourier)) {
+        final resolved = courier.alias.trim();
+        if (resolved.isNotEmpty) {
+          _delegatedCourierAliasCache[cacheKey] = resolved;
+        }
+        return resolved;
+      }
+    }
+
+    return '';
   }
 
   List<_HistoryOrderViewData> _buildOrderHistory(
@@ -617,26 +700,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
-  String _normalizeWhatsappDigits(String value) {
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.isEmpty) return '';
-
-    if (RegExp(r'^(?:58)?4\d{9}$').hasMatch(digits)) {
-      final local = digits.startsWith('58') ? digits.substring(2) : digits;
-      return '58$local';
-    }
-
-    if (RegExp(r'^0?4\d{9}$').hasMatch(digits)) {
-      return '58${digits.replaceFirst(RegExp(r'^0'), '')}';
-    }
-
-    if (RegExp(r'^\d{10,15}$').hasMatch(digits)) {
-      return digits;
-    }
-
-    return '';
-  }
-
   String _deliveryDelegateStatusLabel(String? status) {
     switch ((status ?? '').trim().toLowerCase()) {
       case 'pending':
@@ -668,15 +731,65 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return '$day/$month $hour:$minute';
   }
 
-  Future<String?> _promptCourierPhone({String initialValue = ''}) async {
-    final result = await showDialog<String>(
+  Future<String?> _promptDeliveryExecutionMode() async {
+    return showModalBottomSheet<String>(
       context: context,
-      builder: (dialogContext) {
-        return _CourierPhoneDialog(initialValue: initialValue);
-      },
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (dialogContext) => const _DeliveryExecutionModeSheet(),
     );
+  }
 
-    return result?.trim();
+  Future<void> _handleOrderStatusAction({
+    required _OrderStatusAction action,
+    required bool isDeliveryOrder,
+    required bool hasActiveDelegation,
+    required String comercioNombre,
+    required String comercioId,
+    required String initialDelegatePhone,
+  }) async {
+    final latestPedido = _cachedOrderData?.pedido;
+    if (_normalizeStatusValue(latestPedido?.estado) == 'cancelado') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              'Este pedido fue cancelado. Ya no puedes realizar acciones.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (action.status == 'cancelado') {
+      final confirmed = await _confirmCancelOrder();
+      if (!confirmed || !mounted) {
+        return;
+      }
+    }
+
+    if (action.status == 'en_camino' &&
+        isDeliveryOrder &&
+        !hasActiveDelegation) {
+      final mode = await _promptDeliveryExecutionMode();
+      if (!mounted || mode == null) {
+        return;
+      }
+
+      if (mode == 'delegate') {
+        await _generateAndSendDeliveryInviteWhatsapp(
+          comercioId: comercioId,
+          comercioNombre: comercioNombre,
+          initialPhone: initialDelegatePhone.isEmpty ? null : initialDelegatePhone,
+        );
+        return;
+      }
+    }
+
+    await _updateOrderStatus(action.status);
   }
 
   Future<String?> _createDeliveryInviteLink({String? invitedPhone}) async {
@@ -753,18 +866,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   }
 
   Future<void> _generateAndSendDeliveryInviteWhatsapp({
+    required String comercioId,
     required String comercioNombre,
     String? initialPhone,
   }) async {
     if (_isManagingDeliveryInvite) return;
 
-    final promptedPhone = await _promptCourierPhone(
-      initialValue: initialPhone ?? '',
+    final selection = await showModalBottomSheet<DeliveryCourierSelection>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => AssignCourierSheet(
+        comercioId: comercioId,
+        initialQuery: initialPhone ?? '',
+      ),
     );
-    if (!mounted || promptedPhone == null) return;
+    if (!mounted || selection == null) return;
 
-    final waDigits = _normalizeWhatsappDigits(promptedPhone);
-    if (waDigits.isEmpty) {
+    final waDigits = DeliveryCourierService.normalizeDigits(
+      selection.normalizedPhone,
+    );
+    if (waDigits.isEmpty || waDigits.length < 10) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           behavior: SnackBarBehavior.floating,
@@ -786,7 +909,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       }
 
       final message = Uri.encodeComponent(
-        'Hola. Te asignaron una entrega de $comercioNombre.\n'
+        'Hola ${selection.alias}. Te asignaron una entrega de $comercioNombre.\n'
         'Pedido: ${widget.orderId}.\n'
         'Abre este enlace para aceptar y gestionar la entrega:\n$inviteUrl',
       );
@@ -810,6 +933,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         _cachedOrderData = refreshed ?? _cachedOrderData;
         _deliveryInviteFeedback = 'Enlace enviado por WhatsApp.';
       });
+
+      if (selection.courierId != null && selection.courierId!.isNotEmpty) {
+        await DeliveryCourierService.touchLastUsed(selection.courierId!);
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -891,26 +1018,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
   String _normalizeStatusValue(String? estado) {
     return OrderManagerService.normalizedRawStatus(estado);
-  }
-
-  String _effectiveStatusFromDelegate({
-    required String baseStatus,
-    required String delegateStatus,
-  }) {
-    final normalizedBase = _normalizeStatusValue(baseStatus);
-    final normalizedDelegate = delegateStatus.trim().toLowerCase();
-
-    if (normalizedDelegate == 'completed') {
-      return 'entregado';
-    }
-
-    if (normalizedDelegate == 'accepted' || normalizedDelegate == 'arrived') {
-      if (normalizedBase != 'cancelado' && normalizedBase != 'entregado') {
-        return 'en_camino';
-      }
-    }
-
-    return normalizedBase;
   }
 
   List<_OrderStatusAction> _buildStatusActions({
@@ -1177,23 +1284,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         return 'Cancelado';
       default:
         return 'Pendiente';
-    }
-  }
-
-  Color _statusColor(String? estado) {
-    switch (_normalizeStatusValue(estado)) {
-      case 'confirmado':
-        return const Color(0xFF2563EB);
-      case 'preparando':
-        return const Color(0xFFF59E0B);
-      case 'en_camino':
-        return const Color(0xFF0EA5E9);
-      case 'entregado':
-        return const Color(0xFF27C46B);
-      case 'cancelado':
-        return const Color(0xFFE3645B);
-      default:
-        return const Color(0xFFD7A74D);
     }
   }
 
@@ -1631,7 +1721,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 final deliveryMode = pedido.deliveryMode?.trim();
                 final isDeliveryOrder =
                     (deliveryMode ?? '').trim().toLowerCase() == 'delivery';
-                final currentStatus = _normalizeStatusValue(pedido.estado);
                 final deliveryDelegate = _asMap(
                   pedido.detalles['delivery_delegate'],
                 );
@@ -1643,10 +1732,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     (deliveryDelegate['invitation_id'] ?? '')
                         .toString()
                         .trim();
+                final hasDelegationRecord =
+                    deliveryDelegateStatusNormalized.isNotEmpty ||
+                    deliveryDelegateInvitationId.isNotEmpty;
                 final deliveryDelegateInvitedPhone =
                   (deliveryDelegate['invited_phone'] ?? '')
                     .toString()
                     .trim();
+                final deliveryDelegateInvitedNote =
+                  (deliveryDelegate['invited_note'] ?? '')
+                    .toString()
+                    .trim();
+                final deliveryDelegateAcceptedBy =
+                  (deliveryDelegate['accepted_by_name'] ??
+                          deliveryDelegate['accepted_by'] ??
+                          deliveryDelegate['accepted_by_alias'] ??
+                          deliveryDelegate['courier_name'] ??
+                          '')
+                      .toString()
+                      .trim();
                 final deliveryDelegateAcceptedAt =
                   (deliveryDelegate['accepted_at'] ?? '')
                     .toString()
@@ -1659,6 +1763,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   (deliveryDelegate['expires_at'] ?? '')
                     .toString()
                     .trim();
+                final deliveryDelegateAlias =
+                  (deliveryDelegateAcceptedBy.isNotEmpty
+                    ? deliveryDelegateAcceptedBy
+                    : (data.delegatedCourierAlias ?? '').trim().isNotEmpty
+                    ? (data.delegatedCourierAlias ?? '').trim()
+                    : deliveryDelegateInvitedNote)
+                      .trim();
+                final deliveryDelegatePhoneDigits =
+                  DeliveryCourierService.normalizeDigits(
+                    deliveryDelegateInvitedPhone,
+                  );
+                final deliveryDelegatePhoneDisplay =
+                  deliveryDelegatePhoneDigits.isEmpty
+                  ? ''
+                  : '+$deliveryDelegatePhoneDigits';
+                final canContactDelegatedCourier =
+                  deliveryDelegatePhoneDigits.length >= 10;
                 final deliveryAddress = pedido.deliveryAddress?.trim();
                 final deliveryReference = pedido.deliveryReference?.trim();
                 final deliveryInstructions = pedido.deliveryInstructions
@@ -1682,6 +1803,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   OrderManagerService.visualStatusLabelForPedido(pedido);
                 final visualStatusColor =
                   OrderManagerService.visualStatusColorForPedido(pedido);
+                final isOrderCanceled = visualStatusCode == 'cancelado';
                 final nextStatusActions = _buildStatusActions(
                   isDelivery: isDeliveryOrder,
                   currentStatus: effectiveStatus,
@@ -1692,11 +1814,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                         deliveryDelegateStatusNormalized.isNotEmpty) &&
                     deliveryDelegateStatusNormalized != 'revoked' &&
                     deliveryDelegateStatusNormalized != 'expired';
+                final isDelegationControlTransferred =
+                    isDelegatedDelivery &&
+                    (deliveryDelegateStatusNormalized == 'accepted' ||
+                        deliveryDelegateStatusNormalized == 'arrived');
                 final isAwaitingCustomerConfirmation =
                   visualStatusCode == 'espera_cliente';
-                final canTransitionToEnCamino = nextStatusActions.any(
-                  (action) => action.status == 'en_camino',
-                );
+                final isAwaitingDelegateConfirmation =
+                  hasDelegationRecord &&
+                  deliveryDelegateStatusNormalized == 'pending';
+                final deliveryDelegateStatusSummary =
+                  isAwaitingDelegateConfirmation
+                  ? 'Invitacion enviada'
+                  : _deliveryDelegateStatusLabel(deliveryDelegateStatus);
                 final statusActionsForBar =
                     List<_OrderStatusAction>.from(nextStatusActions)..sort((
                       a,
@@ -1710,7 +1840,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       }
                       return 0;
                     });
-                if (isDelegatedDelivery) {
+                if (isDelegationControlTransferred) {
                   statusActionsForBar.removeWhere(
                     (action) =>
                         action.status == 'en_camino' ||
@@ -2436,11 +2566,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     SizedBox(
                                       width: double.infinity,
                                       child: OutlinedButton.icon(
-                                        onPressed: () =>
-                                            _openExternalGoogleMapsNavigation(
-                                              origin: businessPoint!,
-                                              destination: deliveryPoint,
-                                            ),
+                                        onPressed: isOrderCanceled
+                                            ? null
+                                            : () =>
+                                                  _openExternalGoogleMapsNavigation(
+                                                    origin: businessPoint!,
+                                                    destination: deliveryPoint,
+                                                  ),
                                         icon: const Icon(
                                           Icons.navigation_rounded,
                                         ),
@@ -2476,9 +2608,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                             ),
                             const SizedBox(height: 14),
                           ],
-                            if (!isReadOnly &&
-                              isDeliveryOrder &&
-                              canTransitionToEnCamino) ...[
+                            if (!isReadOnly && hasDelegationRecord) ...[
                             Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
@@ -2515,7 +2645,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              'Delegar repartidor',
+                                              'Repartidor delegado',
                                               style: GoogleFonts.manrope(
                                                 color: text,
                                                 fontSize: 16,
@@ -2524,7 +2654,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                             ),
                                             const SizedBox(height: 2),
                                             Text(
-                                              'Genera un enlace unico y compartelo por WhatsApp.',
+                                              'Esta entrega ya fue delegada a un repartidor externo.',
                                               style: GoogleFonts.manrope(
                                                 color: muted,
                                                 fontSize: 12,
@@ -2555,32 +2685,34 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                           CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          'Estado: ${_deliveryDelegateStatusLabel(deliveryDelegateStatus)}',
+                                          'Estado: $deliveryDelegateStatusSummary',
                                           style: GoogleFonts.manrope(
                                             color: text,
                                             fontSize: 13,
                                             fontWeight: FontWeight.w800,
                                           ),
                                         ),
-                                        if (deliveryDelegateExpiresAt.isNotEmpty)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 4,
-                                            ),
-                                            child: Text(
-                                              'Expira: ${_formatDateTimeShort(deliveryDelegateExpiresAt)}',
-                                              style: GoogleFonts.manrope(
-                                                color: muted,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Nombre: ${deliveryDelegateAlias.isEmpty ? 'Pendiente por confirmar' : deliveryDelegateAlias}',
+                                          style: GoogleFonts.manrope(
+                                            color: muted,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
                                           ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Telefono: ${deliveryDelegatePhoneDisplay.isEmpty ? 'No registrado' : deliveryDelegatePhoneDisplay}',
+                                          style: GoogleFonts.manrope(
+                                            color: muted,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
                                         if (deliveryDelegateAcceptedAt.isNotEmpty)
                                           Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 4,
-                                            ),
+                                            padding: const EdgeInsets.only(top: 4),
                                             child: Text(
                                               'Aceptado: ${_formatDateTimeShort(deliveryDelegateAcceptedAt)}',
                                               style: GoogleFonts.manrope(
@@ -2592,9 +2724,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                           ),
                                         if (deliveryDelegateArrivedAt.isNotEmpty)
                                           Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 4,
-                                            ),
+                                            padding: const EdgeInsets.only(top: 4),
                                             child: Text(
                                               'Llegada: ${_formatDateTimeShort(deliveryDelegateArrivedAt)}',
                                               style: GoogleFonts.manrope(
@@ -2604,17 +2734,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                               ),
                                             ),
                                           ),
-                                        if (isAwaitingCustomerConfirmation)
+                                        if (deliveryDelegateExpiresAt.isNotEmpty)
                                           Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 6,
-                                            ),
+                                            padding: const EdgeInsets.only(top: 4),
                                             child: Text(
-                                              'En espera de confirmacion del cliente para completar la entrega.',
+                                              'Expira: ${_formatDateTimeShort(deliveryDelegateExpiresAt)}',
                                               style: GoogleFonts.manrope(
-                                                color: const Color(0xFFB45309),
+                                                color: muted,
                                                 fontSize: 12,
-                                                fontWeight: FontWeight.w700,
+                                                fontWeight: FontWeight.w600,
                                               ),
                                             ),
                                           ),
@@ -2622,93 +2750,154 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     ),
                                   ),
                                   const SizedBox(height: 10),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: ElevatedButton.icon(
-                                      onPressed: _isManagingDeliveryInvite
-                                          ? null
-                                          : () => _generateAndSendDeliveryInviteWhatsapp(
-                                              comercioNombre:
-                                                  data.comercioNombre,
-                                              initialPhone:
-                                                  deliveryDelegateInvitedPhone,
-                                            ),
-                                      icon: const FaIcon(
-                                        FontAwesomeIcons.whatsapp,
-                                        size: 16,
+                                  if (isAwaitingDelegateConfirmation)
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
                                       ),
-                                      label: Text(
-                                        _isManagingDeliveryInvite
-                                            ? 'Procesando...'
-                                            : 'Generar y enviar por WhatsApp',
-                                      ),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(
-                                          0xFF16A34A,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFEF3C7),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: const Color(0xFFF59E0B).withValues(alpha: 0.38),
                                         ),
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 13,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                    Color(0xFFD97706),
+                                                  ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              'Esperando confirmacion del repartidor delegado...',
+                                              style: GoogleFonts.manrope(
+                                                color: const Color(0xFF92400E),
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  if (isAwaitingDelegateConfirmation)
+                                    const SizedBox(height: 10),
+                                  if (isAwaitingCustomerConfirmation)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 10),
+                                      child: Text(
+                                        'En espera de confirmacion del cliente para completar la entrega.',
+                                        style: GoogleFonts.manrope(
+                                          color: const Color(0xFFB45309),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 8),
                                   Row(
                                     children: [
                                       Expanded(
-                                        child: OutlinedButton.icon(
-                                          onPressed: _isManagingDeliveryInvite
+                                        child: ElevatedButton.icon(
+                                          onPressed:
+                                              isOrderCanceled ||
+                                                  !canContactDelegatedCourier
                                               ? null
-                                              : () => _generateAndCopyDeliveryInvite(
-                                                  invitedPhone:
-                                                      deliveryDelegateInvitedPhone.isEmpty
-                                                      ? null
-                                                      : deliveryDelegateInvitedPhone,
-                                                ),
-                                          icon: const Icon(
-                                            Icons.copy_all_rounded,
-                                            size: 17,
+                                              : () async {
+                                                  final message = Uri.encodeComponent(
+                                                    'Hola ${deliveryDelegateAlias.isEmpty ? 'repartidor' : deliveryDelegateAlias}, te escribimos desde ${data.comercioNombre} por el pedido ${widget.orderId}.',
+                                                  );
+                                                  final waUri = Uri.parse(
+                                                    'https://wa.me/$deliveryDelegatePhoneDigits?text=$message',
+                                                  );
+                                                  final opened = await launchUrl(
+                                                    waUri,
+                                                    mode: LaunchMode.externalApplication,
+                                                  );
+                                                  if (!opened && mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      const SnackBar(
+                                                        behavior: SnackBarBehavior.floating,
+                                                        content: Text('No se pudo abrir WhatsApp.'),
+                                                      ),
+                                                    );
+                                                  }
+                                                },
+                                          icon: const FaIcon(
+                                            FontAwesomeIcons.whatsapp,
+                                            size: 15,
                                           ),
-                                          label: const Text('Copiar enlace'),
+                                          label: const Text('WhatsApp'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFF16A34A),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 12,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: OutlinedButton.icon(
-                                          onPressed: _isManagingDeliveryInvite ||
-                                                  (deliveryDelegateStatus
-                                                              .toLowerCase() !=
-                                                          'pending' &&
-                                                      deliveryDelegateStatus
-                                                              .toLowerCase() !=
-                                                          'accepted' &&
-                                                      deliveryDelegateStatus
-                                                              .toLowerCase() !=
-                                                          'arrived')
+                                          onPressed:
+                                              isOrderCanceled ||
+                                                  !canContactDelegatedCourier
                                               ? null
-                                              : _revokeDeliveryInvite,
+                                              : () async {
+                                                  final callUri = Uri.parse(
+                                                    'tel:+$deliveryDelegatePhoneDigits',
+                                                  );
+                                                  final opened = await launchUrl(
+                                                    callUri,
+                                                    mode: LaunchMode.externalApplication,
+                                                  );
+                                                  if (!opened && mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      const SnackBar(
+                                                        behavior: SnackBarBehavior.floating,
+                                                        content: Text('No se pudo abrir la app de llamadas.'),
+                                                      ),
+                                                    );
+                                                  }
+                                                },
                                           icon: const Icon(
-                                            Icons.block_rounded,
+                                            Icons.call_rounded,
                                             size: 17,
                                           ),
-                                          label: const Text('Revocar'),
+                                          label: const Text('Llamar'),
                                         ),
                                       ),
                                     ],
                                   ),
-                                  if ((_latestDeliveryInviteUrl ?? '').isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 8),
-                                      child: SelectableText(
-                                        _latestDeliveryInviteUrl!,
-                                        style: GoogleFonts.manrope(
-                                          color: muted,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                  const SizedBox(height: 8),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      onPressed: isOrderCanceled ||
+                                            _isManagingDeliveryInvite ||
+                                            (deliveryDelegateStatusNormalized != 'pending' &&
+                                                deliveryDelegateStatusNormalized != 'accepted' &&
+                                                deliveryDelegateStatusNormalized != 'arrived')
+                                          ? null
+                                          : _revokeDeliveryInvite,
+                                      icon: const Icon(
+                                        Icons.block_rounded,
+                                        size: 17,
                                       ),
+                                      label: const Text('Revocar delegacion'),
                                     ),
+                                  ),
                                   if ((_deliveryInviteFeedback ?? '').isNotEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(top: 8),
@@ -2888,9 +3077,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         width: double.infinity,
                                         child: ElevatedButton.icon(
                                           onPressed:
+                                            !isOrderCanceled &&
                                               (customerPhone != null &&
                                                   customerPhone.isNotEmpty &&
-                                                  whatsappNotificationsEnabled)
+                                              whatsappNotificationsEnabled)
                                               ? () => _openCustomerWhatsapp(
                                                   customerPhone,
                                                   data.comercioNombre,
@@ -2950,6 +3140,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         width: double.infinity,
                                         child: ElevatedButton.icon(
                                           onPressed:
+                                            !isOrderCanceled &&
                                               (customerPhone != null &&
                                                   customerPhone.isNotEmpty)
                                               ? () => _openCustomerCall(
@@ -2991,6 +3182,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         width: double.infinity,
                                         child: ElevatedButton.icon(
                                           onPressed:
+                                            !isOrderCanceled &&
                                               (customerEmail != null &&
                                                   customerEmail.isNotEmpty)
                                               ? () => _openCustomerEmail(
@@ -3455,10 +3647,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  isDelegatedDelivery
+                                  isDelegationControlTransferred
                                           ? isAwaitingCustomerConfirmation
                                           ? 'Repartidor reporto llegada. En espera de confirmacion del cliente.'
                                           : 'Pedido delegado a repartidor: el avance de ruta depende del repartidor.'
+                                          : isDelegatedDelivery
+                                    ? isAwaitingDelegateConfirmation
+                                    ? 'Delegacion en espera. Debes esperar la confirmacion del repartidor o revocarla si quieres continuar.'
+                                    : 'Delegacion creada. En este punto puedes revocar si deseas reasignar el repartidor.'
                                           : hasNonCancelAction
                                           ? 'Selecciona la accion para continuar el pedido.'
                                           : 'Solo puedes cancelar este pedido en este momento.',
@@ -3468,7 +3664,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                if (isDelegatedDelivery) ...[
+                                if (isDelegationControlTransferred) ...[
                                   const SizedBox(height: 10),
                                   Container(
                                     width: double.infinity,
@@ -3539,10 +3735,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                 final isPrimary =
                                                     action.status ==
                                                     primaryStatusForBar;
+                                                final isMarkEnCaminoBlocked =
+                                                  action.status ==
+                                                    'en_camino' &&
+                                                  isDeliveryOrder &&
+                                                  isDelegatedDelivery;
                                                 final isDisabled =
-                                                    _isUpdatingStatus &&
+                                                  (_isUpdatingStatus &&
                                                     _pendingStatus !=
-                                                        action.status;
+                                                      action.status) ||
+                                                  isMarkEnCaminoBlocked;
                                                 final isLoading =
                                                     _isUpdatingStatus &&
                                                     _pendingStatus ==
@@ -3552,20 +3754,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   return ElevatedButton.icon(
                                                     onPressed: isDisabled
                                                         ? null
-                                                        : () async {
-                                                            if (action.status ==
-                                                                'cancelado') {
-                                                              final confirmed =
-                                                                  await _confirmCancelOrder();
-                                                              if (!confirmed ||
-                                                                  !mounted) {
-                                                                return;
-                                                              }
-                                                            }
-                                                            await _updateOrderStatus(
-                                                              action.status,
-                                                            );
-                                                          },
+                                                      : () => _handleOrderStatusAction(
+                                                        action: action,
+                                                        isDeliveryOrder:
+                                                          isDeliveryOrder,
+                                                        hasActiveDelegation:
+                                                          isDelegatedDelivery,
+                                                        comercioNombre:
+                                                          data.comercioNombre,
+                                                        comercioId:
+                                                          pedido.comercioId,
+                                                        initialDelegatePhone:
+                                                          deliveryDelegateInvitedPhone,
+                                                        ),
                                                     icon: isLoading
                                                         ? const SizedBox(
                                                             width: 18,
@@ -3627,20 +3828,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                 return OutlinedButton.icon(
                                                   onPressed: isDisabled
                                                       ? null
-                                                      : () async {
-                                                          if (action.status ==
-                                                              'cancelado') {
-                                                            final confirmed =
-                                                                await _confirmCancelOrder();
-                                                            if (!confirmed ||
-                                                                !mounted) {
-                                                              return;
-                                                            }
-                                                          }
-                                                          await _updateOrderStatus(
-                                                            action.status,
-                                                          );
-                                                        },
+                                                      : () => _handleOrderStatusAction(
+                                                          action: action,
+                                                          isDeliveryOrder:
+                                                              isDeliveryOrder,
+                                                          hasActiveDelegation:
+                                                            isDelegatedDelivery,
+                                                          comercioNombre:
+                                                              data.comercioNombre,
+                                                          comercioId:
+                                                            pedido.comercioId,
+                                                          initialDelegatePhone:
+                                                              deliveryDelegateInvitedPhone,
+                                                        ),
                                                   icon: isLoading
                                                       ? SizedBox(
                                                           width: 18,
@@ -3834,6 +4034,7 @@ class _OrderViewData {
     this.businessLatitude,
     this.businessLongitude,
     this.businessLogoUrl,
+    this.delegatedCourierAlias,
     this.history = const <_HistoryOrderViewData>[],
   });
 
@@ -3842,6 +4043,7 @@ class _OrderViewData {
   final double? businessLatitude;
   final double? businessLongitude;
   final String? businessLogoUrl;
+  final String? delegatedCourierAlias;
   final List<_HistoryOrderViewData> history;
 }
 
@@ -3871,52 +4073,220 @@ class _OrderStatusAction {
   final Color color;
 }
 
-class _CourierPhoneDialog extends StatefulWidget {
-  const _CourierPhoneDialog({required this.initialValue});
-
-  final String initialValue;
-
-  @override
-  State<_CourierPhoneDialog> createState() => _CourierPhoneDialogState();
-}
-
-class _CourierPhoneDialogState extends State<_CourierPhoneDialog> {
-  late final TextEditingController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+class _DeliveryExecutionModeSheet extends StatelessWidget {
+  const _DeliveryExecutionModeSheet();
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Enviar a WhatsApp del repartidor'),
-      content: TextField(
-        controller: _controller,
-        keyboardType: TextInputType.phone,
-        decoration: const InputDecoration(
-          labelText: 'Telefono WhatsApp',
-          hintText: 'Ejemplo: +58 4121234567',
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final surface = theme.cardColor;
+    final text = colorScheme.onSurface;
+    final muted = colorScheme.onSurfaceVariant;
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 24,
+              offset: const Offset(0, -6),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 46,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: muted.withValues(alpha: 0.28),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Como quieres gestionar esta entrega?',
+                style: GoogleFonts.manrope(
+                  color: text,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  height: 1.05,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Elige una forma de continuar antes de marcar el pedido en camino.',
+                style: GoogleFonts.manrope(
+                  color: muted,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _DeliveryExecutionOptionCard(
+                title: 'Gestionar yo mismo',
+                description:
+                    'Sigues con el flujo normal del pedido y controlas la entrega desde el comercio.',
+                icon: Icons.storefront_rounded,
+                accent: const Color(0xFF2563EB),
+                actionLabel: 'Continuar manualmente',
+                onTap: () => Navigator.of(context).pop('self'),
+              ),
+              const SizedBox(height: 12),
+              _DeliveryExecutionOptionCard(
+                title: 'Delegar repartidor',
+                description:
+                    'Generamos un enlace por WhatsApp para que un repartidor externo acepte y gestione la ruta.',
+                icon: Icons.delivery_dining_rounded,
+                accent: const Color(0xFF16A34A),
+                actionLabel: 'Delegar ahora',
+                onTap: () => Navigator.of(context).pop('delegate'),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(
+                    'Cancelar',
+                    style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
+    );
+  }
+}
+
+class _DeliveryExecutionOptionCard extends StatelessWidget {
+  const _DeliveryExecutionOptionCard({
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.accent,
+    required this.actionLabel,
+    required this.onTap,
+  });
+
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color accent;
+  final String actionLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final text = colorScheme.onSurface;
+    final muted = colorScheme.onSurfaceVariant;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: accent.withValues(alpha: 0.28)),
+            gradient: LinearGradient(
+              colors: [
+                accent.withValues(alpha: 0.11),
+                accent.withValues(alpha: 0.04),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(icon, color: accent, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: GoogleFonts.manrope(
+                        color: text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    color: accent,
+                    size: 20,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                description,
+                style: GoogleFonts.manrope(
+                  color: muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      actionLabel,
+                      style: GoogleFonts.manrope(
+                        color: accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: accent,
+                      size: 16,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_controller.text),
-          child: const Text('Continuar'),
-        ),
-      ],
+      ),
     );
   }
 }
