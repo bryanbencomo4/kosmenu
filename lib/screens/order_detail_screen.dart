@@ -61,7 +61,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   String? _pendingStatus;
   String? _overlayStatus;
   String? _verificationError;
-  String? _latestDeliveryInviteUrl;
   String? _deliveryInviteFeedback;
   bool _loadingMarkerIcons = false;
   String? _markerIconsKey;
@@ -75,8 +74,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   bool _isAutoCancelingExpiredPending = false;
   String? _lastKnownStatus;
   _OrderViewData? _cachedOrderData;
-  final Map<String, String> _delegatedCourierAliasCache =
-      <String, String>{};
+  final Map<String, String> _delegatedCourierAliasCache = <String, String>{};
 
   @override
   void initState() {
@@ -150,16 +148,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       final latestStatus = _normalizeStatusValue(latest.pedido.estado);
       final previousStatus = _lastKnownStatus;
-        final previousSyncSignature = _cachedOrderData == null
+      final previousSyncSignature = _cachedOrderData == null
           ? null
           : _orderSyncSignature(_cachedOrderData!.pedido);
-        final latestSyncSignature = _orderSyncSignature(latest.pedido);
+      final latestSyncSignature = _orderSyncSignature(latest.pedido);
 
       if (latestStatus == 'pendiente' && _isPendingExpired(latest.pedido)) {
         await _autoCancelExpiredPendingOrder(latest.pedido);
         final refreshed = await _fetchOrder();
         if (mounted && refreshed != null) {
-          final refreshedStatus = _normalizeStatusValue(refreshed.pedido.estado);
+          final refreshedStatus = _normalizeStatusValue(
+            refreshed.pedido.estado,
+          );
           _lastKnownStatus = refreshedStatus;
           setState(() {
             _cachedOrderData = refreshed;
@@ -178,10 +178,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         });
       }
 
-      if (previousStatus != null && previousStatus != latestStatus && latestStatus == 'cancelado') {
+      if (previousStatus != null &&
+          previousStatus != latestStatus &&
+          latestStatus == 'cancelado') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Este pedido fue cancelado por el cliente. Ya no admite cambios de estado.'),
+            content: Text(
+              'Este pedido fue cancelado por el cliente. Ya no admite cambios de estado.',
+            ),
           ),
         );
       }
@@ -194,13 +198,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
   String _orderSyncSignature(PedidoModel pedido) {
     final delegate = _asMap(pedido.detalles['delivery_delegate']);
-    final delegateStatus =
-        (delegate['status'] ?? '').toString().trim().toLowerCase();
+    final delegateStatus = (delegate['status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
     final acceptedAt = (delegate['accepted_at'] ?? '').toString().trim();
     final arrivedAt = (delegate['arrived_at'] ?? '').toString().trim();
     final completedAt = (delegate['completed_at'] ?? '').toString().trim();
-    final customerConfirmedAt =
-        (delegate['customer_confirmed_at'] ?? '').toString().trim();
+    final customerConfirmedAt = (delegate['customer_confirmed_at'] ?? '')
+        .toString()
+        .trim();
     final baseStatus = _normalizeStatusValue(pedido.estado);
     return [
       baseStatus,
@@ -307,7 +314,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     required String comercioId,
     required String invitedPhone,
   }) async {
-    final normalizedInvited = DeliveryCourierService.normalizeDigits(invitedPhone);
+    final normalizedInvited = DeliveryCourierService.normalizeDigits(
+      invitedPhone,
+    );
     if (comercioId.trim().isEmpty || normalizedInvited.isEmpty) {
       return '';
     }
@@ -502,7 +511,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
     if (latest == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se encontro el pedido para actualizar.')),
+        const SnackBar(
+          content: Text('No se encontro el pedido para actualizar.'),
+        ),
       );
       return;
     }
@@ -516,7 +527,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Este pedido ya fue cancelado por el cliente y no se puede actualizar.'),
+          content: Text(
+            'Este pedido ya fue cancelado por el cliente y no se puede actualizar.',
+          ),
         ),
       );
       return;
@@ -541,7 +554,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             .from('pedidos')
             .update({'estado': normalizedStatus})
             .contains('detalles', {'codigo_orden': widget.orderId})
-          .neq('estado', 'cancelado')
+            .neq('estado', 'cancelado')
             .select('*')
             .limit(1);
       }
@@ -551,7 +564,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if ((updatedRows as List).isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No se pudo actualizar el pedido (puede haber sido cancelado).'),
+            content: Text(
+              'No se pudo actualizar el pedido (puede haber sido cancelado).',
+            ),
           ),
         );
         return;
@@ -783,7 +798,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         await _generateAndSendDeliveryInviteWhatsapp(
           comercioId: comercioId,
           comercioNombre: comercioNombre,
-          initialPhone: initialDelegatePhone.isEmpty ? null : initialDelegatePhone,
+          initialPhone: initialDelegatePhone.isEmpty
+              ? null
+              : initialDelegatePhone,
         );
         return;
       }
@@ -813,56 +830,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
 
     return AppLinks.deliveryInviteByToken(token);
-  }
-
-  Future<void> _generateAndCopyDeliveryInvite({String? invitedPhone}) async {
-    if (_isManagingDeliveryInvite) return;
-
-    setState(() {
-      _isManagingDeliveryInvite = true;
-      _deliveryInviteFeedback = null;
-    });
-
-    try {
-      final inviteUrl = await _createDeliveryInviteLink(invitedPhone: invitedPhone);
-      if (inviteUrl == null || inviteUrl.trim().isEmpty) {
-        throw Exception('No fue posible generar un enlace valido.');
-      }
-
-      await Clipboard.setData(ClipboardData(text: inviteUrl));
-      if (!mounted) return;
-
-      final refreshed = await _fetchOrder();
-      if (!mounted) return;
-
-      setState(() {
-        _latestDeliveryInviteUrl = inviteUrl;
-        _cachedOrderData = refreshed ?? _cachedOrderData;
-        _deliveryInviteFeedback = 'Enlace generado y copiado.';
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('Enlace de delivery copiado al portapapeles.'),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _deliveryInviteFeedback = 'No se pudo generar el enlace.';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('Error al generar enlace de delivery: $error'),
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isManagingDeliveryInvite = false);
-      }
-    }
   }
 
   Future<void> _generateAndSendDeliveryInviteWhatsapp({
@@ -929,7 +896,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if (!mounted) return;
 
       setState(() {
-        _latestDeliveryInviteUrl = inviteUrl;
         _cachedOrderData = refreshed ?? _cachedOrderData;
         _deliveryInviteFeedback = 'Enlace enviado por WhatsApp.';
       });
@@ -997,7 +963,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if (!mounted) return;
 
       setState(() {
-        _latestDeliveryInviteUrl = null;
         _cachedOrderData = refreshed ?? _cachedOrderData;
         _deliveryInviteFeedback = 'Enlace revocado.';
       });
@@ -1610,18 +1575,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     final appBarStatus = _normalizeStatusValue(appBarPedido?.estado);
     final appBarCreatedAt = appBarPedido?.createdAt;
     final showPendingClock =
-      appBarStatus == 'pendiente' && appBarCreatedAt != null;
+        appBarStatus == 'pendiente' && appBarCreatedAt != null;
     final appBarPendingLeftRaw = showPendingClock
-      ? _pendingConfirmationWindow - _now.difference(appBarCreatedAt)
-      : Duration.zero;
+        ? _pendingConfirmationWindow - _now.difference(appBarCreatedAt)
+        : Duration.zero;
     final appBarPendingLeft = appBarPendingLeftRaw.isNegative
-      ? Duration.zero
-      : appBarPendingLeftRaw;
+        ? Duration.zero
+        : appBarPendingLeftRaw;
     final totalSeconds = _pendingConfirmationWindow.inSeconds;
     final remainingSeconds = appBarPendingLeft.inSeconds.clamp(0, totalSeconds);
     final appBarProgress = totalSeconds == 0
-      ? 1.0
-      : (totalSeconds - remainingSeconds) / totalSeconds;
+        ? 1.0
+        : (totalSeconds - remainingSeconds) / totalSeconds;
 
     final overlayAnimation = CurvedAnimation(
       parent: _successController,
@@ -1712,11 +1677,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 final customerName = pedido.nombreCliente?.trim();
                 final customerEmail = pedido.clienteEmail?.trim();
                 final customerPhone = pedido.clientePhone?.trim();
-                final notificationsMap = _asMap(pedido.detalles['notifications']);
+                final notificationsMap = _asMap(
+                  pedido.detalles['notifications'],
+                );
                 final whatsappNotificationsEnabled =
-                  notificationsMap['whatsapp_enabled'] is bool
-                  ? notificationsMap['whatsapp_enabled'] as bool
-                  : true;
+                    notificationsMap['whatsapp_enabled'] is bool
+                    ? notificationsMap['whatsapp_enabled'] as bool
+                    : true;
                 final paymentMethod = pedido.metodoPago?.trim();
                 final deliveryMode = pedido.deliveryMode?.trim();
                 final isDeliveryOrder =
@@ -1725,61 +1692,51 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   pedido.detalles['delivery_delegate'],
                 );
                 final deliveryDelegateStatus =
-                  (deliveryDelegate['status'] ?? '').toString().trim();
-                final deliveryDelegateStatusNormalized =
-                    deliveryDelegateStatus.toLowerCase();
+                    (deliveryDelegate['status'] ?? '').toString().trim();
+                final deliveryDelegateStatusNormalized = deliveryDelegateStatus
+                    .toLowerCase();
                 final deliveryDelegateInvitationId =
-                    (deliveryDelegate['invitation_id'] ?? '')
-                        .toString()
-                        .trim();
+                    (deliveryDelegate['invitation_id'] ?? '').toString().trim();
                 final hasDelegationRecord =
                     deliveryDelegateStatusNormalized.isNotEmpty ||
                     deliveryDelegateInvitationId.isNotEmpty;
                 final deliveryDelegateInvitedPhone =
-                  (deliveryDelegate['invited_phone'] ?? '')
-                    .toString()
-                    .trim();
+                    (deliveryDelegate['invited_phone'] ?? '').toString().trim();
                 final deliveryDelegateInvitedNote =
-                  (deliveryDelegate['invited_note'] ?? '')
-                    .toString()
-                    .trim();
+                    (deliveryDelegate['invited_note'] ?? '').toString().trim();
                 final deliveryDelegateAcceptedBy =
-                  (deliveryDelegate['accepted_by_name'] ??
-                          deliveryDelegate['accepted_by'] ??
-                          deliveryDelegate['accepted_by_alias'] ??
-                          deliveryDelegate['courier_name'] ??
-                          '')
-                      .toString()
-                      .trim();
+                    (deliveryDelegate['accepted_by_name'] ??
+                            deliveryDelegate['accepted_by'] ??
+                            deliveryDelegate['accepted_by_alias'] ??
+                            deliveryDelegate['courier_name'] ??
+                            '')
+                        .toString()
+                        .trim();
                 final deliveryDelegateAcceptedAt =
-                  (deliveryDelegate['accepted_at'] ?? '')
-                    .toString()
-                    .trim();
+                    (deliveryDelegate['accepted_at'] ?? '').toString().trim();
                 final deliveryDelegateArrivedAt =
-                  (deliveryDelegate['arrived_at'] ?? '')
-                    .toString()
-                    .trim();
+                    (deliveryDelegate['arrived_at'] ?? '').toString().trim();
                 final deliveryDelegateExpiresAt =
-                  (deliveryDelegate['expires_at'] ?? '')
-                    .toString()
-                    .trim();
+                    (deliveryDelegate['expires_at'] ?? '').toString().trim();
                 final deliveryDelegateAlias =
-                  (deliveryDelegateAcceptedBy.isNotEmpty
-                    ? deliveryDelegateAcceptedBy
-                    : (data.delegatedCourierAlias ?? '').trim().isNotEmpty
-                    ? (data.delegatedCourierAlias ?? '').trim()
-                    : deliveryDelegateInvitedNote)
-                      .trim();
+                    (deliveryDelegateAcceptedBy.isNotEmpty
+                            ? deliveryDelegateAcceptedBy
+                            : (data.delegatedCourierAlias ?? '')
+                                  .trim()
+                                  .isNotEmpty
+                            ? (data.delegatedCourierAlias ?? '').trim()
+                            : deliveryDelegateInvitedNote)
+                        .trim();
                 final deliveryDelegatePhoneDigits =
-                  DeliveryCourierService.normalizeDigits(
-                    deliveryDelegateInvitedPhone,
-                  );
+                    DeliveryCourierService.normalizeDigits(
+                      deliveryDelegateInvitedPhone,
+                    );
                 final deliveryDelegatePhoneDisplay =
-                  deliveryDelegatePhoneDigits.isEmpty
-                  ? ''
-                  : '+$deliveryDelegatePhoneDigits';
+                    deliveryDelegatePhoneDigits.isEmpty
+                    ? ''
+                    : '+$deliveryDelegatePhoneDigits';
                 final canContactDelegatedCourier =
-                  deliveryDelegatePhoneDigits.length >= 10;
+                    deliveryDelegatePhoneDigits.length >= 10;
                 final deliveryAddress = pedido.deliveryAddress?.trim();
                 final deliveryReference = pedido.deliveryReference?.trim();
                 final deliveryInstructions = pedido.deliveryInstructions
@@ -1796,13 +1753,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     data.businessLongitude != null;
                 final isReadOnly = widget.readOnlyView;
                 final effectiveStatus =
-                  OrderManagerService.effectiveRawStatusForPedido(pedido);
+                    OrderManagerService.effectiveRawStatusForPedido(pedido);
                 final visualStatusCode =
-                  OrderManagerService.visualStatusCodeForPedido(pedido);
+                    OrderManagerService.visualStatusCodeForPedido(pedido);
                 final visualStatusLabel =
-                  OrderManagerService.visualStatusLabelForPedido(pedido);
+                    OrderManagerService.visualStatusLabelForPedido(pedido);
                 final visualStatusColor =
-                  OrderManagerService.visualStatusColorForPedido(pedido);
+                    OrderManagerService.visualStatusColorForPedido(pedido);
                 final isOrderCanceled = visualStatusCode == 'cancelado';
                 final nextStatusActions = _buildStatusActions(
                   isDelivery: isDeliveryOrder,
@@ -1819,14 +1776,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     (deliveryDelegateStatusNormalized == 'accepted' ||
                         deliveryDelegateStatusNormalized == 'arrived');
                 final isAwaitingCustomerConfirmation =
-                  visualStatusCode == 'espera_cliente';
+                    visualStatusCode == 'espera_cliente';
                 final isAwaitingDelegateConfirmation =
-                  hasDelegationRecord &&
-                  deliveryDelegateStatusNormalized == 'pending';
+                    hasDelegationRecord &&
+                    deliveryDelegateStatusNormalized == 'pending';
                 final deliveryDelegateStatusSummary =
-                  isAwaitingDelegateConfirmation
-                  ? 'Invitacion enviada'
-                  : _deliveryDelegateStatusLabel(deliveryDelegateStatus);
+                    isAwaitingDelegateConfirmation
+                    ? 'Invitacion enviada'
+                    : _deliveryDelegateStatusLabel(deliveryDelegateStatus);
                 final statusActionsForBar =
                     List<_OrderStatusAction>.from(nextStatusActions)..sort((
                       a,
@@ -2608,7 +2565,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                             ),
                             const SizedBox(height: 14),
                           ],
-                            if (!isReadOnly && hasDelegationRecord) ...[
+                          if (!isReadOnly && hasDelegationRecord) ...[
                             Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
@@ -2710,9 +2667,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                             fontWeight: FontWeight.w700,
                                           ),
                                         ),
-                                        if (deliveryDelegateAcceptedAt.isNotEmpty)
+                                        if (deliveryDelegateAcceptedAt
+                                            .isNotEmpty)
                                           Padding(
-                                            padding: const EdgeInsets.only(top: 4),
+                                            padding: const EdgeInsets.only(
+                                              top: 4,
+                                            ),
                                             child: Text(
                                               'Aceptado: ${_formatDateTimeShort(deliveryDelegateAcceptedAt)}',
                                               style: GoogleFonts.manrope(
@@ -2722,9 +2682,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                               ),
                                             ),
                                           ),
-                                        if (deliveryDelegateArrivedAt.isNotEmpty)
+                                        if (deliveryDelegateArrivedAt
+                                            .isNotEmpty)
                                           Padding(
-                                            padding: const EdgeInsets.only(top: 4),
+                                            padding: const EdgeInsets.only(
+                                              top: 4,
+                                            ),
                                             child: Text(
                                               'Llegada: ${_formatDateTimeShort(deliveryDelegateArrivedAt)}',
                                               style: GoogleFonts.manrope(
@@ -2734,9 +2697,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                               ),
                                             ),
                                           ),
-                                        if (deliveryDelegateExpiresAt.isNotEmpty)
+                                        if (deliveryDelegateExpiresAt
+                                            .isNotEmpty)
                                           Padding(
-                                            padding: const EdgeInsets.only(top: 4),
+                                            padding: const EdgeInsets.only(
+                                              top: 4,
+                                            ),
                                             child: Text(
                                               'Expira: ${_formatDateTimeShort(deliveryDelegateExpiresAt)}',
                                               style: GoogleFonts.manrope(
@@ -2761,7 +2727,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         color: const Color(0xFFFEF3C7),
                                         borderRadius: BorderRadius.circular(12),
                                         border: Border.all(
-                                          color: const Color(0xFFF59E0B).withValues(alpha: 0.38),
+                                          color: const Color(
+                                            0xFFF59E0B,
+                                          ).withValues(alpha: 0.38),
                                         ),
                                       ),
                                       child: Row(
@@ -2795,7 +2763,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     const SizedBox(height: 10),
                                   if (isAwaitingCustomerConfirmation)
                                     Padding(
-                                      padding: const EdgeInsets.only(bottom: 10),
+                                      padding: const EdgeInsets.only(
+                                        bottom: 10,
+                                      ),
                                       child: Text(
                                         'En espera de confirmacion del cliente para completar la entrega.',
                                         style: GoogleFonts.manrope(
@@ -2814,21 +2784,31 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   !canContactDelegatedCourier
                                               ? null
                                               : () async {
-                                                  final message = Uri.encodeComponent(
-                                                    'Hola ${deliveryDelegateAlias.isEmpty ? 'repartidor' : deliveryDelegateAlias}, te escribimos desde ${data.comercioNombre} por el pedido ${widget.orderId}.',
-                                                  );
+                                                  final messenger =
+                                                      ScaffoldMessenger.of(
+                                                        context,
+                                                      );
+                                                  final message =
+                                                      Uri.encodeComponent(
+                                                        'Hola ${deliveryDelegateAlias.isEmpty ? 'repartidor' : deliveryDelegateAlias}, te escribimos desde ${data.comercioNombre} por el pedido ${widget.orderId}.',
+                                                      );
                                                   final waUri = Uri.parse(
                                                     'https://wa.me/$deliveryDelegatePhoneDigits?text=$message',
                                                   );
                                                   final opened = await launchUrl(
                                                     waUri,
-                                                    mode: LaunchMode.externalApplication,
+                                                    mode: LaunchMode
+                                                        .externalApplication,
                                                   );
-                                                  if (!opened && mounted) {
-                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                  if (!opened) {
+                                                    messenger.showSnackBar(
                                                       const SnackBar(
-                                                        behavior: SnackBarBehavior.floating,
-                                                        content: Text('No se pudo abrir WhatsApp.'),
+                                                        behavior:
+                                                            SnackBarBehavior
+                                                                .floating,
+                                                        content: Text(
+                                                          'No se pudo abrir WhatsApp.',
+                                                        ),
                                                       ),
                                                     );
                                                   }
@@ -2839,7 +2819,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                           ),
                                           label: const Text('WhatsApp'),
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFF16A34A),
+                                            backgroundColor: const Color(
+                                              0xFF16A34A,
+                                            ),
                                             foregroundColor: Colors.white,
                                             padding: const EdgeInsets.symmetric(
                                               vertical: 12,
@@ -2855,18 +2837,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   !canContactDelegatedCourier
                                               ? null
                                               : () async {
+                                                  final messenger =
+                                                      ScaffoldMessenger.of(
+                                                        context,
+                                                      );
                                                   final callUri = Uri.parse(
                                                     'tel:+$deliveryDelegatePhoneDigits',
                                                   );
                                                   final opened = await launchUrl(
                                                     callUri,
-                                                    mode: LaunchMode.externalApplication,
+                                                    mode: LaunchMode
+                                                        .externalApplication,
                                                   );
-                                                  if (!opened && mounted) {
-                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                  if (!opened) {
+                                                    messenger.showSnackBar(
                                                       const SnackBar(
-                                                        behavior: SnackBarBehavior.floating,
-                                                        content: Text('No se pudo abrir la app de llamadas.'),
+                                                        behavior:
+                                                            SnackBarBehavior
+                                                                .floating,
+                                                        content: Text(
+                                                          'No se pudo abrir la app de llamadas.',
+                                                        ),
                                                       ),
                                                     );
                                                   }
@@ -2884,11 +2875,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                   SizedBox(
                                     width: double.infinity,
                                     child: OutlinedButton.icon(
-                                      onPressed: isOrderCanceled ||
-                                            _isManagingDeliveryInvite ||
-                                            (deliveryDelegateStatusNormalized != 'pending' &&
-                                                deliveryDelegateStatusNormalized != 'accepted' &&
-                                                deliveryDelegateStatusNormalized != 'arrived')
+                                      onPressed:
+                                          isOrderCanceled ||
+                                              _isManagingDeliveryInvite ||
+                                              (deliveryDelegateStatusNormalized !=
+                                                      'pending' &&
+                                                  deliveryDelegateStatusNormalized !=
+                                                      'accepted' &&
+                                                  deliveryDelegateStatusNormalized !=
+                                                      'arrived')
                                           ? null
                                           : _revokeDeliveryInvite,
                                       icon: const Icon(
@@ -2898,7 +2893,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                       label: const Text('Revocar delegacion'),
                                     ),
                                   ),
-                                  if ((_deliveryInviteFeedback ?? '').isNotEmpty)
+                                  if ((_deliveryInviteFeedback ?? '')
+                                      .isNotEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(top: 8),
                                       child: Text(
@@ -3077,10 +3073,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         width: double.infinity,
                                         child: ElevatedButton.icon(
                                           onPressed:
-                                            !isOrderCanceled &&
-                                              (customerPhone != null &&
-                                                  customerPhone.isNotEmpty &&
-                                              whatsappNotificationsEnabled)
+                                              !isOrderCanceled &&
+                                                  (customerPhone != null &&
+                                                      customerPhone
+                                                          .isNotEmpty &&
+                                                      whatsappNotificationsEnabled)
                                               ? () => _openCustomerWhatsapp(
                                                   customerPhone,
                                                   data.comercioNombre,
@@ -3140,9 +3137,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         width: double.infinity,
                                         child: ElevatedButton.icon(
                                           onPressed:
-                                            !isOrderCanceled &&
-                                              (customerPhone != null &&
-                                                  customerPhone.isNotEmpty)
+                                              !isOrderCanceled &&
+                                                  (customerPhone != null &&
+                                                      customerPhone.isNotEmpty)
                                               ? () => _openCustomerCall(
                                                   customerPhone,
                                                 )
@@ -3182,9 +3179,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         width: double.infinity,
                                         child: ElevatedButton.icon(
                                           onPressed:
-                                            !isOrderCanceled &&
-                                              (customerEmail != null &&
-                                                  customerEmail.isNotEmpty)
+                                              !isOrderCanceled &&
+                                                  (customerEmail != null &&
+                                                      customerEmail.isNotEmpty)
                                               ? () => _openCustomerEmail(
                                                   customerEmail,
                                                   data.comercioNombre,
@@ -3648,16 +3645,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                 const SizedBox(height: 4),
                                 Text(
                                   isDelegationControlTransferred
-                                          ? isAwaitingCustomerConfirmation
-                                          ? 'Repartidor reporto llegada. En espera de confirmacion del cliente.'
-                                          : 'Pedido delegado a repartidor: el avance de ruta depende del repartidor.'
-                                          : isDelegatedDelivery
-                                    ? isAwaitingDelegateConfirmation
-                                    ? 'Delegacion en espera. Debes esperar la confirmacion del repartidor o revocarla si quieres continuar.'
-                                    : 'Delegacion creada. En este punto puedes revocar si deseas reasignar el repartidor.'
-                                          : hasNonCancelAction
-                                          ? 'Selecciona la accion para continuar el pedido.'
-                                          : 'Solo puedes cancelar este pedido en este momento.',
+                                      ? isAwaitingCustomerConfirmation
+                                            ? 'Repartidor reporto llegada. En espera de confirmacion del cliente.'
+                                            : 'Pedido delegado a repartidor: el avance de ruta depende del repartidor.'
+                                      : isDelegatedDelivery
+                                      ? isAwaitingDelegateConfirmation
+                                            ? 'Delegacion en espera. Debes esperar la confirmacion del repartidor o revocarla si quieres continuar.'
+                                            : 'Delegacion creada. En este punto puedes revocar si deseas reasignar el repartidor.'
+                                      : hasNonCancelAction
+                                      ? 'Selecciona la accion para continuar el pedido.'
+                                      : 'Solo puedes cancelar este pedido en este momento.',
                                   style: GoogleFonts.manrope(
                                     color: muted,
                                     fontSize: 12,
@@ -3736,15 +3733,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                     action.status ==
                                                     primaryStatusForBar;
                                                 final isMarkEnCaminoBlocked =
-                                                  action.status ==
-                                                    'en_camino' &&
-                                                  isDeliveryOrder &&
-                                                  isDelegatedDelivery;
+                                                    action.status ==
+                                                        'en_camino' &&
+                                                    isDeliveryOrder &&
+                                                    isDelegatedDelivery;
                                                 final isDisabled =
-                                                  (_isUpdatingStatus &&
-                                                    _pendingStatus !=
-                                                      action.status) ||
-                                                  isMarkEnCaminoBlocked;
+                                                    (_isUpdatingStatus &&
+                                                        _pendingStatus !=
+                                                            action.status) ||
+                                                    isMarkEnCaminoBlocked;
                                                 final isLoading =
                                                     _isUpdatingStatus &&
                                                     _pendingStatus ==
@@ -3754,19 +3751,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   return ElevatedButton.icon(
                                                     onPressed: isDisabled
                                                         ? null
-                                                      : () => _handleOrderStatusAction(
-                                                        action: action,
-                                                        isDeliveryOrder:
-                                                          isDeliveryOrder,
-                                                        hasActiveDelegation:
-                                                          isDelegatedDelivery,
-                                                        comercioNombre:
-                                                          data.comercioNombre,
-                                                        comercioId:
-                                                          pedido.comercioId,
-                                                        initialDelegatePhone:
-                                                          deliveryDelegateInvitedPhone,
-                                                        ),
+                                                        : () => _handleOrderStatusAction(
+                                                            action: action,
+                                                            isDeliveryOrder:
+                                                                isDeliveryOrder,
+                                                            hasActiveDelegation:
+                                                                isDelegatedDelivery,
+                                                            comercioNombre: data
+                                                                .comercioNombre,
+                                                            comercioId: pedido
+                                                                .comercioId,
+                                                            initialDelegatePhone:
+                                                                deliveryDelegateInvitedPhone,
+                                                          ),
                                                     icon: isLoading
                                                         ? const SizedBox(
                                                             width: 18,
@@ -3833,11 +3830,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                           isDeliveryOrder:
                                                               isDeliveryOrder,
                                                           hasActiveDelegation:
-                                                            isDelegatedDelivery,
-                                                          comercioNombre:
-                                                              data.comercioNombre,
+                                                              isDelegatedDelivery,
+                                                          comercioNombre: data
+                                                              .comercioNombre,
                                                           comercioId:
-                                                            pedido.comercioId,
+                                                              pedido.comercioId,
                                                           initialDelegatePhone:
                                                               deliveryDelegateInvitedPhone,
                                                         ),
@@ -4239,11 +4236,7 @@ class _DeliveryExecutionOptionCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Icon(
-                    Icons.arrow_forward_rounded,
-                    color: accent,
-                    size: 20,
-                  ),
+                  Icon(Icons.arrow_forward_rounded, color: accent, size: 20),
                 ],
               ),
               const SizedBox(height: 10),
@@ -4258,7 +4251,10 @@ class _DeliveryExecutionOptionCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: accent.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
@@ -4275,11 +4271,7 @@ class _DeliveryExecutionOptionCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      color: accent,
-                      size: 16,
-                    ),
+                    Icon(Icons.chevron_right_rounded, color: accent, size: 16),
                   ],
                 ),
               ),
