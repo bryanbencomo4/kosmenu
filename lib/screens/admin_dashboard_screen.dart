@@ -55,6 +55,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Timer? _recentCatalogTimer;
   Timer? _pendingAutoCancelTicker;
   bool _isRecoveringOrdersAuth = false;
+  bool _isRestartingOrdersStream = false;
+  _SalesRange _selectedSalesRange = _SalesRange.today;
+  DateTimeRange? _customSalesRange;
 
   bool get _hasComercioId => SupabaseConfig.hasCurrentComercioId;
 
@@ -111,11 +114,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _restartOrdersRealtime() async {
-    if (!mounted || !_hasComercioId) return;
-    setState(() {
-      _ordersStream = _buildOrdersStream();
-    });
-    _subscribeToOrders();
+    if (!mounted || !_hasComercioId || _isRestartingOrdersStream) return;
+
+    _isRestartingOrdersStream = true;
+    try {
+      setState(() {
+        _ordersStream = _buildOrdersStream();
+      });
+      _subscribeToOrders();
+    } finally {
+      _isRestartingOrdersStream = false;
+    }
+  }
+
+  bool _isRealtimeTransientError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('realtimesubscribestatus.timedout') ||
+        message.contains('realtimesubscribestatus.channelerror') ||
+        message.contains('websocket');
   }
 
   Future<void> _forceSignOutAfterAuthFailure(String reason) async {
@@ -400,6 +416,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       onError: (Object error, StackTrace stackTrace) {
         debugPrint('Orders stream error: $error');
         unawaited(_recoverOrdersAuthIfNeeded(error));
+        if (_isRealtimeTransientError(error) &&
+            !_isRealtimeJwtExpiredError(error)) {
+          unawaited(_restartOrdersRealtime());
+        }
       },
     );
   }
@@ -760,12 +780,275 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  bool _isToday(DateTime? date) {
+  DateTime _startOfDay(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
+
+  DateTime _endOfDayExclusive(DateTime date) =>
+      DateTime(date.year, date.month, date.day + 1);
+
+  DateTime _subtractFromToday(int days) =>
+      _startOfDay(DateTime.now()).subtract(Duration(days: days));
+
+  String _monthShortEs(int month) {
+    const names = <String>[
+      'Ene',
+      'Feb',
+      'Mar',
+      'Abr',
+      'May',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dic',
+    ];
+    final safe = month.clamp(1, 12);
+    return names[safe - 1];
+  }
+
+  String _shortDate(DateTime date) {
+    final dd = date.day.toString().padLeft(2, '0');
+    final mm = date.month.toString().padLeft(2, '0');
+    return '$dd/$mm';
+  }
+
+  String _activeRangeLabel() {
+    if (_selectedSalesRange != _SalesRange.custom) {
+      return _selectedSalesRange.label;
+    }
+    final range = _customSalesRange;
+    if (range == null) return _selectedSalesRange.label;
+    return '${_shortDate(range.start)} - ${_shortDate(range.end)}';
+  }
+
+  _SalesRangeWindow _resolveSalesRangeWindow(Iterable<PedidoModel> orders) {
+    final todayStart = _startOfDay(DateTime.now());
+    final tomorrow = _endOfDayExclusive(DateTime.now());
+
+    switch (_selectedSalesRange) {
+      case _SalesRange.today:
+        return _SalesRangeWindow(
+          startInclusive: todayStart,
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.yesterday:
+        return _SalesRangeWindow(
+          startInclusive: todayStart.subtract(const Duration(days: 1)),
+          endExclusive: todayStart,
+        );
+      case _SalesRange.lastWeek:
+        return _SalesRangeWindow(
+          startInclusive: _subtractFromToday(6),
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.lastFortnight:
+        return _SalesRangeWindow(
+          startInclusive: _subtractFromToday(14),
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.lastMonth:
+        return _SalesRangeWindow(
+          startInclusive: _subtractFromToday(29),
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.last3Months:
+        return _SalesRangeWindow(
+          startInclusive: _subtractFromToday(89),
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.last6Months:
+        return _SalesRangeWindow(
+          startInclusive: _subtractFromToday(179),
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.lastYear:
+        return _SalesRangeWindow(
+          startInclusive: _subtractFromToday(364),
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.allTime:
+        DateTime? earliest;
+        for (final order in orders) {
+          final created = order.createdAt?.toLocal();
+          if (created == null) continue;
+          final day = _startOfDay(created);
+          if (earliest == null || day.isBefore(earliest)) {
+            earliest = day;
+          }
+        }
+        return _SalesRangeWindow(
+          startInclusive: earliest ?? todayStart,
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.custom:
+        final custom = _customSalesRange;
+        if (custom == null) {
+          return _SalesRangeWindow(
+            startInclusive: todayStart,
+            endExclusive: tomorrow,
+          );
+        }
+        return _SalesRangeWindow(
+          startInclusive: _startOfDay(custom.start),
+          endExclusive: _endOfDayExclusive(custom.end),
+        );
+    }
+  }
+
+  bool _isWithinSelectedSalesRange(
+    DateTime? date,
+    Iterable<PedidoModel> orders,
+  ) {
     if (date == null) return false;
-    final now = DateTime.now();
-    return date.year == now.year &&
-        date.month == now.month &&
-        date.day == now.day;
+    final local = date.toLocal();
+    final window = _resolveSalesRangeWindow(orders);
+    return !local.isBefore(window.startInclusive) &&
+        local.isBefore(window.endExclusive);
+  }
+
+  double _toDoubleSafe(dynamic value) {
+    if (value is num) return value.toDouble();
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) return 0;
+    return double.tryParse(raw.replaceAll(',', '.')) ?? 0;
+  }
+
+  double _resolvePedidoTotal(PedidoModel pedido) {
+    final direct = pedido.total;
+    if (direct != null && direct > 0) return direct;
+
+    final detalles = pedido.detalles;
+    final resumenRaw = detalles['resumen'];
+    final resumen = resumenRaw is Map
+        ? Map<String, dynamic>.from(resumenRaw)
+        : const <String, dynamic>{};
+
+    final candidates = <dynamic>[
+      detalles['total'],
+      detalles['total_pedido'],
+      detalles['monto_total'],
+      detalles['amount_total'],
+      resumen['total'],
+      resumen['monto_total'],
+    ];
+
+    for (final candidate in candidates) {
+      final parsed = _toDoubleSafe(candidate);
+      if (parsed > 0) return parsed;
+    }
+
+    final itemsTotal = pedido.items.fold<double>(
+      0,
+      (sum, item) => sum + item.total,
+    );
+    return itemsTotal > 0 ? itemsTotal : 0;
+  }
+
+  _SalesHistorySeries _buildSalesHistoryForSelectedRange(
+    Iterable<PedidoModel> orders,
+  ) {
+    final filtered = orders
+        .where((pedido) => pedido.statusBucket != OrderStatusBucket.canceled)
+        .where(
+          (pedido) => _isWithinSelectedSalesRange(pedido.createdAt, orders),
+        )
+        .toList(growable: false);
+
+    if (_selectedSalesRange == _SalesRange.today ||
+        _selectedSalesRange == _SalesRange.yesterday) {
+      final values = List<double>.filled(7, 0);
+      const labels = <String>['00', '04', '08', '12', '16', '20', '24'];
+
+      for (final pedido in filtered) {
+        final createdAt = pedido.createdAt?.toLocal();
+        if (createdAt == null) continue;
+        final bucketIndex = (createdAt.hour ~/ 4).clamp(0, 5);
+        values[bucketIndex] += _resolvePedidoTotal(pedido);
+      }
+
+      values[6] = values[5];
+      return _SalesHistorySeries(values: values, labels: labels);
+    }
+
+    final window = _resolveSalesRangeWindow(orders);
+    final spanDays = window.endExclusive
+        .difference(window.startInclusive)
+        .inDays;
+
+    if (spanDays <= 31) {
+      final desiredBuckets = spanDays <= 10 ? spanDays : 10;
+      final bucketSize = (spanDays / desiredBuckets).ceil();
+      final values = <double>[];
+      final labels = <String>[];
+
+      var cursor = window.startInclusive;
+      while (cursor.isBefore(window.endExclusive)) {
+        final next = cursor.add(Duration(days: bucketSize));
+        final bucketEnd = next.isBefore(window.endExclusive)
+            ? next
+            : window.endExclusive;
+
+        final total = filtered.fold<double>(0, (sum, pedido) {
+          final created = pedido.createdAt?.toLocal();
+          if (created == null) return sum;
+          if (created.isBefore(cursor) || !created.isBefore(bucketEnd)) {
+            return sum;
+          }
+          return sum + _resolvePedidoTotal(pedido);
+        });
+
+        values.add(total);
+        labels.add(_shortDate(cursor));
+        cursor = bucketEnd;
+      }
+
+      return _SalesHistorySeries(values: values, labels: labels);
+    }
+
+    final monthStarts = <DateTime>[];
+    var monthCursor = DateTime(
+      window.startInclusive.year,
+      window.startInclusive.month,
+    );
+    final monthEnd = DateTime(
+      window.endExclusive.year,
+      window.endExclusive.month,
+    );
+    while (!monthCursor.isAfter(monthEnd)) {
+      monthStarts.add(monthCursor);
+      monthCursor = DateTime(monthCursor.year, monthCursor.month + 1);
+    }
+
+    final desiredBuckets = monthStarts.length <= 12 ? monthStarts.length : 12;
+    final groupSize = (monthStarts.length / desiredBuckets).ceil();
+    final values = <double>[];
+    final labels = <String>[];
+
+    for (var i = 0; i < monthStarts.length; i += groupSize) {
+      final bucketStart = monthStarts[i];
+      final nextIndex = (i + groupSize) < monthStarts.length
+          ? i + groupSize
+          : monthStarts.length;
+      final bucketEnd = nextIndex < monthStarts.length
+          ? monthStarts[nextIndex]
+          : window.endExclusive;
+
+      final total = filtered.fold<double>(0, (sum, pedido) {
+        final created = pedido.createdAt?.toLocal();
+        if (created == null) return sum;
+        if (created.isBefore(bucketStart) || !created.isBefore(bucketEnd)) {
+          return sum;
+        }
+        return sum + _resolvePedidoTotal(pedido);
+      });
+
+      values.add(total);
+      labels.add(_monthShortEs(bucketStart.month));
+    }
+
+    return _SalesHistorySeries(values: values, labels: labels);
   }
 
   String _normalizeStatusString(String? value) {
@@ -938,15 +1221,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               pedido.statusBucket == OrderStatusBucket.canceled,
                         )
                         .length;
-                    final todayCount = validOrders
-                        .where((o) => _isToday(o.createdAt))
-                        .length;
-                    final todayRevenue = validOrders
-                        .where((o) => _isToday(o.createdAt))
-                        .fold<double>(0, (sum, o) => sum + (o.total ?? 0));
-                    final double ticketPromedio = todayCount == 0
+                    final selectedOrders = validOrders
+                        .where(
+                          (o) => _isWithinSelectedSalesRange(
+                            o.createdAt,
+                            validOrders,
+                          ),
+                        )
+                        .where(
+                          (o) => o.statusBucket != OrderStatusBucket.canceled,
+                        )
+                        .toList(growable: false);
+                    final selectedCount = selectedOrders.length;
+                    final selectedRevenue = selectedOrders.fold<double>(
+                      0,
+                      (sum, o) => sum + _resolvePedidoTotal(o),
+                    );
+                    final double ticketPromedio = selectedCount == 0
                         ? 0.0
-                        : (todayRevenue / todayCount);
+                        : (selectedRevenue / selectedCount);
+                    final salesSeries = _buildSalesHistoryForSelectedRange(
+                      validOrders,
+                    );
+                    final ordersLabel = _selectedSalesRange.ordersLabel;
+                    final incomeLabel = _selectedSalesRange.incomeLabel;
 
                     return RefreshIndicator(
                       onRefresh: _refreshDashboard,
@@ -1046,21 +1344,57 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ),
                           const SizedBox(height: 12),
                           _CompactSalesSummaryCard(
-                            salesToday: todayRevenue,
-                            ordersToday: todayCount,
+                            salesToday: selectedRevenue,
+                            ordersToday: selectedCount,
                             averageTicket: ticketPromedio,
                             darkText: _darkText,
                             mutedText: _mutedText,
                             purple: _purple,
-                            salesHistory: [
-                              120,
-                              180,
-                              140,
-                              200,
-                              248,
-                              220,
-                              210,
-                            ], // Simulación, reemplazar con datos reales si están disponibles
+                            salesHistory: salesSeries.values,
+                            salesLabels: salesSeries.labels,
+                            rangeLabel: _activeRangeLabel(),
+                            ordersLabel: ordersLabel,
+                            incomeLabel: incomeLabel,
+                            onRangeSelected: (range) async {
+                              if (range == _SalesRange.custom) {
+                                final earliest = validOrders
+                                    .map((o) => o.createdAt?.toLocal())
+                                    .whereType<DateTime>()
+                                    .fold<DateTime?>(null, (acc, date) {
+                                      if (acc == null || date.isBefore(acc)) {
+                                        return date;
+                                      }
+                                      return acc;
+                                    });
+
+                                final firstDate = earliest != null
+                                    ? _startOfDay(earliest)
+                                    : _startOfDay(
+                                        DateTime.now().subtract(
+                                          const Duration(days: 365 * 5),
+                                        ),
+                                      );
+
+                                final picked = await showDateRangePicker(
+                                  context: context,
+                                  firstDate: firstDate,
+                                  lastDate: DateTime.now(),
+                                  initialDateRange: _customSalesRange,
+                                  helpText: 'Selecciona un rango',
+                                  locale: const Locale('es'),
+                                );
+
+                                if (!mounted || picked == null) return;
+                                setState(() {
+                                  _customSalesRange = picked;
+                                  _selectedSalesRange = _SalesRange.custom;
+                                });
+                                return;
+                              }
+
+                              if (_selectedSalesRange == range) return;
+                              setState(() => _selectedSalesRange = range);
+                            },
                           ),
                           const SizedBox(height: 14),
                           _CompactBusinessInfoCard(
@@ -1572,6 +1906,11 @@ class _CompactSalesSummaryCard extends StatelessWidget {
     required this.mutedText,
     required this.purple,
     this.salesHistory,
+    this.salesLabels,
+    required this.rangeLabel,
+    required this.ordersLabel,
+    required this.incomeLabel,
+    required this.onRangeSelected,
   });
 
   final double salesToday;
@@ -1581,12 +1920,27 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   final Color mutedText;
   final Color purple;
   final List<double>? salesHistory;
+  final List<String>? salesLabels;
+  final String rangeLabel;
+  final String ordersLabel;
+  final String incomeLabel;
+  final ValueChanged<_SalesRange> onRangeSelected;
 
   @override
   Widget build(BuildContext context) {
     final chartData =
         salesHistory ?? const <double>[120, 180, 140, 200, 248, 220, 210];
-    final highlightIndex = chartData.length > 4 ? 4 : chartData.length - 1;
+    final labels =
+        salesLabels ?? const <String>['00', '04', '08', '12', '16', '20', '24'];
+
+    var highlightIndex = 0;
+    var peak = -1.0;
+    for (var i = 0; i < chartData.length; i++) {
+      if (chartData[i] >= peak) {
+        peak = chartData[i];
+        highlightIndex = i;
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -1615,31 +1969,74 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              Container(
-                height: 30,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8F8FD),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFE9EAF4)),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      'Hoy',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
+              PopupMenuButton<_SalesRange>(
+                onSelected: onRangeSelected,
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: _SalesRange.today, child: Text('Hoy')),
+                  PopupMenuItem(
+                    value: _SalesRange.yesterday,
+                    child: Text('Ayer'),
+                  ),
+                  PopupMenuItem(
+                    value: _SalesRange.lastWeek,
+                    child: Text('Última semana'),
+                  ),
+                  PopupMenuItem(
+                    value: _SalesRange.lastFortnight,
+                    child: Text('Última quincena'),
+                  ),
+                  PopupMenuItem(
+                    value: _SalesRange.lastMonth,
+                    child: Text('Último mes'),
+                  ),
+                  PopupMenuItem(
+                    value: _SalesRange.last3Months,
+                    child: Text('Últimos 3 meses'),
+                  ),
+                  PopupMenuItem(
+                    value: _SalesRange.last6Months,
+                    child: Text('Últimos 6 meses'),
+                  ),
+                  PopupMenuItem(
+                    value: _SalesRange.lastYear,
+                    child: Text('Último año'),
+                  ),
+                  PopupMenuItem(
+                    value: _SalesRange.allTime,
+                    child: Text('Desde el principio'),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: _SalesRange.custom,
+                    child: Text('Personalizado'),
+                  ),
+                ],
+                child: Container(
+                  height: 30,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8F8FD),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE9EAF4)),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        rangeLabel,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: mutedText,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 16,
                         color: mutedText,
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 16,
-                      color: mutedText,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1699,6 +2096,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                   height: 108,
                   child: _SalesSummaryChart(
                     salesHistory: chartData,
+                    labels: labels,
                     color: purple,
                     highlightIndex: highlightIndex,
                     labelValue: salesToday,
@@ -1724,7 +2122,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
               Expanded(
                 child: _SalesMiniCard(
                   data: _SalesMiniData(
-                    label: 'Pedidos hoy',
+                    label: ordersLabel,
                     value: '$ordersToday',
                     color: const Color(0xFF3B82F6),
                     icon: Icons.bar_chart_rounded,
@@ -1735,7 +2133,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
               Expanded(
                 child: _SalesMiniCard(
                   data: _SalesMiniData(
-                    label: 'Ingresos hoy',
+                    label: incomeLabel,
                     value: '\$${salesToday.toStringAsFixed(2)}',
                     color: const Color(0xFF22C55E),
                     icon: Icons.attach_money_rounded,
@@ -1753,12 +2151,14 @@ class _CompactSalesSummaryCard extends StatelessWidget {
 class _SalesSummaryChart extends StatelessWidget {
   const _SalesSummaryChart({
     required this.salesHistory,
+    required this.labels,
     required this.color,
     required this.highlightIndex,
     required this.labelValue,
   });
 
   final List<double> salesHistory;
+  final List<String> labels;
   final Color color;
   final int highlightIndex;
   final double labelValue;
@@ -1767,15 +2167,6 @@ class _SalesSummaryChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final maxY = salesHistory.reduce((a, b) => a > b ? a : b);
     final safeHighlight = highlightIndex.clamp(0, salesHistory.length - 1);
-    final labels = const <int, String>{
-      0: '00',
-      1: '04',
-      2: '08',
-      3: '12',
-      4: '16',
-      5: '20',
-      6: '24',
-    };
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1807,8 +2198,11 @@ class _SalesSummaryChart extends StatelessWidget {
                       reservedSize: 22,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
-                        final text = labels[value.toInt()];
-                        if (text == null) return const SizedBox.shrink();
+                        final index = value.toInt();
+                        if (index < 0 || index >= labels.length) {
+                          return const SizedBox.shrink();
+                        }
+                        final text = labels[index];
                         return SideTitleWidget(
                           meta: meta,
                           child: Text(
@@ -2253,6 +2647,113 @@ enum _DashboardAction {
   shareMenu,
   copyLink,
   openWeb,
+}
+
+enum _SalesRange {
+  today,
+  yesterday,
+  lastWeek,
+  lastFortnight,
+  lastMonth,
+  last3Months,
+  last6Months,
+  lastYear,
+  allTime,
+  custom,
+}
+
+extension _SalesRangeUi on _SalesRange {
+  String get label {
+    switch (this) {
+      case _SalesRange.today:
+        return 'Hoy';
+      case _SalesRange.yesterday:
+        return 'Ayer';
+      case _SalesRange.lastWeek:
+        return 'Última semana';
+      case _SalesRange.lastFortnight:
+        return 'Última quincena';
+      case _SalesRange.lastMonth:
+        return 'Último mes';
+      case _SalesRange.last3Months:
+        return 'Últimos 3 meses';
+      case _SalesRange.last6Months:
+        return 'Últimos 6 meses';
+      case _SalesRange.lastYear:
+        return 'Último año';
+      case _SalesRange.allTime:
+        return 'Desde el principio';
+      case _SalesRange.custom:
+        return 'Personalizado';
+    }
+  }
+
+  String get ordersLabel {
+    switch (this) {
+      case _SalesRange.today:
+        return 'Pedidos hoy';
+      case _SalesRange.yesterday:
+        return 'Pedidos ayer';
+      case _SalesRange.lastWeek:
+        return 'Pedidos semana';
+      case _SalesRange.lastFortnight:
+        return 'Pedidos quincena';
+      case _SalesRange.lastMonth:
+        return 'Pedidos mes';
+      case _SalesRange.last3Months:
+        return 'Pedidos 3 meses';
+      case _SalesRange.last6Months:
+        return 'Pedidos 6 meses';
+      case _SalesRange.lastYear:
+        return 'Pedidos año';
+      case _SalesRange.allTime:
+        return 'Pedidos total';
+      case _SalesRange.custom:
+        return 'Pedidos rango';
+    }
+  }
+
+  String get incomeLabel {
+    switch (this) {
+      case _SalesRange.today:
+        return 'Ingresos hoy';
+      case _SalesRange.yesterday:
+        return 'Ingresos ayer';
+      case _SalesRange.lastWeek:
+        return 'Ingresos semana';
+      case _SalesRange.lastFortnight:
+        return 'Ingresos quincena';
+      case _SalesRange.lastMonth:
+        return 'Ingresos mes';
+      case _SalesRange.last3Months:
+        return 'Ingresos 3 meses';
+      case _SalesRange.last6Months:
+        return 'Ingresos 6 meses';
+      case _SalesRange.lastYear:
+        return 'Ingresos año';
+      case _SalesRange.allTime:
+        return 'Ingresos total';
+      case _SalesRange.custom:
+        return 'Ingresos rango';
+    }
+  }
+}
+
+class _SalesRangeWindow {
+  const _SalesRangeWindow({
+    required this.startInclusive,
+    required this.endExclusive,
+  });
+
+  final DateTime startInclusive;
+  final DateTime endExclusive;
+}
+
+class _SalesHistorySeries {
+  const _SalesHistorySeries({required this.values, required this.labels});
+
+  final List<double> values;
+  final List<String> labels;
 }
 
 class _DashboardSnapshot {
