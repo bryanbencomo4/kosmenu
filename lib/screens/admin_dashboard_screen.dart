@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:fl_chart/fl_chart.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,7 +9,6 @@ import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
-import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/profile_screen.dart';
@@ -27,16 +27,19 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
+  static const Color _dashboardBg = Color(0xFFF8F7FC);
+  static const Color _purple = Color(0xFF6D28D9);
+  static const Color _darkText = Color(0xFF11183C);
+  static const Color _mutedText = Color(0xFF6B6F92);
+  static const Color _green = Color(0xFF16A34A);
+  static const Color _orange = Color(0xFFF97316);
+  static const Color _red = Color(0xFFEF4444);
 
   late Future<_DashboardSnapshot> _snapshotFuture;
   late Stream<List<PedidoModel>> _ordersStream;
 
   StreamSubscription<List<PedidoModel>>? _ordersSubscription;
   StreamSubscription<AuthState>? _authStateSubscription;
-  final TextEditingController _ordersSearchController = TextEditingController();
-
-  _OrderFilter _orderFilter = _OrderFilter.all;
-  String _ordersSearchQuery = '';
 
   bool _isUpdatingBusinessOnline = false;
   bool _businessOnline = true;
@@ -45,8 +48,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _didPrimeOrderAlert = false;
   Set<String> _seenOrderIds = <String>{};
   List<PedidoModel> _latestOrders = const <PedidoModel>[];
-  final Map<String, String> _optimisticStatusByOrderId =
-      <String, String>{};
+  final Map<String, String> _optimisticStatusByOrderId = <String, String>{};
   final Set<String> _autoCancelInFlight = <String>{};
 
   MagicOnboardingResult? _recentCatalogResult;
@@ -179,7 +181,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return DateTime.now().difference(createdAt) >= _pendingConfirmationWindow;
   }
 
-  Future<void> _autoCancelExpiredPendingOrders(Iterable<PedidoModel> orders) async {
+  Future<void> _autoCancelExpiredPendingOrders(
+    Iterable<PedidoModel> orders,
+  ) async {
     final expired = orders
         .where((pedido) => !pedido.hasParseError)
         .where(_isPendingExpired)
@@ -207,7 +211,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             .eq('estado', 'pendiente');
         canceledCount += 1;
       } catch (error) {
-        debugPrint('No se pudo autocancelar pedido vencido ${pedido.id}: $error');
+        debugPrint(
+          'No se pudo autocancelar pedido vencido ${pedido.id}: $error',
+        );
       } finally {
         _autoCancelInFlight.remove(pedido.id);
       }
@@ -231,7 +237,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void dispose() {
     _ordersSubscription?.cancel();
     _authStateSubscription?.cancel();
-    _ordersSearchController.dispose();
     _recentCatalogTimer?.cancel();
     _pendingAutoCancelTicker?.cancel();
     super.dispose();
@@ -289,18 +294,37 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
     }
 
-    final lastDayRevenue = (results[3] as List<dynamic>)
+    final yesterdayOrders = (results[3] as List<dynamic>)
         .map(
           (row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)),
         )
         .where((pedido) => !pedido.hasParseError)
-        .fold<double>(0, (sum, pedido) => sum + (pedido.total ?? 0));
+        .toList(growable: false);
+
+    final lastDayRevenue = yesterdayOrders.fold<double>(
+      0,
+      (sum, pedido) => sum + (pedido.total ?? 0),
+    );
+    final yesterdayTotalOrders = yesterdayOrders.length;
+    final yesterdayCompletedOrders = yesterdayOrders
+        .where((pedido) => pedido.statusBucket == OrderStatusBucket.completed)
+        .length;
+    final yesterdayPendingOrders = yesterdayOrders
+        .where((pedido) => pedido.statusBucket == OrderStatusBucket.pending)
+        .length;
+    final yesterdayCanceledOrders = yesterdayOrders
+        .where((pedido) => pedido.statusBucket == OrderStatusBucket.canceled)
+        .length;
 
     return _DashboardSnapshot(
       comercio: comercio,
       categoryCount: (results[1] as List<dynamic>).length,
       productCount: (results[2] as List<dynamic>).length,
       lastDayRevenue: lastDayRevenue,
+      yesterdayTotalOrders: yesterdayTotalOrders,
+      yesterdayCompletedOrders: yesterdayCompletedOrders,
+      yesterdayPendingOrders: yesterdayPendingOrders,
+      yesterdayCanceledOrders: yesterdayCanceledOrders,
     );
   }
 
@@ -736,10 +760,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  bool _isOrderFinalized(PedidoModel pedido) {
-    return pedido.isFinalizedStatus;
-  }
-
   bool _isToday(DateTime? date) {
     if (date == null) return false;
     final now = DateTime.now();
@@ -752,6 +772,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final raw = (value ?? '').trim().toLowerCase();
     if (raw.isEmpty) return 'pendiente';
     return raw;
+  }
+
+  double _deltaPercentVsYesterday({
+    required int todayValue,
+    required int yesterdayValue,
+  }) {
+    if (yesterdayValue == 0) {
+      return todayValue > 0 ? 100 : 0;
+    }
+
+    return ((todayValue - yesterdayValue) / yesterdayValue.abs()) * 100;
   }
 
   PedidoModel _pedidoWithOptimisticStatus(PedidoModel pedido) {
@@ -769,202 +800,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return orders.map(_pedidoWithOptimisticStatus).toList(growable: false);
   }
 
-  bool _matchesFilter(PedidoModel pedido) {
-    if (pedido.hasParseError) {
-      return true;
-    }
-    final bucket = pedido.statusBucket;
-
-    switch (_orderFilter) {
-      case _OrderFilter.all:
-        return true;
-      case _OrderFilter.pending:
-        return bucket == OrderStatusBucket.pending;
-      case _OrderFilter.inProgress:
-        return bucket == OrderStatusBucket.inProgress;
-      case _OrderFilter.completed:
-        return bucket == OrderStatusBucket.completed;
-      case _OrderFilter.canceled:
-        return bucket == OrderStatusBucket.canceled;
-    }
-  }
-
-  String _emptyStateSubtitleForFilter() {
-    switch (_orderFilter) {
-      case _OrderFilter.all:
-        return 'Aun no has recibido pedidos o apareceran aqui cuando entren nuevos.';
-      case _OrderFilter.pending:
-        return 'No tienes pedidos pendientes en este momento.';
-      case _OrderFilter.inProgress:
-        return 'No tienes pedidos en proceso ahora mismo.';
-      case _OrderFilter.completed:
-        return 'No tienes pedidos completados todavia.';
-      case _OrderFilter.canceled:
-        return 'No tienes pedidos cancelados.';
-    }
-  }
-
-  bool _matchesSearch(PedidoModel pedido) {
-    final query = _ordersSearchQuery.trim().toLowerCase();
-    if (query.isEmpty) return true;
-
-    final fields = <String>[
-      pedido.id,
-      pedido.orderId ?? '',
-      pedido.estado ?? '',
-      pedido.clienteEmail ?? '',
-      pedido.metodoPago ?? '',
-      pedido.total?.toStringAsFixed(2) ?? '',
-      pedido.createdAt?.toIso8601String() ?? '',
-    ];
-
-    return fields.any((value) => value.toLowerCase().contains(query));
-  }
-
-  Future<void> _handleQuickAdvance(PedidoModel pedido) async {
-    final delegatedControlTransferred =
-        OrderManagerService.isDelegationControlTransferredForPedido(pedido);
-    if (delegatedControlTransferred) {
-      _showInfo(
-        'Este pedido esta delegado. El avance de ruta depende del repartidor y la confirmacion del cliente.',
-      );
-      return;
-    }
-
-    final bucket = pedido.statusBucket;
-    String? nextEstado;
-    String? successMessage;
-
-    switch (bucket) {
-      case OrderStatusBucket.pending:
-        nextEstado = 'confirmado';
-        successMessage = 'Pedido marcado como Confirmado.';
-        break;
-      case OrderStatusBucket.inProgress:
-        nextEstado = 'entregado';
-        successMessage = 'Pedido marcado como Entregado.';
-        break;
-      case OrderStatusBucket.completed:
-      case OrderStatusBucket.canceled:
-        nextEstado = null;
-        break;
-    }
-
-    if (nextEstado == null) {
-      _showInfo('Este pedido ya no se puede avanzar.');
-      return;
-    }
-
-    try {
-      if (mounted) {
-        setState(() {
-          _optimisticStatusByOrderId[pedido.id] = nextEstado!;
-        });
-      }
-
-      await Supabase.instance.client
-          .from('pedidos')
-          .update({'estado': nextEstado})
-          .eq('id', pedido.id);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text(successMessage ?? 'Pedido actualizado.'),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _optimisticStatusByOrderId.remove(pedido.id);
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('No se pudo actualizar el pedido.\n$error'),
-        ),
-      );
-    }
-  }
-
-  Future<void> _handleQuickCancel(PedidoModel pedido) async {
-    final bucket = pedido.statusBucket;
-    if (bucket == OrderStatusBucket.completed ||
-        bucket == OrderStatusBucket.canceled) {
-      _showInfo('Este pedido ya no se puede cancelar.');
-      return;
-    }
-
-    final confirmed =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) {
-            return AlertDialog(
-              title: const Text('Cancelar pedido'),
-              content: Text(
-                '¿Deseas marcar como cancelado el pedido ${pedido.orderId ?? pedido.id}?',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: const Text('Volver'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: const Text('Cancelar pedido'),
-                ),
-              ],
-            );
-          },
-        ) ??
-        false;
-
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      if (mounted) {
-        setState(() {
-          _optimisticStatusByOrderId[pedido.id] = 'cancelado';
-        });
-      }
-
-      await Supabase.instance.client
-          .from('pedidos')
-          .update({'estado': 'cancelado'})
-          .eq('id', pedido.id);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('Pedido cancelado.'),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _optimisticStatusByOrderId.remove(pedido.id);
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('No se pudo cancelar el pedido.\n$error'),
-        ),
-      );
-    }
-  }
-
-  Future<void> _goToMenuManagement() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const CategoryListScreen()));
-    if (!mounted) return;
-    await _refreshDashboard();
-  }
-
   String _buildPublicUrl(ComercioModel comercio) {
     return getPublicMenuUrl(comercio);
   }
@@ -979,8 +814,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    final media = MediaQuery.of(context);
+    final bottomInset = media.viewPadding.bottom;
+    final screenWidth = media.size.width;
+    final isSmallScreen = screenWidth < 390;
 
     return FutureBuilder<_DashboardSnapshot>(
       future: _snapshotFuture,
@@ -992,104 +829,33 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         final dashboardData = snapshot.data;
 
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Dashboard'),
-            actions: [
-              IconButton(
-                tooltip: 'Notificaciones',
-                onPressed: _openNotificationsSheet,
-                icon: const Icon(Icons.notifications_none_rounded),
-              ),
-              IconButton(
-                tooltip: 'Perfil',
-                onPressed: _openProfile,
-                icon: const Icon(Icons.account_circle_outlined),
-              ),
-              PopupMenuButton<_DashboardAction>(
-                tooltip: 'Más acciones',
-                onSelected: (value) async {
-                  switch (value) {
-                    case _DashboardAction.refresh:
-                      await _refreshDashboard();
-                      break;
-                    case _DashboardAction.magicMenu:
-                      await _openMagicOnboarding();
-                      break;
-                    case _DashboardAction.shareMenu:
-                      await _sharePublicMenu();
-                      break;
-                    case _DashboardAction.copyLink:
-                      await _copyPublicMenuUrl();
-                      break;
-                    case _DashboardAction.openWeb:
-                      await _openPublicMenu();
-                      break;
-                    case _DashboardAction.showQr:
-                      await _openQrGenerator();
-                      break;
-                  }
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: _DashboardAction.refresh,
-                    child: _MenuActionRow(
-                      icon: Icons.refresh_rounded,
-                      label: 'Refrescar dashboard',
-                    ),
-                  ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
-                    value: _DashboardAction.magicMenu,
-                    child: _MenuActionRow(
-                      icon: Icons.auto_awesome_rounded,
-                      label: 'Escanear con IA',
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _DashboardAction.showQr,
-                    child: _MenuActionRow(
-                      icon: Icons.qr_code_2_rounded,
-                      label: 'Generar QR',
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _DashboardAction.shareMenu,
-                    child: _MenuActionRow(
-                      icon: Icons.share_rounded,
-                      label: 'Compartir menú',
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _DashboardAction.copyLink,
-                    child: _MenuActionRow(
-                      icon: Icons.copy_all_rounded,
-                      label: 'Copiar enlace',
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _DashboardAction.openWeb,
-                    child: _MenuActionRow(
-                      icon: Icons.open_in_browser_rounded,
-                      label: 'Abrir menú web',
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+          backgroundColor: _dashboardBg,
           floatingActionButton: dashboardData == null
               ? null
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FloatingActionButton.extended(
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compactFab = constraints.maxWidth < 390;
+                    if (compactFab) {
+                      return FloatingActionButton(
+                        heroTag: 'assisted-order-fab',
+                        backgroundColor: _purple,
+                        foregroundColor: Colors.white,
+                        onPressed: () =>
+                            _openAssistedPublicMenu(dashboardData.comercio),
+                        child: const Icon(Icons.add_rounded),
+                      );
+                    }
+
+                    return FloatingActionButton.extended(
                       heroTag: 'assisted-order-fab',
+                      backgroundColor: _purple,
+                      foregroundColor: Colors.white,
                       onPressed: () =>
                           _openAssistedPublicMenu(dashboardData.comercio),
                       icon: const Icon(Icons.receipt_long_rounded),
-                      label: const Text('Crear pedido'),
-                    ),
-                  ],
+                      label: const Text('Nuevo pedido'),
+                    );
+                  },
                 ),
           body: SafeArea(
             child: Builder(
@@ -1145,26 +911,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     final malformedOrders = allOrders
                         .where((pedido) => pedido.hasParseError)
                         .toList(growable: false);
-                    final filteredOrders = allOrders
-                        .where((pedido) => !pedido.hasParseError)
-                        .where(_matchesFilter)
-                        .where(_matchesSearch)
-                        .toList(growable: false);
                     final validOrders = allOrders
                         .where((pedido) => !pedido.hasParseError)
+                        .toList(growable: false);
+
+                    final recentOrders = validOrders
+                        .take(3)
                         .toList(growable: false);
 
                     final pendingCount = validOrders
                         .where(
                           (pedido) =>
                               pedido.statusBucket == OrderStatusBucket.pending,
-                        )
-                        .length;
-                    final inProgressCount = validOrders
-                        .where(
-                          (pedido) =>
-                              pedido.statusBucket ==
-                              OrderStatusBucket.inProgress,
                         )
                         .length;
                     final completedCount = validOrders
@@ -1186,6 +944,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     final todayRevenue = validOrders
                         .where((o) => _isToday(o.createdAt))
                         .fold<double>(0, (sum, o) => sum + (o.total ?? 0));
+                    final double ticketPromedio = todayCount == 0
+                        ? 0.0
+                        : (todayRevenue / todayCount);
 
                     return RefreshIndicator(
                       onRefresh: _refreshDashboard,
@@ -1194,109 +955,132 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           16,
                           12,
                           16,
-                          110 + bottomInset,
+                          (isSmallScreen ? 124 : 136) + bottomInset,
                         ),
                         children: [
-                          if (_recentCatalogResult != null)
-                            _CatalogUpdateBanner(result: _recentCatalogResult!),
-                          _BusinessHeroCard(
-                            comercio: data.comercio,
-                            businessOnline: _businessOnline,
-                            onManageMenu: _goToMenuManagement,
-                            onOpenWeb: _openPublicMenu,
-                            onCopyUrl: _copyPublicMenuUrl,
-                            publicUrl: _buildPublicUrl(data.comercio),
+                          _DashboardHeader(
+                            commerceName: data.comercio.nombre,
+                            darkText: _darkText,
+                            mutedText: _mutedText,
+                            onOpenNotifications: _openNotificationsSheet,
+                            onOpenProfile: _openProfile,
+                            onActionSelected: (value) async {
+                              switch (value) {
+                                case _DashboardAction.refresh:
+                                  await _refreshDashboard();
+                                  break;
+                                case _DashboardAction.magicMenu:
+                                  await _openMagicOnboarding();
+                                  break;
+                                case _DashboardAction.shareMenu:
+                                  await _sharePublicMenu();
+                                  break;
+                                case _DashboardAction.copyLink:
+                                  await _copyPublicMenuUrl();
+                                  break;
+                                case _DashboardAction.openWeb:
+                                  await _openPublicMenu();
+                                  break;
+                                case _DashboardAction.showQr:
+                                  await _openQrGenerator();
+                                  break;
+                              }
+                            },
                           ),
                           const SizedBox(height: 14),
-                          _SectionTitle(
-                            title: 'Indicadores',
-                            actionLabel: 'Refrescar',
-                            onActionTap: _refreshDashboard,
-                          ),
-                          const SizedBox(height: 10),
-                          GridView.count(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            childAspectRatio: 1.28,
-                            children: [
-                              _KpiCard(
-                                label: 'Productos',
-                                value: '${data.productCount}',
-                                icon: Icons.restaurant_menu_rounded,
+                          if (_recentCatalogResult != null)
+                            _CatalogUpdateBanner(result: _recentCatalogResult!),
+                          _CompactKpiScroller(
+                            cards: [
+                              _CompactKpiCardData(
+                                title: 'Pedidos',
+                                value: '${validOrders.length}',
+                                icon: Icons.shopping_bag_outlined,
+                                color: _purple,
+                                deltaPercent: _deltaPercentVsYesterday(
+                                  todayValue: validOrders.length,
+                                  yesterdayValue: data.yesterdayTotalOrders,
+                                ),
                               ),
-                              _KpiCard(
-                                label: 'Categorías',
-                                value: '${data.categoryCount}',
-                                icon: Icons.grid_view_rounded,
+                              _CompactKpiCardData(
+                                title: 'Completados',
+                                value: '$completedCount',
+                                icon: Icons.check_circle_outline_rounded,
+                                color: _green,
+                                deltaPercent: _deltaPercentVsYesterday(
+                                  todayValue: completedCount,
+                                  yesterdayValue: data.yesterdayCompletedOrders,
+                                ),
                               ),
-                              _KpiCard(
-                                label: 'Pedidos hoy',
-                                value: '$todayCount',
-                                icon: Icons.receipt_long_rounded,
+                              _CompactKpiCardData(
+                                title: 'Pendientes',
+                                value: '$pendingCount',
+                                icon: Icons.access_time_rounded,
+                                color: _orange,
+                                deltaPercent: _deltaPercentVsYesterday(
+                                  todayValue: pendingCount,
+                                  yesterdayValue: data.yesterdayPendingOrders,
+                                ),
+                                downColor: _orange,
                               ),
-                              _KpiCard(
-                                label: 'Ingresos hoy',
-                                value: '\$${todayRevenue.toStringAsFixed(2)}',
-                                icon: Icons.paid_rounded,
-                                highlight: colorScheme.primary,
-                                comparisonValue: data.lastDayRevenue,
+                              _CompactKpiCardData(
+                                title: 'Cancelados',
+                                value: '$canceledCount',
+                                icon: Icons.cancel_outlined,
+                                color: _red,
+                                deltaPercent: _deltaPercentVsYesterday(
+                                  todayValue: canceledCount,
+                                  yesterdayValue: data.yesterdayCanceledOrders,
+                                ),
+                                downColor: _red,
                               ),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          _StatusRow(
-                            pendingCount: pendingCount,
-                            inProgressCount: inProgressCount,
-                            completedCount: completedCount,
-                            canceledCount: canceledCount,
+                          const SizedBox(height: 14),
+                          _CompactBusinessConfigBanner(
+                            title: 'Configuración del negocio',
+                            subtitle:
+                                'Administra tu perfil público y abre el menú en segundos.',
+                            onEdit: () => _editBusinessInfo(data.comercio),
+                            purple: _purple,
                           ),
-                          const SizedBox(height: 16),
-                          const SizedBox(height: 6),
-                          _BusinessSettingsCard(
+                          const SizedBox(height: 12),
+                          _CompactSalesSummaryCard(
+                            salesToday: todayRevenue,
+                            ordersToday: todayCount,
+                            averageTicket: ticketPromedio,
+                            darkText: _darkText,
+                            mutedText: _mutedText,
+                            purple: _purple,
+                            salesHistory: [
+                              120,
+                              180,
+                              140,
+                              200,
+                              248,
+                              220,
+                              210,
+                            ], // Simulación, reemplazar con datos reales si están disponibles
+                          ),
+                          const SizedBox(height: 14),
+                          _CompactBusinessInfoCard(
                             comercio: data.comercio,
                             isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
                             businessOnline: _businessOnline,
-                            onEditInfo: () => _editBusinessInfo(data.comercio),
                             onToggleOnline: _updateBusinessOnline,
+                            darkText: _darkText,
+                            mutedText: _mutedText,
+                            purple: _purple,
                           ),
                           const SizedBox(height: 16),
-                          _SectionTitle(title: 'Pedidos recientes'),
-                          const SizedBox(height: 10),
-                          _OrderSearchField(
-                            controller: _ordersSearchController,
-                            onChanged: (value) {
-                              if (!mounted) return;
-                              setState(() => _ordersSearchQuery = value);
-                            },
-                            onClear: () {
-                              _ordersSearchController.clear();
-                              if (!mounted) return;
-                              setState(() => _ordersSearchQuery = '');
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: _OrderFilter.values.map((filter) {
-                                final selected = _orderFilter == filter;
-                                return Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: ChoiceChip(
-                                    selected: selected,
-                                    onSelected: (_) {
-                                      if (!mounted) return;
-                                      setState(() => _orderFilter = filter);
-                                    },
-                                    label: Text(filter.label),
-                                    avatar: Icon(filter.icon, size: 16),
-                                  ),
-                                );
-                              }).toList(),
-                            ),
+                          _SectionTitle(
+                            title: 'Pedidos recientes',
+                            actionLabel: validOrders.length > 3
+                                ? 'Ver todos'
+                                : null,
+                            onActionTap: validOrders.length > 3
+                                ? () => _openAllOrdersSheet(validOrders)
+                                : null,
                           ),
                           const SizedBox(height: 10),
                           if (ordersSnapshot.hasError)
@@ -1309,32 +1093,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               actionLabel: 'Reintentar',
                               onAction: _refreshDashboard,
                             )
-                          else if (filteredOrders.isEmpty &&
+                          else if (recentOrders.isEmpty &&
                               malformedOrders.isEmpty)
                             _EmptyStateCard(
-                              title: 'Sin pedidos para este filtro',
-                              subtitle: _emptyStateSubtitleForFilter(),
+                              title: 'Sin pedidos recientes',
+                              subtitle:
+                                  'Aún no recibes pedidos. Aquí aparecerán los últimos cuando entren.',
                               icon: Icons.inbox_outlined,
                             )
                           else ...[
                             ...malformedOrders.map(
                               (pedido) => _MalformedOrderTile(pedido: pedido),
                             ),
-                            ...filteredOrders.map(
-                              (pedido) => _OrderTile(
+                            ...recentOrders.map(
+                              (pedido) => _CompactRecentOrderTile(
                                 pedido: pedido,
-                                statusBucket: pedido.statusBucket,
-                                isDelayed:
-                                    !_isOrderFinalized(pedido) &&
-                                    pedido.createdAt != null &&
-                                DateTime.now().difference(pedido.createdAt!).inMinutes >
-                                  (pedido.statusBucket == OrderStatusBucket.pending
-                                    ? _pendingConfirmationWindow.inMinutes
-                                    : 20),
                                 onTap: () => _openOrderDetail(pedido),
-                                onQuickAdvance: () =>
-                                    _handleQuickAdvance(pedido),
-                                onQuickCancel: () => _handleQuickCancel(pedido),
+                                darkText: _darkText,
+                                mutedText: _mutedText,
                               ),
                             ),
                           ],
@@ -1350,6 +1126,1124 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       },
     );
   }
+
+  Future<void> _openAllOrdersSheet(List<PedidoModel> orders) async {
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.82,
+          maxChildSize: 0.96,
+          minChildSize: 0.55,
+          builder: (context, controller) {
+            return ListView.separated(
+              controller: controller,
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+              itemCount: orders.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final pedido = orders[index];
+                return _CompactRecentOrderTile(
+                  pedido: pedido,
+                  onTap: () async {
+                    Navigator.of(sheetContext).pop();
+                    await _openOrderDetail(pedido);
+                  },
+                  darkText: _darkText,
+                  mutedText: _mutedText,
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _DashboardHeader extends StatelessWidget {
+  const _DashboardHeader({
+    required this.commerceName,
+    required this.darkText,
+    required this.mutedText,
+    required this.onOpenNotifications,
+    required this.onOpenProfile,
+    required this.onActionSelected,
+  });
+
+  final String commerceName;
+  final Color darkText;
+  final Color mutedText;
+  final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenProfile;
+  final ValueChanged<_DashboardAction> onActionSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedName = commerceName.trim().isEmpty
+        ? 'Comercio'
+        : commerceName.trim();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '¡Hola, $resolvedName! 👋',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: darkText,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Aquí tienes un resumen de tu negocio.',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: mutedText,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _HeaderCircleButton(
+              icon: Icons.notifications_none_rounded,
+              tooltip: 'Notificaciones',
+              onTap: onOpenNotifications,
+            ),
+            _HeaderCircleButton(
+              icon: Icons.account_circle_outlined,
+              tooltip: 'Perfil',
+              onTap: onOpenProfile,
+            ),
+            PopupMenuButton<_DashboardAction>(
+              tooltip: 'Más acciones',
+              onSelected: onActionSelected,
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: _DashboardAction.refresh,
+                  child: _MenuActionRow(
+                    icon: Icons.refresh_rounded,
+                    label: 'Refrescar dashboard',
+                  ),
+                ),
+                PopupMenuDivider(),
+                PopupMenuItem(
+                  value: _DashboardAction.magicMenu,
+                  child: _MenuActionRow(
+                    icon: Icons.auto_awesome_rounded,
+                    label: 'Escanear con IA',
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _DashboardAction.showQr,
+                  child: _MenuActionRow(
+                    icon: Icons.qr_code_2_rounded,
+                    label: 'Generar QR',
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _DashboardAction.shareMenu,
+                  child: _MenuActionRow(
+                    icon: Icons.share_rounded,
+                    label: 'Compartir menú',
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _DashboardAction.copyLink,
+                  child: _MenuActionRow(
+                    icon: Icons.copy_all_rounded,
+                    label: 'Copiar enlace',
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _DashboardAction.openWeb,
+                  child: _MenuActionRow(
+                    icon: Icons.open_in_browser_rounded,
+                    label: 'Abrir menú web',
+                  ),
+                ),
+              ],
+              child: const _HeaderCircleButton(
+                icon: Icons.more_horiz_rounded,
+                tooltip: 'Más acciones',
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _HeaderCircleButton extends StatelessWidget {
+  const _HeaderCircleButton({
+    required this.icon,
+    required this.tooltip,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Tooltip(
+          message: tooltip,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x120F172A),
+                  blurRadius: 8,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Icon(icon, size: 18, color: const Color(0xFF11183C)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactKpiCardData {
+  const _CompactKpiCardData({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.color,
+    required this.deltaPercent,
+    this.downColor,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color color;
+  final double deltaPercent;
+  final Color? downColor;
+}
+
+class _CompactKpiScroller extends StatelessWidget {
+  const _CompactKpiScroller({required this.cards});
+
+  final List<_CompactKpiCardData> cards;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 124,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: cards.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final item = cards[index];
+          return _CompactKpiCard(data: item);
+        },
+      ),
+    );
+  }
+}
+
+class _CompactKpiCard extends StatelessWidget {
+  const _CompactKpiCard({required this.data});
+
+  final _CompactKpiCardData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final isUp = data.deltaPercent >= 0;
+    final trendColor = isUp
+        ? const Color(0xFF16A34A)
+        : (data.downColor ?? const Color(0xFFEF4444));
+    final trendValue = data.deltaPercent.abs().round();
+
+    return Container(
+      width: 132,
+      height: 124,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE8EAF2)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x100F172A),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: data.color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(data.icon, color: data.color, size: 18),
+          ),
+          const Spacer(),
+          Text(
+            data.value,
+            style: GoogleFonts.poppins(
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+              color: const Color(0xFF11183C),
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 1),
+          Text(
+            data.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 11.5,
+              color: const Color(0xFF6B6F92),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(
+                isUp
+                    ? Icons.arrow_drop_up_rounded
+                    : Icons.arrow_drop_down_rounded,
+                size: 14,
+                color: trendColor,
+              ),
+              Text(
+                '$trendValue% vs ayer',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 10.5,
+                  color: trendColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactBusinessConfigBanner extends StatelessWidget {
+  const _CompactBusinessConfigBanner({
+    required this.title,
+    required this.subtitle,
+    required this.onEdit,
+    required this.purple,
+  });
+
+  final String title;
+  final String subtitle;
+  final VoidCallback onEdit;
+  final Color purple;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: purple,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1A6D28D9),
+            blurRadius: 14,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.storefront_rounded, color: purple, size: 21),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    color: Colors.white.withValues(alpha: 0.86),
+                    fontWeight: FontWeight.w500,
+                    fontSize: 11.5,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton(
+            onPressed: onEdit,
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: purple,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              minimumSize: const Size(0, 34),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              'Editar',
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactSalesSummaryCard extends StatelessWidget {
+  const _CompactSalesSummaryCard({
+    required this.salesToday,
+    required this.ordersToday,
+    required this.averageTicket,
+    required this.darkText,
+    required this.mutedText,
+    required this.purple,
+    this.salesHistory,
+  });
+
+  final double salesToday;
+  final int ordersToday;
+  final double averageTicket;
+  final Color darkText;
+  final Color mutedText;
+  final Color purple;
+  final List<double>? salesHistory;
+
+  @override
+  Widget build(BuildContext context) {
+    final chartData =
+        salesHistory ?? const <double>[120, 180, 140, 200, 248, 220, 210];
+    final highlightIndex = chartData.length > 4 ? 4 : chartData.length - 1;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x100F172A),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Resumen de ventas',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                height: 30,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8F8FD),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE9EAF4)),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'Hoy',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: mutedText,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: 16,
+                      color: mutedText,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 122,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ventas totales',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: mutedText,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '\$${salesToday.toStringAsFixed(2)}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 38,
+                        height: 0.98,
+                        fontWeight: FontWeight.w700,
+                        color: darkText,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.arrow_upward_rounded,
+                          color: Color(0xFF16A34A),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '15% vs ayer',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12.3,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF16A34A),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: SizedBox(
+                  height: 108,
+                  child: _SalesSummaryChart(
+                    salesHistory: chartData,
+                    color: purple,
+                    highlightIndex: highlightIndex,
+                    labelValue: salesToday,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _SalesMiniCard(
+                  data: _SalesMiniData(
+                    label: 'Ticket promedio',
+                    value: '\$${averageTicket.toStringAsFixed(2)}',
+                    color: const Color(0xFF8B5CF6),
+                    icon: Icons.receipt_rounded,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: _SalesMiniCard(
+                  data: _SalesMiniData(
+                    label: 'Pedidos hoy',
+                    value: '$ordersToday',
+                    color: const Color(0xFF3B82F6),
+                    icon: Icons.bar_chart_rounded,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: _SalesMiniCard(
+                  data: _SalesMiniData(
+                    label: 'Ingresos hoy',
+                    value: '\$${salesToday.toStringAsFixed(2)}',
+                    color: const Color(0xFF22C55E),
+                    icon: Icons.attach_money_rounded,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SalesSummaryChart extends StatelessWidget {
+  const _SalesSummaryChart({
+    required this.salesHistory,
+    required this.color,
+    required this.highlightIndex,
+    required this.labelValue,
+  });
+
+  final List<double> salesHistory;
+  final Color color;
+  final int highlightIndex;
+  final double labelValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxY = salesHistory.reduce((a, b) => a > b ? a : b);
+    final safeHighlight = highlightIndex.clamp(0, salesHistory.length - 1);
+    final labels = const <int, String>{
+      0: '00',
+      1: '04',
+      2: '08',
+      3: '12',
+      4: '16',
+      5: '20',
+      6: '24',
+    };
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final xRatio = salesHistory.length <= 1
+            ? 0.5
+            : safeHighlight / (salesHistory.length - 1);
+        final bubbleLeft = (constraints.maxWidth * xRatio) - 26;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            LineChart(
+              LineChartData(
+                lineTouchData: const LineTouchData(enabled: false),
+                gridData: FlGridData(show: false),
+                titlesData: FlTitlesData(
+                  leftTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 22,
+                      interval: 1,
+                      getTitlesWidget: (value, meta) {
+                        final text = labels[value.toInt()];
+                        if (text == null) return const SizedBox.shrink();
+                        return SideTitleWidget(
+                          meta: meta,
+                          child: Text(
+                            text,
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF6B6F92),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                minX: 0,
+                maxX: (salesHistory.length - 1).toDouble(),
+                minY: 0,
+                maxY: maxY * 1.28,
+                extraLinesData: ExtraLinesData(
+                  verticalLines: [
+                    VerticalLine(
+                      x: safeHighlight.toDouble(),
+                      color: color.withValues(alpha: 0.28),
+                      strokeWidth: 1,
+                      dashArray: const [4, 4],
+                    ),
+                  ],
+                ),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: [
+                      for (int i = 0; i < salesHistory.length; i++)
+                        FlSpot(i.toDouble(), salesHistory[i]),
+                    ],
+                    isCurved: true,
+                    color: color,
+                    barWidth: 2.2,
+                    isStrokeCapRound: true,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, percent, barData, index) {
+                        final isHighlight = index == safeHighlight;
+                        return FlDotCirclePainter(
+                          radius: isHighlight ? 4.2 : 2.2,
+                          color: color,
+                          strokeWidth: isHighlight ? 2 : 0,
+                          strokeColor: Colors.white,
+                        );
+                      },
+                    ),
+                    belowBarData: BarAreaData(show: false),
+                  ),
+                ],
+              ),
+              duration: const Duration(milliseconds: 350),
+            ),
+            Positioned(
+              left: bubbleLeft.clamp(0, constraints.maxWidth - 54),
+              top: -2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF312E81),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '\$${labelValue.toStringAsFixed(2)}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SalesMiniData {
+  const _SalesMiniData({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.icon,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+  final IconData icon;
+}
+
+class _SalesMiniCard extends StatelessWidget {
+  const _SalesMiniCard({required this.data});
+
+  final _SalesMiniData data;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+      decoration: BoxDecoration(
+        color: data.color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 18,
+            height: 18,
+            decoration: BoxDecoration(
+              color: data.color.withValues(alpha: 0.16),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(data.icon, size: 11, color: data.color),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            data.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(
+              fontSize: 9.2,
+              color: const Color(0xFF6B6F92),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              data.value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                fontSize: 25,
+                height: 0.95,
+                color: const Color(0xFF11183C),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactBusinessInfoCard extends StatelessWidget {
+  const _CompactBusinessInfoCard({
+    required this.comercio,
+    required this.isUpdatingBusinessOnline,
+    required this.businessOnline,
+    required this.onToggleOnline,
+    required this.darkText,
+    required this.mutedText,
+    required this.purple,
+  });
+
+  final ComercioModel comercio;
+  final bool isUpdatingBusinessOnline;
+  final bool businessOnline;
+  final ValueChanged<bool> onToggleOnline;
+  final Color darkText;
+  final Color mutedText;
+  final Color purple;
+
+  @override
+  Widget build(BuildContext context) {
+    final whatsappLabel = (comercio.whatsapp ?? '').trim().isEmpty
+        ? 'Sin configurar'
+        : comercio.whatsapp!.trim();
+    final slugLabel = (comercio.slug ?? '').trim().isEmpty
+        ? 'Sin slug'
+        : '@${comercio.slug!.trim()}';
+
+    Widget infoLine({
+      required String label,
+      required String value,
+      required IconData icon,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 7),
+        child: Row(
+          children: [
+            Icon(icon, size: 15, color: purple),
+            const SizedBox(width: 7),
+            Text(
+              '$label:',
+              style: GoogleFonts.poppins(
+                fontSize: 11.2,
+                color: mutedText,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 11.8,
+                  color: darkText,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE8EAF2)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x100F172A),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Información de tu negocio',
+            style: GoogleFonts.poppins(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w700,
+              color: darkText,
+            ),
+          ),
+          const SizedBox(height: 8),
+          infoLine(
+            label: 'Nombre',
+            value: comercio.nombre,
+            icon: Icons.storefront_rounded,
+          ),
+          infoLine(
+            label: 'WhatsApp',
+            value: whatsappLabel,
+            icon: Icons.phone_in_talk_outlined,
+          ),
+          infoLine(
+            label: 'Slug',
+            value: slugLabel,
+            icon: Icons.alternate_email_rounded,
+          ),
+          const SizedBox(height: 2),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF6F2FF),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  businessOnline
+                      ? Icons.wifi_tethering_rounded
+                      : Icons.wifi_tethering_off_rounded,
+                  size: 16,
+                  color: businessOnline
+                      ? const Color(0xFF16A34A)
+                      : const Color(0xFFEF4444),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    businessOnline ? 'Negocio en línea' : 'Negocio pausado',
+                    style: GoogleFonts.poppins(
+                      fontSize: 11.6,
+                      fontWeight: FontWeight.w600,
+                      color: darkText,
+                    ),
+                  ),
+                ),
+                if (isUpdatingBusinessOnline)
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Transform.scale(
+                    scale: 0.82,
+                    child: Switch.adaptive(
+                      value: businessOnline,
+                      onChanged: onToggleOnline,
+                      activeThumbColor: purple,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactRecentOrderTile extends StatelessWidget {
+  const _CompactRecentOrderTile({
+    required this.pedido,
+    required this.onTap,
+    required this.darkText,
+    required this.mutedText,
+  });
+
+  final PedidoModel pedido;
+  final VoidCallback onTap;
+  final Color darkText;
+  final Color mutedText;
+
+  String get _shortOrderId {
+    final value = (pedido.orderId ?? pedido.id).trim();
+    if (value.length <= 10) {
+      return value;
+    }
+    return '${value.substring(0, 10)}…';
+  }
+
+  String get _hourLabel {
+    final created = pedido.createdAt;
+    if (created == null) {
+      return '--:--';
+    }
+    final local = created.toLocal();
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = pedido.statusBucket;
+
+    return SizedBox(
+      height: 72,
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE8EAF2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x0D0F172A),
+                  blurRadius: 8,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: status.color.withValues(alpha: 0.14),
+                  ),
+                  child: Icon(status.icon, size: 17, color: status.color),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _shortOrderId,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: darkText,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$_hourLabel · ${status.label}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          color: mutedText,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  pedido.total != null
+                      ? '\$${pedido.total!.toStringAsFixed(2)}'
+                      : '--',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: darkText,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(Icons.chevron_right_rounded, color: mutedText, size: 18),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 enum _DashboardAction {
@@ -1361,229 +2255,28 @@ enum _DashboardAction {
   openWeb,
 }
 
-enum _OrderFilter { all, pending, inProgress, completed, canceled }
-
-extension on _OrderFilter {
-  String get label {
-    switch (this) {
-      case _OrderFilter.all:
-        return 'Todos';
-      case _OrderFilter.pending:
-        return 'Pendientes';
-      case _OrderFilter.inProgress:
-        return 'En proceso';
-      case _OrderFilter.completed:
-        return 'Completados';
-      case _OrderFilter.canceled:
-        return 'Cancelados';
-    }
-  }
-
-  IconData get icon {
-    switch (this) {
-      case _OrderFilter.all:
-        return Icons.receipt_long_rounded;
-      case _OrderFilter.pending:
-        return Icons.timelapse_rounded;
-      case _OrderFilter.inProgress:
-        return Icons.local_shipping_rounded;
-      case _OrderFilter.completed:
-        return Icons.check_circle_rounded;
-      case _OrderFilter.canceled:
-        return Icons.cancel_rounded;
-    }
-  }
-}
-
 class _DashboardSnapshot {
   const _DashboardSnapshot({
     required this.comercio,
     required this.categoryCount,
     required this.productCount,
     double? lastDayRevenue,
+    this.yesterdayTotalOrders = 0,
+    this.yesterdayCompletedOrders = 0,
+    this.yesterdayPendingOrders = 0,
+    this.yesterdayCanceledOrders = 0,
   }) : _lastDayRevenue = lastDayRevenue;
 
   final ComercioModel comercio;
   final int categoryCount;
   final int productCount;
   final double? _lastDayRevenue;
+  final int yesterdayTotalOrders;
+  final int yesterdayCompletedOrders;
+  final int yesterdayPendingOrders;
+  final int yesterdayCanceledOrders;
 
   double get lastDayRevenue => _lastDayRevenue ?? 0;
-}
-
-class _BusinessHeroCard extends StatelessWidget {
-  const _BusinessHeroCard({
-    required this.comercio,
-    required this.businessOnline,
-    required this.onManageMenu,
-    required this.onOpenWeb,
-    required this.onCopyUrl,
-    required this.publicUrl,
-  });
-
-  final ComercioModel comercio;
-  final bool businessOnline;
-  final VoidCallback onManageMenu;
-  final VoidCallback onOpenWeb;
-  final VoidCallback onCopyUrl;
-  final String publicUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final palette = _BusinessCardPalette.fromMenuPalette(
-      comercio.menuPalette,
-      colorScheme,
-      primaryArgb: comercio.menuPalettePrimaryArgb,
-      accentArgb: comercio.menuPaletteAccentArgb,
-      surfaceArgb: comercio.menuPaletteSurfaceArgb,
-      textArgb: comercio.menuPaletteTextArgb,
-    );
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        gradient: LinearGradient(
-          colors: [palette.surfaceStart, palette.surfaceEnd],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: palette.primary.withValues(alpha: 0.4)),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: palette.primary.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: palette.primary.withValues(alpha: 0.44),
-                  ),
-                ),
-                child: _BusinessLogoAvatar(
-                  logoUrl: comercio.logoUrl,
-                  businessName: comercio.nombre,
-                  fallbackBackground: colorScheme.primaryContainer,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      comercio.nombre,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        color: palette.onSurface,
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '@${(comercio.slug ?? '').trim().isEmpty ? 'tu-slug' : comercio.slug!.trim()}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        color: palette.onSurface.withValues(alpha: 0.82),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _StatusPill(
-                label: businessOnline ? 'En línea' : 'Pausado',
-                color: businessOnline ? palette.success : palette.warning,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: palette.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: palette.accent.withValues(alpha: 0.45)),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.link_rounded,
-                  size: 16,
-                  color: palette.onSurfaceMuted,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SelectableText(
-                      publicUrl,
-                      style: GoogleFonts.poppins(
-                        color: palette.onSurface,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  tooltip: 'Copiar URL completa',
-                  onPressed: onCopyUrl,
-                  icon: Icon(
-                    Icons.copy_all_rounded,
-                    size: 18,
-                    color: palette.onSurface,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: palette.primary,
-                    foregroundColor: palette.onPrimary,
-                  ),
-                  onPressed: onManageMenu,
-                  icon: const Icon(Icons.inventory_2_outlined),
-                  label: const Text('Administrar menú'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: palette.onSurface,
-                    side: BorderSide(
-                      color: palette.accent.withValues(alpha: 0.7),
-                    ),
-                  ),
-                  onPressed: onOpenWeb,
-                  icon: const Icon(Icons.open_in_browser_rounded),
-                  label: const Text('Abrir web'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _StatusPill extends StatelessWidget {
@@ -1615,198 +2308,6 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
-class _BusinessLogoAvatar extends StatelessWidget {
-  const _BusinessLogoAvatar({
-    required this.logoUrl,
-    required this.businessName,
-    required this.fallbackBackground,
-  });
-
-  final String? logoUrl;
-  final String businessName;
-  final Color fallbackBackground;
-
-  String get _fallbackInitial {
-    final trimmed = businessName.trim();
-    if (trimmed.isEmpty) {
-      return 'K';
-    }
-
-    return trimmed.substring(0, 1).toUpperCase();
-  }
-
-  Widget _buildFallbackAvatar() {
-    return Container(
-      color: fallbackBackground,
-      alignment: Alignment.center,
-      child: Text(
-        _fallbackInitial,
-        style: GoogleFonts.poppins(
-          color: Colors.white,
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final trimmed = logoUrl?.trim() ?? '';
-    if (trimmed.isEmpty) {
-      return _buildFallbackAvatar();
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Image.network(
-        trimmed,
-        fit: BoxFit.cover,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) {
-            return child;
-          }
-
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              _buildFallbackAvatar(),
-              const Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            ],
-          );
-        },
-        errorBuilder: (_, _, _) => _buildFallbackAvatar(),
-      ),
-    );
-  }
-}
-
-class _BusinessCardPalette {
-  const _BusinessCardPalette({
-    required this.surfaceStart,
-    required this.surfaceEnd,
-    required this.primary,
-    required this.accent,
-    required this.onSurface,
-    required this.onSurfaceMuted,
-    required this.onPrimary,
-    required this.success,
-    required this.warning,
-  });
-
-  final Color surfaceStart;
-  final Color surfaceEnd;
-  final Color primary;
-  final Color accent;
-  final Color onSurface;
-  final Color onSurfaceMuted;
-  final Color onPrimary;
-  final Color success;
-  final Color warning;
-
-  static _BusinessCardPalette fromMenuPalette(
-    String? rawPalette,
-    ColorScheme colorScheme, {
-    int? primaryArgb,
-    int? accentArgb,
-    int? surfaceArgb,
-    int? textArgb,
-  }) {
-    if (primaryArgb != null && surfaceArgb != null && textArgb != null) {
-      final primary = Color(primaryArgb);
-      final accent = Color(accentArgb ?? primaryArgb);
-      final surface = Color(surfaceArgb);
-      final text = Color(textArgb);
-      final surfaceStart = Color.lerp(surface, primary, 0.22) ?? surface;
-      final onPrimary = primary.computeLuminance() > 0.5
-          ? const Color(0xFF1F2937)
-          : Colors.white;
-      return _BusinessCardPalette(
-        surfaceStart: surfaceStart,
-        surfaceEnd: surface,
-        primary: primary,
-        accent: accent,
-        onSurface: text,
-        onSurfaceMuted: text.withValues(alpha: 0.78),
-        onPrimary: onPrimary,
-        success: const Color(0xFF4ADE80),
-        warning: const Color(0xFFFBBF24),
-      );
-    }
-
-    final id = (rawPalette ?? '').trim().toLowerCase();
-    switch (id) {
-      case 'uva':
-        return const _BusinessCardPalette(
-          surfaceStart: Color(0xFF2B1455),
-          surfaceEnd: Color(0xFF1A1030),
-          primary: Color(0xFF8B5CF6),
-          accent: Color(0xFFC4B5FD),
-          onSurface: Color(0xFFF5F3FF),
-          onSurfaceMuted: Color(0xFFD6CCF5),
-          onPrimary: Color(0xFF1A1030),
-          success: Color(0xFF4ADE80),
-          warning: Color(0xFFFBBF24),
-        );
-      case 'cafe':
-        return const _BusinessCardPalette(
-          surfaceStart: Color(0xFF332015),
-          surfaceEnd: Color(0xFF1E150F),
-          primary: Color(0xFFF59E0B),
-          accent: Color(0xFFFCD34D),
-          onSurface: Color(0xFFFFF7ED),
-          onSurfaceMuted: Color(0xFFF2D7B0),
-          onPrimary: Color(0xFF2B1708),
-          success: Color(0xFF4ADE80),
-          warning: Color(0xFFFBBF24),
-        );
-      case 'oliva':
-        return const _BusinessCardPalette(
-          surfaceStart: Color(0xFF203019),
-          surfaceEnd: Color(0xFF152114),
-          primary: Color(0xFFA3E635),
-          accent: Color(0xFFD9F99D),
-          onSurface: Color(0xFFF7FEE7),
-          onSurfaceMuted: Color(0xFFDCE8BE),
-          onPrimary: Color(0xFF22330F),
-          success: Color(0xFF4ADE80),
-          warning: Color(0xFFFBBF24),
-        );
-      case 'oceano':
-        return const _BusinessCardPalette(
-          surfaceStart: Color(0xFF12314A),
-          surfaceEnd: Color(0xFF0F2233),
-          primary: Color(0xFF38BDF8),
-          accent: Color(0xFFBAE6FD),
-          onSurface: Color(0xFFEFF9FF),
-          onSurfaceMuted: Color(0xFFBCD9EE),
-          onPrimary: Color(0xFF062033),
-          success: Color(0xFF4ADE80),
-          warning: Color(0xFFFBBF24),
-        );
-      default:
-        final onSurface = colorScheme.onPrimaryContainer;
-        return _BusinessCardPalette(
-          surfaceStart: colorScheme.primaryContainer,
-          surfaceEnd: colorScheme.surfaceContainerHighest,
-          primary: colorScheme.primary,
-          accent: colorScheme.secondary,
-          onSurface: onSurface,
-          onSurfaceMuted: onSurface.withValues(alpha: 0.78),
-          onPrimary: colorScheme.onPrimary,
-          success: const Color(0xFF16A34A),
-          warning: const Color(0xFFF59E0B),
-        );
-    }
-  }
-}
-
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({
     required this.title,
@@ -1834,892 +2335,6 @@ class _SectionTitle extends StatelessWidget {
         if (actionLabel != null && onActionTap != null)
           TextButton(onPressed: onActionTap, child: Text(actionLabel!)),
       ],
-    );
-  }
-}
-
-class _KpiCard extends StatelessWidget {
-  const _KpiCard({
-    required this.label,
-    required this.value,
-    required this.icon,
-    this.highlight,
-    this.comparisonValue,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color? highlight;
-  final double? comparisonValue;
-
-  double? get _currentNumericValue {
-    final normalized = value.replaceAll(RegExp(r'[^0-9.,-]'), '').trim();
-    if (normalized.isEmpty) {
-      return null;
-    }
-
-    return double.tryParse(normalized.replaceAll(',', ''));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final accent = highlight ?? colorScheme.primary;
-    final currentNumericValue = _currentNumericValue;
-    final previousNumericValue = comparisonValue;
-    final hasComparison =
-        currentNumericValue != null && previousNumericValue != null;
-    final percentageDelta = hasComparison
-        ? previousNumericValue == 0
-              ? (currentNumericValue > 0 ? 100.0 : 0.0)
-              : ((currentNumericValue - previousNumericValue) /
-                        previousNumericValue.abs()) *
-                    100
-        : null;
-    final isUp = (percentageDelta ?? 0) >= 0;
-    final comparisonColor = isUp
-        ? const Color(0xFF16A34A)
-        : const Color(0xFFE11D48);
-    final comparisonLabel = percentageDelta == null
-        ? null
-        : '${isUp ? '+' : ''}${percentageDelta.round()}% vs ayer';
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accent.withValues(alpha: 0.22)),
-      ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: accent, size: 20),
-          const Spacer(),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          if (comparisonLabel != null) ...[
-            const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: comparisonColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                '${isUp ? '↑' : '↓'} $comparisonLabel',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  color: comparisonColor,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 2),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusRow extends StatelessWidget {
-  const _StatusRow({
-    required this.pendingCount,
-    required this.inProgressCount,
-    required this.completedCount,
-    required this.canceledCount,
-  });
-
-  final int pendingCount;
-  final int inProgressCount;
-  final int completedCount;
-  final int canceledCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final cards = <Widget>[
-      _MiniInfoCard(
-        icon: OrderStatusBucket.pending.icon,
-        label: 'Pendientes',
-        value: '$pendingCount',
-        color: OrderStatusBucket.pending.color,
-      ),
-      _MiniInfoCard(
-        icon: OrderStatusBucket.inProgress.icon,
-        label: 'En proceso',
-        value: '$inProgressCount',
-        color: OrderStatusBucket.inProgress.color,
-      ),
-      _MiniInfoCard(
-        icon: OrderStatusBucket.completed.icon,
-        label: 'Completados',
-        value: '$completedCount',
-        color: OrderStatusBucket.completed.color,
-      ),
-      _MiniInfoCard(
-        icon: OrderStatusBucket.canceled.icon,
-        label: 'Cancelados',
-        value: '$canceledCount',
-        color: OrderStatusBucket.canceled.color,
-      ),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth > 500) {
-          return Row(
-            children: [
-              for (var index = 0; index < cards.length; index++) ...[
-                Expanded(child: cards[index]),
-                if (index != cards.length - 1) const SizedBox(width: 10),
-              ],
-            ],
-          );
-        }
-
-        return GridView.count(
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 2.5,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: cards,
-        );
-      },
-    );
-  }
-}
-
-class _MiniInfoCard extends StatelessWidget {
-  const _MiniInfoCard({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final numericValue = int.tryParse(value);
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact =
-            constraints.maxWidth < 120 || constraints.maxHeight < 78;
-        final iconSize = compact ? 15.0 : 17.0;
-        final valueFontSize = compact ? 13.0 : 14.0;
-        final labelFontSize = compact ? 10.0 : 11.0;
-        final padding = compact ? 8.0 : 10.0;
-        final spacing = compact ? 6.0 : 8.0;
-
-        Widget buildAnimatedValue() {
-          return TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0, end: (numericValue ?? 0).toDouble()),
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic,
-            builder: (context, animatedValue, _) {
-              final displayValue = numericValue == null
-                  ? value
-                  : animatedValue.round().toString();
-
-              return Opacity(
-                opacity: numericValue == null || numericValue <= 0
-                    ? 1
-                    : (animatedValue / numericValue).clamp(0.0, 1.0),
-                child: Text(
-                  displayValue,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: valueFontSize,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              );
-            },
-          );
-        }
-
-        return Container(
-          padding: EdgeInsets.all(padding),
-          decoration: BoxDecoration(
-            color: theme.cardColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: color.withValues(alpha: 0.24)),
-          ),
-          child: compact
-              ? Row(
-                  children: [
-                    Icon(icon, size: iconSize, color: color),
-                    SizedBox(width: spacing),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          buildAnimatedValue(),
-                          const SizedBox(height: 1),
-                          Text(
-                            label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.poppins(
-                              fontSize: labelFontSize,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(icon, size: iconSize, color: color),
-                    SizedBox(height: spacing),
-                    buildAnimatedValue(),
-                    const SizedBox(height: 2),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: labelFontSize,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-        );
-      },
-    );
-  }
-}
-
-class _BusinessSettingsCard extends StatelessWidget {
-  const _BusinessSettingsCard({
-    required this.comercio,
-    required this.isUpdatingBusinessOnline,
-    required this.businessOnline,
-    required this.onEditInfo,
-    required this.onToggleOnline,
-  });
-
-  final ComercioModel comercio;
-  final bool isUpdatingBusinessOnline;
-  final bool businessOnline;
-  final VoidCallback onEditInfo;
-  final ValueChanged<bool> onToggleOnline;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final whatsappLabel = (comercio.whatsapp ?? '').trim().isEmpty
-        ? 'Sin configurar'
-        : comercio.whatsapp!.trim();
-    final slugLabel = (comercio.slug ?? '').trim().isEmpty
-        ? 'Sin slug'
-        : '@${comercio.slug!.trim()}';
-
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    colorScheme.primaryContainer,
-                    colorScheme.surfaceContainerHighest,
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: colorScheme.primary.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      Icons.settings_outlined,
-                      color: colorScheme.primary,
-                      size: 19,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Configuración del negocio',
-                          style: GoogleFonts.poppins(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        Text(
-                          'Ajusta datos públicos y estado operativo',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.poppins(
-                            fontSize: 11.5,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.tonalIcon(
-                onPressed: onEditInfo,
-                icon: const Icon(Icons.tune_rounded, size: 16),
-                label: const Text('Editar'),
-              ),
-            ),
-            const SizedBox(height: 10),
-            _BusinessInfoLine(
-              icon: Icons.storefront_rounded,
-              label: 'Nombre',
-              value: comercio.nombre,
-            ),
-            const SizedBox(height: 8),
-            _BusinessInfoLine(
-              icon: Icons.phone_in_talk_outlined,
-              label: 'WhatsApp',
-              value: whatsappLabel,
-            ),
-            const SizedBox(height: 8),
-            _BusinessInfoLine(
-              icon: Icons.alternate_email_rounded,
-              label: 'Slug',
-              value: slugLabel,
-            ),
-            const SizedBox(height: 8),
-            SwitchListTile.adaptive(
-              value: businessOnline,
-              onChanged: isUpdatingBusinessOnline ? null : onToggleOnline,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-              title: Text(
-                businessOnline ? 'En línea' : 'Pausado',
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5,
-                ),
-              ),
-              subtitle: Text(
-                isUpdatingBusinessOnline
-                    ? 'Guardando estado en el servidor...'
-                    : businessOnline
-                    ? 'Aceptando pedidos de clientes.'
-                    : 'Temporalmente pausado para nuevos pedidos.',
-                style: GoogleFonts.poppins(
-                  fontSize: 11,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-              secondary: isUpdatingBusinessOnline
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2.2),
-                    )
-                  : Icon(
-                      businessOnline
-                          ? Icons.wifi_tethering_rounded
-                          : Icons.wifi_tethering_off_rounded,
-                      size: 18,
-                      color: businessOnline
-                          ? const Color(0xFF16A34A)
-                          : const Color(0xFFE11D48),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BusinessInfoLine extends StatelessWidget {
-  const _BusinessInfoLine({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 17, color: colorScheme.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '$label: $value',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OrderSearchField extends StatelessWidget {
-  const _OrderSearchField({
-    required this.controller,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      decoration: InputDecoration(
-        hintText: 'Buscar por ID, correo, estado o método',
-        prefixIcon: const Icon(Icons.search_rounded),
-        suffixIcon: controller.text.trim().isEmpty
-            ? null
-            : IconButton(
-                onPressed: onClear,
-                icon: const Icon(Icons.close_rounded),
-              ),
-      ),
-    );
-  }
-}
-
-class _OrderTile extends StatefulWidget {
-  static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
-
-  const _OrderTile({
-    required this.pedido,
-    required this.statusBucket,
-    required this.isDelayed,
-    required this.onTap,
-    required this.onQuickAdvance,
-    required this.onQuickCancel,
-  });
-
-  final PedidoModel pedido;
-  final OrderStatusBucket statusBucket;
-  final bool isDelayed;
-  final VoidCallback onTap;
-  final Future<void> Function() onQuickAdvance;
-  final Future<void> Function() onQuickCancel;
-
-  @override
-  State<_OrderTile> createState() => _OrderTileState();
-}
-
-class _OrderTileState extends State<_OrderTile> {
-  Timer? _ticker;
-  DateTime _now = DateTime.now();
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() {
-        _now = DateTime.now();
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _ticker?.cancel();
-    super.dispose();
-  }
-
-  String get _statusLabel {
-    return OrderManagerService.visualStatusLabelForPedido(widget.pedido);
-  }
-
-  String _deliveryDelegateLabel() {
-    return OrderManagerService.deliveryDelegateLabelForPedido(widget.pedido);
-  }
-
-  bool get _isDelegationControlTransferred {
-    return OrderManagerService.isDelegationControlTransferredForPedido(
-      widget.pedido,
-    );
-  }
-
-  Color get _statusColor {
-    return OrderManagerService.visualStatusColorForPedido(widget.pedido);
-  }
-
-  IconData get _statusIcon {
-    return OrderManagerService.visualStatusIconForPedido(widget.pedido);
-  }
-
-  String _formatCountdown(Duration value) {
-    final safe = value.inSeconds <= 0 ? Duration.zero : value;
-    final totalSeconds = safe.inSeconds;
-    final minutes = totalSeconds ~/ 60;
-    final seconds = totalSeconds % 60;
-    final mm = minutes.toString().padLeft(2, '0');
-    final ss = seconds.toString().padLeft(2, '0');
-    return '$mm:$ss';
-  }
-
-  double get _pendingProgressValue {
-    final remaining = _pendingTimeLeft;
-    if (remaining == null) {
-      return 0;
-    }
-
-    final total = _OrderTile._pendingConfirmationWindow.inSeconds;
-    final remainingSeconds = remaining.inSeconds.clamp(0, total);
-    final elapsed = total - remainingSeconds;
-    if (total == 0) {
-      return 1;
-    }
-
-    return (elapsed / total).clamp(0, 1);
-  }
-
-  bool get _isPendingCritical {
-    final remaining = _pendingTimeLeft;
-    if (remaining == null) {
-      return false;
-    }
-
-    return remaining.inSeconds <= 120;
-  }
-
-  bool get _isPendingWarning {
-    final remaining = _pendingTimeLeft;
-    if (remaining == null) {
-      return false;
-    }
-
-    return remaining.inSeconds <= 300;
-  }
-
-  Duration? get _pendingTimeLeft {
-    if (widget.statusBucket != OrderStatusBucket.pending) {
-      return null;
-    }
-
-    final createdAt = widget.pedido.createdAt;
-    if (createdAt == null) {
-      return null;
-    }
-
-    final elapsed = _now.difference(createdAt);
-    final remaining = _OrderTile._pendingConfirmationWindow - elapsed;
-    return remaining.isNegative ? Duration.zero : remaining;
-  }
-
-  String? get _waitingLabel {
-    if (widget.statusBucket == OrderStatusBucket.pending) {
-      return null;
-    }
-
-    final createdAt = widget.pedido.createdAt;
-    if (createdAt == null ||
-        widget.statusBucket == OrderStatusBucket.completed ||
-        widget.statusBucket == OrderStatusBucket.canceled) {
-      return null;
-    }
-
-    final elapsed = _now.difference(createdAt);
-    if (elapsed.inMinutes < 1) {
-      return 'Hace menos de 1 min';
-    }
-    if (elapsed.inHours >= 1) {
-      final hours = elapsed.inHours;
-      final minutes = elapsed.inMinutes.remainder(60);
-      return minutes == 0 ? 'Hace ${hours}h' : 'Hace ${hours}h ${minutes}m';
-    }
-
-    return 'Hace ${elapsed.inMinutes} min';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _statusColor;
-    final label = _statusLabel;
-    final waitingLabel = _waitingLabel;
-    final delegateLabel = _deliveryDelegateLabel();
-    final pendingTimeLeft = _pendingTimeLeft;
-    final showPendingCountdownBadge = pendingTimeLeft != null;
-    final waitingColor = widget.isDelayed
-        ? Theme.of(context).colorScheme.error
-        : Theme.of(context).colorScheme.onSurfaceVariant;
-
-    return Dismissible(
-      key: ValueKey('order-${widget.pedido.id}-${widget.pedido.estado ?? ''}'),
-      direction: DismissDirection.horizontal,
-      background: Container(
-        alignment: Alignment.centerLeft,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF16A34A),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Icon(Icons.check_circle_outline, color: Colors.white),
-      ),
-      secondaryBackground: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE11D48),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Icon(Icons.block_flipped, color: Colors.white),
-      ),
-      confirmDismiss: (direction) async {
-        final messenger = ScaffoldMessenger.of(context);
-        await HapticFeedback.mediumImpact();
-
-        if (direction == DismissDirection.startToEnd) {
-          if (_isDelegationControlTransferred) {
-            if (mounted) {
-              messenger.showSnackBar(
-                const SnackBar(
-                  behavior: SnackBarBehavior.floating,
-                  content: Text(
-                    'Pedido delegado: el repartidor/cliente deben completar la entrega.',
-                  ),
-                ),
-              );
-            }
-            return false;
-          }
-          await widget.onQuickAdvance();
-          return false;
-        }
-
-        if (direction == DismissDirection.endToStart) {
-          await widget.onQuickCancel();
-          return false;
-        }
-
-        return false;
-      },
-      child: Card(
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 6,
-          ),
-          onTap: widget.onTap,
-          leading: showPendingCountdownBadge
-              ? _CircularCountdownBadge(
-                  label: _formatCountdown(pendingTimeLeft),
-                  progress: _pendingProgressValue,
-                  isCritical: _isPendingCritical,
-                  isWarning: _isPendingWarning,
-                )
-              : Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.16),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(_statusIcon, color: color),
-                ),
-          title: Text(
-            'Pedido ${(widget.pedido.orderId ?? widget.pedido.id).substring(0, (widget.pedido.orderId ?? widget.pedido.id).length < 16 ? (widget.pedido.orderId ?? widget.pedido.id).length : 16)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 2),
-              Text(
-                widget.pedido.clienteEmail?.trim().isNotEmpty == true
-                    ? '${widget.pedido.clienteEmail} • ${widget.pedido.metodoPago ?? 'Método no definido'}'
-                    : (widget.pedido.createdAt?.toString() ?? 'Sin fecha disponible'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (waitingLabel != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  waitingLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight:
-                        widget.isDelayed ? FontWeight.w700 : FontWeight.w500,
-                    color: waitingColor,
-                  ),
-                ),
-              ],
-              if (delegateLabel.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  delegateLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: const Color(0xFF7C3AED),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 5),
-              _StatusPill(label: label, color: color),
-            ],
-          ),
-          trailing: Text(
-            widget.pedido.total != null
-                ? '\$${widget.pedido.total!.toStringAsFixed(2)}'
-                : '--',
-            textAlign: TextAlign.right,
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CircularCountdownBadge extends StatelessWidget {
-  const _CircularCountdownBadge({
-    required this.label,
-    required this.progress,
-    required this.isCritical,
-    required this.isWarning,
-  });
-
-  final String label;
-  final double progress;
-  final bool isCritical;
-  final bool isWarning;
-
-  Color get _ringColor {
-    if (isCritical) return const Color(0xFFDC2626);
-    if (isWarning) return const Color(0xFFD97706);
-    return const Color(0xFF475569);
-  }
-
-  Color get _bgColor {
-    if (isCritical) return const Color(0xFFFEF2F2);
-    if (isWarning) return const Color(0xFFFFFBEB);
-    return const Color(0xFFF8FAFC);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CircularProgressIndicator(
-            value: progress,
-            strokeWidth: 2.6,
-            backgroundColor: _bgColor,
-            valueColor: AlwaysStoppedAnimation<Color>(_ringColor),
-          ),
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: _bgColor,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              label,
-              style: GoogleFonts.robotoMono(
-                fontSize: 7.6,
-                fontWeight: FontWeight.w700,
-                color: _ringColor,
-                letterSpacing: 0.1,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -2826,8 +2441,7 @@ class _EmptyStateCard extends StatelessWidget {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            if (onAction != null &&
-                (actionLabel ?? '').trim().isNotEmpty) ...[
+            if (onAction != null && (actionLabel ?? '').trim().isNotEmpty) ...[
               const SizedBox(height: 12),
               FilledButton.tonalIcon(
                 onPressed: onAction,
