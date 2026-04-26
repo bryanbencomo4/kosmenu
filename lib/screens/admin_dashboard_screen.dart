@@ -814,6 +814,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return '$dd/$mm';
   }
 
+  String _compactChartDateLabel(DateTime date, {DateTime? previous}) {
+    final day = date.day.toString().padLeft(2, '0');
+    final shouldShowMonth =
+        previous == null ||
+        previous.month != date.month ||
+        previous.year != date.year;
+
+    if (!shouldShowMonth) {
+      return day;
+    }
+
+    return '$day ${_monthShortEs(date.month)}';
+  }
+
+  String _fullChartDateLabel(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    return '$day ${_monthShortEs(date.month)}';
+  }
+
+  String _hourAxisLabel(int hour) => hour.toString().padLeft(2, '0');
+
+  String _hourTooltipLabel(DateTime day, int hour) {
+    final hh = hour.toString().padLeft(2, '0');
+    return '${_fullChartDateLabel(day)} $hh:00';
+  }
+
   String _activeRangeLabel() {
     if (_selectedSalesRange != _SalesRange.custom) {
       return _selectedSalesRange.label;
@@ -826,6 +852,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   _SalesRangeWindow _resolveSalesRangeWindow(Iterable<PedidoModel> orders) {
     final todayStart = _startOfDay(DateTime.now());
     final tomorrow = _endOfDayExclusive(DateTime.now());
+    final currentMonthStart = DateTime(todayStart.year, todayStart.month);
 
     switch (_selectedSalesRange) {
       case _SalesRange.today:
@@ -846,6 +873,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       case _SalesRange.lastFortnight:
         return _SalesRangeWindow(
           startInclusive: _subtractFromToday(14),
+          endExclusive: tomorrow,
+        );
+      case _SalesRange.thisMonth:
+        return _SalesRangeWindow(
+          startInclusive: currentMonthStart,
           endExclusive: tomorrow,
         );
       case _SalesRange.lastMonth:
@@ -949,6 +981,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   _SalesHistorySeries _buildSalesHistoryForSelectedRange(
     Iterable<PedidoModel> orders,
   ) {
+    final window = _resolveSalesRangeWindow(orders);
     final filtered = orders
         .where((pedido) => pedido.statusBucket != OrderStatusBucket.canceled)
         .where(
@@ -958,37 +991,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     if (_selectedSalesRange == _SalesRange.today ||
         _selectedSalesRange == _SalesRange.yesterday) {
-      final values = List<double>.filled(7, 0);
-      const labels = <String>['00', '04', '08', '12', '16', '20', '24'];
+      final dayStart = window.startInclusive;
+      final values = List<double>.filled(24, 0);
+      final labels = List<String>.generate(24, _hourAxisLabel);
+      final tooltipLabels = List<String>.generate(
+        24,
+        (hour) => _hourTooltipLabel(dayStart, hour),
+      );
 
       for (final pedido in filtered) {
         final createdAt = pedido.createdAt?.toLocal();
         if (createdAt == null) continue;
-        final bucketIndex = (createdAt.hour ~/ 4).clamp(0, 5);
-        values[bucketIndex] += _resolvePedidoTotal(pedido);
+        values[createdAt.hour] += _resolvePedidoTotal(pedido);
       }
 
-      values[6] = values[5];
-      return _SalesHistorySeries(values: values, labels: labels);
+      return _SalesHistorySeries(
+        values: values,
+        labels: labels,
+        tooltipLabels: tooltipLabels,
+      );
     }
 
-    final window = _resolveSalesRangeWindow(orders);
     final spanDays = window.endExclusive
         .difference(window.startInclusive)
         .inDays;
 
     if (spanDays <= 31) {
-      final desiredBuckets = spanDays <= 10 ? spanDays : 10;
-      final bucketSize = (spanDays / desiredBuckets).ceil();
       final values = <double>[];
       final labels = <String>[];
+      final tooltipLabels = <String>[];
 
       var cursor = window.startInclusive;
+      DateTime? previousBucketStart;
       while (cursor.isBefore(window.endExclusive)) {
-        final next = cursor.add(Duration(days: bucketSize));
-        final bucketEnd = next.isBefore(window.endExclusive)
-            ? next
-            : window.endExclusive;
+        final bucketEnd = cursor.add(const Duration(days: 1));
 
         final total = filtered.fold<double>(0, (sum, pedido) {
           final created = pedido.createdAt?.toLocal();
@@ -1000,11 +1036,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         });
 
         values.add(total);
-        labels.add(_shortDate(cursor));
+        labels.add(
+          _compactChartDateLabel(cursor, previous: previousBucketStart),
+        );
+        tooltipLabels.add(_fullChartDateLabel(cursor));
+        previousBucketStart = cursor;
         cursor = bucketEnd;
       }
 
-      return _SalesHistorySeries(values: values, labels: labels);
+      return _SalesHistorySeries(
+        values: values,
+        labels: labels,
+        tooltipLabels: tooltipLabels,
+      );
     }
 
     final monthStarts = <DateTime>[];
@@ -1025,6 +1069,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final groupSize = (monthStarts.length / desiredBuckets).ceil();
     final values = <double>[];
     final labels = <String>[];
+    final tooltipLabels = <String>[];
 
     for (var i = 0; i < monthStarts.length; i += groupSize) {
       final bucketStart = monthStarts[i];
@@ -1046,9 +1091,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
       values.add(total);
       labels.add(_monthShortEs(bucketStart.month));
+      tooltipLabels.add(_fullChartDateLabel(bucketStart));
     }
 
-    return _SalesHistorySeries(values: values, labels: labels);
+    return _SalesHistorySeries(
+      values: values,
+      labels: labels,
+      tooltipLabels: tooltipLabels,
+    );
   }
 
   String _normalizeStatusString(String? value) {
@@ -1352,6 +1402,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             purple: _purple,
                             salesHistory: salesSeries.values,
                             salesLabels: salesSeries.labels,
+                            salesTooltipLabels: salesSeries.tooltipLabels,
                             rangeLabel: _activeRangeLabel(),
                             ordersLabel: ordersLabel,
                             incomeLabel: incomeLabel,
@@ -1907,6 +1958,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
     required this.purple,
     this.salesHistory,
     this.salesLabels,
+    this.salesTooltipLabels,
     required this.rangeLabel,
     required this.ordersLabel,
     required this.incomeLabel,
@@ -1921,6 +1973,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   final Color purple;
   final List<double>? salesHistory;
   final List<String>? salesLabels;
+  final List<String>? salesTooltipLabels;
   final String rangeLabel;
   final String ordersLabel;
   final String incomeLabel;
@@ -1932,6 +1985,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
         salesHistory ?? const <double>[120, 180, 140, 200, 248, 220, 210];
     final labels =
         salesLabels ?? const <String>['00', '04', '08', '12', '16', '20', '24'];
+    final tooltipLabels = salesTooltipLabels ?? labels;
 
     var highlightIndex = 0;
     var peak = -1.0;
@@ -1984,6 +2038,10 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                   PopupMenuItem(
                     value: _SalesRange.lastFortnight,
                     child: Text('Última quincena'),
+                  ),
+                  PopupMenuItem(
+                    value: _SalesRange.thisMonth,
+                    child: Text('Este mes'),
                   ),
                   PopupMenuItem(
                     value: _SalesRange.lastMonth,
@@ -2097,9 +2155,9 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                   child: _SalesSummaryChart(
                     salesHistory: chartData,
                     labels: labels,
+                    tooltipLabels: tooltipLabels,
                     color: purple,
                     highlightIndex: highlightIndex,
-                    labelValue: salesToday,
                   ),
                 ),
               ),
@@ -2148,139 +2206,250 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   }
 }
 
-class _SalesSummaryChart extends StatelessWidget {
+class _SalesSummaryChart extends StatefulWidget {
   const _SalesSummaryChart({
     required this.salesHistory,
     required this.labels,
+    required this.tooltipLabels,
     required this.color,
     required this.highlightIndex,
-    required this.labelValue,
   });
 
   final List<double> salesHistory;
   final List<String> labels;
+  final List<String> tooltipLabels;
   final Color color;
   final int highlightIndex;
-  final double labelValue;
+
+  @override
+  State<_SalesSummaryChart> createState() => _SalesSummaryChartState();
+}
+
+class _SalesSummaryChartState extends State<_SalesSummaryChart> {
+  late int _selectedIndex;
+
+  void _updateSelectedIndexFromDx(double dx, double width) {
+    if (widget.salesHistory.length <= 1 || width <= 0) {
+      return;
+    }
+
+    final clampedDx = dx.clamp(0.0, width);
+    final ratio = clampedDx / width;
+    final nextIndex = (ratio * (widget.salesHistory.length - 1)).round().clamp(
+      0,
+      widget.salesHistory.length - 1,
+    );
+
+    if (nextIndex == _selectedIndex) {
+      return;
+    }
+
+    setState(() {
+      _selectedIndex = nextIndex;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedIndex = widget.highlightIndex;
+  }
+
+  @override
+  void didUpdateWidget(covariant _SalesSummaryChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.highlightIndex != oldWidget.highlightIndex ||
+        widget.salesHistory.length != oldWidget.salesHistory.length ||
+        widget.labels.length != oldWidget.labels.length ||
+        widget.tooltipLabels.length != oldWidget.tooltipLabels.length) {
+      _selectedIndex = widget.highlightIndex;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final maxY = salesHistory.reduce((a, b) => a > b ? a : b);
-    final safeHighlight = highlightIndex.clamp(0, salesHistory.length - 1);
+    final maxY = widget.salesHistory.reduce((a, b) => a > b ? a : b);
+    final safeHighlight = _selectedIndex.clamp(
+      0,
+      widget.salesHistory.length - 1,
+    );
+    final selectedValue = widget.salesHistory[safeHighlight];
+    final selectedLabel = widget.tooltipLabels[safeHighlight];
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final xRatio = salesHistory.length <= 1
+        final isHourlyAxis = widget.labels.every((label) => label.length <= 2);
+        final maxVisibleLabels = isHourlyAxis
+            ? (constraints.maxWidth < 280 ? 6 : 8)
+            : (constraints.maxWidth < 280 ? 4 : 5);
+        final labelStep = widget.labels.length <= maxVisibleLabels
+            ? 1
+            : ((widget.labels.length - 1) / (maxVisibleLabels - 1)).ceil();
+        final xRatio = widget.salesHistory.length <= 1
             ? 0.5
-            : safeHighlight / (salesHistory.length - 1);
-        final bubbleLeft = (constraints.maxWidth * xRatio) - 26;
+            : safeHighlight / (widget.salesHistory.length - 1);
+        final bubbleLeft = (constraints.maxWidth * xRatio) - 38;
 
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            LineChart(
-              LineChartData(
-                lineTouchData: const LineTouchData(enabled: false),
-                gridData: FlGridData(show: false),
-                titlesData: FlTitlesData(
-                  leftTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 22,
-                      interval: 1,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.toInt();
-                        if (index < 0 || index >= labels.length) {
-                          return const SizedBox.shrink();
-                        }
-                        final text = labels[index];
-                        return SideTitleWidget(
-                          meta: meta,
-                          child: Text(
-                            text,
-                            style: GoogleFonts.poppins(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500,
-                              color: const Color(0xFF6B6F92),
-                            ),
-                          ),
-                        );
-                      },
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (details) {
+            _updateSelectedIndexFromDx(
+              details.localPosition.dx,
+              constraints.maxWidth,
+            );
+          },
+          onHorizontalDragStart: (details) {
+            _updateSelectedIndexFromDx(
+              details.localPosition.dx,
+              constraints.maxWidth,
+            );
+          },
+          onHorizontalDragUpdate: (details) {
+            _updateSelectedIndexFromDx(
+              details.localPosition.dx,
+              constraints.maxWidth,
+            );
+          },
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              IgnorePointer(
+                child: LineChart(
+                  LineChartData(
+                    lineTouchData: const LineTouchData(enabled: false),
+                    gridData: FlGridData(show: false),
+                    titlesData: FlTitlesData(
+                      leftTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 26,
+                          interval: 1,
+                          getTitlesWidget: (value, meta) {
+                            final index = value.toInt();
+                            if (index < 0 || index >= widget.labels.length) {
+                              return const SizedBox.shrink();
+                            }
+
+                            final isBoundary =
+                                index == 0 || index == widget.labels.length - 1;
+                            final shouldShow =
+                                isBoundary || index % labelStep == 0;
+                            if (!shouldShow) {
+                              return const SizedBox.shrink();
+                            }
+
+                            final text = widget.labels[index];
+                            return SideTitleWidget(
+                              meta: meta,
+                              space: 6,
+                              child: Text(
+                                text,
+                                style: GoogleFonts.poppins(
+                                  fontSize: isHourlyAxis ? 10 : 9,
+                                  fontWeight: FontWeight.w500,
+                                  color: const Color(0xFF6B6F92),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                minX: 0,
-                maxX: (salesHistory.length - 1).toDouble(),
-                minY: 0,
-                maxY: maxY * 1.28,
-                extraLinesData: ExtraLinesData(
-                  verticalLines: [
-                    VerticalLine(
-                      x: safeHighlight.toDouble(),
-                      color: color.withValues(alpha: 0.28),
-                      strokeWidth: 1,
-                      dashArray: const [4, 4],
+                    borderData: FlBorderData(show: false),
+                    minX: 0,
+                    maxX: (widget.salesHistory.length - 1).toDouble(),
+                    minY: 0,
+                    maxY: maxY <= 0 ? 1 : maxY * 1.28,
+                    extraLinesData: ExtraLinesData(
+                      verticalLines: [
+                        VerticalLine(
+                          x: safeHighlight.toDouble(),
+                          color: widget.color.withValues(alpha: 0.28),
+                          strokeWidth: 1,
+                          dashArray: const [4, 4],
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: [
-                      for (int i = 0; i < salesHistory.length; i++)
-                        FlSpot(i.toDouble(), salesHistory[i]),
+                    lineBarsData: [
+                      LineChartBarData(
+                        spots: [
+                          for (int i = 0; i < widget.salesHistory.length; i++)
+                            FlSpot(i.toDouble(), widget.salesHistory[i]),
+                        ],
+                        isCurved: true,
+                        color: widget.color,
+                        barWidth: 2.2,
+                        isStrokeCapRound: true,
+                        dotData: FlDotData(
+                          show: true,
+                          getDotPainter: (spot, percent, barData, index) {
+                            final isHighlight = index == safeHighlight;
+                            return FlDotCirclePainter(
+                              radius: isHighlight ? 4.8 : 2.4,
+                              color: widget.color,
+                              strokeWidth: isHighlight ? 2 : 0,
+                              strokeColor: Colors.white,
+                            );
+                          },
+                        ),
+                        belowBarData: BarAreaData(show: false),
+                      ),
                     ],
-                    isCurved: true,
-                    color: color,
-                    barWidth: 2.2,
-                    isStrokeCapRound: true,
-                    dotData: FlDotData(
-                      show: true,
-                      getDotPainter: (spot, percent, barData, index) {
-                        final isHighlight = index == safeHighlight;
-                        return FlDotCirclePainter(
-                          radius: isHighlight ? 4.2 : 2.2,
-                          color: color,
-                          strokeWidth: isHighlight ? 2 : 0,
-                          strokeColor: Colors.white,
-                        );
-                      },
+                  ),
+                  duration: const Duration(milliseconds: 120),
+                ),
+              ),
+              Positioned(
+                left: bubbleLeft.clamp(0, constraints.maxWidth - 88),
+                top: -8,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
                     ),
-                    belowBarData: BarAreaData(show: false),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF312E81),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selectedLabel,
+                          style: GoogleFonts.poppins(
+                            fontSize: 8,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white.withValues(alpha: 0.86),
+                            height: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '\$${selectedValue.toStringAsFixed(2)}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            height: 1,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
-              duration: const Duration(milliseconds: 350),
-            ),
-            Positioned(
-              left: bubbleLeft.clamp(0, constraints.maxWidth - 54),
-              top: -2,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF312E81),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '\$${labelValue.toStringAsFixed(2)}',
-                  style: GoogleFonts.poppins(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -2654,6 +2823,7 @@ enum _SalesRange {
   yesterday,
   lastWeek,
   lastFortnight,
+  thisMonth,
   lastMonth,
   last3Months,
   last6Months,
@@ -2673,6 +2843,8 @@ extension _SalesRangeUi on _SalesRange {
         return 'Última semana';
       case _SalesRange.lastFortnight:
         return 'Última quincena';
+      case _SalesRange.thisMonth:
+        return 'Este mes';
       case _SalesRange.lastMonth:
         return 'Último mes';
       case _SalesRange.last3Months:
@@ -2698,6 +2870,8 @@ extension _SalesRangeUi on _SalesRange {
         return 'Pedidos semana';
       case _SalesRange.lastFortnight:
         return 'Pedidos quincena';
+      case _SalesRange.thisMonth:
+        return 'Pedidos este mes';
       case _SalesRange.lastMonth:
         return 'Pedidos mes';
       case _SalesRange.last3Months:
@@ -2723,6 +2897,8 @@ extension _SalesRangeUi on _SalesRange {
         return 'Ingresos semana';
       case _SalesRange.lastFortnight:
         return 'Ingresos quincena';
+      case _SalesRange.thisMonth:
+        return 'Ingresos este mes';
       case _SalesRange.lastMonth:
         return 'Ingresos mes';
       case _SalesRange.last3Months:
@@ -2750,10 +2926,15 @@ class _SalesRangeWindow {
 }
 
 class _SalesHistorySeries {
-  const _SalesHistorySeries({required this.values, required this.labels});
+  const _SalesHistorySeries({
+    required this.values,
+    required this.labels,
+    required this.tooltipLabels,
+  });
 
   final List<double> values;
   final List<String> labels;
+  final List<String> tooltipLabels;
 }
 
 class _DashboardSnapshot {
