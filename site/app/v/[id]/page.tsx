@@ -939,6 +939,7 @@ export default function PublicMenuPage() {
   const mapPickerGeocoderRef = useRef<any>(null);
   const mapPickerAutocompleteRef = useRef<any>(null);
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
+  const shouldReturnToMenuOnEmptyCartRef = useRef(false);
   const [infoSections, setInfoSections] = useState({
     location: true,
     delivery: true,
@@ -1566,6 +1567,14 @@ export default function PublicMenuPage() {
   const canSubmitStep3 =
     (menuData?.metodosPago.length ?? 0) === 0 ||
     (selectedPaymentMethodId !== null && isPaymentReferenceValid && hasPaymentProof);
+  const canAdvanceCurrentStep =
+    checkoutStep === 0
+      ? canGoNextFromStep0
+      : checkoutStep === 1
+        ? canGoNextFromStep1
+        : checkoutStep === 2
+          ? canGoNextFromStep2
+          : canSubmitStep3;
   const canSubmitCheckout =
     canGoNextFromStep0 &&
     canGoNextFromStep1 &&
@@ -1827,7 +1836,19 @@ export default function PublicMenuPage() {
     if (cartCount > 0 || !isConfirmOpen) return;
     setCheckoutError(null);
     setCheckoutStep(0);
-    setIsConfirmOpen(false);
+
+    if (shouldReturnToMenuOnEmptyCartRef.current) {
+      shouldReturnToMenuOnEmptyCartRef.current = false;
+      setIsConfirmOpen(false);
+
+      window.setTimeout(() => {
+        const target = stickySearchCardRef.current;
+        const targetTop = target
+          ? window.scrollY + target.getBoundingClientRect().top - (topTickerHeightPx + topAppBarHeightPx + 12)
+          : 0;
+        window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+      }, 120);
+    }
   }, [cartCount, isConfirmOpen]);
 
   useEffect(() => {
@@ -2145,6 +2166,9 @@ export default function PublicMenuPage() {
     setCart((prev) => {
       const current = prev[productId] ?? 0;
       if (current <= 1) {
+        if (isConfirmOpen && Object.keys(prev).length === 1) {
+          shouldReturnToMenuOnEmptyCartRef.current = true;
+        }
         const next = { ...prev };
         delete next[productId];
         return next;
@@ -2154,6 +2178,20 @@ export default function PublicMenuPage() {
         ...prev,
         [productId]: current - 1,
       };
+    });
+  }
+
+  function removeProductFromCart(productId: string) {
+    setCart((prev) => {
+      if (!(productId in prev)) return prev;
+
+      if (isConfirmOpen && Object.keys(prev).length === 1) {
+        shouldReturnToMenuOnEmptyCartRef.current = true;
+      }
+
+      const next = { ...prev };
+      delete next[productId];
+      return next;
     });
   }
 
@@ -2737,14 +2775,12 @@ export default function PublicMenuPage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (cartCount <= 0) return;
                   setCheckoutError(null);
                   setCheckoutStep(0);
                   setIsConfirmOpen(true);
                 }}
                 aria-label={cartCount > 0 ? 'Ver pedido' : 'Carrito vacio'}
-                disabled={cartCount <= 0}
-                className="relative inline-flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-slate-800 shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-70"
+                className="relative inline-flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-slate-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
               >
                 <ShoppingCart className="h-4 w-4" strokeWidth={2.4} />
                 {cartCount > 0 ? (
@@ -3774,11 +3810,7 @@ export default function PublicMenuPage() {
 
                                     <button
                                       type="button"
-                                      onClick={() => setCart((prev) => {
-                                        const next = { ...prev };
-                                        delete next[item.id];
-                                        return next;
-                                      })}
+                                      onClick={() => removeProductFromCart(item.id)}
                                       className="text-sm font-bold text-rose-500"
                                     >
                                       Quitar
@@ -3790,12 +3822,51 @@ export default function PublicMenuPage() {
                           ))}
                         </div>
                       ) : (
-                        <div className="rounded-[24px] border border-dashed border-slate-300 bg-white px-4 py-5 text-sm font-semibold text-slate-500">
-                          Tu carrito esta vacio. Cierra esta vista y agrega productos para continuar.
+                        <div className="rounded-[24px] border border-dashed border-slate-300 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-4 shadow-[0_14px_34px_rgba(15,23,42,0.05)] sm:p-5">
+                          <div className="flex items-start gap-3">
+                            <div
+                              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] text-white shadow-[0_16px_32px_rgba(15,23,42,0.16)]"
+                              style={{ backgroundColor: 'var(--primary-color)' }}
+                            >
+                              <ShoppingCart className="h-5 w-5" strokeWidth={2.4} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Pedido</p>
+                              <h6 className="mt-1.5 text-[1.1rem] font-black leading-tight tracking-[-0.03em] text-slate-950 sm:text-[1.2rem]" style={titleFontStyle}>
+                                Tu carrito está vacío
+                              </h6>
+                              <p className="mt-2 text-sm leading-5 text-slate-600">
+                                Agrega un producto para continuar con tu pedido.
+                              </p>
+
+                              <div className="mt-4 flex flex-col gap-2.5 sm:flex-row">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsConfirmOpen(false);
+                                    const target = stickySearchCardRef.current;
+                                    const targetTop = target
+                                      ? window.scrollY + target.getBoundingClientRect().top - (topTickerHeightPx + topAppBarHeightPx + 12)
+                                      : 0;
+                                    window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+                                  }}
+                                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_32px_rgba(15,23,42,0.14)]"
+                                  style={{
+                                    backgroundColor: 'var(--primary-color)',
+                                    color: 'var(--text-on-primary)',
+                                  }}
+                                >
+                                  Empezar a agregar
+                                  <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
 
-                      <div className="checkout-item-enter rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '120ms' }}>
+                      {checkoutSummaryItems.length > 0 ? (
+                        <div className="checkout-item-enter rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '120ms' }}>
                         <label htmlFor="order-notes" className="block">
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
                             <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
@@ -3813,7 +3884,8 @@ export default function PublicMenuPage() {
                         <p className="mt-2 text-[11px] font-medium text-slate-500">
                           Opcional.
                         </p>
-                      </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -4303,9 +4375,13 @@ export default function PublicMenuPage() {
                       <button
                         type="button"
                         onClick={goToNextStep}
-                        disabled={isSubmittingOrder}
+                        disabled={isSubmittingOrder || !canAdvanceCurrentStep}
                         className="h-11 rounded-2xl px-5 text-sm font-black tracking-[0.01em]"
-                        style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                        style={
+                          isSubmittingOrder || !canAdvanceCurrentStep
+                            ? { backgroundColor: '#E2E8F0', color: '#64748B' }
+                            : { backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }
+                        }
                       >
                         {nextStepCtaLabels[checkoutStep] ?? 'Siguiente'}
                       </button>
