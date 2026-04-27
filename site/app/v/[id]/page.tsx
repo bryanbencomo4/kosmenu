@@ -13,6 +13,7 @@ type CategoriaRow = {
   id: string;
   nombre: string;
   orden?: number | null;
+  icono?: string | null;
 };
 
 type ProductoRow = {
@@ -851,6 +852,180 @@ function normalizeSearchText(value: string) {
     .trim();
 }
 
+type CategoryVisualTheme = {
+  glyph: string;
+  accent: string;
+  tint: string;
+  border: string;
+  shadow: string;
+};
+
+const DEFAULT_CATEGORY_VISUAL_THEME: CategoryVisualTheme = {
+  glyph: '🍽️',
+  accent: '#475569',
+  tint: 'rgba(71, 85, 105, 0.12)',
+  border: 'rgba(71, 85, 105, 0.2)',
+  shadow: '0 10px 24px rgba(71, 85, 105, 0.18)',
+};
+
+const CATEGORY_VISUAL_RULES: Array<CategoryVisualTheme & { keywords: string[] }> = [
+  {
+    glyph: '🍔',
+    accent: '#DD6B20',
+    tint: 'rgba(221, 107, 32, 0.14)',
+    border: 'rgba(221, 107, 32, 0.24)',
+    shadow: '0 10px 24px rgba(221, 107, 32, 0.22)',
+    keywords: ['burger', 'hamburgues', 'smash', 'cheeseburger'],
+  },
+  {
+    glyph: '🌭',
+    accent: '#D97706',
+    tint: 'rgba(217, 119, 6, 0.14)',
+    border: 'rgba(217, 119, 6, 0.24)',
+    shadow: '0 10px 24px rgba(217, 119, 6, 0.2)',
+    keywords: ['perro', 'hot dog'],
+  },
+  {
+    glyph: '🍕',
+    accent: '#DC2626',
+    tint: 'rgba(220, 38, 38, 0.13)',
+    border: 'rgba(220, 38, 38, 0.23)',
+    shadow: '0 10px 24px rgba(220, 38, 38, 0.2)',
+    keywords: ['pizza', 'pizzeria', 'pepperoni'],
+  },
+  {
+    glyph: '🍗',
+    accent: '#EA580C',
+    tint: 'rgba(234, 88, 12, 0.13)',
+    border: 'rgba(234, 88, 12, 0.24)',
+    shadow: '0 10px 24px rgba(234, 88, 12, 0.2)',
+    keywords: ['pollo', 'chicken', 'alita', 'wing', 'tender', 'nugget'],
+  },
+  {
+    glyph: '🥩',
+    accent: '#B91C1C',
+    tint: 'rgba(185, 28, 28, 0.13)',
+    border: 'rgba(185, 28, 28, 0.22)',
+    shadow: '0 10px 24px rgba(185, 28, 28, 0.2)',
+    keywords: ['beef', 'carne', 'res', 'parrilla', 'steak', 'asado'],
+  },
+  {
+    glyph: '🥤',
+    accent: '#2563EB',
+    tint: 'rgba(37, 99, 235, 0.12)',
+    border: 'rgba(37, 99, 235, 0.22)',
+    shadow: '0 10px 24px rgba(37, 99, 235, 0.18)',
+    keywords: ['bebida', 'drink', 'refresco', 'soda', 'jugo', 'juice', 'batido', 'malteada'],
+  },
+  {
+    glyph: '☕',
+    accent: '#92400E',
+    tint: 'rgba(146, 64, 14, 0.14)',
+    border: 'rgba(146, 64, 14, 0.22)',
+    shadow: '0 10px 24px rgba(146, 64, 14, 0.18)',
+    keywords: ['cafe', 'coffee', 'espresso', 'latte', 'te', 'tea'],
+  },
+  {
+    glyph: '🍰',
+    accent: '#DB2777',
+    tint: 'rgba(219, 39, 119, 0.12)',
+    border: 'rgba(219, 39, 119, 0.22)',
+    shadow: '0 10px 24px rgba(219, 39, 119, 0.18)',
+    keywords: ['postre', 'dessert', 'dulce', 'torta', 'cake', 'helado', 'ice cream', 'brownie'],
+  },
+  {
+    glyph: '🥗',
+    accent: '#15803D',
+    tint: 'rgba(21, 128, 61, 0.12)',
+    border: 'rgba(21, 128, 61, 0.22)',
+    shadow: '0 10px 24px rgba(21, 128, 61, 0.18)',
+    keywords: ['ensalada', 'salad', 'veg', 'vegetar', 'vegan', 'healthy', 'saludable'],
+  },
+  {
+    glyph: '🍝',
+    accent: '#C2410C',
+    tint: 'rgba(194, 65, 12, 0.12)',
+    border: 'rgba(194, 65, 12, 0.22)',
+    shadow: '0 10px 24px rgba(194, 65, 12, 0.18)',
+    keywords: ['pasta', 'spaghetti', 'lasagna', 'ravioli'],
+  },
+  {
+    glyph: '🍣',
+    accent: '#7C3AED',
+    tint: 'rgba(124, 58, 237, 0.12)',
+    border: 'rgba(124, 58, 237, 0.22)',
+    shadow: '0 10px 24px rgba(124, 58, 237, 0.18)',
+    keywords: ['sushi', 'ramen', 'asiat', 'noodle', 'wok', 'teriyaki'],
+  },
+  {
+    glyph: '🌮',
+    accent: '#CA8A04',
+    tint: 'rgba(202, 138, 4, 0.13)',
+    border: 'rgba(202, 138, 4, 0.24)',
+    shadow: '0 10px 24px rgba(202, 138, 4, 0.18)',
+    keywords: ['taco', 'burrito', 'mex', 'quesadilla', 'nacho'],
+  },
+  {
+    glyph: '🍤',
+    accent: '#0891B2',
+    tint: 'rgba(8, 145, 178, 0.12)',
+    border: 'rgba(8, 145, 178, 0.22)',
+    shadow: '0 10px 24px rgba(8, 145, 178, 0.18)',
+    keywords: ['marisco', 'seafood', 'pescado', 'fish', 'camaron', 'shrimp', 'ceviche'],
+  },
+  {
+    glyph: '🍳',
+    accent: '#EAB308',
+    tint: 'rgba(234, 179, 8, 0.14)',
+    border: 'rgba(234, 179, 8, 0.24)',
+    shadow: '0 10px 24px rgba(234, 179, 8, 0.18)',
+    keywords: ['desayuno', 'breakfast', 'brunch', 'waffle', 'panque', 'huevo'],
+  },
+  {
+    glyph: '🍱',
+    accent: '#0F766E',
+    tint: 'rgba(15, 118, 110, 0.12)',
+    border: 'rgba(15, 118, 110, 0.22)',
+    shadow: '0 10px 24px rgba(15, 118, 110, 0.18)',
+    keywords: ['combo', 'combos', 'promo', 'promocion', 'familiar'],
+  },
+  {
+    glyph: '🥪',
+    accent: '#B45309',
+    tint: 'rgba(180, 83, 9, 0.12)',
+    border: 'rgba(180, 83, 9, 0.22)',
+    shadow: '0 10px 24px rgba(180, 83, 9, 0.18)',
+    keywords: ['sandwich', 'sanduche', 'wrap', 'arepa', 'empanada', 'pan'],
+  },
+];
+
+function formatCategoryDisplayName(value: string | null | undefined) {
+  const normalized = (value ?? '').trim();
+  return normalized ? normalized.toLocaleUpperCase('es-VE') : '';
+}
+
+function getAssignedCategoryGlyph(value: string | null | undefined) {
+  const icon = (value ?? '').trim();
+  if (!icon) return '';
+  return /[a-z0-9]/i.test(icon) ? '' : icon;
+}
+
+function resolveCategoryVisual(category: Pick<CategoriaRow, 'nombre' | 'icono'>) {
+  const keywordSource = normalizeSearchText(`${category.icono ?? ''} ${category.nombre ?? ''}`);
+  const matchedRule = CATEGORY_VISUAL_RULES.find((rule) =>
+    rule.keywords.some((keyword) => keywordSource.includes(keyword)),
+  );
+  const glyph = getAssignedCategoryGlyph(category.icono) || matchedRule?.glyph || DEFAULT_CATEGORY_VISUAL_THEME.glyph;
+
+  return {
+    glyph,
+    accent: matchedRule?.accent || DEFAULT_CATEGORY_VISUAL_THEME.accent,
+    tint: matchedRule?.tint || DEFAULT_CATEGORY_VISUAL_THEME.tint,
+    border: matchedRule?.border || DEFAULT_CATEGORY_VISUAL_THEME.border,
+    shadow: matchedRule?.shadow || DEFAULT_CATEGORY_VISUAL_THEME.shadow,
+  };
+}
+
 function toNumberOrNull(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const raw = (value ?? '').toString().trim();
@@ -1136,6 +1311,16 @@ export default function PublicMenuPage() {
 
   const filteredProductIds = useMemo(
     () => filteredCategorias.flatMap((categoria) => categoria.productos.map((producto) => producto.id)),
+    [filteredCategorias],
+  );
+
+  const visibleCategorias = useMemo(
+    () =>
+      filteredCategorias.map((categoria) => ({
+        ...categoria,
+        displayName: formatCategoryDisplayName(categoria.nombre),
+        visual: resolveCategoryVisual(categoria),
+      })),
     [filteredCategorias],
   );
 
@@ -1509,8 +1694,8 @@ export default function PublicMenuPage() {
     .join(', ');
   const heroSubtitle =
     menuData?.comercio.descripcion?.trim() ||
-    (filteredCategorias[0]?.nombre
-      ? `Explora ${filteredCategorias[0].nombre.toLowerCase()} y pide directo desde tu mesa.`
+    (visibleCategorias[0]?.displayName
+      ? `Explora ${visibleCategorias[0].displayName} y pide directo desde tu mesa.`
       : 'Explora el menú y arma tu pedido en segundos.');
   const heroBadgeLabel = searchQuery.trim() ? 'Resultados del menú' : 'Disponible hoy';
   const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
@@ -3032,7 +3217,7 @@ export default function PublicMenuPage() {
                 className="mt-3 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
               >
                 <div className="flex w-max items-center gap-2 pr-2">
-                  {filteredCategorias.map((categoria) => (
+                  {visibleCategorias.map((categoria) => (
                     <button
                       type="button"
                       key={categoria.id}
@@ -3040,7 +3225,7 @@ export default function PublicMenuPage() {
                         categoryChipRefs.current[categoria.id] = element;
                       }}
                       onClick={() => scrollToCategory(categoria.id)}
-                      className={`rounded-full px-4 py-2 text-xs font-extrabold transition-all duration-200 ${
+                      className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-extrabold uppercase tracking-[0.04em] transition-all duration-200 ${
                         activeCategoryId === categoria.id
                           ? 'text-white shadow-[0_10px_24px_rgba(15,23,42,0.14)]'
                           : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm'
@@ -3054,7 +3239,18 @@ export default function PublicMenuPage() {
                           : undefined
                       }
                     >
-                      {categoria.nombre}
+                      <span
+                        aria-hidden="true"
+                        className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[13px]"
+                        style={{
+                          backgroundColor: activeCategoryId === categoria.id ? 'rgba(255,255,255,0.18)' : categoria.visual.tint,
+                          border: `1px solid ${activeCategoryId === categoria.id ? 'rgba(255,255,255,0.22)' : categoria.visual.border}`,
+                          boxShadow: activeCategoryId === categoria.id ? 'none' : categoria.visual.shadow,
+                        }}
+                      >
+                        <span className="translate-y-[0.5px]">{categoria.visual.glyph}</span>
+                      </span>
+                      <span>{categoria.displayName}</span>
                     </button>
                   ))}
                 </div>
@@ -3088,12 +3284,25 @@ export default function PublicMenuPage() {
               </div>
             ) : (
               <div className="space-y-8">
-                {filteredCategorias.map((categoria) => (
+                {visibleCategorias.map((categoria) => (
                   <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-[12rem]">
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                      <h2 className="min-w-0 flex-1 text-[1.65rem] font-black tracking-[-0.03em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
-                        {categoria.nombre}
-                      </h2>
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <span
+                          aria-hidden="true"
+                          className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-lg"
+                          style={{
+                            backgroundColor: categoria.visual.tint,
+                            border: `1px solid ${categoria.visual.border}`,
+                            boxShadow: categoria.visual.shadow,
+                          }}
+                        >
+                          <span className="translate-y-[0.5px]">{categoria.visual.glyph}</span>
+                        </span>
+                        <h2 className="min-w-0 flex-1 text-[1.65rem] font-black uppercase tracking-[-0.03em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
+                          {categoria.displayName}
+                        </h2>
+                      </div>
                       <span className="shrink-0 whitespace-nowrap rounded-full border border-slate-200 bg-white/84 px-3 py-1.5 text-[10px] font-black uppercase leading-none tracking-[0.08em] text-slate-500 shadow-[0_8px_20px_rgba(15,23,42,0.05)] sm:px-3 sm:py-1 sm:text-[11px] sm:tracking-[0.14em]">
                         {categoria.productos.length} item{categoria.productos.length === 1 ? '' : 's'}
                       </span>
