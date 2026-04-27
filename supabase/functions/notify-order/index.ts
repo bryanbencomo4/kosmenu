@@ -46,6 +46,11 @@ const corsHeaders = {
 const FIREBASE_AUTH_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const FIREBASE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DEFAULT_WASENDER_ENDPOINT = 'https://wasenderapi.com/api/send-message';
+const DEFAULT_PUBLIC_SITE_URL = 'https://elmenuxfa.com';
+
+function getPublicSiteUrl(): string {
+  return (Deno.env.get('PUBLIC_SITE_URL') ?? DEFAULT_PUBLIC_SITE_URL).trim().replace(/\/$/, '');
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -340,19 +345,21 @@ function messageLinesByStatus(status: string) {
 }
 
 function buildTrackingUrl(orderId: string, slug: string): string {
+  const publicSiteUrl = getPublicSiteUrl();
   if (slug) {
-    return `https://kosmenu.vercel.app/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}`;
+    return `${publicSiteUrl}/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}`;
   }
 
-  return `https://kosmenu.vercel.app/orders/${encodeURIComponent(orderId)}`;
+  return `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
 }
 
 function buildBusinessUrl(slug: string): string {
+  const publicSiteUrl = getPublicSiteUrl();
   if (slug) {
-    return `https://kosmenu.vercel.app/v/${encodeURIComponent(slug)}`;
+    return `${publicSiteUrl}/v/${encodeURIComponent(slug)}`;
   }
 
-  return 'https://kosmenu.vercel.app';
+  return publicSiteUrl;
 }
 
 function buildWhatsappMessage(params: {

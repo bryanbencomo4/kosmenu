@@ -9733,7 +9733,7 @@ class _UrlBar extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               const Text(
-                'kosmenu.vercel.app/v/',
+                'elmenuxfa.com/v/',
                 style: TextStyle(color: _setupTextLow, fontSize: 14),
               ),
               Expanded(

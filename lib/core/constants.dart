@@ -42,7 +42,18 @@ class AppLinks {
   const AppLinks._();
 
   // Keep base URL without trailing slash to avoid //v/... routes.
-  static const String productionUrl = 'https://kosmenu.vercel.app';
+  static const String productionUrl = 'https://elmenuxfa.com';
+  static const String brandIsotipoUrl = '$productionUrl/branding/isotipo.png';
+
+  static String brandAsset(String assetPath) {
+    final base = productionUrl.endsWith('/')
+        ? productionUrl.substring(0, productionUrl.length - 1)
+        : productionUrl;
+    final normalizedPath = assetPath.startsWith('/')
+        ? assetPath
+        : '/$assetPath';
+    return '$base$normalizedPath';
+  }
 
   static String publicMenuByComercio(String comercioId) {
     final base = productionUrl.endsWith('/')

@@ -112,7 +112,7 @@ type DeliveryPointSelectionSource = 'none' | 'business-default' | 'user';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const publicBaseUrl = 'https://kosmenu.vercel.app';
+const publicBaseUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(/\/$/, '');
 const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
 const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
 const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';

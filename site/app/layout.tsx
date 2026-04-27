@@ -2,6 +2,8 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { Montserrat, Roboto } from 'next/font/google';
 
+const publicSiteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com';
+
 const displayFont = Montserrat({
   subsets: ['latin'],
   variable: '--font-display',
@@ -15,6 +17,7 @@ const bodyFont = Roboto({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(publicSiteUrl),
   title: 'elmenuxfa.com',
   description: 'Menu digital publico',
   icons: {

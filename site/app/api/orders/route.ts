@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   createOrderId,
 } from '../_lib/order-utils';
+import { publicSiteUrl } from '../_lib/public-site-url';
 import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
 import { getServerSupabaseClient } from '../_lib/supabase-server';
 
@@ -336,8 +337,8 @@ export async function POST(request: Request) {
     }
 
     const trackingUrl = resolvedComercioSlug
-      ? `https://kosmenu.vercel.app/v/${encodeURIComponent(resolvedComercioSlug)}/orders/${encodeURIComponent(orderId)}`
-      : `https://kosmenu.vercel.app/orders/${encodeURIComponent(orderId)}`;
+      ? `${publicSiteUrl}/v/${encodeURIComponent(resolvedComercioSlug)}/orders/${encodeURIComponent(orderId)}`
+      : `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
     let emailStatus: 'queued' | 'skipped' = 'skipped';
     let whatsappStatus: 'queued' | 'skipped' = 'skipped';
 

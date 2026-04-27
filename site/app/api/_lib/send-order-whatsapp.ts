@@ -1,5 +1,7 @@
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
+import { publicSiteUrl } from './public-site-url';
+
 export type SendOrderNotificationResult = {
   ok: true;
   recipient: string;
@@ -122,8 +124,8 @@ export async function sendOrderNotification(
   }
 
   const businessUrl = safeBusinessSlug
-    ? `https://kosmenu.vercel.app/v/${encodeURIComponent(safeBusinessSlug)}`
-    : 'https://kosmenu.vercel.app';
+    ? `${publicSiteUrl}/v/${encodeURIComponent(safeBusinessSlug)}`
+    : publicSiteUrl;
   const trackingUrl = (options?.trackingUrl ?? '').toString().trim() || `${businessUrl}/orders/${encodeURIComponent(safeOrderId)}`;
   const statusLabel = normalizeStatusLabel(status);
   const messageVariant = messageLinesByStatus(status);

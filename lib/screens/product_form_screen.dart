@@ -31,8 +31,7 @@ class ProductFormScreen extends StatefulWidget {
 
 class _ProductFormScreenState extends State<ProductFormScreen> {
   static const _bucketName = 'product-images';
-  static const _defaultBrandLogoUrl =
-      'https://elmenuxfa.com/branding/isotipo.png';
+  static const _defaultBrandLogoUrl = AppLinks.brandIsotipoUrl;
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();

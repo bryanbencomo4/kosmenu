@@ -5,7 +5,8 @@
       {
         "appID": "TEAM_ID.com.kosmenu.kosmenuApp",
         "paths": [
-          "/orders/*"
+          "/orders/*",
+          "/v/*/orders/*"
         ]
       }
     ]

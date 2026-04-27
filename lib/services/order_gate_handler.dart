@@ -37,6 +37,12 @@ class OrderGateHandler {
       return Uri.decodeComponent(segments[1]).trim();
     }
 
+    if (segments.length >= 4 &&
+        segments.first == 'v' &&
+        (segments[2] == 'orders' || segments[2] == 'order')) {
+      return Uri.decodeComponent(segments[3]).trim();
+    }
+
     return null;
   }
 

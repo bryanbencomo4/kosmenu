@@ -28,8 +28,7 @@ class ProductListScreen extends StatefulWidget {
 class _ProductListScreenState extends State<ProductListScreen> {
   static const _pageSize = 12;
   static const _bucketName = 'product-images';
-  static const _defaultBrandLogoUrl =
-      'https://elmenuxfa.com/branding/isotipo.png';
+  static const _defaultBrandLogoUrl = AppLinks.brandIsotipoUrl;
 
   bool _loading = true;
   bool _isSavingOrder = false;

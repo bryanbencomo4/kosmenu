@@ -4,7 +4,8 @@
 <dict>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:kosmenu.vercel.app</string>
+		<string>applinks:elmenuxfa.com</string>
+		<string>applinks:www.elmenuxfa.com</string>
 	</array>
 </dict>
 </plist>

@@ -65,7 +65,40 @@
 
                 <data
                     android:scheme="https"
-                    android:host="kosmenu.vercel.app"
+                    android:host="elmenuxfa.com"
+                    android:pathPattern="/v/.*/orders/.*" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="www.elmenuxfa.com"
+                    android:pathPattern="/v/.*/orders/.*" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="elmenuxfa.com"
+                    android:pathPrefix="/orders/" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="www.elmenuxfa.com"
                     android:pathPrefix="/orders/" />
             </intent-filter>
         </activity>

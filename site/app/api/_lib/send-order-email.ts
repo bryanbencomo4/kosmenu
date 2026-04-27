@@ -1,5 +1,7 @@
 import { Resend } from 'resend';
 
+import { publicSiteUrl } from './public-site-url';
+
 export type SendOrderEmailInput = {
   clientEmail: string;
   comercioNombre: string;
@@ -36,7 +38,7 @@ export async function sendOrderEmail(input: SendOrderEmailInput) {
   const fromEmail = process.env.RESEND_FROM_EMAIL ?? 'elmenuxfa.com <onboarding@resend.dev>';
   const resend = new Resend(resendApiKey);
 
-  const trackingLink = finalTrackingLink(orderId);
+  const trackingLink = finalTrackingLink(input.orderTrackingUrl, orderId);
   const subject = `💜 ¡Pedido Confirmado en ${comercioNombre}!`;
   const html = `
 <!doctype html>
@@ -87,6 +89,11 @@ export async function sendOrderEmail(input: SendOrderEmailInput) {
   return { ok: true as const, skipped: false as const };
 }
 
-function finalTrackingLink(orderId: string) {
-  return `https://kosmenu.vercel.app/orders/${orderId}`;
+function finalTrackingLink(orderTrackingUrl: string | undefined, orderId: string) {
+  const directUrl = (orderTrackingUrl ?? '').trim();
+  if (directUrl.length > 0) {
+    return directUrl;
+  }
+
+  return `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
 }

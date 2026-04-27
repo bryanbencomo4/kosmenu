@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/services/order_gate_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -86,7 +87,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
         _loading = false;
         _title = 'No pudimos abrir el pedido en la app';
         _fallbackUri = Uri.tryParse(
-          'https://kosmenu.vercel.app/orders/${Uri.encodeComponent(widget.orderId)}?view=web',
+          '${AppLinks.productionUrl}/orders/${Uri.encodeComponent(widget.orderId)}?view=web',
         );
         _showAccountMismatchNotice = false;
         _message = 'No se pudo validar el acceso en la app. Puedes abrir el pedido en el navegador.';
