@@ -2679,13 +2679,17 @@ export default function PublicMenuPage() {
 
   return (
     <>
-      {googleFontsUrl ? (
-        <Head>
-          <link rel="preconnect" href="https://fonts.googleapis.com" />
-          <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-          <link rel="stylesheet" href={googleFontsUrl} />
-        </Head>
-      ) : null}
+      <Head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {googleFontsUrl ? (
+          <>
+            <link rel="preconnect" href="https://fonts.googleapis.com" />
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+            <link rel="stylesheet" href={googleFontsUrl} />
+          </>
+        ) : null}
+      </Head>
       <style jsx global>{`
         @keyframes kosmenuTickerScroll {
           0% {
@@ -2901,7 +2905,7 @@ export default function PublicMenuPage() {
 
               <div className="max-w-[34rem]">
                 <h2
-                  className="max-w-full overflow-hidden text-[2rem] font-black leading-[0.92] tracking-[-0.05em] text-white sm:text-[2.75rem] md:text-[3.4rem]"
+                  className="max-w-full pb-1 text-[2rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[2.75rem] md:text-[3.4rem]"
                   style={{
                     ...titleFontStyle,
                     overflowWrap: 'anywhere',
@@ -2923,20 +2927,57 @@ export default function PublicMenuPage() {
                   {heroSubtitle}
                 </p>
 
-                <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-white/84">
-                  <MapPin className="h-4 w-4 shrink-0" strokeWidth={2.3} />
-                  <span className="truncate">{heroLocation || `@${resolvedSlug}`}</span>
+                <div className="mt-4 inline-flex w-fit max-w-[17rem] items-start gap-2 rounded-[15px] border border-white/16 bg-[rgba(255,255,255,0.09)] px-2.5 py-2 text-left shadow-[0_10px_22px_rgba(15,23,42,0.12)] backdrop-blur-md">
+                  <span className="mt-0.5 flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/92">
+                    <MapPin className="h-3.5 w-3.5" strokeWidth={2.3} />
+                  </span>
+                  <span
+                    className="block text-[10px] font-semibold leading-[1.28] text-white/84 sm:text-[11px]"
+                    style={{
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {heroLocation || `@${resolvedSlug}`}
+                  </span>
                 </div>
 
-                <div ref={statsCardsRef} className="mt-5 flex flex-wrap gap-2.5">
-                  <div className="rounded-full border border-white/14 bg-white/10 px-3.5 py-2 text-xs font-black uppercase tracking-[0.12em] text-white backdrop-blur-sm">
-                    {animatedCategoryCount} categorías
-                  </div>
-                  <div className="rounded-full border border-white/14 bg-white/10 px-3.5 py-2 text-xs font-black uppercase tracking-[0.12em] text-white backdrop-blur-sm">
-                    {animatedProductCount} productos
-                  </div>
-                  <div className="rounded-full border border-white/14 bg-white/10 px-3.5 py-2 text-xs font-black uppercase tracking-[0.12em] text-white backdrop-blur-sm">
-                    {supportsDelivery ? 'Delivery disponible' : 'Retiro en tienda'}
+                <div ref={statsCardsRef} className="mt-5 max-w-md">
+                  <div className="grid grid-cols-[0.78fr_0.9fr_1.62fr] overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(180deg,rgba(255,255,255,0.12)_0%,rgba(255,255,255,0.07)_100%)] shadow-[0_18px_32px_rgba(15,23,42,0.14)] backdrop-blur-md sm:grid-cols-[0.84fr_0.96fr_1.5fr] sm:rounded-[20px]">
+                    <div className="flex min-h-[56px] flex-col items-center justify-center px-2.5 py-2 text-center sm:min-h-[64px] sm:px-3">
+                      <span className="text-[17px] font-black leading-none text-white sm:text-[18px]">{animatedCategoryCount}</span>
+                      <span className="mt-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/74 sm:text-[10px]">Categorías</span>
+                    </div>
+
+                    <div className="flex min-h-[56px] flex-col items-center justify-center border-l border-white/10 px-2.5 py-2 text-center sm:min-h-[64px] sm:px-3">
+                      <span className="text-[17px] font-black leading-none text-white sm:text-[18px]">{animatedProductCount}</span>
+                      <span className="mt-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/74 sm:text-[10px]">Productos</span>
+                    </div>
+
+                    <div className="flex min-h-[56px] items-center justify-center gap-1.5 border-l border-white/10 px-2 py-2 text-center sm:min-h-[64px] sm:gap-2 sm:px-3">
+                      <span className="shrink-0 text-white/92">
+                        <svg
+                          viewBox="0 0 24 24"
+                          aria-hidden="true"
+                          className="h-[clamp(22px,5.6vw,28px)] w-[clamp(22px,5.6vw,28px)]"
+                          fill="currentColor"
+                        >
+                          <path d="M19,7c0-1.1-0.9-2-2-2h-3v2h3v2.65L13.52,14H10V9H6c-2.21,0-4,1.79-4,4v3h2c0,1.66,1.34,3,3,3s3-1.34,3-3h4.48L19,10.35V7z M7,17c-0.55,0-1-0.45-1-1h2C8,16.55,7.55,17,7,17z" />
+                          <rect x="5" y="6" width="5" height="2" />
+                          <path d="M19,13c-1.66,0-3,1.34-3,3s1.34,3,3,3s3-1.34,3-3S20.66,13,19,13z M19,17c-0.55,0-1-0.45-1-1s0.45-1,1-1s1,0.45,1,1S19.55,17,19,17z" />
+                        </svg>
+                      </span>
+                      <div className="min-w-0 text-left">
+                        <p className="text-[clamp(8.5px,2.1vw,11px)] font-black uppercase leading-[1.05] tracking-[0.11em] text-white/95 sm:tracking-[0.13em]">
+                          {supportsDelivery ? 'Delivery' : 'Retiro'}
+                        </p>
+                        <p className="mt-1 text-[clamp(8.5px,2.1vw,11px)] font-black uppercase leading-[1.05] tracking-[0.08em] text-white/74 sm:tracking-[0.11em]">
+                          {supportsDelivery ? 'Disponible' : 'En tienda'}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3049,11 +3090,11 @@ export default function PublicMenuPage() {
               <div className="space-y-8">
                 {filteredCategorias.map((categoria) => (
                   <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-[12rem]">
-                    <div className="mb-4 flex items-end justify-between gap-3">
-                      <h2 className="text-[1.65rem] font-black tracking-[-0.03em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                      <h2 className="min-w-0 flex-1 text-[1.65rem] font-black tracking-[-0.03em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
                         {categoria.nombre}
                       </h2>
-                      <span className="rounded-full border border-slate-200 bg-white/75 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
+                      <span className="shrink-0 whitespace-nowrap rounded-full border border-slate-200 bg-white/84 px-3 py-1.5 text-[10px] font-black uppercase leading-none tracking-[0.08em] text-slate-500 shadow-[0_8px_20px_rgba(15,23,42,0.05)] sm:px-3 sm:py-1 sm:text-[11px] sm:tracking-[0.14em]">
                         {categoria.productos.length} item{categoria.productos.length === 1 ? '' : 's'}
                       </span>
                     </div>
