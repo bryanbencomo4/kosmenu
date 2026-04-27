@@ -3,7 +3,7 @@
 
 import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
-import { ArrowUp, ChevronDown, Info, Mail, MapPin, Menu, MessageCircle, Phone, Share2, Store, Truck, User, X } from 'lucide-react';
+import { ArrowRight, ArrowUp, ChevronDown, Flame, Info, Mail, MapPin, Menu, MessageCircle, Phone, Share2, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
@@ -1138,6 +1138,17 @@ export default function PublicMenuPage() {
     [filteredCategorias],
   );
 
+  const heroProduct = useMemo(() => {
+    const categorySource = filteredCategorias.length > 0 ? filteredCategorias : categoriasConProductos;
+    const firstWithImage = categorySource
+      .flatMap((categoria) => categoria.productos)
+      .find((producto) => Boolean((producto.imagen_url ?? '').trim()));
+
+    if (firstWithImage) return firstWithImage;
+
+    return categorySource.flatMap((categoria) => categoria.productos)[0] ?? null;
+  }, [categoriasConProductos, filteredCategorias]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (filteredProductIds.length === 0) {
@@ -1490,6 +1501,17 @@ export default function PublicMenuPage() {
   const summaryProductCount = categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0);
   const animatedCategoryCount = useCountUp(summaryCategoryCount, statsCardsVisible, 950);
   const animatedProductCount = useCountUp(summaryProductCount, statsCardsVisible, 1250);
+  const heroImageSrc = safeImageSrc(heroProduct?.imagen_url, comercioLogoUrl);
+  const heroLocation = [menuData?.comercio.ciudad, menuData?.comercio.direccion]
+    .map((item) => (item ?? '').trim())
+    .filter(Boolean)
+    .join(', ');
+  const heroSubtitle =
+    menuData?.comercio.descripcion?.trim() ||
+    (filteredCategorias[0]?.nombre
+      ? `Explora ${filteredCategorias[0].nombre.toLowerCase()} y pide directo desde tu mesa.`
+      : 'Explora el menú y arma tu pedido en segundos.');
+  const heroBadgeLabel = searchQuery.trim() ? 'Resultados del menú' : 'Disponible hoy';
   const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
@@ -2677,24 +2699,27 @@ export default function PublicMenuPage() {
                 <img
                   src={comercioLogoUrl}
                   alt={`Logo de ${comercioNombre}`}
-                  className="h-8 w-8 shrink-0 rounded-lg border border-slate-200 bg-white object-cover"
+                  className="h-9 w-9 shrink-0 rounded-xl border border-slate-200 bg-white object-cover"
                   onError={(event) => {
                     event.currentTarget.style.display = 'none';
                   }}
                 />
               ) : (
                 <div
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-black text-white"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-xs font-black text-white"
                   style={{ backgroundColor: 'var(--primary-color)' }}
                 >
                   {comercioInitialLetter}
                 </div>
               )}
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-black tracking-[-0.01em] text-slate-900 md:text-xl" style={titleFontStyle}>
+                <h1 className="truncate text-[15px] font-black tracking-[-0.02em] text-slate-900 sm:text-base" style={titleFontStyle}>
                   {comercioNombre}
                 </h1>
-                <p className="truncate text-[11px] font-semibold text-slate-500">@{resolvedSlug}</p>
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                  <MapPin className="h-3 w-3 shrink-0" strokeWidth={2.2} />
+                  <p className="truncate">{heroLocation || `@${resolvedSlug}`}</p>
+                </div>
               </div>
             </div>
             <div className="relative flex items-center gap-2">
@@ -2703,16 +2728,33 @@ export default function PublicMenuPage() {
                 onClick={() => setIsQuickActionsOpen((prev) => !prev)}
                 aria-expanded={isQuickActionsOpen}
                 aria-label="Abrir menu de acciones"
-                className="inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-black uppercase tracking-[0.08em] shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
-                style={{
-                  borderColor: 'color-mix(in srgb, var(--primary-color) 28%, white)',
-                  backgroundColor: 'var(--primary-color)',
-                  color: 'var(--text-on-primary)',
-                }}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
               >
                 <Menu className="h-4 w-4" strokeWidth={2.5} />
-                <span className="hidden sm:inline">Menu</span>
-                <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isQuickActionsOpen ? 'rotate-180' : ''}`} strokeWidth={2.4} />
+                <ChevronDown className={`absolute bottom-1 right-1 h-3 w-3 transition-transform duration-200 ${isQuickActionsOpen ? 'rotate-180' : ''}`} strokeWidth={2.4} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (cartCount <= 0) return;
+                  setCheckoutError(null);
+                  setCheckoutStep(0);
+                  setIsConfirmOpen(true);
+                }}
+                aria-label={cartCount > 0 ? 'Ver pedido' : 'Carrito vacio'}
+                disabled={cartCount <= 0}
+                className="relative inline-flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-slate-800 shadow-sm transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <ShoppingCart className="h-4 w-4" strokeWidth={2.4} />
+                {cartCount > 0 ? (
+                  <span
+                    className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full px-1 text-[10px] font-black text-white"
+                    style={{ backgroundColor: 'var(--primary-color)' }}
+                  >
+                    {cartCount}
+                  </span>
+                ) : null}
               </button>
 
               {isQuickActionsOpen ? (
@@ -2793,91 +2835,73 @@ export default function PublicMenuPage() {
         ) : null}
 
         <section className="mx-auto mt-4 max-w-6xl px-4 sm:mt-5 sm:px-6">
-          <div className="relative overflow-hidden rounded-[28px] border border-slate-200/90 bg-[color:color-mix(in_srgb,var(--card-surface)_97%,white)] p-4 shadow-[0_18px_50px_rgba(15,23,42,0.07)] sm:p-5">
-            <div className="pointer-events-none absolute inset-y-0 left-0 w-1" style={{ backgroundColor: 'var(--primary-color)' }} />
-            {comercioLogoUrl ? (
-              <div className="pointer-events-none absolute inset-0 overflow-hidden opacity-10">
-                <img
-                  src={comercioLogoUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="absolute right-[-2rem] top-1/2 h-[120%] w-auto -translate-y-1/2 object-contain blur-3xl md:right-0"
-                />
-              </div>
-            ) : null}
+          <div className="relative overflow-hidden rounded-[32px] border border-slate-900/8 bg-slate-950 shadow-[0_22px_55px_rgba(15,23,42,0.14)]">
+            <img
+              src={heroImageSrc}
+              alt={heroProduct?.nombre || comercioNombre}
+              className="absolute inset-0 h-full w-full object-cover"
+              loading="eager"
+              onError={(event) => {
+                const img = event.currentTarget;
+                if (img.src !== defaultProductImage) {
+                  img.onerror = null;
+                  img.src = defaultProductImage;
+                }
+              }}
+            />
+            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.28)_0%,rgba(15,23,42,0.52)_38%,rgba(15,23,42,0.86)_100%)]" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_32%)]" />
 
-            <div className="relative flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-              <div className="min-w-0 flex-1 rounded-[22px] border border-slate-200/90 bg-white/92 px-4 py-4 backdrop-blur-sm sm:px-5">
-                <div className="flex min-w-0 items-start gap-3 sm:gap-4">
-                  <div className="shrink-0">
-                    {comercioLogoUrl ? (
-                      <img
-                        src={comercioLogoUrl}
-                        alt={`Logo de ${comercioNombre}`}
-                        className="h-12 w-12 rounded-[14px] border border-slate-200 bg-white object-cover shadow-sm sm:h-14 sm:w-14"
-                        onError={(event) => {
-                          event.currentTarget.style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <div
-                        className="grid h-12 w-12 place-items-center rounded-[14px] text-base font-black text-white shadow-sm sm:h-14 sm:w-14 sm:text-lg"
-                        style={{ backgroundColor: 'var(--primary-color)' }}
-                      >
-                        {comercioInitialLetter}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <h2
-                        className="max-w-full overflow-hidden text-2xl font-black leading-[0.95] tracking-[-0.04em] text-slate-950 sm:text-4xl md:text-5xl"
-                      style={{
-                        ...titleFontStyle,
-                        overflowWrap: 'anywhere',
-                      }}
-                    >
-                      {comercioNombre}
-                    </h2>
-
-                    {menuData.comercio.descripcion?.trim() ? (
-                      <p
-                        className="mt-2 max-w-2xl text-sm font-medium leading-5 text-slate-600 sm:text-[15px] sm:leading-6"
-                        style={{
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                          overflowWrap: 'anywhere',
-                        }}
-                      >
-                        {menuData.comercio.descripcion.trim()}
-                      </p>
-                    ) : null}
-
-                    {comercioAddress ? (
-                      <p
-                        className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-slate-500"
-                        style={{
-                          overflowWrap: 'anywhere',
-                        }}
-                        title={comercioAddress}
-                      >
-                        {comercioAddress}
-                      </p>
-                    ) : null}
-                  </div>
+            <div className="relative flex min-h-[19rem] flex-col justify-between p-4 sm:min-h-[22rem] sm:p-6">
+              <div className="flex items-start justify-between gap-3">
+                <div className="inline-flex items-center gap-2 rounded-full bg-[rgba(239,68,68,0.92)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-white shadow-[0_12px_26px_rgba(239,68,68,0.32)]">
+                  <Flame className="h-3.5 w-3.5" strokeWidth={2.4} />
+                  {heroBadgeLabel}
+                </div>
+                <div className="rounded-full border border-white/15 bg-black/25 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-white/92 backdrop-blur-sm">
+                  {selectedCurrencyCode}
                 </div>
               </div>
 
-              <div ref={statsCardsRef} className="grid grid-cols-2 gap-3 md:w-[180px] md:shrink-0">
-                <div className="rounded-[20px] border border-slate-200/90 bg-white/92 px-4 py-3 text-center backdrop-blur-sm">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[11px]">Categorias</p>
-                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950 sm:text-3xl">{animatedCategoryCount}</p>
+              <div className="max-w-[34rem]">
+                <h2
+                  className="max-w-full overflow-hidden text-[2rem] font-black leading-[0.92] tracking-[-0.05em] text-white sm:text-[2.75rem] md:text-[3.4rem]"
+                  style={{
+                    ...titleFontStyle,
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {comercioNombre}
+                </h2>
+
+                <p
+                  className="mt-3 max-w-xl text-sm font-medium leading-6 text-white/88 sm:text-[15px]"
+                  style={{
+                    display: '-webkit-box',
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {heroSubtitle}
+                </p>
+
+                <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-white/84">
+                  <MapPin className="h-4 w-4 shrink-0" strokeWidth={2.3} />
+                  <span className="truncate">{heroLocation || `@${resolvedSlug}`}</span>
                 </div>
-                <div className="rounded-[20px] border border-slate-200/90 bg-white/92 px-4 py-3 text-center backdrop-blur-sm">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[11px]">Productos</p>
-                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-slate-950 sm:text-3xl">{animatedProductCount}</p>
+
+                <div ref={statsCardsRef} className="mt-5 flex flex-wrap gap-2.5">
+                  <div className="rounded-full border border-white/14 bg-white/10 px-3.5 py-2 text-xs font-black uppercase tracking-[0.12em] text-white backdrop-blur-sm">
+                    {animatedCategoryCount} categorías
+                  </div>
+                  <div className="rounded-full border border-white/14 bg-white/10 px-3.5 py-2 text-xs font-black uppercase tracking-[0.12em] text-white backdrop-blur-sm">
+                    {animatedProductCount} productos
+                  </div>
+                  <div className="rounded-full border border-white/14 bg-white/10 px-3.5 py-2 text-xs font-black uppercase tracking-[0.12em] text-white backdrop-blur-sm">
+                    {supportsDelivery ? 'Delivery disponible' : 'Retiro en tienda'}
+                  </div>
                 </div>
               </div>
             </div>
@@ -2941,11 +2965,19 @@ export default function PublicMenuPage() {
                       onClick={() => scrollToCategory(categoria.id)}
                       className={`rounded-full px-4 py-2 text-xs font-extrabold transition-all duration-200 ${
                         activeCategoryId === categoria.id
-                          ? 'border border-slate-900 bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.14)]'
+                          ? 'text-white shadow-[0_10px_24px_rgba(15,23,42,0.14)]'
                           : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm'
                       }`}
+                      style={
+                        activeCategoryId === categoria.id
+                          ? {
+                              backgroundColor: 'var(--primary-color)',
+                              borderColor: 'var(--primary-color)',
+                            }
+                          : undefined
+                      }
                     >
-                      {categoria.nombre.toUpperCase()}
+                      {categoria.nombre}
                     </button>
                   ))}
                 </div>
@@ -2967,7 +2999,7 @@ export default function PublicMenuPage() {
             </div>
           ) : null}
 
-          <div className="mt-5 pb-40">
+          <div className="mt-5 pb-44">
             {!hasProducts ? (
               <div className="rounded-[28px] border border-slate-200/90 bg-white/92 p-8 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur-sm">
                 <p className="text-xl font-black text-slate-900" style={titleFontStyle}>
@@ -2982,18 +3014,19 @@ export default function PublicMenuPage() {
                 {filteredCategorias.map((categoria) => (
                   <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-[12rem]">
                     <div className="mb-4 flex items-end justify-between gap-3">
-                      <h2 className="text-2xl font-black tracking-[-0.02em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
-                        {categoria.nombre.toUpperCase()}
+                      <h2 className="text-[1.65rem] font-black tracking-[-0.03em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
+                        {categoria.nombre}
                       </h2>
                       <span className="rounded-full border border-slate-200 bg-white/75 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
                         {categoria.productos.length} item{categoria.productos.length === 1 ? '' : 's'}
                       </span>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className={menuGridClass(layoutType, itemsPerRow)}>
                       {categoria.productos.map((producto, productIndex) => {
                         const quantity = cart[producto.id] ?? 0;
                         const isZeroPricedProduct = (producto.precio ?? 0) <= 0;
+                        const isProductUnavailable = producto.disponible === false || isZeroPricedProduct;
                         const isProductRevealed = Boolean(revealedProductIds[producto.id]);
                         const convertedPrice = formatAmountByCurrency(
                           convertFromBaseCurrency(
@@ -3021,99 +3054,7 @@ export default function PublicMenuPage() {
                               transitionDelay: isProductRevealed ? `${(productIndex % 6) * 55}ms` : '0ms',
                             }}
                           >
-                            <div className="flex gap-4 p-4 sm:gap-5 sm:p-5">
-                              <div className="min-w-0 flex-1 py-0.5">
-                                <h3
-                                  className="text-lg font-extrabold leading-6 text-slate-900 sm:text-[22px]"
-                                  style={{
-                                    ...titleFontStyle,
-                                    wordBreak: 'break-word',
-                                  }}
-                                >
-                                  {producto.nombre}
-                                </h3>
-
-                                <p
-                                  className="mt-2 text-sm leading-6 text-slate-600 sm:max-w-[38rem]"
-                                  style={{
-                                    display: '-webkit-box',
-                                    WebkitLineClamp: 3,
-                                    WebkitBoxOrient: 'vertical',
-                                    overflow: 'hidden',
-                                  }}
-                                >
-                                  {producto.descripcion?.trim() || 'Preparacion recomendada por la casa.'}
-                                </p>
-
-                                <div className="mt-4">
-                                  <p className="text-2xl font-black tracking-[-0.03em]" style={{ ...titleFontStyle, color: 'var(--primary-color)' }}>
-                                    {convertedPrice}
-                                  </p>
-                                  {selectedCurrencyCode !== 'COP' ? (
-                                    <p className="mt-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
-                                      Base {formatAmountByCurrency(producto.precio ?? 0, 'COP')}
-                                    </p>
-                                  ) : null}
-                                </div>
-
-                                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                                  {quantity === 0 ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (isZeroPricedProduct) return;
-                                        incrementProduct(producto.id);
-                                      }}
-                                      disabled={isZeroPricedProduct}
-                                      className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_28px_rgba(15,23,42,0.14)] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_20px_34px_rgba(15,23,42,0.18)]"
-                                      style={{
-                                        borderRadius: '18px',
-                                        backgroundColor: isZeroPricedProduct ? '#E2E8F0' : 'var(--primary-color)',
-                                        color: isZeroPricedProduct ? '#64748B' : 'var(--text-on-primary)',
-                                        cursor: isZeroPricedProduct ? 'not-allowed' : 'pointer',
-                                        boxShadow: isZeroPricedProduct ? 'none' : undefined,
-                                        opacity: isZeroPricedProduct ? 0.9 : 1,
-                                      }}
-                                    >
-                                      <span className={`grid h-5 w-5 place-items-center rounded-full text-base leading-none ${isZeroPricedProduct ? 'bg-slate-300/80' : 'bg-white/16'}`}>
-                                        +
-                                      </span>
-                                      {isZeroPricedProduct ? 'No disponible' : 'Agregar'}
-                                    </button>
-                                  ) : (
-                                    <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
-                                      <button
-                                        type="button"
-                                        onClick={() => decrementProduct(producto.id)}
-                                        className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-lg font-black text-slate-700"
-                                      >
-                                        -
-                                      </button>
-                                      <span className="min-w-8 text-center text-sm font-black text-slate-900">{quantity}</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => incrementProduct(producto.id)}
-                                        disabled={isZeroPricedProduct}
-                                        className="grid h-9 w-9 place-items-center rounded-xl text-lg font-black"
-                                        style={{
-                                          backgroundColor: isZeroPricedProduct ? '#E2E8F0' : 'var(--primary-color)',
-                                          color: isZeroPricedProduct ? '#94A3B8' : 'var(--text-on-primary)',
-                                          cursor: isZeroPricedProduct ? 'not-allowed' : 'pointer',
-                                        }}
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                  )}
-
-                                  {quantity > 0 ? (
-                                    <span className="rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-white">
-                                      {quantity} en tu pedido
-                                    </span>
-                                  ) : null}
-                                </div>
-                              </div>
-
+                            <div className="flex gap-3 p-3 sm:gap-4 sm:p-4">
                               {showImages ? (
                                 <button
                                   type="button"
@@ -3125,13 +3066,14 @@ export default function PublicMenuPage() {
                                       description: producto.descripcion?.trim() || 'Preparacion recomendada por la casa.',
                                     })
                                   }
-                                  className="h-24 w-24 shrink-0 overflow-hidden rounded-[20px] bg-slate-100 shadow-[0_14px_26px_rgba(15,23,42,0.14)] transition-transform duration-300 hover:scale-[1.02] sm:h-[118px] sm:w-[118px] sm:rounded-[22px]"
+                                  className="relative h-[8.75rem] w-[8.4rem] shrink-0 overflow-hidden rounded-[22px] bg-slate-100 shadow-[0_14px_26px_rgba(15,23,42,0.14)] transition-transform duration-300 hover:scale-[1.02] sm:h-[10rem] sm:w-[9.5rem]"
                                   aria-label={`Ver imagen grande de ${producto.nombre}`}
                                 >
                                   <img
                                     src={safeImageSrc(producto.imagen_url, comercioLogoUrl)}
                                     alt={producto.nombre}
                                     className="h-full w-full object-cover"
+                                    loading="lazy"
                                     onError={(event) => {
                                       const img = event.currentTarget;
                                       if (img.src !== defaultProductImage) {
@@ -3140,8 +3082,102 @@ export default function PublicMenuPage() {
                                       }
                                     }}
                                   />
+                                  <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
+                                  <span className={`absolute left-2 top-2 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${isProductUnavailable ? 'bg-slate-900/85 text-white' : 'bg-white/92 text-slate-900'}`}>
+                                    {isProductUnavailable ? 'No disponible' : 'Pedir'}
+                                  </span>
                                 </button>
                               ) : null}
+
+                              <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
+                                <div>
+                                  <h3
+                                    className="text-[1.05rem] font-extrabold leading-5 text-slate-900 sm:text-[1.2rem]"
+                                    style={{
+                                      ...titleFontStyle,
+                                      wordBreak: 'break-word',
+                                    }}
+                                  >
+                                    {producto.nombre}
+                                  </h3>
+
+                                  <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-slate-600 sm:text-sm">
+                                    {producto.descripcion?.trim() || 'Preparacion recomendada por la casa.'}
+                                  </p>
+                                </div>
+
+                                <div className="mt-4">
+                                  <p className="text-[1.6rem] font-black leading-none tracking-[-0.04em]" style={{ ...titleFontStyle, color: 'var(--primary-color)' }}>
+                                    {convertedPrice}
+                                  </p>
+                                  {selectedCurrencyCode !== businessBaseCurrency ? (
+                                    <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                                      Base {formatAmountByCurrency(producto.precio ?? 0, businessBaseCurrency)}
+                                    </p>
+                                  ) : null}
+
+                                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                                    {quantity === 0 ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (isProductUnavailable) return;
+                                          incrementProduct(producto.id);
+                                        }}
+                                        disabled={isProductUnavailable}
+                                        className="inline-flex min-h-11 items-center justify-center rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_28px_rgba(15,23,42,0.14)] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_20px_34px_rgba(15,23,42,0.18)]"
+                                        style={{
+                                          minWidth: '9rem',
+                                          borderRadius: '18px',
+                                          backgroundColor: isProductUnavailable ? '#E2E8F0' : 'var(--primary-color)',
+                                          color: isProductUnavailable ? '#64748B' : 'var(--text-on-primary)',
+                                          cursor: isProductUnavailable ? 'not-allowed' : 'pointer',
+                                          boxShadow: isProductUnavailable ? 'none' : undefined,
+                                          opacity: isProductUnavailable ? 0.9 : 1,
+                                        }}
+                                      >
+                                        {isProductUnavailable ? 'No disponible' : 'Agregar'}
+                                      </button>
+                                    ) : (
+                                      <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
+                                        <button
+                                          type="button"
+                                          onClick={() => decrementProduct(producto.id)}
+                                          className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-lg font-black text-slate-700"
+                                        >
+                                          -
+                                        </button>
+                                        <span className="min-w-8 text-center text-sm font-black text-slate-900">{quantity}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => incrementProduct(producto.id)}
+                                          disabled={isProductUnavailable}
+                                          className="grid h-9 w-9 place-items-center rounded-xl text-lg font-black"
+                                          style={{
+                                            backgroundColor: isProductUnavailable ? '#E2E8F0' : 'var(--primary-color)',
+                                            color: isProductUnavailable ? '#94A3B8' : 'var(--text-on-primary)',
+                                            cursor: isProductUnavailable ? 'not-allowed' : 'pointer',
+                                          }}
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                    )}
+
+                                    {quantity > 0 ? (
+                                      <span
+                                        className="rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em]"
+                                        style={{
+                                          backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, white)',
+                                          color: 'var(--primary-color)',
+                                        }}
+                                      >
+                                        {quantity} en tu pedido
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </article>
                         );
@@ -3155,38 +3191,49 @@ export default function PublicMenuPage() {
         </section>
 
         {cartCount > 0 ? (
-          <section className="fixed inset-x-0 bottom-0 z-50 px-4 py-4">
-            <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
-              <div className="flex-1 rounded-[26px] border border-white/70 bg-white/92 px-4 py-3 shadow-[0_18px_45px_rgba(15,23,42,0.16)] backdrop-blur-xl sm:px-5">
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
-                  {cartCount} producto{cartCount === 1 ? '' : 's'}
-                </p>
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="text-2xl font-black tracking-[-0.03em] text-slate-900" style={titleFontStyle}>
-                    {formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCheckoutError(null);
-                      setCheckoutStep(0);
-                      setIsConfirmOpen(true);
-                    }}
-                    disabled={isSubmittingOrder}
-                    className="rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.08em] shadow-[0_16px_32px_rgba(15,23,42,0.18)]"
-                    style={
-                      isSubmittingOrder
-                        ? { backgroundColor: '#E2E8F0', color: '#64748B' }
-                        : {
-                            borderRadius: '18px',
-                            backgroundColor: 'var(--primary-color)',
-                            color: 'var(--text-on-primary)',
-                          }
-                    }
-                  >
-                    {isSubmittingOrder ? 'Procesando...' : 'Ver pedido'}
-                  </button>
+          <section
+            className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-3 sm:px-4"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
+          >
+            <div className="pointer-events-auto mx-auto flex max-w-6xl items-center justify-between gap-3">
+              <div
+                className="flex w-full items-center gap-3 rounded-[28px] border border-white/10 px-3.5 py-3.5 text-white shadow-[0_20px_55px_rgba(15,23,42,0.32)]"
+                style={{
+                  background: 'linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 78%, black) 0%, color-mix(in srgb, var(--secondary-color) 82%, black) 100%)',
+                }}
+              >
+                <div className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/14 backdrop-blur-sm">
+                  <ShoppingCart className="h-5 w-5" strokeWidth={2.4} />
+                  <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#FACC15] px-1 text-[10px] font-black text-slate-950">
+                    {cartCount}
+                  </span>
                 </div>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/70">
+                    {cartCount} producto{cartCount === 1 ? '' : 's'}
+                  </p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <p className="truncate text-xl font-black tracking-[-0.03em] text-white" style={titleFontStyle}>
+                      {formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
+                    </p>
+                    <span className="hidden text-xs font-semibold text-white/70 sm:inline">{selectedCurrencyCode}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCheckoutError(null);
+                    setCheckoutStep(0);
+                    setIsConfirmOpen(true);
+                  }}
+                  disabled={isSubmittingOrder}
+                  className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-[#FACC15] px-4 py-3 text-sm font-black text-slate-950 shadow-[0_16px_32px_rgba(250,204,21,0.28)]"
+                >
+                  {isSubmittingOrder ? 'Procesando...' : 'Ver pedido'}
+                  {!isSubmittingOrder ? <ArrowRight className="h-4 w-4" strokeWidth={2.5} /> : null}
+                </button>
               </div>
             </div>
           </section>
