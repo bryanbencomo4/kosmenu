@@ -1,8 +1,47 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery'];
+const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known'];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml']);
+const CANONICAL_HOST = 'www.elmenuxfa.com';
+const CANONICAL_REDIRECT_HOSTS = new Set(['elmenuxfa.com', 'kosmenu.vercel.app']);
+
+function applySecurityHeaders(response: NextResponse) {
+  response.headers.set(
+    'Strict-Transport-Security',
+    'max-age=31536000; includeSubDomains; preload',
+  );
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+  return response;
+}
+
+function requestHost(request: NextRequest) {
+  return (
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    request.nextUrl.host
+  )
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+}
+
+function requestProto(request: NextRequest) {
+  return (
+    request.headers.get('x-forwarded-proto') ??
+    request.nextUrl.protocol.replace(':', '')
+  )
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+}
+
+function shouldPreserveHostForWellKnown(pathname: string) {
+  return pathname === '/.well-known/apple-app-site-association' ||
+      pathname === '/.well-known/assetlinks.json';
+}
 
 function hasFileExtension(pathname: string) {
   return /\.[^/]+$/.test(pathname);
@@ -20,19 +59,32 @@ function isExcludedPath(pathname: string) {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const host = requestHost(request);
+  const proto = requestProto(request);
+
+  const needsCanonicalHost =
+    CANONICAL_REDIRECT_HOSTS.has(host) && !shouldPreserveHostForWellKnown(pathname);
+  const needsHttps = proto === 'http' && !shouldPreserveHostForWellKnown(pathname);
+
+  if (needsCanonicalHost || needsHttps) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.protocol = 'https';
+    redirectUrl.host = CANONICAL_HOST;
+    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308));
+  }
 
   if (pathname === '/') {
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next());
   }
 
   if (isExcludedPath(pathname) || hasFileExtension(pathname)) {
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next());
   }
 
   const redirectUrl = request.nextUrl.clone();
   redirectUrl.pathname = `/v${pathname}`;
 
-  return NextResponse.redirect(redirectUrl, 308);
+  return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308));
 }
 
 export const config = {
