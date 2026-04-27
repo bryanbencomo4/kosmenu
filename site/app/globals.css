@@ -36,6 +36,7 @@ html,
 body {
   margin: 0;
   padding: 0;
+  scroll-behavior: smooth;
   background: var(--brand-background);
   color: var(--color-text-strong);
   font-family: var(--brand-body-font);
