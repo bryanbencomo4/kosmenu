@@ -123,6 +123,7 @@ const preferLeafletMapPicker = false;
 const topTickerHeightPx = 36;
 const topAppBarHeightPx = 56;
 const stickySearchTopPx = topTickerHeightPx + topAppBarHeightPx + 10;
+const categoryTitleRevealOffsetPx = 30;
 const defaultProductImage =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
@@ -244,6 +245,11 @@ function loadLeafletAssets() {
   });
 
   return leafletAssetsPromise;
+}
+
+function getCategoryScrollOffset(stickySearchCard: HTMLDivElement | null) {
+  const stickyHeight = stickySearchCard?.getBoundingClientRect().height ?? 108;
+  return topTickerHeightPx + topAppBarHeightPx + stickyHeight + categoryTitleRevealOffsetPx;
 }
 
 async function reverseGeocodeWithNominatim(point: DeliveryPoint) {
@@ -1418,16 +1424,10 @@ export default function PublicMenuPage() {
   useEffect(() => {
     if (filteredCategorias.length === 0) return;
 
-    const getStickyCategoryOffset = () => {
-      const appBarOffset = topTickerHeightPx + topAppBarHeightPx;
-      const stickyHeight = stickySearchCardRef.current?.getBoundingClientRect().height ?? 108;
-      return appBarOffset + stickyHeight + 18;
-    };
-
     const getActiveCategoryByViewport = () => {
       let selectedId = filteredCategorias[0].id;
       let minDistance = Number.POSITIVE_INFINITY;
-      const stickyOffset = getStickyCategoryOffset();
+      const stickyOffset = getCategoryScrollOffset(stickySearchCardRef.current);
 
       for (const categoria of filteredCategorias) {
         const section = document.getElementById(`categoria-${categoria.id}`);
@@ -2407,9 +2407,7 @@ export default function PublicMenuPage() {
     const section = document.getElementById(`categoria-${categoryId}`);
     if (!section) return;
 
-    const appBarOffset = 72;
-    const stickyHeight = stickySearchCardRef.current?.getBoundingClientRect().height ?? 108;
-    const scrollOffset = appBarOffset + stickyHeight + 18;
+    const scrollOffset = getCategoryScrollOffset(stickySearchCardRef.current);
     const nextTop = window.scrollY + section.getBoundingClientRect().top - scrollOffset;
 
     window.scrollTo({
