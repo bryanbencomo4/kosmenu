@@ -2,6 +2,10 @@ const MAX_REQUESTS_PER_MONTH = 50;
 const MAX_ESTIMATED_COST = 10;
 const COST_PER_1K_TOKENS = 0.0005;
 const MAX_AI_IMAGES_ONBOARDING = 25;
+const INITIAL_AI_CREDITS = 100;
+const COST_IMAGE = 1;
+const COST_MENU = 0.5;
+const COST_BRANDING = 0.5;
 
 type AiUsageControlRow = {
   id: string;
@@ -26,6 +30,15 @@ type CommerceAiImageStateRow = {
   ai_image_generation_used: boolean;
   ai_images_generated_count: number;
   ai_images_generation_completed_at?: string;
+};
+
+type AiCreditsWalletRow = {
+  id: string;
+  commerce_id: string;
+  credits_balance: number;
+  credits_used: number;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export class AiUsageError extends Error {
@@ -246,6 +259,115 @@ export async function recordAiImagesGenerated(
   return data;
 }
 
+export async function getCredits(
+  supabase: any,
+  commerceId: string,
+): Promise<AiCreditsWalletRow> {
+  const normalizedCommerceId = commerceId.trim();
+  if (!normalizedCommerceId) {
+    throw new AiUsageError('Missing required field: commerce_id', 400, 'Missing commerce_id');
+  }
+
+  const { data, error } = await supabase.rpc('ensure_ai_credits_wallet', {
+    p_commerce_id: normalizedCommerceId,
+    p_initial_credits: INITIAL_AI_CREDITS,
+  });
+
+  if (error) {
+    throw new Error(`Error loading AI credits wallet: ${error.message}`);
+  }
+
+  return normalizeAiCreditsWallet(data as Record<string, unknown>);
+}
+
+export async function hasEnoughCredits(
+  supabase: any,
+  commerceId: string,
+  required: number,
+) {
+  const wallet = await getCredits(supabase, commerceId);
+  const requiredAmount = normalizePositiveAmount(required);
+
+  if (wallet.credits_balance < requiredAmount) {
+    throw new AiUsageError(
+      'You need more credits to use AI',
+      402,
+      'Not enough credits',
+    );
+  }
+
+  return wallet;
+}
+
+export async function deductCredits(
+  supabase: any,
+  commerceId: string,
+  amount: number,
+  reason: string,
+  metadata?: Record<string, unknown>,
+) {
+  const normalizedCommerceId = commerceId.trim();
+  if (!normalizedCommerceId) {
+    throw new AiUsageError('Missing required field: commerce_id', 400, 'Missing commerce_id');
+  }
+
+  const normalizedAmount = normalizePositiveAmount(amount);
+  if (normalizedAmount <= 0) {
+    return getCredits(supabase, normalizedCommerceId);
+  }
+
+  const { data, error } = await supabase.rpc('deduct_ai_credits', {
+    p_commerce_id: normalizedCommerceId,
+    p_amount: normalizedAmount,
+    p_reason: normalizeString(reason) || 'ai_usage',
+    p_metadata: metadata ?? {},
+  });
+
+  if (error) {
+    if ((error.message ?? '').toLowerCase().includes('not enough credits')) {
+      throw new AiUsageError(
+        'You need more credits to use AI',
+        402,
+        'Not enough credits',
+      );
+    }
+    throw new Error(`Error deducting AI credits: ${error.message}`);
+  }
+
+  return normalizeAiCreditsWallet(data as Record<string, unknown>);
+}
+
+export async function addCredits(
+  supabase: any,
+  commerceId: string,
+  amount: number,
+  reason: string,
+  metadata?: Record<string, unknown>,
+) {
+  const normalizedCommerceId = commerceId.trim();
+  if (!normalizedCommerceId) {
+    throw new AiUsageError('Missing required field: commerce_id', 400, 'Missing commerce_id');
+  }
+
+  const normalizedAmount = normalizePositiveAmount(amount);
+  if (normalizedAmount <= 0) {
+    return getCredits(supabase, normalizedCommerceId);
+  }
+
+  const { data, error } = await supabase.rpc('add_ai_credits', {
+    p_commerce_id: normalizedCommerceId,
+    p_amount: normalizedAmount,
+    p_reason: normalizeString(reason) || 'ai_credit_topup',
+    p_metadata: metadata ?? {},
+  });
+
+  if (error) {
+    throw new Error(`Error adding AI credits: ${error.message}`);
+  }
+
+  return normalizeAiCreditsWallet(data as Record<string, unknown>);
+}
+
 function estimateCostUsd(inputTokens: number, outputTokens: number): number {
   return ((inputTokens + outputTokens) / 1000) * COST_PER_1K_TOKENS;
 }
@@ -278,6 +400,19 @@ function normalizeCommerceAiImageState(
   };
 }
 
+function normalizeAiCreditsWallet(
+  value: Record<string, unknown>,
+): AiCreditsWalletRow {
+  return {
+    id: String(value.id ?? ''),
+    commerce_id: String(value.commerce_id ?? ''),
+    credits_balance: normalizeNumber(value.credits_balance),
+    credits_used: normalizeNumber(value.credits_used),
+    created_at: value.created_at ? String(value.created_at) : undefined,
+    updated_at: value.updated_at ? String(value.updated_at) : undefined,
+  };
+}
+
 function normalizeBoolean(value: unknown): boolean {
   return value === true;
 }
@@ -288,6 +423,15 @@ function isAiImageGenerationEnabled(): boolean {
 
 function normalizeString(value: unknown): string {
   return String(value ?? '').trim();
+}
+
+function normalizePositiveAmount(value: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Number(value.toFixed(4)));
+  }
+
+  const parsed = Number.parseFloat(String(value ?? '0'));
+  return Number.isFinite(parsed) ? Math.max(0, Number(parsed.toFixed(4))) : 0;
 }
 
 function normalizeInteger(value: unknown): number {
@@ -309,6 +453,10 @@ function normalizeNumber(value: unknown): number {
 }
 
 export {
+  COST_BRANDING,
+  COST_IMAGE,
+  COST_MENU,
+  INITIAL_AI_CREDITS,
   MAX_AI_IMAGES_ONBOARDING,
   MAX_ESTIMATED_COST,
   MAX_REQUESTS_PER_MONTH,

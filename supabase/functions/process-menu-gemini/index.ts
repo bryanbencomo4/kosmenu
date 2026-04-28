@@ -1,7 +1,15 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { AiUsageError, enforceAiLimits, recordGeminiUsage } from '../_shared/ai-usage.ts';
+import {
+  AiUsageError,
+  COST_MENU,
+  addCredits,
+  deductCredits,
+  enforceAiLimits,
+  hasEnoughCredits,
+  recordGeminiUsage,
+} from '../_shared/ai-usage.ts';
 
 type Product = {
   nombre: string;
@@ -110,92 +118,109 @@ Deno.serve(async (req: Request) => {
     );
 
     await enforceAiLimits(supabase, comercioId);
+    await hasEnoughCredits(supabase, comercioId, COST_MENU);
 
     const parsedMenu = promptText
       ? await extractMenuFromPromptText(promptText, geminiApiKey, supabase, comercioId)
       : await extractMenuWithGemini(fileUrl!, geminiApiKey, supabase, comercioId);
 
-    const catalog = await ensureCatalogForComercio(
-      supabase,
-      comercioId,
-      requestedCatalogName,
-    );
+    let creditsCharged = false;
 
-    let createdCategories = 0;
-    let createdProducts = 0;
+    try {
+      await deductCredits(supabase, comercioId, COST_MENU, 'menu_generation', {
+        function: 'process-menu-gemini',
+      });
+      creditsCharged = true;
 
-    for (let i = 0; i < parsedMenu.categorias.length; i++) {
-      const category = parsedMenu.categorias[i];
+      const catalog = await ensureCatalogForComercio(
+        supabase,
+        comercioId,
+        requestedCatalogName,
+      );
 
-      const { data: categoryData, error: categoryError } = await supabase
-        .from('categorias')
-        .insert({
-          comercio_id: comercioId,
-          catalogo_id: catalog.id,
-          nombre: (category.nombre || 'Categoria').trim(),
-          orden: i,
-          creado_por_ia: true,
-          confianza_ia: 0.9,
-        })
-        .select('id')
-        .single();
+      let createdCategories = 0;
+      let createdProducts = 0;
 
-      if (categoryError) {
-        console.error('Error inserting categoria', {
-          comercio_id: comercioId,
-          catalogo_id: catalog.id,
-          category_index: i,
-          category_name: (category.nombre || 'Categoria').trim(),
-          supabase_error: toSupabaseErrorLog(categoryError),
-        });
-        throw new Error(`Error inserting categoria: ${categoryError.message}`);
-      }
+      for (let i = 0; i < parsedMenu.categorias.length; i++) {
+        const category = parsedMenu.categorias[i];
 
-      createdCategories += 1;
-      const categoriaId = categoryData.id as string;
-
-      const productRows = (category.productos || []).map((product) => ({
-        comercio_id: comercioId,
-        categoria_id: categoriaId,
-        nombre: (product.nombre || 'Producto').trim(),
-        descripcion: (product.descripcion || '').trim(),
-        precio: normalizePrice(product.precio),
-        creado_por_ia: true,
-        confianza_ia: 0.9,
-      }));
-
-      if (productRows.length > 0) {
-        const { error: productsError } = await supabase.from('productos').insert(productRows);
-        if (productsError) {
-          console.error('Error inserting productos', {
+        const { data: categoryData, error: categoryError } = await supabase
+          .from('categorias')
+          .insert({
             comercio_id: comercioId,
-            categoria_id: categoriaId,
-            productos_count: productRows.length,
-            first_producto: productRows[0],
-            supabase_error: toSupabaseErrorLog(productsError),
+            catalogo_id: catalog.id,
+            nombre: (category.nombre || 'Categoria').trim(),
+            orden: i,
+            creado_por_ia: true,
+            confianza_ia: 0.9,
+          })
+          .select('id')
+          .single();
+
+        if (categoryError) {
+          console.error('Error inserting categoria', {
+            comercio_id: comercioId,
+            catalogo_id: catalog.id,
+            category_index: i,
+            category_name: (category.nombre || 'Categoria').trim(),
+            supabase_error: toSupabaseErrorLog(categoryError),
           });
-          throw new Error(`Error inserting productos: ${productsError.message}`);
+          throw new Error(`Error inserting categoria: ${categoryError.message}`);
         }
 
-        createdProducts += productRows.length;
-      }
-    }
+        createdCategories += 1;
+        const categoriaId = categoryData.id as string;
 
-    return jsonResponse(
-      {
-        ok: true,
-        comercio_id: comercioId,
-        catalog_id: catalog.id,
-        catalog_name: catalog.nombre,
-        catalog_order: catalog.orden,
-        catalog_active: catalog.activo,
-        catalog_created: catalog.created,
-        created_categories: createdCategories,
-        created_products: createdProducts,
-        parsed_menu: parsedMenu,
-      },
-      200,
-    );
+        const productRows = (category.productos || []).map((product) => ({
+          comercio_id: comercioId,
+          categoria_id: categoriaId,
+          nombre: (product.nombre || 'Producto').trim(),
+          descripcion: (product.descripcion || '').trim(),
+          precio: normalizePrice(product.precio),
+          creado_por_ia: true,
+          confianza_ia: 0.9,
+        }));
+
+        if (productRows.length > 0) {
+          const { error: productsError } = await supabase.from('productos').insert(productRows);
+          if (productsError) {
+            console.error('Error inserting productos', {
+              comercio_id: comercioId,
+              categoria_id: categoriaId,
+              productos_count: productRows.length,
+              first_producto: productRows[0],
+              supabase_error: toSupabaseErrorLog(productsError),
+            });
+            throw new Error(`Error inserting productos: ${productsError.message}`);
+          }
+
+          createdProducts += productRows.length;
+        }
+      }
+
+      return jsonResponse(
+        {
+          ok: true,
+          comercio_id: comercioId,
+          catalog_id: catalog.id,
+          catalog_name: catalog.nombre,
+          catalog_order: catalog.orden,
+          catalog_active: catalog.activo,
+          catalog_created: catalog.created,
+          created_categories: createdCategories,
+          created_products: createdProducts,
+          parsed_menu: parsedMenu,
+        },
+        200,
+      );
+    } catch (error) {
+      if (creditsCharged) {
+        await addCredits(supabase, comercioId, COST_MENU, 'menu_generation_refund', {
+          function: 'process-menu-gemini',
+        });
+      }
+      throw error;
+    }
   } catch (error) {
     if (error instanceof AiUsageError) {
       return jsonResponse(error.toResponseBody(), error.status);

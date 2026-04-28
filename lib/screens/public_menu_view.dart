@@ -47,6 +47,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   String? _activeCategoryId;
   String? _entrySource;
   String _searchQuery = '';
+  Timer? _aiImageRefreshTimer;
 
   static const String _deliveryModePickup = 'pickup';
   static const String _deliveryModeDelivery = 'delivery';
@@ -63,6 +64,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
   @override
   void dispose() {
+    _aiImageRefreshTimer?.cancel();
     _scrollController
       ..removeListener(_handleMenuScroll)
       ..dispose();
@@ -118,6 +120,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
         )
         .toList();
 
+    _syncAiImageRefresh(products);
+
     return _PublicMenuData(
       comercioNombre: comercioMap['nombre']?.toString() ?? 'Kosmenu',
       comercioLogoUrl: _resolveComercioLogoUrl(comercioMap),
@@ -139,6 +143,24 @@ class _PublicMenuViewState extends State<PublicMenuView> {
       categories: categories,
       products: products,
     );
+  }
+
+  void _syncAiImageRefresh(List<_PublicProduct> products) {
+    final hasPendingAiImages = products.any(
+      (product) => product.hasAiImageInProgress,
+    );
+    if (!hasPendingAiImages) {
+      _aiImageRefreshTimer?.cancel();
+      _aiImageRefreshTimer = null;
+      return;
+    }
+
+    _aiImageRefreshTimer ??= Timer.periodic(const Duration(seconds: 8), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _menuFuture = _fetchMenuData());
+    });
   }
 
   String? _resolveComercioLogoUrl(Map<String, dynamic> comercioMap) {
@@ -2047,6 +2069,29 @@ class _ModernProductTile extends StatelessWidget {
                             ),
                           ),
                         ),
+                      if (product.hasAiImageInProgress) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: palette.primary.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            product.aiImageStatus == 'processing'
+                                ? 'Generando imagen del producto...'
+                                : 'Imagen del producto en cola...',
+                            style: GoogleFonts.manrope(
+                              color: palette.primary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       Text(
                         '\$${product.precio.toStringAsFixed(2)}',
@@ -2134,6 +2179,8 @@ class _ModernProductTile extends StatelessWidget {
                 _ProductTileVisual(
                   productImageUrl: product.imageUrl,
                   fallbackImageUrl: fallbackImageUrl,
+                  aiImageStatus: product.aiImageStatus,
+                  isAiGeneratedImage: product.isAiGeneratedImage,
                   surfaceAlt: palette.surfaceAlt,
                   muted: palette.onSurfaceMuted,
                   defaultAssetPath: _PublicMenuViewState._defaultBrandLogoAsset,
@@ -2203,6 +2250,8 @@ class _ProductTileVisual extends StatelessWidget {
   const _ProductTileVisual({
     required this.productImageUrl,
     required this.fallbackImageUrl,
+    required this.aiImageStatus,
+    required this.isAiGeneratedImage,
     required this.surfaceAlt,
     required this.muted,
     required this.defaultAssetPath,
@@ -2210,6 +2259,8 @@ class _ProductTileVisual extends StatelessWidget {
 
   final String? productImageUrl;
   final String? fallbackImageUrl;
+  final String aiImageStatus;
+  final bool isAiGeneratedImage;
   final Color surfaceAlt;
   final Color muted;
   final String defaultAssetPath;
@@ -2218,6 +2269,13 @@ class _ProductTileVisual extends StatelessWidget {
   Widget build(BuildContext context) {
     final productUrl = productImageUrl?.trim() ?? '';
     final businessLogoUrl = fallbackImageUrl?.trim() ?? '';
+    final isAiPending =
+        aiImageStatus == 'pending' || aiImageStatus == 'processing';
+    final overlayIcon = isAiPending
+        ? null
+        : isAiGeneratedImage
+        ? Icons.auto_awesome_rounded
+        : null;
 
     return Container(
       width: 118,
@@ -2233,17 +2291,42 @@ class _ProductTileVisual extends StatelessWidget {
         ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: productUrl.isNotEmpty
-          ? CachedNetworkImage(
-              imageUrl: productUrl,
-              fit: BoxFit.cover,
-              fadeInDuration: const Duration(milliseconds: 180),
-              placeholder: (context, url) => _buildLoadingState(),
-              errorWidget: (context, url, error) {
-                return _buildLogoOrDefault(businessLogoUrl);
-              },
-            )
-          : _buildLogoOrDefault(businessLogoUrl),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: productUrl.isNotEmpty
+                ? CachedNetworkImage(
+                    imageUrl: productUrl,
+                    fit: BoxFit.cover,
+                    fadeInDuration: const Duration(milliseconds: 180),
+                    placeholder: (context, url) => _buildLoadingState(),
+                    errorWidget: (context, url, error) {
+                      return _buildLogoOrDefault(businessLogoUrl);
+                    },
+                  )
+                : _buildLogoOrDefault(businessLogoUrl),
+          ),
+          if (isAiPending || overlayIcon != null)
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  shape: BoxShape.circle,
+                ),
+                child: isAiPending
+                    ? const Padding(
+                        padding: EdgeInsets.all(5),
+                        child: CircularProgressIndicator(strokeWidth: 1.8),
+                      )
+                    : Icon(overlayIcon, size: 13, color: Colors.white),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -2423,6 +2506,9 @@ class _PublicProduct {
     required this.descripcion,
     required this.precio,
     this.imageUrl,
+    this.imageSourceType = 'manual',
+    this.aiImageStatus = 'none',
+    this.aiImageErrorMessage,
   });
 
   final String id;
@@ -2431,6 +2517,14 @@ class _PublicProduct {
   final String descripcion;
   final double precio;
   final String? imageUrl;
+  final String imageSourceType;
+  final String aiImageStatus;
+  final String? aiImageErrorMessage;
+
+  bool get hasAiImageInProgress =>
+      aiImageStatus == 'pending' || aiImageStatus == 'processing';
+
+  bool get isAiGeneratedImage => imageSourceType == 'ai_generated';
 
   factory _PublicProduct.fromMap(Map<String, dynamic> map) {
     return _PublicProduct(
@@ -2440,6 +2534,9 @@ class _PublicProduct {
       descripcion: map['descripcion']?.toString() ?? '',
       precio: _parsePrice(map['precio']),
       imageUrl: _resolveImageUrl(map),
+      imageSourceType: map['imagen_source_type']?.toString() ?? 'manual',
+      aiImageStatus: map['ai_image_status']?.toString() ?? 'none',
+      aiImageErrorMessage: map['ai_image_error_message']?.toString(),
     );
   }
 
@@ -2462,13 +2559,44 @@ class _PublicProduct {
     ];
 
     for (final key in candidates) {
-      final value = map[key]?.toString().trim();
+      final value = _normalizeImageUrl(map[key]);
       if (value != null && value.isNotEmpty) {
         return value;
       }
     }
 
     return null;
+  }
+
+  static String? _normalizeImageUrl(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    if (value is Map) {
+      final nested = value['data'];
+      if (nested is Map && nested['publicUrl'] != null) {
+        final url = nested['publicUrl'].toString().trim();
+        return url.isEmpty ? null : url;
+      }
+      final direct = value['publicUrl']?.toString().trim() ?? '';
+      return direct.isEmpty ? null : direct;
+    }
+
+    final raw = value.toString().trim();
+    if (raw.isEmpty) {
+      return null;
+    }
+
+    final publicUrlMatch = RegExp(
+      r'"publicUrl"\s*:\s*"([^"]+)"',
+    ).firstMatch(raw);
+    if (publicUrlMatch != null) {
+      final url = publicUrlMatch.group(1)?.trim() ?? '';
+      return url.isEmpty ? null : url;
+    }
+
+    return raw;
   }
 }
 

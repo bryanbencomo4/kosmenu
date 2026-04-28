@@ -9,6 +9,7 @@ import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
+import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/profile_screen.dart';
@@ -286,6 +287,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .from('productos')
         .select('id')
         .eq('comercio_id', SupabaseConfig.currentComercioId);
+    final creditsFuture = client.functions.invoke(
+      'get-ai-credits',
+      method: HttpMethod.get,
+      queryParameters: <String, String>{
+        'commerce_id': SupabaseConfig.currentComercioId,
+      },
+    );
     final yesterdayOrdersFuture = client
         .from('pedidos')
         .select('id, comercio_id, total, detalles, estado, created_at')
@@ -297,6 +305,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       comercioFuture,
       categoriasFuture,
       productosFuture,
+      creditsFuture,
       yesterdayOrdersFuture,
     ]);
 
@@ -310,7 +319,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
     }
 
-    final yesterdayOrders = (results[3] as List<dynamic>)
+    final creditsResponse = results[3] as FunctionResponse;
+    final creditsPayload = _functionResponseMap(creditsResponse.data);
+    final aiCreditsBalance = _toDoubleSafe(creditsPayload['credits_balance']);
+    final aiCreditsUsed = _toDoubleSafe(creditsPayload['credits_used']);
+
+    final yesterdayOrders = (results[4] as List<dynamic>)
         .map(
           (row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)),
         )
@@ -336,6 +350,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       comercio: comercio,
       categoryCount: (results[1] as List<dynamic>).length,
       productCount: (results[2] as List<dynamic>).length,
+      aiCreditsBalance: aiCreditsBalance,
+      aiCreditsUsed: aiCreditsUsed,
       lastDayRevenue: lastDayRevenue,
       yesterdayTotalOrders: yesterdayTotalOrders,
       yesterdayCompletedOrders: yesterdayCompletedOrders,
@@ -607,6 +623,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => QrGeneratorScreen(comercio: comercio)),
     );
+  }
+
+  Future<void> _openCurrentMenuManager() async {
+    if (!_hasComercioId) {
+      _showInfo('No hay comercio configurado para gestionar el menú.');
+      return;
+    }
+
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const CategoryListScreen()));
+
+    if (!mounted) return;
+    await _refreshDashboard();
   }
 
   Future<void> _openNotificationsSheet() async {
@@ -1137,6 +1167,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return getPublicMenuUrl(comercio);
   }
 
+  Map<String, dynamic> _functionResponseMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((key, item) => MapEntry('$key', item));
+    }
+    return const <String, dynamic>{};
+  }
+
   void _showInfo(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -1332,6 +1372,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 case _DashboardAction.showQr:
                                   await _openQrGenerator();
                                   break;
+                                case _DashboardAction.manageMenu:
+                                  await _openCurrentMenuManager();
+                                  break;
                               }
                             },
                           ),
@@ -1390,6 +1433,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             subtitle:
                                 'Administra tu perfil público y abre el menú en segundos.',
                             onEdit: () => _editBusinessInfo(data.comercio),
+                            onManageMenu: _openCurrentMenuManager,
                             purple: _purple,
                           ),
                           const SizedBox(height: 12),
@@ -1450,6 +1494,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           const SizedBox(height: 14),
                           _CompactBusinessInfoCard(
                             comercio: data.comercio,
+                            aiCreditsBalance: data.aiCreditsBalance,
+                            aiCreditsUsed: data.aiCreditsUsed,
                             isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
                             businessOnline: _businessOnline,
                             onToggleOnline: _updateBusinessOnline,
@@ -1639,6 +1685,13 @@ class _DashboardHeader extends StatelessWidget {
                   child: _MenuActionRow(
                     icon: Icons.auto_awesome_rounded,
                     label: 'Escanear con IA',
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _DashboardAction.manageMenu,
+                  child: _MenuActionRow(
+                    icon: Icons.restaurant_menu_rounded,
+                    label: 'Gestionar menú actual',
                   ),
                 ),
                 PopupMenuItem(
@@ -1860,12 +1913,14 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onEdit,
+    required this.onManageMenu,
     required this.purple,
   });
 
   final String title;
   final String subtitle;
   final VoidCallback onEdit;
+  final VoidCallback onManageMenu;
   final Color purple;
 
   @override
@@ -1925,22 +1980,53 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          FilledButton(
-            onPressed: onEdit,
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: purple,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              minimumSize: const Size(0, 34),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: Text(
-              'Editar',
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FilledButton(
+                onPressed: onManageMenu,
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: purple,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  minimumSize: const Size(0, 34),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Menú actual',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(height: 6),
+              FilledButton(
+                onPressed: onEdit,
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.14),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  minimumSize: const Size(0, 34),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  elevation: 0,
+                  side: const BorderSide(color: Colors.white24),
+                ),
+                child: Text(
+                  'Editar',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -2532,6 +2618,8 @@ class _SalesMiniCard extends StatelessWidget {
 class _CompactBusinessInfoCard extends StatelessWidget {
   const _CompactBusinessInfoCard({
     required this.comercio,
+    required this.aiCreditsBalance,
+    required this.aiCreditsUsed,
     required this.isUpdatingBusinessOnline,
     required this.businessOnline,
     required this.onToggleOnline,
@@ -2541,6 +2629,8 @@ class _CompactBusinessInfoCard extends StatelessWidget {
   });
 
   final ComercioModel comercio;
+  final double aiCreditsBalance;
+  final double aiCreditsUsed;
   final bool isUpdatingBusinessOnline;
   final bool businessOnline;
   final ValueChanged<bool> onToggleOnline;
@@ -2634,6 +2724,12 @@ class _CompactBusinessInfoCard extends StatelessWidget {
             label: 'Slug',
             value: slugLabel,
             icon: Icons.alternate_email_rounded,
+          ),
+          infoLine(
+            label: 'Créditos IA',
+            value:
+                '${aiCreditsBalance.toStringAsFixed(aiCreditsBalance % 1 == 0 ? 0 : 2)} disponibles · ${aiCreditsUsed.toStringAsFixed(aiCreditsUsed % 1 == 0 ? 0 : 2)} usados',
+            icon: Icons.auto_awesome_rounded,
           ),
           const SizedBox(height: 2),
           Container(
@@ -2812,6 +2908,7 @@ class _CompactRecentOrderTile extends StatelessWidget {
 enum _DashboardAction {
   refresh,
   magicMenu,
+  manageMenu,
   showQr,
   shareMenu,
   copyLink,
@@ -2942,6 +3039,8 @@ class _DashboardSnapshot {
     required this.comercio,
     required this.categoryCount,
     required this.productCount,
+    this.aiCreditsBalance = 0,
+    this.aiCreditsUsed = 0,
     double? lastDayRevenue,
     this.yesterdayTotalOrders = 0,
     this.yesterdayCompletedOrders = 0,
@@ -2952,6 +3051,8 @@ class _DashboardSnapshot {
   final ComercioModel comercio;
   final int categoryCount;
   final int productCount;
+  final double aiCreditsBalance;
+  final double aiCreditsUsed;
   final double? _lastDayRevenue;
   final int yesterdayTotalOrders;
   final int yesterdayCompletedOrders;

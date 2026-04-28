@@ -18,6 +18,7 @@ import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
+import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:geolocator/geolocator.dart';
@@ -272,6 +273,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _locationNoteController = TextEditingController();
   final BrandingAiService _brandingAiService = const BrandingAiService();
+  final AiImageService _aiImageService = const AiImageService();
 
   _SetupStep _step = _SetupStep.identity;
   String _selectedCategory = 'Restaurante';
@@ -341,6 +343,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   int _scanCreatedCategories = 0;
   int _scanCreatedProducts = 0;
   String _scanCatalogName = '';
+  String? _aiImageGenerationMessage;
+  bool _aiImageGenerationMessageIsError = false;
   double? _businessLatitude;
   double? _businessLongitude;
 
@@ -3782,12 +3786,69 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _scanCreatedCategories = result.createdCategories;
       _scanCreatedProducts = result.createdProducts;
       _scanCatalogName = result.catalog.nombre;
+      _aiImageGenerationMessage = result.requestAiProductImages
+          ? 'Preparando cola de imagenes IA para productos nuevos...'
+          : 'Generacion de imagenes IA omitida en onboarding.';
+      _aiImageGenerationMessageIsError = false;
       if (_menuCatalogCount <= 0) {
         _menuCatalogCount = 1;
       }
     });
     await _refreshMenuCatalogCount(comercioId);
     await _saveDraft();
+
+    if (result.requestAiProductImages) {
+      unawaited(_startOnboardingAiImageGeneration(comercioId, result));
+    }
+  }
+
+  Future<void> _startOnboardingAiImageGeneration(
+    String comercioId,
+    MagicOnboardingResult result,
+  ) async {
+    final catalogId = result.catalog.id.trim();
+    if (catalogId.isEmpty) {
+      return;
+    }
+
+    try {
+      final queued = await _aiImageService.enqueueOnboardingImages(
+        comercioId: comercioId,
+        catalogId: catalogId,
+      );
+      final enqueuedJobs = (queued['enqueued_jobs'] as num?)?.toInt() ?? 0;
+      final statusMessage = enqueuedJobs > 0
+          ? 'Imagenes IA en cola para $enqueuedJobs productos. Se procesaran en segundo plano.'
+          : (queued['message']?.toString() ??
+                'No habia productos pendientes para generar imagen IA.');
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _aiImageGenerationMessage = statusMessage;
+        _aiImageGenerationMessageIsError = false;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(statusMessage)));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      final message = error.toString().replaceFirst('Bad state: ', '');
+      setState(() {
+        _aiImageGenerationMessage = message;
+        _aiImageGenerationMessageIsError = true;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   Future<void> _refreshMenuCatalogCount(String comercioId) async {
@@ -9223,6 +9284,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       : 'Usa IA o crealo manualmente para completar este paso.',
                   style: const TextStyle(color: _setupTextMedium, fontSize: 12),
                 ),
+                if ((_aiImageGenerationMessage ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _aiImageGenerationMessage!,
+                    style: TextStyle(
+                      color: _aiImageGenerationMessageIsError
+                          ? const Color(0xFFFCA5A5)
+                          : const Color(0xFFA7F3D0),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,

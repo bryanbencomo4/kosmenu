@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -8,6 +9,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
+import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -43,6 +45,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
   bool _showAppBarSearch = false;
   double _headerCollapse = 0;
   _ProductVisibilityFilter _visibilityFilter = _ProductVisibilityFilter.all;
+  Timer? _aiImageRefreshTimer;
+  final AiImageService _aiImageService = const AiImageService();
 
   @override
   void initState() {
@@ -80,6 +84,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
   @override
   void dispose() {
+    _aiImageRefreshTimer?.cancel();
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
@@ -87,12 +92,17 @@ class _ProductListScreenState extends State<ProductListScreen> {
     super.dispose();
   }
 
-  Future<void> _loadProducts({bool reset = false}) async {
+  Future<void> _loadProducts({
+    bool reset = false,
+    bool showLoadingIndicator = true,
+  }) async {
     if (!reset && (!_hasMoreProducts || _isLoadingMore)) return;
 
     if (reset) {
       setState(() {
-        _loading = true;
+        if (showLoadingIndicator) {
+          _loading = true;
+        }
         _hasMoreProducts = true;
       });
     } else {
@@ -122,6 +132,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
         _products = reset ? products : [..._products, ...products];
         _hasMoreProducts = products.length == _pageSize;
       });
+      _syncAiImageRefresh(_products);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -130,7 +141,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
     } finally {
       if (mounted) {
         setState(() {
-          _loading = false;
+          if (showLoadingIndicator || _loading) {
+            _loading = false;
+          }
           _isLoadingMore = false;
         });
       }
@@ -159,21 +172,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
     setState(() {
       _products = _products
           .map(
-            (item) => item.id == product.id
-                ? ProductModel(
-                    id: item.id,
-                    comercioId: item.comercioId,
-                    categoriaId: item.categoriaId,
-                    nombre: item.nombre,
-                    precio: item.precio,
-                    descripcion: item.descripcion,
-                    orden: item.orden,
-                    disponible: value,
-                    imagenUrl: item.imagenUrl,
-                    creadoPorIa: item.creadoPorIa,
-                    confianzaIa: item.confianzaIa,
-                  )
-                : item,
+            (item) =>
+                item.id == product.id ? item.copyWith(disponible: value) : item,
           )
           .toList();
     });
@@ -303,7 +303,12 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
       await Supabase.instance.client
           .from('productos')
-          .update({'imagen_url': publicUrl})
+          .update({
+            'imagen_url': publicUrl,
+            'imagen_source_type': 'manual',
+            'ai_image_status': 'completed',
+            'ai_image_error_message': null,
+          })
           .eq('id', product.id);
 
       if (!mounted) return;
@@ -311,18 +316,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
         _products = _products
             .map(
               (item) => item.id == product.id
-                  ? ProductModel(
-                      id: item.id,
-                      comercioId: item.comercioId,
-                      categoriaId: item.categoriaId,
-                      nombre: item.nombre,
-                      precio: item.precio,
-                      descripcion: item.descripcion,
-                      orden: item.orden,
-                      disponible: item.disponible,
+                  ? item.copyWith(
                       imagenUrl: publicUrl,
-                      creadoPorIa: item.creadoPorIa,
-                      confianzaIa: item.confianzaIa,
+                      imagenSourceType: 'manual',
+                      aiImageStatus: 'completed',
+                      clearAiImageErrorMessage: true,
                     )
                   : item,
             )
@@ -346,7 +344,12 @@ class _ProductListScreenState extends State<ProductListScreen> {
     try {
       await Supabase.instance.client
           .from('productos')
-          .update({'imagen_url': null})
+          .update({
+            'imagen_url': null,
+            'imagen_source_type': 'manual',
+            'ai_image_status': 'none',
+            'ai_image_error_message': null,
+          })
           .eq('id', product.id);
 
       if (!mounted) return;
@@ -354,18 +357,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
         _products = _products
             .map(
               (item) => item.id == product.id
-                  ? ProductModel(
-                      id: item.id,
-                      comercioId: item.comercioId,
-                      categoriaId: item.categoriaId,
-                      nombre: item.nombre,
-                      precio: item.precio,
-                      descripcion: item.descripcion,
-                      orden: item.orden,
-                      disponible: item.disponible,
-                      imagenUrl: null,
-                      creadoPorIa: item.creadoPorIa,
-                      confianzaIa: item.confianzaIa,
+                  ? item.copyWith(
+                      clearImagenUrl: true,
+                      imagenSourceType: 'manual',
+                      aiImageStatus: 'none',
+                      clearAiImageErrorMessage: true,
                     )
                   : item,
             )
@@ -387,6 +383,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     if (_updatingImageProductIds.contains(product.id)) return;
 
     final hasOwnImage = (product.imagenUrl?.trim().isNotEmpty ?? false);
+    final canRequestAiImage = !product.hasAiImageInProgress;
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -405,6 +402,29 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 leading: const Icon(Icons.photo_library_rounded),
                 title: const Text('Cargar desde galería'),
                 onTap: () => Navigator.of(context).pop('gallery'),
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.auto_awesome_rounded,
+                  color: canRequestAiImage
+                      ? colorScheme.primary
+                      : colorScheme.outline,
+                ),
+                title: Text(
+                  'Generar con IA',
+                  style: TextStyle(
+                    color: canRequestAiImage
+                        ? colorScheme.onSurface
+                        : colorScheme.outline,
+                  ),
+                ),
+                subtitle: const Text(
+                  'Cuesta 1 crédito y se procesa en segundo plano',
+                ),
+                enabled: canRequestAiImage,
+                onTap: canRequestAiImage
+                    ? () => Navigator.of(context).pop('ai')
+                    : null,
               ),
               if (hasOwnImage)
                 ListTile(
@@ -431,12 +451,130 @@ class _ProductListScreenState extends State<ProductListScreen> {
       case 'gallery':
         await _pickAndUpdateProductImage(product, ImageSource.gallery);
         break;
+      case 'ai':
+        await _generateAiImageForProduct(product);
+        break;
       case 'remove':
         await _removeProductImage(product);
         break;
       default:
         break;
     }
+  }
+
+  Future<void> _generateAiImageForProduct(ProductModel product) async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) {
+      _showMessage('No hay comercio activo para generar la imagen IA.');
+      return;
+    }
+
+    final confirmed = await _confirmAiImageGeneration(product);
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      _products = _products
+          .map(
+            (item) => item.id == product.id
+                ? item.copyWith(
+                    aiImageStatus: 'pending',
+                    clearAiImageErrorMessage: true,
+                  )
+                : item,
+          )
+          .toList();
+    });
+    _syncAiImageRefresh(_products);
+
+    try {
+      final response = await _aiImageService.enqueueProductImage(
+        comercioId: comercioId,
+        productId: product.id,
+        productName: product.nombre,
+        description: product.descripcion,
+        categoryName: widget.category.nombre,
+      );
+
+      if (!mounted) return;
+      final message = response['message']?.toString().trim();
+      _showMessage(
+        message?.isNotEmpty == true
+            ? message!
+            : 'Imagen IA en cola para ${product.nombre}.',
+      );
+      await _loadProducts(reset: true);
+    } catch (error) {
+      if (!mounted) return;
+      final friendlyMessage = _formatAiImageErrorMessage(
+        error.toString().replaceFirst('Bad state: ', ''),
+      );
+      setState(() {
+        _products = _products
+            .map(
+              (item) => item.id == product.id
+                  ? item.copyWith(
+                      aiImageStatus: 'failed',
+                      aiImageErrorMessage: friendlyMessage,
+                    )
+                  : item,
+            )
+            .toList();
+      });
+      _showMessage(friendlyMessage);
+    }
+  }
+
+  Future<bool?> _confirmAiImageGeneration(ProductModel product) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          backgroundColor: colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            'Generar imagen con IA',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: Text(
+            'Se descontará 1 crédito para generar la imagen de "${product.nombre}" y el proceso continuará en segundo plano. ¿Deseas continuar?',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+              ),
+              label: const Text('Generar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _onReorder(int oldIndex, int newIndex) async {
@@ -468,21 +606,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
         _products = updated
             .asMap()
             .entries
-            .map(
-              (entry) => ProductModel(
-                id: entry.value.id,
-                comercioId: entry.value.comercioId,
-                categoriaId: entry.value.categoriaId,
-                nombre: entry.value.nombre,
-                precio: entry.value.precio,
-                descripcion: entry.value.descripcion,
-                orden: entry.key,
-                disponible: entry.value.disponible,
-                imagenUrl: entry.value.imagenUrl,
-                creadoPorIa: entry.value.creadoPorIa,
-                confianzaIa: entry.value.confianzaIa,
-              ),
-            )
+            .map((entry) => entry.value.copyWith(orden: entry.key))
             .toList();
       });
     } catch (error) {
@@ -517,6 +641,24 @@ class _ProductListScreenState extends State<ProductListScreen> {
     return searched
         .where((product) => product.disponible == showVisible)
         .toList();
+  }
+
+  void _syncAiImageRefresh(List<ProductModel> products) {
+    final hasPendingAiImages = products.any(
+      (product) => product.hasAiImageInProgress,
+    );
+    if (!hasPendingAiImages) {
+      _aiImageRefreshTimer?.cancel();
+      _aiImageRefreshTimer = null;
+      return;
+    }
+
+    _aiImageRefreshTimer ??= Timer.periodic(const Duration(seconds: 7), (_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_loadProducts(reset: true, showLoadingIndicator: false));
+    });
   }
 
   int get _visibleCount => _products.where((item) => item.disponible).length;
@@ -1052,6 +1194,8 @@ class _ProductCard extends StatelessWidget {
                   fallbackImageUrl: fallbackImageUrl,
                   heroTag: 'hero-product-image-${product.id}',
                   isUpdating: isUpdatingImage,
+                  aiImageStatus: product.aiImageStatus,
+                  isAiGeneratedImage: product.isAiGeneratedImage,
                 ),
               ),
               const SizedBox(width: 12),
@@ -1082,29 +1226,82 @@ class _ProductCard extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.primary.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '\$${product.precio.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              color: colorScheme.primary,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colorScheme.primary.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.sell_rounded,
+                                size: 14,
+                                color: colorScheme.primary,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Precio \$${product.precio.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  color: colorScheme.primary,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (!product.hasAiImageInProgress)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colorScheme.secondaryContainer,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'Imagen IA: 1 crédito',
+                              style: TextStyle(
+                                color: colorScheme.onSecondaryContainer,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
                             ),
                           ),
-                        ],
-                      ),
+                      ],
                     ),
+                    if (product.hasAiImageInProgress ||
+                        product.hasAiImageFailure ||
+                        product.isAiGeneratedImage) ...[
+                      const SizedBox(height: 8),
+                      _AiImageStatusChip(product: product),
+                    ],
+                    if (product.hasAiImageFailure &&
+                        (product.aiImageErrorMessage ?? '')
+                            .trim()
+                            .isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatAiImageErrorMessage(product.aiImageErrorMessage),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colorScheme.error,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1160,6 +1357,47 @@ class _ProductCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatAiImageErrorMessage(String? rawMessage) {
+  final message = (rawMessage ?? '').trim();
+  if (message.isEmpty) {
+    return 'No se pudo generar la imagen IA.';
+  }
+
+  final normalized = message.toLowerCase();
+
+  if (normalized.contains('resource_exhausted') ||
+      normalized.contains('prepayment credits are depleted') ||
+      normalized.contains('gemini image generation failed (429)')) {
+    return 'Google Gemini no tiene saldo disponible en este momento. Recarga créditos del proyecto e inténtalo de nuevo.';
+  }
+
+  if (normalized.contains('not enough credits')) {
+    return 'Este comercio no tiene créditos IA suficientes para generar la imagen.';
+  }
+
+  if (normalized.contains(
+    'ai image generation is only available once during onboarding',
+  )) {
+    return 'La generación de imágenes IA solo está disponible una vez durante el onboarding.';
+  }
+
+  if (normalized.contains('unauthorized request') ||
+      normalized.contains('worker secret')) {
+    return 'El servicio interno de imágenes IA no está disponible ahora mismo.';
+  }
+
+  if (normalized.contains('producto no encontrado')) {
+    return 'No se encontró el producto para generar su imagen IA.';
+  }
+
+  if (normalized.contains('ya tiene una imagen manual')) {
+    return 'Este producto ya tiene una imagen manual.';
+  }
+
+  final firstLine = message.split('\n').first.trim();
+  return firstLine.isEmpty ? 'No se pudo generar la imagen IA.' : firstLine;
 }
 
 class _ProductVisibilityBadge extends StatelessWidget {
@@ -1236,12 +1474,16 @@ class _ProductThumb extends StatelessWidget {
   const _ProductThumb({
     required this.imageUrl,
     required this.fallbackImageUrl,
+    required this.aiImageStatus,
+    required this.isAiGeneratedImage,
     this.isUpdating = false,
     this.heroTag,
   });
 
   final String? imageUrl;
   final String fallbackImageUrl;
+  final String aiImageStatus;
+  final bool isAiGeneratedImage;
   final bool isUpdating;
   final String? heroTag;
 
@@ -1250,6 +1492,9 @@ class _ProductThumb extends StatelessWidget {
     final primary = imageUrl?.trim();
     final fallback = fallbackImageUrl.trim();
     final hasFallback = fallback.isNotEmpty;
+    final isAiPending =
+        aiImageStatus == 'pending' || aiImageStatus == 'processing';
+    final isAiFailed = aiImageStatus == 'failed';
 
     Widget iconFallback() => Container(
       width: 72,
@@ -1302,13 +1547,17 @@ class _ProductThumb extends StatelessWidget {
                 color: Colors.black.withValues(alpha: 0.62),
                 shape: BoxShape.circle,
               ),
-              child: isUpdating
+              child: isUpdating || isAiPending
                   ? const Padding(
                       padding: EdgeInsets.all(5),
                       child: CircularProgressIndicator(strokeWidth: 1.8),
                     )
-                  : const Icon(
-                      Icons.camera_alt_rounded,
+                  : Icon(
+                      isAiFailed
+                          ? Icons.error_outline_rounded
+                          : isAiGeneratedImage
+                          ? Icons.auto_awesome_rounded
+                          : Icons.camera_alt_rounded,
                       size: 13,
                       color: Colors.white,
                     ),
@@ -1323,6 +1572,68 @@ class _ProductThumb extends StatelessWidget {
     }
 
     return Hero(tag: heroTag!, child: thumb);
+  }
+}
+
+class _AiImageStatusChip extends StatelessWidget {
+  const _AiImageStatusChip({required this.product});
+
+  final ProductModel product;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isPending = product.hasAiImageInProgress;
+    final isFailed = product.hasAiImageFailure;
+    final backgroundColor = isPending
+        ? colorScheme.primary.withValues(alpha: 0.14)
+        : isFailed
+        ? colorScheme.errorContainer.withValues(alpha: 0.35)
+        : colorScheme.tertiaryContainer.withValues(alpha: 0.44);
+    final foregroundColor = isPending
+        ? colorScheme.primary
+        : isFailed
+        ? colorScheme.error
+        : colorScheme.tertiary;
+    final icon = isPending
+        ? Icons.hourglass_top_rounded
+        : isFailed
+        ? Icons.error_outline_rounded
+        : Icons.auto_awesome_rounded;
+    final label = isPending
+        ? (product.aiImageStatus == 'processing'
+              ? 'Generando imagen IA...'
+              : 'Imagen IA en cola')
+        : isFailed
+        ? 'Fallo la imagen IA'
+        : 'Imagen creada con IA';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: foregroundColor),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: foregroundColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

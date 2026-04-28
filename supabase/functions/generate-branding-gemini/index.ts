@@ -1,7 +1,15 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { AiUsageError, enforceAiLimits, recordGeminiUsage } from '../_shared/ai-usage.ts';
+import {
+  AiUsageError,
+  COST_BRANDING,
+  addCredits,
+  deductCredits,
+  enforceAiLimits,
+  hasEnoughCredits,
+  recordGeminiUsage,
+} from '../_shared/ai-usage.ts';
 
 type BrandingStyle = 'rounded' | 'sharp' | 'pill';
 type LayoutType = 'list' | 'grid' | 'compact';
@@ -143,6 +151,7 @@ Deno.serve(async (req: Request) => {
     });
 
     await enforceAiLimits(supabase, comercioId);
+    await hasEnoughCredits(supabase, comercioId, COST_BRANDING);
 
     const branding = await generateBrandingWithGemini({
       promptUsuario,
@@ -152,31 +161,47 @@ Deno.serve(async (req: Request) => {
       comercioId,
     });
 
-    const { data: updatedComercio, error: updateError } = await supabase
-      .from('comercios')
-      .update({
-        branding_ia: branding,
-      })
-      .eq('id', comercioId)
-      .select('id, branding_ia')
-      .maybeSingle();
+    let creditsCharged = false;
 
-    if (updateError) {
-      throw new Error(`Error updating comercio branding_ia: ${updateError.message}`);
+    try {
+      await deductCredits(supabase, comercioId, COST_BRANDING, 'branding_generation', {
+        function: 'generate-branding-gemini',
+      });
+      creditsCharged = true;
+
+      const { data: updatedComercio, error: updateError } = await supabase
+        .from('comercios')
+        .update({
+          branding_ia: branding,
+        })
+        .eq('id', comercioId)
+        .select('id, branding_ia')
+        .maybeSingle();
+
+      if (updateError) {
+        throw new Error(`Error updating comercio branding_ia: ${updateError.message}`);
+      }
+
+      if (!updatedComercio?.id) {
+        return jsonResponse({ error: 'Comercio not found.' }, 404);
+      }
+
+      return jsonResponse(
+        {
+          ok: true,
+          comercio_id: comercioId,
+          branding_ia: branding,
+        },
+        200,
+      );
+    } catch (error) {
+      if (creditsCharged) {
+        await addCredits(supabase, comercioId, COST_BRANDING, 'branding_generation_refund', {
+          function: 'generate-branding-gemini',
+        });
+      }
+      throw error;
     }
-
-    if (!updatedComercio?.id) {
-      return jsonResponse({ error: 'Comercio not found.' }, 404);
-    }
-
-    return jsonResponse(
-      {
-        ok: true,
-        comercio_id: comercioId,
-        branding_ia: branding,
-      },
-      200,
-    );
   } catch (error) {
     if (error instanceof AiUsageError) {
       return jsonResponse(error.toResponseBody(), error.status);

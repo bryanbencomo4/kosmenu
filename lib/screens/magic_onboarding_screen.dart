@@ -17,6 +17,7 @@ class MagicOnboardingResult {
   final int createdProducts;
   final List<String> detectedCategoryNames;
   final bool isNewCatalog;
+  final bool requestAiProductImages;
 
   const MagicOnboardingResult({
     required this.catalog,
@@ -24,6 +25,7 @@ class MagicOnboardingResult {
     required this.createdProducts,
     required this.detectedCategoryNames,
     required this.isNewCatalog,
+    required this.requestAiProductImages,
   });
 }
 
@@ -63,6 +65,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
   String _scanProgressMessage = '';
   double _scanProgressValue = 0;
   int _selectedAssetCount = 0;
+  bool _generateAiImages = true;
 
   bool get _isFileImportMode =>
       widget.inputMode == MagicOnboardingInputMode.fileImport;
@@ -156,6 +159,26 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                           ),
                         ),
                         child: _HeaderCard(inputMode: widget.inputMode),
+                      ),
+                      const SizedBox(height: 16),
+                      _AnimatedReveal(
+                        animation: CurvedAnimation(
+                          parent: _entryController,
+                          curve: const Interval(
+                            0.26,
+                            0.84,
+                            curve: Curves.easeOutCubic,
+                          ),
+                        ),
+                        child: _AiImagesOptInCard(
+                          value: _generateAiImages,
+                          onChanged: (value) {
+                            if (!mounted) {
+                              return;
+                            }
+                            setState(() => _generateAiImages = value);
+                          },
+                        ),
                       ),
                       const SizedBox(height: 16),
                       _AnimatedReveal(
@@ -556,6 +579,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
           createdProducts: totalCreatedProducts,
           detectedCategoryNames: detectedCategoryNames.toList(),
           isNewCatalog: isNewCatalog,
+          requestAiProductImages: _generateAiImages,
         ),
       );
     } catch (error) {
@@ -700,6 +724,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
           createdProducts: totalCreatedProducts,
           detectedCategoryNames: detectedCategoryNames,
           isNewCatalog: isNewCatalog,
+          requestAiProductImages: _generateAiImages,
         ),
       );
     } catch (error) {
@@ -1707,6 +1732,83 @@ class _AiNoteCard extends StatelessWidget {
                 height: 1.4,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AiImagesOptInCard extends StatelessWidget {
+  const _AiImagesOptInCard({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.borderSubtle),
+        boxShadow: AppTheme.softShadow,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppColors.accentSoft,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(
+              Icons.image_search_rounded,
+              color: AppColors.accent,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Generar imagenes de productos con IA',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textStrong,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Se encola al terminar el menu y se procesa en segundo plano. No bloquea el onboarding.',
+                  style: GoogleFonts.poppins(
+                    color: AppColors.textSoft,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Solo disponible una vez durante onboarding y sujeto a creditos IA.',
+                  style: GoogleFonts.poppins(
+                    color: AppColors.textSoft,
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Switch.adaptive(
+            value: value,
+            activeTrackColor: AppColors.accent,
+            onChanged: onChanged,
           ),
         ],
       ),
