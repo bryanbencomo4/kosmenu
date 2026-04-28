@@ -1,6 +1,7 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { AiUsageError, enforceAiLimits, recordGeminiUsage } from '../_shared/ai-usage.ts';
 
 type BrandingStyle = 'rounded' | 'sharp' | 'pill';
 type LayoutType = 'list' | 'grid' | 'compact';
@@ -137,14 +138,18 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false },
+    });
+
+    await enforceAiLimits(supabase, comercioId);
+
     const branding = await generateBrandingWithGemini({
       promptUsuario,
       imageUrl,
       apiKey: geminiApiKey,
-    });
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
+      supabase,
+      comercioId,
     });
 
     const { data: updatedComercio, error: updateError } = await supabase
@@ -173,6 +178,10 @@ Deno.serve(async (req: Request) => {
       200,
     );
   } catch (error) {
+    if (error instanceof AiUsageError) {
+      return jsonResponse(error.toResponseBody(), error.status);
+    }
+
     const message = error instanceof Error ? error.message : 'Unknown error';
     return jsonResponse({ error: message }, 500);
   }
@@ -182,6 +191,8 @@ async function generateBrandingWithGemini(params: {
   promptUsuario: string;
   imageUrl?: string;
   apiKey: string;
+  supabase: ReturnType<typeof createClient>;
+  comercioId: string;
 }): Promise<BrandingResult> {
   const parts: Array<Record<string, unknown>> = [
     {
@@ -292,6 +303,11 @@ async function generateBrandingWithGemini(params: {
   }
 
   const completion = await response.json();
+  await recordGeminiUsage(
+    params.supabase,
+    params.comercioId,
+    completion?.usageMetadata,
+  );
   const text = completion?.candidates?.[0]?.content?.parts?.[0]?.text;
 
   if (!text || typeof text !== 'string') {

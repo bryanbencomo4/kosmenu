@@ -7155,6 +7155,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       },
       'menu_font': _selectedHeadingFont,
       'menu_footer': _selectedFooter,
+      if (!widget.businessConfigOnly) 'onboarding_completed': true,
     };
 
     final removable = <String>{

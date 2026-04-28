@@ -1,6 +1,7 @@
 /// <reference path="../_shared/edge-runtime.d.ts" />
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { AiUsageError, enforceAiLimits, recordGeminiUsage } from '../_shared/ai-usage.ts';
 
 type Product = {
   nombre: string;
@@ -100,10 +101,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const parsedMenu = promptText
-      ? await extractMenuFromPromptText(promptText, geminiApiKey)
-      : await extractMenuWithGemini(fileUrl!, geminiApiKey);
-
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
@@ -111,6 +108,12 @@ Deno.serve(async (req: Request) => {
         auth: { persistSession: false },
       },
     );
+
+    await enforceAiLimits(supabase, comercioId);
+
+    const parsedMenu = promptText
+      ? await extractMenuFromPromptText(promptText, geminiApiKey, supabase, comercioId)
+      : await extractMenuWithGemini(fileUrl!, geminiApiKey, supabase, comercioId);
 
     const catalog = await ensureCatalogForComercio(
       supabase,
@@ -194,6 +197,10 @@ Deno.serve(async (req: Request) => {
       200,
     );
   } catch (error) {
+    if (error instanceof AiUsageError) {
+      return jsonResponse(error.toResponseBody(), error.status);
+    }
+
     if (error instanceof HttpResponseError) {
       return jsonResponse(
         {
@@ -209,7 +216,12 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function extractMenuWithGemini(fileUrl: string, apiKey: string): Promise<ParsedMenu> {
+async function extractMenuWithGemini(
+  fileUrl: string,
+  apiKey: string,
+  supabase: ReturnType<typeof createClient>,
+  comercioId: string,
+): Promise<ParsedMenu> {
   const fileResponse = await fetch(fileUrl);
   if (!fileResponse.ok) {
     throw new Error(`Could not download file_url: ${fileResponse.status}`);
@@ -221,10 +233,17 @@ async function extractMenuWithGemini(fileUrl: string, apiKey: string): Promise<P
   return generateStructuredMenu(
     [buildGeminiRequestContent(contentType, fileBytes)],
     apiKey,
+    supabase,
+    comercioId,
   );
 }
 
-async function extractMenuFromPromptText(promptText: string, apiKey: string): Promise<ParsedMenu> {
+async function extractMenuFromPromptText(
+  promptText: string,
+  apiKey: string,
+  supabase: ReturnType<typeof createClient>,
+  comercioId: string,
+): Promise<ParsedMenu> {
   return generateStructuredMenu(
     [
       {
@@ -240,10 +259,17 @@ async function extractMenuFromPromptText(promptText: string, apiKey: string): Pr
       },
     ],
     apiKey,
+    supabase,
+    comercioId,
   );
 }
 
-async function generateStructuredMenu(contents: Array<Record<string, unknown>>, apiKey: string): Promise<ParsedMenu> {
+async function generateStructuredMenu(
+  contents: Array<Record<string, unknown>>,
+  apiKey: string,
+  supabase: ReturnType<typeof createClient>,
+  comercioId: string,
+): Promise<ParsedMenu> {
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent` +
     `?key=${encodeURIComponent(apiKey)}`;
@@ -251,6 +277,7 @@ async function generateStructuredMenu(contents: Array<Record<string, unknown>>, 
   const response = await fetchGeminiWithRetry(url, contents);
 
   const completion = await response.json();
+  await recordGeminiUsage(supabase, comercioId, completion?.usageMetadata);
   const text = completion?.candidates?.[0]?.content?.parts?.[0]?.text;
 
   if (!text || typeof text !== 'string') {
