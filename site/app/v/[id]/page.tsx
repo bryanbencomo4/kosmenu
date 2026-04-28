@@ -124,6 +124,36 @@ const topTickerHeightPx = 36;
 const topAppBarHeightPx = 56;
 const stickySearchTopPx = topTickerHeightPx + topAppBarHeightPx + 10;
 const categoryTitleRevealOffsetPx = 30;
+
+type MotionIntensity = 'subtle' | 'medium' | 'strong';
+type MotionDirection = 'up' | 'down' | 'left' | 'right' | 'none';
+
+const MOTION_TOKENS = {
+  duration: {
+    instant: 1,
+    fast: 180,
+    base: 280,
+    slow: 420,
+    hero: 560,
+  },
+  easing: {
+    standard: 'cubic-bezier(0.2, 0, 0, 1)',
+    entrance: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    emphasized: 'cubic-bezier(0.16, 1, 0.3, 1)',
+  },
+  distance: {
+    subtle: 8,
+    medium: 16,
+    strong: 24,
+  },
+  scale: {
+    subtle: 0.994,
+    medium: 0.985,
+    strong: 0.975,
+  },
+  staggerStep: 55,
+} as const;
+
 const defaultProductImage =
   'data:image/svg+xml;utf8,' +
   encodeURIComponent(
@@ -339,6 +369,151 @@ function useCountUp(target: number, enabled: boolean, durationMs = 1100) {
   }, [durationMs, enabled, target]);
 
   return value;
+}
+
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updatePreference = () => {
+      setPrefersReducedMotion(mediaQuery.matches);
+    };
+
+    updatePreference();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', updatePreference);
+      return () => mediaQuery.removeEventListener('change', updatePreference);
+    }
+
+    mediaQuery.addListener(updatePreference);
+    return () => mediaQuery.removeListener(updatePreference);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
+function motionDelay(index: number, step = MOTION_TOKENS.staggerStep) {
+  return Math.max(0, index) * step;
+}
+
+function revealMotionStyle({
+  delay = 0,
+  duration = MOTION_TOKENS.duration.slow,
+  intensity = 'medium',
+  direction = 'up',
+}: {
+  delay?: number;
+  duration?: number;
+  intensity?: MotionIntensity;
+  direction?: MotionDirection;
+} = {}) {
+  const distance = MOTION_TOKENS.distance[intensity];
+  const translateX = direction === 'left' ? `${distance}px` : direction === 'right' ? `${-distance}px` : '0px';
+  const translateY = direction === 'up' ? `${distance}px` : direction === 'down' ? `${-distance}px` : '0px';
+
+  return {
+    '--kos-enter-delay': `${delay}ms`,
+    '--kos-enter-duration': `${duration}ms`,
+    '--kos-enter-x': translateX,
+    '--kos-enter-y': translateY,
+    '--kos-enter-scale': `${MOTION_TOKENS.scale[intensity]}`,
+  } as React.CSSProperties;
+}
+
+function useVisibilityReveal(
+  ids: string[],
+  elementRefs: { current: Record<string, HTMLElement | null> },
+  options?: {
+    rootMargin?: string;
+    threshold?: number;
+    disabled?: boolean;
+    fallbackDelayMs?: number;
+  },
+) {
+  const { rootMargin = '0px 0px -10% 0px', threshold = 0.16, disabled = false, fallbackDelayMs = 1400 } = options ?? {};
+  const [visibleIds, setVisibleIds] = useState<Record<string, boolean>>({});
+  const idsKey = ids.join('|');
+
+  useEffect(() => {
+    if (ids.length === 0) {
+      setVisibleIds({});
+      return;
+    }
+
+    setVisibleIds((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const id of ids) {
+        if (prev[id]) next[id] = true;
+      }
+      const sameSize = Object.keys(next).length === Object.keys(prev).length;
+      const sameValues = sameSize && Object.keys(next).every((key) => prev[key] === next[key]);
+      return sameValues ? prev : next;
+    });
+
+    if (disabled || typeof window === 'undefined' || typeof window.IntersectionObserver === 'undefined') {
+      setVisibleIds(Object.fromEntries(ids.map((id) => [id, true])));
+      return;
+    }
+
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        setVisibleIds((prev) => {
+          let changed = false;
+          const next = { ...prev };
+
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const element = entry.target as HTMLElement;
+            const id = element.dataset.motionId ?? '';
+            if (!id || next[id]) continue;
+            next[id] = true;
+            changed = true;
+            observer.unobserve(element);
+          }
+
+          return changed ? next : prev;
+        });
+      },
+      {
+        root: null,
+        rootMargin,
+        threshold,
+      },
+    );
+
+    const fallbackTimer = window.setTimeout(() => {
+      setVisibleIds((prev) => {
+        let changed = false;
+        const next = { ...prev };
+
+        for (const id of ids) {
+          if (next[id]) continue;
+          next[id] = true;
+          changed = true;
+        }
+
+        return changed ? next : prev;
+      });
+    }, Math.max(0, fallbackDelayMs));
+
+    for (const id of ids) {
+      const node = elementRefs.current[id];
+      if (!node) continue;
+      node.dataset.motionId = id;
+      observer.observe(node);
+    }
+
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      observer.disconnect();
+    };
+  }, [disabled, fallbackDelayMs, idsKey, rootMargin, threshold]);
+
+  return visibleIds;
 }
 
 function formatAmountByCurrency(value: number, currency: string) {
@@ -1073,7 +1248,6 @@ export default function PublicMenuPage() {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isCheckoutFooterExpanded, setIsCheckoutFooterExpanded] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
-  const [isInfoPanelReady, setIsInfoPanelReady] = useState(false);
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   const [shareMessage, setShareMessage] = useState('');
@@ -1111,6 +1285,7 @@ export default function PublicMenuPage() {
   } | null>(null);
   const categoryChipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const productCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const categorySectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const stickySearchCardRef = useRef<HTMLDivElement | null>(null);
   const statsCardsRef = useRef<HTMLDivElement | null>(null);
   const mapPickerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1127,10 +1302,11 @@ export default function PublicMenuPage() {
     contact: true,
     payments: true,
   });
-  const [revealedProductIds, setRevealedProductIds] = useState<Record<string, boolean>>({});
   const [statsCardsVisible, setStatsCardsVisible] = useState(false);
   const [cachedSplashLogoUrl, setCachedSplashLogoUrl] = useState('');
   const [cachedSplashName, setCachedSplashName] = useState('');
+  const [isExperienceReady, setIsExperienceReady] = useState(false);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     if (typeof window === 'undefined' || !commerceIdentifier) return;
@@ -1320,6 +1496,22 @@ export default function PublicMenuPage() {
     [filteredCategorias],
   );
 
+  const revealedProductIds = useVisibilityReveal(filteredProductIds, productCardRefs, {
+    rootMargin: '0px 0px -8% 0px',
+    threshold: 0.14,
+    disabled: prefersReducedMotion,
+  });
+
+  const revealedCategoryIds = useVisibilityReveal(
+    filteredCategorias.map((categoria) => categoria.id),
+    categorySectionRefs,
+    {
+      rootMargin: '0px 0px -14% 0px',
+      threshold: 0.12,
+      disabled: prefersReducedMotion,
+    },
+  );
+
   const visibleCategorias = useMemo(
     () =>
       filteredCategorias.map((categoria) => ({
@@ -1342,70 +1534,58 @@ export default function PublicMenuPage() {
   }, [categoriasConProductos, filteredCategorias]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (filteredProductIds.length === 0) {
-      setRevealedProductIds({});
-      return;
-    }
-
-    const revealVisibleCards = () => {
-      setRevealedProductIds((prev) => {
-        const next = { ...prev };
-        let changed = false;
-
-        for (const categoria of filteredCategorias) {
-          for (const producto of categoria.productos) {
-            const node = productCardRefs.current[producto.id];
-            if (!node || next[producto.id]) continue;
-
-            const rect = node.getBoundingClientRect();
-            const isVisible = rect.top < window.innerHeight * 0.96 && rect.bottom > window.innerHeight * -0.08;
-            if (isVisible) {
-              next[producto.id] = true;
-              changed = true;
-            }
-          }
-        }
-
-        return changed ? next : prev;
-      });
-    };
-
-    const frameId = window.requestAnimationFrame(revealVisibleCards);
-    const timeoutId = window.setTimeout(revealVisibleCards, 140);
-    const delayedTimeoutId = window.setTimeout(revealVisibleCards, 420);
-
-    window.addEventListener('scroll', revealVisibleCards, { passive: true });
-    window.addEventListener('resize', revealVisibleCards);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      window.clearTimeout(timeoutId);
-      window.clearTimeout(delayedTimeoutId);
-      window.removeEventListener('scroll', revealVisibleCards);
-      window.removeEventListener('resize', revealVisibleCards);
-    };
-  }, [filteredCategorias, filteredProductIds]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (filteredCategorias.length === 0) {
+    if (typeof window === 'undefined' || filteredCategorias.length === 0) {
       setStatsCardsVisible(false);
       return;
     }
 
+    if (prefersReducedMotion || typeof window.IntersectionObserver === 'undefined') {
+      setStatsCardsVisible(true);
+      return;
+    }
+
+    const node = statsCardsRef.current;
+    if (!node) return;
+
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        setStatsCardsVisible(true);
+        observer.disconnect();
+      },
+      {
+        root: null,
+        rootMargin: '0px 0px -12% 0px',
+        threshold: 0.18,
+      },
+    );
+
+    observer.observe(node);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [filteredCategorias.length, prefersReducedMotion]);
+
+  useEffect(() => {
+    if (loading || !menuData) {
+      setIsExperienceReady(false);
+      return;
+    }
+
+    if (prefersReducedMotion) {
+      setIsExperienceReady(true);
+      return;
+    }
+
     const frameId = window.requestAnimationFrame(() => {
-      setStatsCardsVisible(true);
+      setIsExperienceReady(true);
     });
-    const timeoutId = window.setTimeout(() => {
-      setStatsCardsVisible(true);
-    }, 180);
 
     return () => {
       window.cancelAnimationFrame(frameId);
-      window.clearTimeout(timeoutId);
     };
-  }, [filteredCategorias.length]);
+  }, [loading, menuData, prefersReducedMotion]);
 
   useEffect(() => {
     if (filteredCategorias.length === 0) {
@@ -1456,8 +1636,8 @@ export default function PublicMenuPage() {
     if (!activeCategoryId) return;
     const chip = categoryChipRefs.current[activeCategoryId];
     if (!chip) return;
-    chip.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-  }, [activeCategoryId]);
+    chip.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', inline: 'center', block: 'nearest' });
+  }, [activeCategoryId, prefersReducedMotion]);
 
   const comercioNombre = (menuData?.comercio.nombre ?? cachedSplashName ?? commerceIdentifier ?? 'elmenuxfa.com').trim() || 'elmenuxfa.com';
   const comercioLogoUrl = (menuData?.comercio.logo_url ?? cachedSplashLogoUrl ?? '').trim();
@@ -1685,8 +1865,17 @@ export default function PublicMenuPage() {
   );
   const summaryCategoryCount = filteredCategorias.length;
   const summaryProductCount = categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0);
-  const animatedCategoryCount = useCountUp(summaryCategoryCount, statsCardsVisible, 950);
-  const animatedProductCount = useCountUp(summaryProductCount, statsCardsVisible, 1250);
+  const statsMotionEnabled = isExperienceReady || statsCardsVisible;
+  const animatedCategoryCount = useCountUp(
+    summaryCategoryCount,
+    statsMotionEnabled,
+    prefersReducedMotion ? MOTION_TOKENS.duration.instant : 950,
+  );
+  const animatedProductCount = useCountUp(
+    summaryProductCount,
+    statsMotionEnabled,
+    prefersReducedMotion ? MOTION_TOKENS.duration.instant : 1250,
+  );
   const heroImageSrc = safeImageSrc(heroProduct?.imagen_url, comercioLogoUrl);
   const heroLocation = [menuData?.comercio.ciudad, menuData?.comercio.direccion]
     .map((item) => (item ?? '').trim())
@@ -2031,10 +2220,10 @@ export default function PublicMenuPage() {
         const targetTop = target
           ? window.scrollY + target.getBoundingClientRect().top - (topTickerHeightPx + topAppBarHeightPx + 12)
           : 0;
-        window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+        window.scrollTo({ top: Math.max(0, targetTop), behavior: prefersReducedMotion ? 'auto' : 'smooth' });
       }, 120);
     }
-  }, [cartCount, isConfirmOpen]);
+  }, [cartCount, isConfirmOpen, prefersReducedMotion]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2050,16 +2239,6 @@ export default function PublicMenuPage() {
       window.removeEventListener('scroll', updateScrollTopButton);
     };
   }, []);
-
-  useEffect(() => {
-    if (!isInfoOpen) {
-      setIsInfoPanelReady(false);
-      return;
-    }
-
-    const raf = window.requestAnimationFrame(() => setIsInfoPanelReady(true));
-    return () => window.cancelAnimationFrame(raf);
-  }, [isInfoOpen]);
 
   useEffect(() => {
     if (!menuData) return;
@@ -2412,7 +2591,7 @@ export default function PublicMenuPage() {
 
     window.scrollTo({
       top: Math.max(0, nextTop),
-      behavior: 'smooth',
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
     });
   }
 
@@ -2768,16 +2947,16 @@ export default function PublicMenuPage() {
         }}
       >
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute left-1/2 top-[12%] h-72 w-72 -translate-x-1/2 rounded-full bg-[rgba(214,90,31,0.12)] blur-3xl animate-pulse" />
-          <div className="absolute left-[10%] top-[30%] h-28 w-28 rounded-full bg-[rgba(255,194,102,0.20)] blur-3xl animate-pulse" />
-          <div className="absolute bottom-[14%] right-[14%] h-36 w-36 rounded-full bg-[rgba(15,23,42,0.06)] blur-3xl animate-pulse" />
+          <div className="kos-loader-aura absolute left-1/2 top-[12%] h-72 w-72 -translate-x-1/2 rounded-full bg-[rgba(214,90,31,0.12)]" />
+          <div className="kos-loader-aura absolute left-[10%] top-[30%] h-28 w-28 rounded-full bg-[rgba(255,194,102,0.20)]" style={{ animationDelay: '220ms' }} />
+          <div className="kos-loader-aura absolute bottom-[14%] right-[14%] h-36 w-36 rounded-full bg-[rgba(15,23,42,0.06)]" style={{ animationDelay: '420ms' }} />
           <div className="absolute inset-x-10 top-[22%] h-px bg-gradient-to-r from-transparent via-[rgba(214,90,31,0.18)] to-transparent" />
         </div>
 
         <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 text-center">
           <div className="relative flex h-36 w-36 items-center justify-center sm:h-40 sm:w-40">
-            <div className="absolute inset-0 rounded-full border border-[rgba(214,90,31,0.16)] animate-[spin_8s_linear_infinite]" />
-            <div className="absolute inset-[10px] rounded-full border border-dashed border-[rgba(15,23,42,0.12)] animate-[spin_14s_linear_infinite_reverse]" />
+            <div className="kos-loader-orbit absolute inset-0 rounded-full border border-[rgba(214,90,31,0.16)]" />
+            <div className="kos-loader-orbit-reverse absolute inset-[10px] rounded-full border border-dashed border-[rgba(15,23,42,0.12)]" />
             <div className="absolute inset-[20px] rounded-full bg-white/78 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur-md" />
 
             <div
@@ -2810,14 +2989,12 @@ export default function PublicMenuPage() {
           </div>
 
           <div className="mt-8 flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-[#D65A1F] animate-bounce" />
-            <span className="h-2 w-2 rounded-full bg-[#F59E0B] animate-bounce [animation-delay:140ms]" />
-            <span className="h-2 w-2 rounded-full bg-slate-400 animate-bounce [animation-delay:280ms]" />
+            <span className="kos-loader-dot h-2 w-2 rounded-full bg-[#D65A1F]" />
+            <span className="kos-loader-dot h-2 w-2 rounded-full bg-[#F59E0B]" style={{ animationDelay: '140ms' }} />
+            <span className="kos-loader-dot h-2 w-2 rounded-full bg-slate-400" style={{ animationDelay: '280ms' }} />
           </div>
 
-          <div className="mt-6 h-[3px] w-40 overflow-hidden rounded-full bg-slate-200/80">
-            <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-[#D65A1F] via-[#FF9A54] to-[#FFD089] animate-[pulse_1.1s_ease-in-out_infinite]" />
-          </div>
+          <div className="kos-loader-bar relative mt-6 h-[3px] w-40 overflow-hidden rounded-full bg-slate-200/80" />
         </section>
 
         <div className="pointer-events-none absolute inset-x-0 bottom-10 z-10 text-center">
@@ -2874,12 +3051,277 @@ export default function PublicMenuPage() {
         ) : null}
       </Head>
       <style jsx global>{`
+        :root {
+          --kos-duration-fast: ${MOTION_TOKENS.duration.fast}ms;
+          --kos-duration-base: ${MOTION_TOKENS.duration.base}ms;
+          --kos-duration-slow: ${MOTION_TOKENS.duration.slow}ms;
+          --kos-duration-hero: ${MOTION_TOKENS.duration.hero}ms;
+          --kos-ease-standard: ${MOTION_TOKENS.easing.standard};
+          --kos-ease-entrance: ${MOTION_TOKENS.easing.entrance};
+          --kos-ease-emphasized: ${MOTION_TOKENS.easing.emphasized};
+        }
+
         @keyframes kosmenuTickerScroll {
           0% {
-            transform: translateX(0);
+            transform: translate3d(0, 0, 0);
           }
           100% {
-            transform: translateX(-50%);
+            transform: translate3d(-50%, 0, 0);
+          }
+        }
+
+        @keyframes kosLoaderAura {
+          0%,
+          100% {
+            opacity: 0.48;
+            transform: translate3d(0, 0, 0) scale(0.96);
+          }
+          50% {
+            opacity: 0.8;
+            transform: translate3d(0, -6px, 0) scale(1.03);
+          }
+        }
+
+        @keyframes kosLoaderOrbit {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        @keyframes kosLoaderDot {
+          0%,
+          100% {
+            opacity: 0.32;
+            transform: translate3d(0, 0, 0) scale(0.92);
+          }
+          50% {
+            opacity: 1;
+            transform: translate3d(0, -4px, 0) scale(1);
+          }
+        }
+
+        @keyframes kosLoaderBar {
+          0% {
+            transform: translate3d(-105%, 0, 0) scaleX(0.9);
+          }
+          100% {
+            transform: translate3d(170%, 0, 0) scaleX(1.05);
+          }
+        }
+
+        @keyframes kosSoftFloat {
+          0%,
+          100% {
+            transform: translate3d(0, 0, 0);
+          }
+          50% {
+            transform: translate3d(0, -6px, 0);
+          }
+        }
+
+        @keyframes kosFadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        @keyframes kosSlideInUp {
+          from {
+            opacity: 0;
+            transform: translate3d(0, 24px, 0) scale(0.985);
+          }
+          to {
+            opacity: 1;
+            transform: translate3d(0, 0, 0) scale(1);
+          }
+        }
+
+        @keyframes kosSlideInRight {
+          from {
+            opacity: 0;
+            transform: translate3d(28px, 0, 0);
+          }
+          to {
+            opacity: 1;
+            transform: translate3d(0, 0, 0);
+          }
+        }
+
+        @keyframes kosScaleIn {
+          from {
+            opacity: 0;
+            transform: translate3d(0, 16px, 0) scale(0.97);
+          }
+          to {
+            opacity: 1;
+            transform: translate3d(0, 0, 0) scale(1);
+          }
+        }
+
+        @keyframes kosStepPulse {
+          0%,
+          100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.04);
+          }
+        }
+
+        .kos-motion-enter {
+          opacity: 0;
+          transform: translate3d(var(--kos-enter-x, 0px), var(--kos-enter-y, 16px), 0)
+            scale(var(--kos-enter-scale, 0.985));
+          transition-property: transform, opacity;
+          transition-duration: var(--kos-enter-duration, var(--kos-duration-slow));
+          transition-timing-function: var(--kos-ease-entrance);
+          transition-delay: var(--kos-enter-delay, 0ms);
+        }
+
+        .kos-motion-enter[data-motion-in='true'] {
+          opacity: 1;
+          transform: translate3d(0, 0, 0) scale(1);
+        }
+
+        .kos-surface-motion {
+          transform: translate3d(0, 0, 0);
+          transition-property: transform, opacity, background-color, border-color, color;
+          transition-duration: var(--kos-duration-base);
+          transition-timing-function: var(--kos-ease-standard);
+        }
+
+        .kos-pressable {
+          transform: translate3d(0, 0, 0);
+          touch-action: manipulation;
+        }
+
+        .kos-pressable:active {
+          transform: scale(0.985);
+        }
+
+        .kos-float-subtle {
+          animation: kosSoftFloat 6.8s var(--kos-ease-standard) infinite;
+        }
+
+        .kos-loader-aura {
+          animation: kosLoaderAura 4.4s var(--kos-ease-standard) infinite;
+        }
+
+        .kos-loader-orbit {
+          animation: kosLoaderOrbit 8s linear infinite;
+        }
+
+        .kos-loader-orbit-reverse {
+          animation: kosLoaderOrbit 13s linear infinite reverse;
+        }
+
+        .kos-loader-dot {
+          animation: kosLoaderDot 1.15s var(--kos-ease-standard) infinite;
+        }
+
+        .kos-loader-bar::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          width: 42%;
+          border-radius: inherit;
+          background: linear-gradient(90deg, #d65a1f 0%, #ff9a54 55%, #ffd089 100%);
+          animation: kosLoaderBar 1.2s var(--kos-ease-emphasized) infinite;
+        }
+
+        .kos-drawer-backdrop,
+        .kos-modal-backdrop,
+        .checkout-overlay-enter {
+          animation: kosFadeIn var(--kos-duration-fast) var(--kos-ease-standard) both;
+        }
+
+        .kos-drawer-panel,
+        .kos-side-panel-enter {
+          animation: kosSlideInRight var(--kos-duration-slow) var(--kos-ease-emphasized) both;
+        }
+
+        .kos-sheet-panel,
+        .checkout-sheet-enter,
+        .checkout-panel-enter,
+        .checkout-item-enter {
+          animation: kosSlideInUp var(--kos-duration-slow) var(--kos-ease-emphasized) both;
+        }
+
+        .kos-image-modal-panel {
+          animation: kosScaleIn var(--kos-duration-base) var(--kos-ease-emphasized) both;
+        }
+
+        .checkout-step-active {
+          animation: kosStepPulse 1.6s var(--kos-ease-standard) 1;
+        }
+
+        .checkout-phone-field .PhoneInput {
+          display: flex;
+          min-height: 3rem;
+          align-items: center;
+          gap: 0.5rem;
+          padding-inline: 0.875rem;
+        }
+
+        .checkout-phone-field .PhoneInputInput {
+          min-width: 0;
+          flex: 1;
+          height: 3rem;
+          border: 0;
+          background: transparent;
+          color: #0f172a;
+          font-size: 0.95rem;
+          outline: 0;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+          .kos-hover-subtle:hover {
+            transform: translate3d(0, -4px, 0) scale(1.01);
+          }
+
+          .kos-hover-medium:hover {
+            transform: translate3d(0, -6px, 0) scale(1.014);
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .kos-motion-enter,
+          .kos-motion-enter[data-motion-in='true'],
+          .kos-surface-motion,
+          .kos-float-subtle,
+          .kos-loader-aura,
+          .kos-loader-orbit,
+          .kos-loader-orbit-reverse,
+          .kos-loader-dot,
+          .kos-drawer-backdrop,
+          .kos-drawer-panel,
+          .kos-modal-backdrop,
+          .kos-side-panel-enter,
+          .kos-sheet-panel,
+          .kos-image-modal-panel,
+          .checkout-overlay-enter,
+          .checkout-sheet-enter,
+          .checkout-panel-enter,
+          .checkout-item-enter,
+          .checkout-step-active {
+            animation: none !important;
+            transition-duration: 1ms !important;
+            transition-delay: 0ms !important;
+            transform: none !important;
+            opacity: 1 !important;
+          }
+
+          .kos-loader-bar::after {
+            animation: none !important;
+            transform: none !important;
+            inset: 0;
+            width: 100%;
           }
         }
       `}</style>
@@ -2953,7 +3395,7 @@ export default function PublicMenuPage() {
                 onClick={() => setIsQuickActionsOpen((prev) => !prev)}
                 aria-expanded={isQuickActionsOpen}
                 aria-label="Abrir menu de acciones"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm"
               >
                 <Menu className="h-4 w-4" strokeWidth={2.5} />
                 <ChevronDown className={`absolute bottom-1 right-1 h-3 w-3 transition-transform duration-200 ${isQuickActionsOpen ? 'rotate-180' : ''}`} strokeWidth={2.4} />
@@ -2967,7 +3409,7 @@ export default function PublicMenuPage() {
                   setIsConfirmOpen(true);
                 }}
                 aria-label={cartCount > 0 ? 'Ver pedido' : 'Carrito vacio'}
-                className="relative inline-flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-slate-800 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                className="kos-surface-motion kos-pressable kos-hover-subtle relative inline-flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-slate-800 shadow-sm"
               >
                 <ShoppingCart className="h-4 w-4" strokeWidth={2.4} />
                 {cartCount > 0 ? (
@@ -2990,10 +3432,10 @@ export default function PublicMenuPage() {
               type="button"
               aria-label="Cerrar menu de acciones"
               onClick={() => setIsQuickActionsOpen(false)}
-              className="absolute inset-0 bg-slate-950/38 backdrop-blur-[2px]"
+              className="kos-drawer-backdrop absolute inset-0 bg-slate-950/38 backdrop-blur-[2px]"
             />
 
-            <aside className="absolute right-0 top-0 flex h-full w-[min(88vw,360px)] flex-col border-l border-white/60 bg-white/96 shadow-[-24px_0_60px_rgba(15,23,42,0.2)] backdrop-blur-xl">
+            <aside className="kos-drawer-panel absolute right-0 top-0 flex h-full w-[min(88vw,360px)] flex-col border-l border-white/60 bg-white/96 shadow-[-24px_0_60px_rgba(15,23,42,0.2)] backdrop-blur-xl">
               <div className="flex items-center justify-between border-b border-slate-200/80 px-5 py-4">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Menu</p>
@@ -3005,7 +3447,7 @@ export default function PublicMenuPage() {
                   type="button"
                   onClick={() => setIsQuickActionsOpen(false)}
                   aria-label="Cerrar drawer"
-                  className="grid h-10 w-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  className="kos-surface-motion kos-pressable kos-hover-subtle grid h-10 w-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm"
                 >
                   <X className="h-4.5 w-4.5" strokeWidth={2.4} />
                 </button>
@@ -3019,7 +3461,7 @@ export default function PublicMenuPage() {
                       <a
                         href={`tel:+${callNumber}`}
                         onClick={() => setIsQuickActionsOpen(false)}
-                        className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                        className="kos-surface-motion kos-pressable kos-hover-subtle flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700"
                       >
                         <span className="flex items-center gap-2">
                           <Phone className="h-4 w-4" strokeWidth={2.2} />
@@ -3035,7 +3477,7 @@ export default function PublicMenuPage() {
                         setIsQuickActionsOpen(false);
                         void shareMenu();
                       }}
-                      className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                      className="kos-surface-motion kos-pressable kos-hover-subtle flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700"
                     >
                       <span className="flex items-center gap-2">
                         <Share2 className="h-4 w-4" strokeWidth={2.2} />
@@ -3050,7 +3492,7 @@ export default function PublicMenuPage() {
                         setIsQuickActionsOpen(false);
                         setIsInfoOpen(true);
                       }}
-                      className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                      className="kos-surface-motion kos-pressable kos-hover-subtle flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700"
                     >
                       <span className="flex items-center gap-2">
                         <Info className="h-4 w-4" strokeWidth={2.2} />
@@ -3090,7 +3532,11 @@ export default function PublicMenuPage() {
         ) : null}
 
         <section className="mx-auto mt-4 max-w-6xl px-4 sm:mt-5 sm:px-6">
-          <div className="relative overflow-hidden rounded-[32px] border border-slate-900/8 bg-slate-950 shadow-[0_22px_55px_rgba(15,23,42,0.14)]">
+          <div
+            className="kos-motion-enter relative overflow-hidden rounded-[32px] border border-slate-900/8 bg-slate-950 shadow-[0_22px_55px_rgba(15,23,42,0.14)]"
+            data-motion-in={isExperienceReady}
+            style={revealMotionStyle({ duration: MOTION_TOKENS.duration.hero, intensity: 'medium' })}
+          >
             <img
               src={heroImageSrc}
               alt={heroProduct?.nombre || comercioNombre}
@@ -3109,20 +3555,30 @@ export default function PublicMenuPage() {
 
             <div className="relative flex min-h-[19rem] flex-col justify-between p-4 sm:min-h-[22rem] sm:p-6">
               <div className="flex items-start justify-between gap-3">
-                <div className="inline-flex items-center gap-2 rounded-full bg-[rgba(239,68,68,0.92)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-white shadow-[0_12px_26px_rgba(239,68,68,0.32)]">
+                <div
+                  className="kos-motion-enter inline-flex items-center gap-2 rounded-full bg-[rgba(239,68,68,0.92)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-white shadow-[0_12px_26px_rgba(239,68,68,0.32)]"
+                  data-motion-in={isExperienceReady}
+                  style={revealMotionStyle({ delay: motionDelay(1), intensity: 'subtle' })}
+                >
                   <Flame className="h-3.5 w-3.5" strokeWidth={2.4} />
                   {heroBadgeLabel}
                 </div>
-                <div className="rounded-full border border-white/15 bg-black/25 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-white/92 backdrop-blur-sm">
+                <div
+                  className="kos-motion-enter rounded-full border border-white/15 bg-black/25 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-white/92 backdrop-blur-sm"
+                  data-motion-in={isExperienceReady}
+                  style={revealMotionStyle({ delay: motionDelay(2), intensity: 'subtle', direction: 'left' })}
+                >
                   {selectedCurrencyCode}
                 </div>
               </div>
 
               <div className="max-w-[34rem]">
                 <h2
-                  className="max-w-full pb-1 text-[2rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[2.75rem] md:text-[3.4rem]"
+                  className="kos-motion-enter max-w-full pb-1 text-[2rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[2.75rem] md:text-[3.4rem]"
+                  data-motion-in={isExperienceReady}
                   style={{
                     ...titleFontStyle,
+                    ...revealMotionStyle({ delay: motionDelay(3), duration: MOTION_TOKENS.duration.hero, intensity: 'strong' }),
                     overflowWrap: 'anywhere',
                   }}
                 >
@@ -3130,8 +3586,10 @@ export default function PublicMenuPage() {
                 </h2>
 
                 <p
-                  className="mt-3 max-w-xl text-sm font-medium leading-6 text-white/88 sm:text-[15px]"
+                  className="kos-motion-enter mt-3 max-w-xl text-sm font-medium leading-6 text-white/88 sm:text-[15px]"
+                  data-motion-in={isExperienceReady}
                   style={{
+                    ...revealMotionStyle({ delay: motionDelay(4), intensity: 'medium' }),
                     display: '-webkit-box',
                     WebkitLineClamp: 3,
                     WebkitBoxOrient: 'vertical',
@@ -3142,7 +3600,11 @@ export default function PublicMenuPage() {
                   {heroSubtitle}
                 </p>
 
-                <div className="mt-4 inline-flex w-fit max-w-[17rem] items-start gap-2 rounded-[15px] border border-white/16 bg-[rgba(255,255,255,0.09)] px-2.5 py-2 text-left shadow-[0_10px_22px_rgba(15,23,42,0.12)] backdrop-blur-md">
+                <div
+                  className="kos-motion-enter mt-4 inline-flex w-fit max-w-[17rem] items-start gap-2 rounded-[15px] border border-white/16 bg-[rgba(255,255,255,0.09)] px-2.5 py-2 text-left shadow-[0_10px_22px_rgba(15,23,42,0.12)] backdrop-blur-md"
+                  data-motion-in={isExperienceReady}
+                  style={revealMotionStyle({ delay: motionDelay(5), intensity: 'subtle' })}
+                >
                   <span className="mt-0.5 flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/92">
                     <MapPin className="h-3.5 w-3.5" strokeWidth={2.3} />
                   </span>
@@ -3160,7 +3622,11 @@ export default function PublicMenuPage() {
                 </div>
 
                 <div ref={statsCardsRef} className="mt-5 max-w-md">
-                  <div className="grid grid-cols-[0.78fr_0.9fr_1.62fr] overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(180deg,rgba(255,255,255,0.12)_0%,rgba(255,255,255,0.07)_100%)] shadow-[0_18px_32px_rgba(15,23,42,0.14)] backdrop-blur-md sm:grid-cols-[0.84fr_0.96fr_1.5fr] sm:rounded-[20px]">
+                  <div
+                    className="kos-motion-enter kos-float-subtle grid grid-cols-[0.78fr_0.9fr_1.62fr] overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(180deg,rgba(255,255,255,0.12)_0%,rgba(255,255,255,0.07)_100%)] shadow-[0_18px_32px_rgba(15,23,42,0.14)] backdrop-blur-md sm:grid-cols-[0.84fr_0.96fr_1.5fr] sm:rounded-[20px]"
+                    data-motion-in={isExperienceReady}
+                    style={revealMotionStyle({ delay: motionDelay(6), intensity: 'medium' })}
+                  >
                     <div className="flex min-h-[56px] flex-col items-center justify-center px-2.5 py-2 text-center sm:min-h-[64px] sm:px-3">
                       <span className="text-[17px] font-black leading-none text-white sm:text-[18px]">{animatedCategoryCount}</span>
                       <span className="mt-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/74 sm:text-[10px]">Categorías</span>
@@ -3201,8 +3667,12 @@ export default function PublicMenuPage() {
 
           <div
             ref={stickySearchCardRef}
-            className="sticky z-30 mt-4 overflow-visible rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-shadow duration-300 md:p-4 hover:shadow-[0_24px_70px_rgba(15,23,42,0.12)]"
-            style={{ top: `${stickySearchTopPx}px` }}
+            className="kos-motion-enter sticky z-30 mt-4 overflow-visible rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur-xl md:p-4"
+            data-motion-in={isExperienceReady}
+            style={{
+              ...revealMotionStyle({ delay: motionDelay(4), duration: MOTION_TOKENS.duration.hero, intensity: 'medium' }),
+              top: `${stickySearchTopPx}px`,
+            }}
           >
             <div className="pointer-events-none absolute inset-x-5 -bottom-4 h-8 rounded-full bg-gradient-to-b from-slate-900/12 via-slate-900/6 to-transparent blur-md" />
             <div className="rounded-[22px] border border-slate-200/90 bg-[color:color-mix(in_srgb,var(--card-surface)_95%,white)] p-3 sm:p-4">
@@ -3213,7 +3683,7 @@ export default function PublicMenuPage() {
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="Buscar producto..."
-                    className="h-12 w-full rounded-2xl border border-slate-200/90 bg-white pl-11 pr-12 text-sm font-semibold text-slate-900 outline-none transition duration-200 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-200/70"
+                    className="h-12 w-full rounded-2xl border border-slate-200/90 bg-white pl-11 pr-12 text-sm font-semibold text-slate-900 outline-none transition-[border-color,background-color,box-shadow] duration-200 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-200/70"
                   />
                   <svg
                     viewBox="0 0 24 24"
@@ -3233,7 +3703,7 @@ export default function PublicMenuPage() {
                     type="button"
                     onClick={() => setSearchQuery('')}
                     aria-label="Limpiar busqueda"
-                    className="absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                    className="kos-surface-motion kos-pressable absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4">
                       <path d="M6 6l12 12" />
@@ -3255,18 +3725,22 @@ export default function PublicMenuPage() {
                         categoryChipRefs.current[categoria.id] = element;
                       }}
                       onClick={() => scrollToCategory(categoria.id)}
-                      className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-extrabold uppercase tracking-[0.04em] transition-all duration-200 ${
+                      className={`kos-motion-enter kos-surface-motion kos-pressable kos-hover-subtle inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-extrabold uppercase tracking-[0.04em] ${
                         activeCategoryId === categoria.id
                           ? 'text-white shadow-[0_10px_24px_rgba(15,23,42,0.14)]'
-                          : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm'
+                          : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
                       }`}
+                      data-motion-in={isExperienceReady}
                       style={
-                        activeCategoryId === categoria.id
-                          ? {
-                              backgroundColor: 'var(--primary-color)',
-                              borderColor: 'var(--primary-color)',
-                            }
-                          : undefined
+                        {
+                          ...revealMotionStyle({ delay: motionDelay(categoria.productos.length > 0 ? visibleCategorias.findIndex((item) => item.id === categoria.id) + 5 : 5, 32), intensity: 'subtle' }),
+                          ...(activeCategoryId === categoria.id
+                            ? {
+                                backgroundColor: 'var(--primary-color)',
+                                borderColor: 'var(--primary-color)',
+                              }
+                            : undefined),
+                        }
                       }
                     >
                       <span
@@ -3292,9 +3766,9 @@ export default function PublicMenuPage() {
             <div className={`fixed right-4 z-[45] ${cartCount > 0 ? 'bottom-24 sm:bottom-28' : 'bottom-6 sm:bottom-8'}`}>
               <button
                 type="button"
-                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                onClick={() => window.scrollTo({ top: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' })}
                 aria-label="Volver arriba"
-                className="flex h-12 w-12 items-center justify-center rounded-full shadow-[0_18px_38px_rgba(15,23,42,0.24)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_24px_44px_rgba(15,23,42,0.28)]"
+                className="kos-surface-motion kos-pressable kos-hover-subtle flex h-12 w-12 items-center justify-center rounded-full shadow-[0_18px_38px_rgba(15,23,42,0.24)]"
                 style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
               >
                 <ArrowUp className="h-5 w-5" strokeWidth={2.6} />
@@ -3315,8 +3789,19 @@ export default function PublicMenuPage() {
             ) : (
               <div className="space-y-8">
                 {visibleCategorias.map((categoria) => (
-                  <section key={categoria.id} id={`categoria-${categoria.id}`} className="scroll-mt-[12rem]">
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                  <section
+                    key={categoria.id}
+                    id={`categoria-${categoria.id}`}
+                    ref={(element) => {
+                      categorySectionRefs.current[categoria.id] = element;
+                    }}
+                    className="scroll-mt-[12rem]"
+                  >
+                    <div
+                      className="kos-motion-enter mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2"
+                      data-motion-in={isExperienceReady || Boolean(revealedCategoryIds[categoria.id])}
+                      style={revealMotionStyle({ intensity: 'medium' })}
+                    >
                       <div className="flex min-w-0 flex-1 items-center gap-3">
                         <span
                           aria-hidden="true"
@@ -3361,13 +3846,16 @@ export default function PublicMenuPage() {
                               productCardRefs.current[producto.id] = element;
                             }}
                             data-product-id={producto.id}
-                            className="overflow-hidden rounded-[28px] border bg-[color:color-mix(in_srgb,var(--card-surface)_94%,white)] shadow-[0_18px_38px_rgba(15,23,42,0.07)] transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-0.5 hover:shadow-[0_28px_55px_rgba(15,23,42,0.10)]"
+                            className="kos-motion-enter kos-surface-motion kos-pressable kos-hover-subtle overflow-hidden rounded-[28px] border bg-[color:color-mix(in_srgb,var(--card-surface)_94%,white)] shadow-[0_18px_38px_rgba(15,23,42,0.07)]"
+                            data-motion-in={isExperienceReady || isProductRevealed}
                             style={{
+                              ...revealMotionStyle({
+                                delay: motionDelay(productIndex),
+                                duration: MOTION_TOKENS.duration.hero,
+                                intensity: 'medium',
+                              }),
                               borderColor: 'color-mix(in srgb, var(--primary-color) 12%, white)',
-                              opacity: isProductRevealed ? 1 : 0,
-                              transform: isProductRevealed ? 'translate3d(0,0,0) scale(1)' : 'translate3d(0,28px,0) scale(0.985)',
-                              filter: isProductRevealed ? 'blur(0px)' : 'blur(8px)',
-                              transitionDelay: isProductRevealed ? `${(productIndex % 6) * 55}ms` : '0ms',
+                              willChange: isProductRevealed ? 'auto' : 'transform, opacity',
                             }}
                           >
                             <div className="flex gap-3 p-3 sm:gap-4 sm:p-4">
@@ -3382,7 +3870,7 @@ export default function PublicMenuPage() {
                                       description: producto.descripcion?.trim() || 'Preparacion recomendada por la casa.',
                                     })
                                   }
-                                  className="relative h-[8.75rem] w-[8.4rem] shrink-0 overflow-hidden rounded-[22px] bg-slate-100 shadow-[0_14px_26px_rgba(15,23,42,0.14)] transition-transform duration-300 hover:scale-[1.02] sm:h-[10rem] sm:w-[9.5rem]"
+                                  className="kos-surface-motion kos-pressable kos-hover-subtle relative h-[8.75rem] w-[8.4rem] shrink-0 overflow-hidden rounded-[22px] bg-slate-100 shadow-[0_14px_26px_rgba(15,23,42,0.14)] sm:h-[10rem] sm:w-[9.5rem]"
                                   aria-label={`Ver imagen grande de ${producto.nombre}`}
                                 >
                                   <img
@@ -3441,7 +3929,7 @@ export default function PublicMenuPage() {
                                           incrementProduct(producto.id);
                                         }}
                                         disabled={isProductUnavailable}
-                                        className="inline-flex min-h-11 items-center justify-center rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_28px_rgba(15,23,42,0.14)] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_20px_34px_rgba(15,23,42,0.18)]"
+                                        className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex min-h-11 items-center justify-center rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_28px_rgba(15,23,42,0.14)]"
                                         style={{
                                           minWidth: '9rem',
                                           borderRadius: '18px',
@@ -3459,7 +3947,7 @@ export default function PublicMenuPage() {
                                         <button
                                           type="button"
                                           onClick={() => decrementProduct(producto.id)}
-                                          className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-lg font-black text-slate-700"
+                                          className="kos-surface-motion kos-pressable grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-lg font-black text-slate-700"
                                         >
                                           -
                                         </button>
@@ -3468,7 +3956,7 @@ export default function PublicMenuPage() {
                                           type="button"
                                           onClick={() => incrementProduct(producto.id)}
                                           disabled={isProductUnavailable}
-                                          className="grid h-9 w-9 place-items-center rounded-xl text-lg font-black"
+                                          className="kos-surface-motion kos-pressable grid h-9 w-9 place-items-center rounded-xl text-lg font-black"
                                           style={{
                                             backgroundColor: isProductUnavailable ? '#E2E8F0' : 'var(--primary-color)',
                                             color: isProductUnavailable ? '#94A3B8' : 'var(--text-on-primary)',
@@ -3545,7 +4033,7 @@ export default function PublicMenuPage() {
                     setIsConfirmOpen(true);
                   }}
                   disabled={isSubmittingOrder}
-                  className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-[#FACC15] px-4 py-3 text-sm font-black text-slate-950 shadow-[0_16px_32px_rgba(250,204,21,0.28)]"
+                  className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex min-h-12 items-center gap-2 rounded-2xl bg-[#FACC15] px-4 py-3 text-sm font-black text-slate-950 shadow-[0_16px_32px_rgba(250,204,21,0.28)]"
                 >
                   {isSubmittingOrder ? 'Procesando...' : 'Ver pedido'}
                   {!isSubmittingOrder ? <ArrowRight className="h-4 w-4" strokeWidth={2.5} /> : null}
@@ -3557,12 +4045,12 @@ export default function PublicMenuPage() {
 
         {expandedProductImage ? (
           <section
-            className="fixed inset-0 z-[57] bg-black/85 p-4"
+            className="kos-modal-backdrop fixed inset-0 z-[57] bg-black/85 p-4"
             onClick={() => setExpandedProductImage(null)}
           >
             <div className="mx-auto flex h-full max-w-5xl items-center justify-center">
               <div
-                className="w-full max-w-4xl"
+                className="kos-image-modal-panel w-full max-w-4xl"
                 onClick={(event) => event.stopPropagation()}
               >
                 <img
@@ -3580,7 +4068,7 @@ export default function PublicMenuPage() {
               <button
                 type="button"
                 onClick={() => setExpandedProductImage(null)}
-                className="absolute right-5 top-5 rounded-full border border-white/30 bg-black/40 px-3 py-1 text-xs font-semibold text-white"
+                className="kos-surface-motion kos-pressable absolute right-5 top-5 rounded-full border border-white/30 bg-black/40 px-3 py-1 text-xs font-semibold text-white"
               >
                 Cerrar
               </button>
@@ -3589,14 +4077,9 @@ export default function PublicMenuPage() {
         ) : null}
 
         {isInfoOpen ? (
-          <section className="fixed inset-0 z-[58] bg-white">
+          <section className="kos-modal-backdrop fixed inset-0 z-[58] bg-white">
             <div
-              className="mx-auto h-full max-w-3xl bg-white"
-              style={{
-                opacity: isInfoPanelReady ? 1 : 0,
-                transform: isInfoPanelReady ? 'translateX(0)' : 'translateX(18px)',
-                transition: 'opacity 220ms ease, transform 220ms ease',
-              }}
+              className="kos-side-panel-enter mx-auto h-full max-w-3xl bg-white"
             >
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:px-6">
                 <div>
@@ -3607,7 +4090,7 @@ export default function PublicMenuPage() {
                 <button
                   type="button"
                   onClick={() => setIsInfoOpen(false)}
-                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600"
+                  className="kos-surface-motion kos-pressable rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600"
                 >
                   Cerrar
                 </button>
@@ -3801,8 +4284,8 @@ export default function PublicMenuPage() {
         ) : null}
 
         {isMapPickerOpen ? (
-          <section className="fixed inset-0 z-[61] bg-white">
-            <div className="mx-auto flex h-full max-w-2xl flex-col bg-white">
+          <section className="kos-modal-backdrop fixed inset-0 z-[61] bg-white">
+            <div className="kos-sheet-panel mx-auto flex h-full max-w-2xl flex-col bg-white">
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:px-6">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Mapa</p>
@@ -3886,7 +4369,7 @@ export default function PublicMenuPage() {
                 <div ref={mapPickerContainerRef} className="h-full w-full bg-slate-100" />
                 <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center">
                   <div
-                    className={`-mt-6 text-4xl leading-none transition-all duration-200 ease-out ${
+                    className={`-mt-6 text-4xl leading-none transition-[transform] duration-200 ease-out ${
                       isMapPickerDragging
                         ? '-translate-y-3 scale-110 drop-shadow-[0_16px_14px_rgba(15,23,42,0.24)]'
                         : 'translate-y-0 scale-100 drop-shadow-[0_8px_8px_rgba(15,23,42,0.22)]'
@@ -3987,8 +4470,11 @@ export default function PublicMenuPage() {
                     <div className="checkout-panel-enter rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5">
                       <div className="h-1 overflow-hidden rounded-full bg-slate-200">
                         <div
-                          className="h-full rounded-full transition-all duration-300"
-                          style={{ width: `${Math.max(checkoutProgress * 100, 8)}%`, backgroundColor: 'var(--primary-color)' }}
+                          className="h-full origin-left rounded-full transition-transform duration-300"
+                          style={{
+                            transform: `scaleX(${Math.max(checkoutProgress, 0.08)})`,
+                            backgroundColor: 'var(--primary-color)',
+                          }}
                         />
                       </div>
                       <div className="mt-4 grid grid-cols-4 items-start">
@@ -4005,7 +4491,7 @@ export default function PublicMenuPage() {
                               ) : null}
                               <div className="relative z-[1] flex flex-col items-center bg-white px-2">
                                 <div
-                                  className={`grid h-9 w-9 place-items-center rounded-full border text-sm font-black transition-all duration-300 ${isActive ? 'checkout-step-active' : ''}`}
+                                  className={`grid h-9 w-9 place-items-center rounded-full border text-sm font-black transition-[transform,background-color,border-color,color] duration-300 ${isActive ? 'checkout-step-active' : ''}`}
                                   style={
                                     isActive
                                       ? {
@@ -4128,9 +4614,9 @@ export default function PublicMenuPage() {
                                     const targetTop = target
                                       ? window.scrollY + target.getBoundingClientRect().top - (topTickerHeightPx + topAppBarHeightPx + 12)
                                       : 0;
-                                    window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+                                    window.scrollTo({ top: Math.max(0, targetTop), behavior: prefersReducedMotion ? 'auto' : 'smooth' });
                                   }}
-                                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_32px_rgba(15,23,42,0.14)]"
+                                  className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_32px_rgba(15,23,42,0.14)]"
                                   style={{
                                     backgroundColor: 'var(--primary-color)',
                                     color: 'var(--text-on-primary)',
@@ -4612,7 +5098,7 @@ export default function PublicMenuPage() {
                   </div>
 
                   <div
-                    className={`grid overflow-hidden transition-all duration-300 ease-out ${isCheckoutFooterExpanded && paymentMethodsByCurrency.length > 1 ? 'mt-3 grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+                    className={`overflow-hidden ${isCheckoutFooterExpanded && paymentMethodsByCurrency.length > 1 ? 'mt-3 opacity-100' : 'hidden opacity-0'}`}
                   >
                     <div className="min-h-0">
                       <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3">
