@@ -1794,7 +1794,7 @@ class _AiImagesOptInCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Solo disponible una vez durante onboarding y sujeto a creditos IA.',
+                  'Incluye hasta 30 creditos iniciales. En onboarding se usa una sola vez y mantiene el tope de 25 imagenes.',
                   style: GoogleFonts.poppins(
                     color: AppColors.textSoft,
                     fontSize: 11.5,

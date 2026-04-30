@@ -15,7 +15,7 @@ declare
   v_reason text := nullif(trim(coalesce(p_reason, '')), '');
   v_is_refund boolean := coalesce(v_reason, '') ilike '%refund%';
 begin
-  perform public.ensure_ai_credits_wallet(p_commerce_id, 100);
+  perform public.ensure_ai_credits_wallet(p_commerce_id, 30);
 
   if v_amount <= 0 then
     select * into v_row from public.ai_credits_wallet where commerce_id = p_commerce_id;

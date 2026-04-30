@@ -1,22 +1,3 @@
-create table if not exists public.ai_credits_wallet (
-  id uuid primary key default gen_random_uuid(),
-  commerce_id uuid not null unique,
-  credits_balance numeric not null default 0,
-  credits_used numeric not null default 0,
-  created_at timestamp not null default now(),
-  updated_at timestamp not null default now()
-);
-
-create table if not exists public.ai_credits_transactions (
-  id uuid primary key default gen_random_uuid(),
-  commerce_id uuid not null,
-  type text not null check (type in ('credit', 'debit')),
-  amount numeric not null,
-  reason text,
-  metadata jsonb,
-  created_at timestamp not null default now()
-);
-
 create or replace function public.ensure_ai_credits_wallet(
   p_commerce_id uuid,
   p_initial_credits numeric default 30
@@ -85,6 +66,8 @@ as $$
 declare
   v_row public.ai_credits_wallet;
   v_amount numeric := greatest(coalesce(p_amount, 0), 0);
+  v_reason text := nullif(trim(coalesce(p_reason, '')), '');
+  v_is_refund boolean := coalesce(v_reason, '') ilike '%refund%';
 begin
   perform public.ensure_ai_credits_wallet(p_commerce_id, 30);
 
@@ -96,6 +79,10 @@ begin
   update public.ai_credits_wallet
   set
     credits_balance = credits_balance + v_amount,
+    credits_used = case
+      when v_is_refund then greatest(credits_used - v_amount, 0)
+      else credits_used
+    end,
     updated_at = now()
   where commerce_id = p_commerce_id
   returning * into v_row;
@@ -111,7 +98,7 @@ begin
     p_commerce_id,
     'credit',
     v_amount,
-    nullif(trim(coalesce(p_reason, '')), ''),
+    v_reason,
     coalesce(p_metadata, '{}'::jsonb)
   );
 
@@ -184,36 +171,6 @@ begin
   return new;
 end;
 $$;
-
-drop trigger if exists trg_seed_ai_credits_wallet on public.comercios;
-
-create trigger trg_seed_ai_credits_wallet
-after insert on public.comercios
-for each row execute function public.trg_seed_ai_credits_wallet();
-
-insert into public.ai_credits_wallet (
-  commerce_id,
-  credits_balance,
-  credits_used
-)
-select c.id, 30, 0
-from public.comercios c
-left join public.ai_credits_wallet w on w.commerce_id = c.id
-where w.id is null;
-
-insert into public.ai_credits_transactions (
-  commerce_id,
-  type,
-  amount,
-  reason,
-  metadata
-)
-select c.id, 'credit', 30, 'initial_signup_credits', jsonb_build_object('source', 'backfill')
-from public.comercios c
-left join public.ai_credits_transactions t
-  on t.commerce_id = c.id
- and t.reason = 'initial_signup_credits'
-where t.id is null;
 
 revoke all on function public.ensure_ai_credits_wallet(uuid, numeric) from public;
 revoke all on function public.ensure_ai_credits_wallet(uuid, numeric) from anon;
