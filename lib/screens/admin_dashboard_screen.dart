@@ -1434,6 +1434,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 'Administra tu perfil público y abre el menú en segundos.',
                             onEdit: () => _editBusinessInfo(data.comercio),
                             onManageMenu: _openCurrentMenuManager,
+                            businessOnline: _businessOnline,
+                            businessLogoUrl: data.comercio.logoUrl,
                             purple: _purple,
                           ),
                           const SizedBox(height: 12),
@@ -1914,6 +1916,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
     required this.subtitle,
     required this.onEdit,
     required this.onManageMenu,
+    required this.businessOnline,
+    required this.businessLogoUrl,
     required this.purple,
   });
 
@@ -1921,6 +1925,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
   final String subtitle;
   final VoidCallback onEdit;
   final VoidCallback onManageMenu;
+  final bool businessOnline;
+  final String? businessLogoUrl;
   final Color purple;
 
   @override
@@ -1931,6 +1937,13 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
     const darkText = Color(0xFF11183C);
     const bodyText = Color(0xFF5E6282);
     const success = Color(0xFF16A34A);
+    const danger = Color(0xFFEF4444);
+    final hasLogo = (businessLogoUrl ?? '').trim().isNotEmpty;
+    final statusColor = businessOnline ? success : danger;
+    final statusBackground = businessOnline
+      ? const Color(0xFFDDF7E7)
+      : const Color(0xFFFEE2E2);
+    final statusLabel = businessOnline ? 'Abierto' : 'Pausado';
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1976,8 +1989,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
-                          width: 52,
-                          height: 52,
+                          width: 56,
+                          height: 56,
                           decoration: BoxDecoration(
                             color: surface.withValues(alpha: 0.9),
                             shape: BoxShape.circle,
@@ -1985,10 +1998,22 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                               color: accentText.withValues(alpha: 0.14),
                             ),
                           ),
-                          child: const Icon(
-                            Icons.storefront_rounded,
-                            color: accentText,
-                            size: 26,
+                          child: ClipOval(
+                            child: hasLogo
+                                ? Image.network(
+                                    businessLogoUrl!.trim(),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => const Icon(
+                                      Icons.storefront_rounded,
+                                      color: accentText,
+                                      size: 28,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.storefront_rounded,
+                                    color: accentText,
+                                    size: 28,
+                                  ),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -2088,8 +2113,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                   Container(
                     width: 10,
                     height: 10,
-                    decoration: const BoxDecoration(
-                      color: success,
+                    decoration: BoxDecoration(
+                      color: statusColor,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -2109,13 +2134,13 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                       vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFDDF7E7),
+                      color: statusBackground,
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
-                      'Abierto',
+                      statusLabel,
                       style: GoogleFonts.poppins(
-                        color: success,
+                        color: statusColor,
                         fontWeight: FontWeight.w700,
                         fontSize: 12.5,
                       ),
@@ -2829,37 +2854,60 @@ class _CompactBusinessInfoCard extends StatelessWidget {
     final slugLabel = (comercio.slug ?? '').trim().isEmpty
         ? 'Sin slug'
         : '@${comercio.slug!.trim()}';
+    final creditsLabel =
+        '${aiCreditsBalance.toStringAsFixed(aiCreditsBalance % 1 == 0 ? 0 : 2)} disponibles · ${aiCreditsUsed.toStringAsFixed(aiCreditsUsed % 1 == 0 ? 0 : 2)} usados';
 
-    Widget infoLine({
+    Widget detailCard({
       required String label,
       required String value,
       required IconData icon,
+      required Color accent,
     }) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 7),
+      return Container(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 11),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE7E2F6)),
+        ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 15, color: purple),
-            const SizedBox(width: 7),
-            Text(
-              '$label:',
-              style: GoogleFonts.poppins(
-                fontSize: 11.2,
-                color: mutedText,
-                fontWeight: FontWeight.w600,
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
               ),
+              child: Icon(icon, size: 18, color: accent),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 11.8,
-                  color: darkText,
-                  fontWeight: FontWeight.w600,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: GoogleFonts.poppins(
+                      fontSize: 10.8,
+                      color: mutedText,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    value,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.5,
+                      color: darkText,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -2867,103 +2915,253 @@ class _CompactBusinessInfoCard extends StatelessWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 11, 12, 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE8EAF2)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x100F172A),
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Información de tu negocio',
-            style: GoogleFonts.poppins(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w700,
-              color: darkText,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useSingleColumn = constraints.maxWidth < 360;
+        final infoCardWidth = useSingleColumn
+            ? constraints.maxWidth
+            : (constraints.maxWidth - 12) / 2;
+
+        return Container(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFFF8F4FF), Color(0xFFFFFFFF)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: const Color(0xFFE7E2F6)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x120F172A),
+                blurRadius: 16,
+                offset: Offset(0, 8),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          infoLine(
-            label: 'Nombre',
-            value: comercio.nombre,
-            icon: Icons.storefront_rounded,
-          ),
-          infoLine(
-            label: 'WhatsApp',
-            value: whatsappLabel,
-            icon: Icons.phone_in_talk_outlined,
-          ),
-          infoLine(
-            label: 'Slug',
-            value: slugLabel,
-            icon: Icons.alternate_email_rounded,
-          ),
-          infoLine(
-            label: 'Créditos IA',
-            value:
-                '${aiCreditsBalance.toStringAsFixed(aiCreditsBalance % 1 == 0 ? 0 : 2)} disponibles · ${aiCreditsUsed.toStringAsFixed(aiCreditsUsed % 1 == 0 ? 0 : 2)} usados',
-            icon: Icons.auto_awesome_rounded,
-          ),
-          const SizedBox(height: 2),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF6F2FF),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  businessOnline
-                      ? Icons.wifi_tethering_rounded
-                      : Icons.wifi_tethering_off_rounded,
-                  size: 16,
-                  color: businessOnline
-                      ? const Color(0xFF16A34A)
-                      : const Color(0xFFEF4444),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    businessOnline ? 'Negocio en línea' : 'Negocio pausado',
-                    style: GoogleFonts.poppins(
-                      fontSize: 11.6,
-                      fontWeight: FontWeight.w600,
-                      color: darkText,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: purple.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      Icons.domain_add_rounded,
+                      color: purple,
+                      size: 25,
                     ),
                   ),
-                ),
-                if (isUpdatingBusinessOnline)
-                  const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  Transform.scale(
-                    scale: 0.82,
-                    child: Switch.adaptive(
-                      value: businessOnline,
-                      onChanged: onToggleOnline,
-                      activeThumbColor: purple,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Información de tu negocio',
+                          style: GoogleFonts.poppins(
+                            fontSize: 15.2,
+                            fontWeight: FontWeight.w700,
+                            color: darkText,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Revisa tus datos públicos, el estado de tu negocio y tu saldo de IA en un vistazo.',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12.2,
+                            color: mutedText,
+                            fontWeight: FontWeight.w500,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-              ],
-            ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  SizedBox(
+                    width: infoCardWidth,
+                    child: detailCard(
+                      label: 'Nombre del negocio',
+                      value: comercio.nombre,
+                      icon: Icons.storefront_rounded,
+                      accent: purple,
+                    ),
+                  ),
+                  SizedBox(
+                    width: infoCardWidth,
+                    child: detailCard(
+                      label: 'WhatsApp',
+                      value: whatsappLabel,
+                      icon: Icons.phone_in_talk_outlined,
+                      accent: const Color(0xFF16A34A),
+                    ),
+                  ),
+                  SizedBox(
+                    width: infoCardWidth,
+                    child: detailCard(
+                      label: 'Slug público',
+                      value: slugLabel,
+                      icon: Icons.alternate_email_rounded,
+                      accent: const Color(0xFF2563EB),
+                    ),
+                  ),
+                  SizedBox(
+                    width: infoCardWidth,
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 11),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3EDFF),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: purple.withValues(alpha: 0.14),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: purple.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 18,
+                              color: purple,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Créditos IA',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 10.8,
+                                    color: mutedText,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  creditsLabel,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12.5,
+                                    color: darkText,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE7E2F6)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: (businessOnline
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFFEF4444))
+                            .withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        businessOnline
+                            ? Icons.wifi_tethering_rounded
+                            : Icons.wifi_tethering_off_rounded,
+                        size: 18,
+                        color: businessOnline
+                            ? const Color(0xFF16A34A)
+                            : const Color(0xFFEF4444),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Estado operativo',
+                            style: GoogleFonts.poppins(
+                              fontSize: 10.8,
+                              color: mutedText,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            businessOnline
+                                ? 'Negocio en línea y visible para tus clientes'
+                                : 'Negocio pausado temporalmente',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12.4,
+                              fontWeight: FontWeight.w700,
+                              color: darkText,
+                              height: 1.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (isUpdatingBusinessOnline)
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else
+                      Transform.scale(
+                        scale: 0.84,
+                        child: Switch.adaptive(
+                          value: businessOnline,
+                          onChanged: onToggleOnline,
+                          activeThumbColor: purple,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
