@@ -1,0 +1,4 @@
+project_id = "qqhberaayhohxlbbhdyi"
+
+[functions.process-ai-image-jobs]
+verify_jwt = false

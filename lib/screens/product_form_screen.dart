@@ -116,6 +116,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return <String, dynamic>{};
   }
 
+  bool get _canGenerateAiImage => widget.product != null;
+
   Future<void> _loadAiCredits() async {
     final comercioId = SupabaseConfig.currentComercioId.trim();
     if (comercioId.isEmpty) return;
@@ -925,6 +927,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   heroTag: widget.product != null
                       ? 'hero-product-image-${widget.product!.id}'
                       : null,
+                  canGenerateAiImage: _canGenerateAiImage,
                   isSaving: _isSaving,
                   isUploadingImage: _isUploadingImage,
                   isGeneratingDescription: _isGeneratingDescription,
@@ -1038,6 +1041,7 @@ class _ImagePanel extends StatelessWidget {
     required this.remoteImageUrl,
     required this.fallbackImageUrl,
     required this.heroTag,
+    required this.canGenerateAiImage,
     required this.isSaving,
     required this.isUploadingImage,
     required this.isGeneratingDescription,
@@ -1051,6 +1055,7 @@ class _ImagePanel extends StatelessWidget {
   final String? remoteImageUrl;
   final String fallbackImageUrl;
   final String? heroTag;
+  final bool canGenerateAiImage;
   final bool isSaving;
   final bool isUploadingImage;
   final bool isGeneratingDescription;
@@ -1220,7 +1225,9 @@ class _ImagePanel extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Genera imagen y descripción optimizada para vender más',
+                  canGenerateAiImage
+                      ? 'Genera imagen y descripción optimizada para vender más'
+                      : 'Guarda primero el producto para habilitar la imagen con IA',
                   style: GoogleFonts.manrope(
                     color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w500,
@@ -1237,9 +1244,15 @@ class _ImagePanel extends StatelessWidget {
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton.icon(
-                              onPressed: isSaving ? null : onGenerateAiImageAction,
+                              onPressed: (!canGenerateAiImage || isSaving)
+                                  ? null
+                                  : onGenerateAiImageAction,
                               icon: const Icon(Icons.auto_awesome),
-                              label: const Text('Mejorar imagen'),
+                              label: Text(
+                                canGenerateAiImage
+                                    ? 'Mejorar imagen'
+                                    : 'Guarda para imagen IA',
+                              ),
                               style: FilledButton.styleFrom(
                                 minimumSize: const Size.fromHeight(48),
                               ),
@@ -1279,9 +1292,15 @@ class _ImagePanel extends StatelessWidget {
                       children: [
                         Expanded(
                           child: FilledButton.icon(
-                            onPressed: isSaving ? null : onGenerateAiImageAction,
+                            onPressed: (!canGenerateAiImage || isSaving)
+                                ? null
+                                : onGenerateAiImageAction,
                             icon: const Icon(Icons.auto_awesome),
-                            label: const Text('Mejorar imagen'),
+                            label: Text(
+                              canGenerateAiImage
+                                  ? 'Mejorar imagen'
+                                  : 'Guarda para imagen IA',
+                            ),
                             style: FilledButton.styleFrom(
                               minimumSize: const Size.fromHeight(48),
                             ),

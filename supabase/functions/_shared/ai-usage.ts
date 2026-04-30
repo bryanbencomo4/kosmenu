@@ -6,6 +6,7 @@ const INITIAL_AI_CREDITS = 30;
 const COST_IMAGE = 1;
 const COST_MENU = 0.5;
 const COST_BRANDING = 0.5;
+const COST_CATEGORY_ICON = 0.5;
 
 type AiUsageControlRow = {
   id: string;
@@ -454,6 +455,7 @@ function normalizeNumber(value: unknown): number {
 
 export {
   COST_BRANDING,
+  COST_CATEGORY_ICON,
   COST_IMAGE,
   COST_MENU,
   INITIAL_AI_CREDITS,

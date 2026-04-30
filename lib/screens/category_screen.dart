@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_print
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,6 +13,7 @@ import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/category_icon_ai_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -138,37 +140,32 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
               child: Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
                   color: colorScheme.surfaceContainerHigh,
-                  border: Border.all(
-                    color: colorScheme.primary.withValues(alpha: 0.28),
-                  ),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: colorScheme.outlineVariant),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.menu_book_rounded,
-                      size: 38,
-                      color: colorScheme.primary,
-                    ),
-                    const SizedBox(height: 10),
                     Text(
-                      'Aún no tienes un menú creado',
-                      textAlign: TextAlign.center,
+                      'Todavía no tienes un menú principal',
                       style: GoogleFonts.manrope(
                         color: colorScheme.onSurface,
                         fontWeight: FontWeight.w800,
-                        fontSize: 18,
+                        fontSize: 22,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 10),
                     Text(
-                      'Por ahora trabajamos con un solo menú. Se creará automáticamente como "Menu principal".',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                      'Crea tu primer menú para empezar a organizar categorías y productos.',
+                      style: GoogleFonts.manrope(
+                        color: colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 14,
+                      ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 18),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
@@ -176,6 +173,9 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
                         icon: const Icon(Icons.add_rounded),
                         label: Text(
                           _isCreating ? 'Creando...' : 'Crear menú principal',
+                        ),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
                         ),
                       ),
                     ),
@@ -185,366 +185,6 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class CatalogListScreen extends StatefulWidget {
-  const CatalogListScreen({super.key});
-
-  @override
-  State<CatalogListScreen> createState() => _CatalogListScreenState();
-}
-
-class _CatalogListScreenState extends State<CatalogListScreen> {
-  bool _loading = true;
-  bool _isMutating = false;
-  List<CatalogModel> _catalogs = <CatalogModel>[];
-
-  bool get _canCreateCatalog => _catalogs.isEmpty;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadCatalogs();
-  }
-
-  Future<void> _loadCatalogs() async {
-    if (!mounted) return;
-    final comercioId = SupabaseConfig.currentComercioId.trim();
-    print('DEBUG: Buscando catálogos para comercio: $comercioId');
-
-    if (comercioId.isEmpty) {
-      setState(() {
-        _catalogs = <CatalogModel>[];
-        _loading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No hay comercio_id configurado para cargar catálogos.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    setState(() => _loading = true);
-    try {
-      final rows = await Supabase.instance.client
-          .from('catalogos')
-          .select()
-          .eq('comercio_id', comercioId)
-          .order('orden', ascending: true)
-          .order('nombre', ascending: true);
-
-      print('DEBUG: response.status: success');
-      print('DEBUG: response.data: $rows');
-      print('DEBUG: Resultado de Supabase: $rows');
-
-      final catalogs = (rows as List<dynamic>)
-          .map(
-            (row) =>
-                CatalogModel.fromMap(Map<String, dynamic>.from(row as Map)),
-          )
-          .toList();
-
-      if (!mounted) return;
-      setState(() => _catalogs = catalogs);
-    } catch (error) {
-      print('DEBUG: response.status: error');
-      print('DEBUG: response.data: null');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudieron cargar catálogos: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
-    }
-  }
-
-  Future<String?> _showNameDialog({
-    required String title,
-    String initialValue = '',
-  }) async {
-    String draft = initialValue;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: colorScheme.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-        contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-        actionsPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-        title: Text(
-          title,
-          style: GoogleFonts.manrope(
-            color: colorScheme.onSurface,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        content: Container(
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: TextFormField(
-            initialValue: initialValue,
-            onChanged: (value) => draft = value,
-            onFieldSubmitted: (value) =>
-                Navigator.of(dialogContext).pop(value.trim()),
-            autofocus: true,
-            textCapitalization: TextCapitalization.words,
-            style: TextStyle(color: colorScheme.onSurface),
-            cursorColor: colorScheme.primary,
-            decoration: InputDecoration(
-              hintText: 'Nombre',
-              hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              errorBorder: InputBorder.none,
-              focusedErrorBorder: InputBorder.none,
-              disabledBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(
-              'Cancelar',
-              style: TextStyle(color: colorScheme.onSurfaceVariant),
-            ),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(draft.trim()),
-            style: FilledButton.styleFrom(
-              backgroundColor: colorScheme.primary,
-              foregroundColor: colorScheme.onPrimary,
-            ),
-            child: const Text('Guardar'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _createCatalog() async {
-    if (_isMutating) return;
-    if (!_canCreateCatalog) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Por ahora solo se permite 1 catalogo por negocio.'),
-        ),
-      );
-      return;
-    }
-
-    final name = await _showNameDialog(title: 'Nuevo Catálogo');
-    if (!mounted || name == null || name.isEmpty) return;
-
-    setState(() => _isMutating = true);
-    try {
-      final maxOrder = _catalogs.isEmpty
-          ? 0
-          : _catalogs.map((c) => c.orden).reduce((a, b) => a > b ? a : b) + 1;
-
-      await Supabase.instance.client.from('catalogos').insert({
-        'comercio_id': SupabaseConfig.currentComercioId,
-        'nombre': name,
-        'orden': maxOrder,
-        'activo': true,
-      });
-
-      await _loadCatalogs();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo crear catálogo: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
-      }
-    }
-  }
-
-  Future<void> _editCatalog(CatalogModel catalog) async {
-    if (_isMutating) return;
-    final name = await _showNameDialog(
-      title: 'Editar Catálogo',
-      initialValue: catalog.nombre,
-    );
-    if (!mounted || name == null || name.isEmpty || name == catalog.nombre) {
-      return;
-    }
-
-    setState(() => _isMutating = true);
-    try {
-      await Supabase.instance.client
-          .from('catalogos')
-          .update({'nombre': name})
-          .eq('comercio_id', SupabaseConfig.currentComercioId)
-          .eq('id', catalog.id);
-
-      await _loadCatalogs();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo editar catálogo: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
-      }
-    }
-  }
-
-  Future<void> _deleteCatalog(CatalogModel catalog) async {
-    if (_isMutating) return;
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final colorScheme = Theme.of(dialogContext).colorScheme;
-        return AlertDialog(
-          backgroundColor: colorScheme.surfaceContainerHigh,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          title: Text(
-            'Eliminar catálogo',
-            style: GoogleFonts.manrope(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          content: Text(
-            '¿Eliminar "${catalog.nombre}" y sus categorías?',
-            style: TextStyle(color: colorScheme.onSurfaceVariant),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(
-                'Cancelar',
-                style: TextStyle(color: colorScheme.onSurfaceVariant),
-              ),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: colorScheme.primary,
-                foregroundColor: colorScheme.onPrimary,
-              ),
-              child: const Text('Eliminar'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (!mounted || confirm != true) return;
-
-    setState(() => _isMutating = true);
-    try {
-      await Supabase.instance.client
-          .from('catalogos')
-          .delete()
-          .eq('comercio_id', SupabaseConfig.currentComercioId)
-          .eq('id', catalog.id)
-          .select('id');
-
-      await _loadCatalogs();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo eliminar catálogo: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
-      }
-    }
-  }
-
-  Future<void> _openCategories(CatalogModel catalog) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CatalogCategoriesScreen(catalog: catalog),
-      ),
-    );
-
-    await _loadCatalogs();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    if (_loading) {
-      return const BrandedLoadingScreen(withScaffold: true);
-    }
-
-    return Scaffold(
-      backgroundColor: colorScheme.surface,
-      appBar: AppBar(
-        backgroundColor: colorScheme.surfaceContainerHighest,
-        foregroundColor: colorScheme.onSurface,
-        titleTextStyle: GoogleFonts.manrope(
-          color: colorScheme.onSurface,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
-        ),
-        title: const Text('Gestión de Catálogos'),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: (_loading || _isMutating || !_canCreateCatalog)
-            ? null
-            : _createCatalog,
-        backgroundColor: colorScheme.primary,
-        foregroundColor: colorScheme.onPrimary,
-        icon: Icon(_canCreateCatalog ? Icons.add : Icons.block_rounded),
-        label: Text(_canCreateCatalog ? 'Nuevo Catálogo' : '1 catálogo activo'),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _loadCatalogs,
-        child: _catalogs.isEmpty
-            ? ListView(
-                physics: AlwaysScrollableScrollPhysics(),
-                children: [
-                  SizedBox(height: 160),
-                  Center(
-                    child: Text(
-                      'No hay catálogos creados',
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                  ),
-                ],
-              )
-            : ListView.builder(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 120),
-                itemCount: _catalogs.length,
-                itemBuilder: (context, index) {
-                  final catalog = _catalogs[index];
-                  return _CatalogCard(
-                    catalog: catalog,
-                    enabled: !_isMutating,
-                    onOpen: () => _openCategories(catalog),
-                    onEdit: () => _editCatalog(catalog),
-                    onDelete: () => _deleteCatalog(catalog),
-                  );
-                },
-              ),
       ),
     );
   }
@@ -562,6 +202,7 @@ class CatalogCategoriesScreen extends StatefulWidget {
 
 class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   bool _loading = true;
+  bool _hasLoadedInitialSnapshot = false;
   bool _isMutating = false;
   bool _isSavingCategoryOrder = false;
   List<CategoryModel> _categories = <CategoryModel>[];
@@ -576,6 +217,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   Map<String, int> _productCountByCategory = <String, int>{};
   Timer? _aiImageRefreshTimer;
   final AiImageService _aiImageService = const AiImageService();
+  final CategoryIconAiService _categoryIconAiService =
+      const CategoryIconAiService();
 
   String get _currentCatalogoId => widget.catalog.id.trim();
 
@@ -604,7 +247,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     super.dispose();
   }
 
-  Future<void> _loadCategories() async {
+  Future<void> _loadCategories({bool showLoadingIndicator = true}) async {
     if (!mounted) return;
     if (_currentCatalogoId.isEmpty) {
       setState(() {
@@ -614,7 +257,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       return;
     }
 
-    setState(() => _loading = true);
+    if (showLoadingIndicator) {
+      setState(() => _loading = true);
+    }
+
     try {
       final rows = await Supabase.instance.client
           .from('categorias')
@@ -632,7 +278,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           .toList();
 
       if (!mounted) return;
-      setState(() => _categories = categories);
+      setState(() {
+        _categories = categories;
+        _hasLoadedInitialSnapshot = true;
+      });
       await _loadProducts(categories);
     } catch (error) {
       if (!mounted) return;
@@ -640,7 +289,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         SnackBar(content: Text('No se pudieron cargar categorías: $error')),
       );
     } finally {
-      if (mounted) {
+      if (mounted && showLoadingIndicator) {
         setState(() => _loading = false);
       }
     }
@@ -709,6 +358,510 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         _selectedProductCategoryId = null;
       });
       _showMessage('No se pudieron cargar productos: $error');
+    }
+  }
+
+  Future<bool?> _confirmCategoryAiIconGeneration() {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          backgroundColor: colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            'Generar icono con IA',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: Text(
+            'Se descontará 0.5 crédito para sugerir el mejor icono para esta categoría. ¿Deseas continuar?',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+              ),
+              label: const Text('Generar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _formatCategoryIconAiErrorMessage(Object error) {
+    final message = error.toString().replaceFirst('Bad state: ', '').trim();
+    final normalized = message.toLowerCase();
+    if (normalized.contains('not enough credits')) {
+      return 'No tienes créditos IA suficientes para generar un icono.';
+    }
+    if (normalized.contains('ai disabled')) {
+      return 'La IA no está habilitada para este comercio.';
+    }
+    if (normalized.contains('gemini error')) {
+      return 'No se pudo generar el icono IA en este momento.';
+    }
+    if (normalized.contains('boot_error') ||
+        normalized.contains('function failed to start') ||
+        normalized.contains('service unavailable') ||
+        normalized.contains('functionexception')) {
+      return 'El servicio de iconos IA no está disponible en este momento. Inténtalo nuevamente en unos minutos.';
+    }
+    return message.isEmpty ? 'No se pudo generar el icono IA.' : message;
+  }
+
+  Future<_CategoryEditorResult?> _showCategoryEditorSheet({
+    required String title,
+    CategoryModel? category,
+  }) async {
+    final colorScheme = Theme.of(context).colorScheme;
+    final nameController = TextEditingController(text: category?.nombre ?? '');
+    var selectedIconKey = _normalizeCategoryIconKey(category?.icono) ??
+        _suggestCategoryIconKey(category?.nombre ?? '');
+    var generatedWithAi = category?.creadoPorIa == true;
+    var aiConfidence = category?.confianzaIa;
+    var isGeneratingAi = false;
+    String? helperMessage;
+
+    final result = await showModalBottomSheet<_CategoryEditorResult>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            final media = MediaQuery.of(sheetContext);
+            final iconOption =
+                _categoryIconOptionByKey(selectedIconKey) ?? _categoryIconOptions.first;
+
+            Future<void> generateWithAi() async {
+              final categoryName = nameController.text.trim();
+              if (categoryName.isEmpty) {
+                setSheetState(() {
+                  helperMessage =
+                      'Escribe primero el nombre de la categoría para usar IA.';
+                });
+                return;
+              }
+
+              final confirmed = await _confirmCategoryAiIconGeneration();
+              if (confirmed != true) return;
+
+              setSheetState(() {
+                isGeneratingAi = true;
+                helperMessage = null;
+              });
+
+              try {
+                final suggestion = await _categoryIconAiService.generateIcon(
+                  comercioId: SupabaseConfig.currentComercioId,
+                  categoryName: categoryName,
+                  context:
+                      'Selecciona un icono para una categoría de menú de restaurante.',
+                );
+
+                if (!mounted) return;
+                setSheetState(() {
+                  selectedIconKey = suggestion.iconKey;
+                  generatedWithAi = true;
+                  aiConfidence = suggestion.confidence;
+                  helperMessage = suggestion.reason.isNotEmpty
+                      ? '${suggestion.reason} · ${suggestion.creditsCharged.toStringAsFixed(1)} crédito'
+                      : 'Icono generado con IA.';
+                });
+              } catch (error) {
+                if (!mounted) return;
+                setSheetState(() {
+                  helperMessage = _formatCategoryIconAiErrorMessage(error);
+                });
+              } finally {
+                if (mounted) {
+                  setSheetState(() => isGeneratingAi = false);
+                }
+              }
+            }
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  8,
+                  20,
+                  max(20, media.viewInsets.bottom + 12),
+                ),
+                child: SizedBox(
+                  height: media.size.height * 0.84,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                style: GoogleFonts.manrope(
+                                  color: colorScheme.onSurface,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 22,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Elige un icono manualmente o pide una sugerencia con IA.',
+                                style: GoogleFonts.manrope(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              TextField(
+                                controller: nameController,
+                                autofocus: category == null,
+                                onChanged: (_) => setSheetState(() {}),
+                                textCapitalization: TextCapitalization.words,
+                                cursorColor: colorScheme.primary,
+                                decoration: InputDecoration(
+                                  labelText: 'Nombre de la categoría',
+                                  hintText: 'Ej: Hamburguesas, Postres, Bebidas',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.surfaceContainerHigh,
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(color: colorScheme.outlineVariant),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 56,
+                                      height: 56,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF6D28D9).withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Icon(
+                                        iconOption.icon,
+                                        color: const Color(0xFF6D28D9),
+                                        size: 28,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            nameController.text.trim().isEmpty
+                                                ? 'Vista previa de la categoría'
+                                                : nameController.text.trim(),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: GoogleFonts.manrope(
+                                              color: colorScheme.onSurface,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 15,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            iconOption.label,
+                                            style: GoogleFonts.manrope(
+                                              color: colorScheme.onSurfaceVariant,
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 12.5,
+                                            ),
+                                          ),
+                                          if (generatedWithAi) ...[
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              'Sugerido por IA${aiConfidence != null ? ' · ${aiConfidence!.toStringAsFixed(2)}' : ''}',
+                                              style: GoogleFonts.manrope(
+                                                color: const Color(0xFF6D28D9),
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 11.5,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              OutlinedButton.icon(
+                                onPressed: isGeneratingAi ? null : generateWithAi,
+                                icon: isGeneratingAi
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : const Icon(Icons.auto_awesome_rounded),
+                                label: Text(
+                                  isGeneratingAi
+                                      ? 'Generando...'
+                                      : 'Generar con IA (0.5 crédito)',
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(48),
+                                ),
+                              ),
+                              if (helperMessage != null) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  helperMessage!,
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 16),
+                              Text(
+                                'Iconos disponibles',
+                                style: GoogleFonts.manrope(
+                                  color: colorScheme.onSurface,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14.5,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              GridView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: _categoryIconOptions.length,
+                                gridDelegate:
+                                    const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 4,
+                                  mainAxisSpacing: 10,
+                                  crossAxisSpacing: 10,
+                                  childAspectRatio: 0.82,
+                                ),
+                                itemBuilder: (context, index) {
+                                  final option = _categoryIconOptions[index];
+                                  final selected = option.key == selectedIconKey;
+                                  return InkWell(
+                                    onTap: () {
+                                      setSheetState(() {
+                                        selectedIconKey = option.key;
+                                        generatedWithAi = false;
+                                        aiConfidence = null;
+                                        helperMessage = null;
+                                      });
+                                    },
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: selected
+                                            ? const Color(0xFF6D28D9).withValues(alpha: 0.14)
+                                            : colorScheme.surfaceContainerHigh,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: selected
+                                              ? const Color(0xFF6D28D9)
+                                              : colorScheme.outlineVariant,
+                                        ),
+                                      ),
+                                      padding: const EdgeInsets.all(10),
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            option.icon,
+                                            color: selected
+                                                ? const Color(0xFF6D28D9)
+                                                : colorScheme.onSurfaceVariant,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            option.label,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: GoogleFonts.manrope(
+                                              color: colorScheme.onSurface,
+                                              fontSize: 11,
+                                              fontWeight: selected
+                                                  ? FontWeight.w800
+                                                  : FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.of(sheetContext).pop(),
+                              child: const Text('Cancelar'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () {
+                                final draft = nameController.text.trim();
+                                if (draft.isEmpty) {
+                                  setSheetState(() {
+                                    helperMessage =
+                                        'Escribe un nombre para guardar la categoría.';
+                                  });
+                                  return;
+                                }
+
+                                Navigator.of(sheetContext).pop(
+                                  _CategoryEditorResult(
+                                    name: draft,
+                                    iconKey: selectedIconKey,
+                                    generatedWithAi: generatedWithAi,
+                                    aiConfidence: aiConfidence,
+                                  ),
+                                );
+                              },
+                              child: const Text('Guardar categoría'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    return result;
+  }
+
+  Future<void> _createCategory() async {
+    if (_isMutating) return;
+    final draft = await _showCategoryEditorSheet(title: 'Nueva categoría');
+    if (!mounted || draft == null || draft.name.isEmpty) return;
+    if (_currentCatalogoId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Catálogo inválido. No se puede crear categoría.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isMutating = true);
+    try {
+      final maxOrder = _categories.isEmpty
+          ? 0
+          : _categories.map((c) => c.orden).reduce((a, b) => a > b ? a : b) + 1;
+
+      await Supabase.instance.client.from('categorias').insert({
+        'comercio_id': SupabaseConfig.currentComercioId,
+        'catalogo_id': _currentCatalogoId,
+        'nombre': draft.name,
+        'icono': draft.iconKey,
+        'creado_por_ia': draft.generatedWithAi,
+        'confianza_ia': draft.aiConfidence,
+        'orden': maxOrder,
+        'activo': true,
+      });
+
+      await _loadCategories();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo crear categoría: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
+    }
+  }
+
+  Future<void> _editCategory(CategoryModel category) async {
+    if (_isMutating) return;
+    final draft = await _showCategoryEditorSheet(
+      title: 'Editar categoría',
+      category: category,
+    );
+    if (!mounted || draft == null || draft.name.isEmpty) {
+      return;
+    }
+
+    final didChange = draft.name != category.nombre ||
+        draft.iconKey != _normalizeCategoryIconKey(category.icono) ||
+        draft.generatedWithAi != (category.creadoPorIa == true) ||
+        (draft.aiConfidence ?? -1) != (category.confianzaIa ?? -1);
+
+    if (!didChange) {
+      return;
+    }
+
+    setState(() => _isMutating = true);
+    try {
+      await Supabase.instance.client
+          .from('categorias')
+          .update({
+            'nombre': draft.name,
+            'icono': draft.iconKey,
+            'creado_por_ia': draft.generatedWithAi,
+            'confianza_ia': draft.aiConfidence,
+          })
+          .eq('comercio_id', SupabaseConfig.currentComercioId)
+          .eq('catalogo_id', _currentCatalogoId)
+          .eq('id', category.id);
+
+      await _loadCategories();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo editar categoría: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
     }
   }
 
@@ -1035,152 +1188,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       if (!mounted) {
         return;
       }
-      unawaited(_loadCategories());
+      unawaited(_loadCategories(showLoadingIndicator: false));
     });
-  }
-
-  Future<String?> _showNameDialog({
-    required String title,
-    String initialValue = '',
-  }) async {
-    String draft = initialValue;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: colorScheme.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-        contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-        actionsPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-        title: Text(
-          title,
-          style: GoogleFonts.manrope(
-            color: colorScheme.onSurface,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        content: Container(
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: TextFormField(
-            initialValue: initialValue,
-            onChanged: (value) => draft = value,
-            onFieldSubmitted: (value) =>
-                Navigator.of(dialogContext).pop(value.trim()),
-            autofocus: true,
-            textCapitalization: TextCapitalization.words,
-            style: TextStyle(color: colorScheme.onSurface),
-            cursorColor: colorScheme.primary,
-            decoration: InputDecoration(
-              hintText: 'Nombre de la categoría',
-              hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              errorBorder: InputBorder.none,
-              focusedErrorBorder: InputBorder.none,
-              disabledBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(
-              'Cancelar',
-              style: TextStyle(color: colorScheme.onSurfaceVariant),
-            ),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(draft.trim()),
-            style: FilledButton.styleFrom(
-              backgroundColor: colorScheme.primary,
-              foregroundColor: colorScheme.onPrimary,
-            ),
-            child: const Text('Guardar'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _createCategory() async {
-    if (_isMutating) return;
-    final name = await _showNameDialog(title: 'Nueva Categoría');
-    if (!mounted || name == null || name.isEmpty) return;
-    if (_currentCatalogoId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Catálogo inválido. No se puede crear categoría.'),
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isMutating = true);
-    try {
-      final maxOrder = _categories.isEmpty
-          ? 0
-          : _categories.map((c) => c.orden).reduce((a, b) => a > b ? a : b) + 1;
-
-      await Supabase.instance.client.from('categorias').insert({
-        'comercio_id': SupabaseConfig.currentComercioId,
-        'catalogo_id': _currentCatalogoId,
-        'nombre': name,
-        'orden': maxOrder,
-        'activo': true,
-      });
-
-      await _loadCategories();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo crear categoría: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
-      }
-    }
-  }
-
-  Future<void> _editCategory(CategoryModel category) async {
-    if (_isMutating) return;
-    final name = await _showNameDialog(
-      title: 'Editar Categoría',
-      initialValue: category.nombre,
-    );
-    if (!mounted || name == null || name.isEmpty || name == category.nombre) {
-      return;
-    }
-
-    setState(() => _isMutating = true);
-    try {
-      await Supabase.instance.client
-          .from('categorias')
-          .update({'nombre': name})
-          .eq('comercio_id', SupabaseConfig.currentComercioId)
-          .eq('catalogo_id', _currentCatalogoId)
-          .eq('id', category.id);
-
-      await _loadCategories();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo editar categoría: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isMutating = false);
-      }
-    }
   }
 
   Future<void> _toggleCategoryActive(CategoryModel category, bool value) async {
@@ -1797,7 +1806,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     final headerScale = (1 - (_headerCollapse * 0.2)).clamp(0.82, 1.0);
     final headerOpacity = (1 - (_headerCollapse * 1.45)).clamp(0.0, 1.0);
     final headerHeightFactor = (1 - (_headerCollapse * 1.4)).clamp(0.0, 1.0);
-    if (_loading) {
+    final showInitialLoading =
+        _loading && !_hasLoadedInitialSnapshot && _categories.isEmpty;
+
+    if (showInitialLoading) {
       return const BrandedLoadingScreen(withScaffold: true);
     }
 
@@ -2034,101 +2046,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }
 }
 
-class _CatalogCard extends StatelessWidget {
-  const _CatalogCard({
-    required this.catalog,
-    required this.enabled,
-    required this.onOpen,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  final CatalogModel catalog;
-  final bool enabled;
-  final VoidCallback onOpen;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Card(
-      color: colorScheme.surfaceContainerHigh,
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 0,
-      shadowColor: Colors.black.withValues(alpha: 0.18),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: colorScheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    catalog.nombre,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.manrope(
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  onPressed: enabled ? onOpen : null,
-                  icon: const Icon(Icons.folder_open_rounded, size: 18),
-                  tooltip: 'Abrir categorías',
-                  style: IconButton.styleFrom(
-                    minimumSize: const Size(32, 32),
-                    padding: EdgeInsets.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    backgroundColor: colorScheme.primary.withValues(
-                      alpha: 0.16,
-                    ),
-                    foregroundColor: colorScheme.primary,
-                  ),
-                ),
-                IconButton(
-                  onPressed: enabled ? onEdit : null,
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  tooltip: 'Editar catálogo',
-                  style: IconButton.styleFrom(
-                    minimumSize: const Size(32, 32),
-                    padding: EdgeInsets.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    backgroundColor: colorScheme.secondaryContainer,
-                    foregroundColor: colorScheme.onSecondaryContainer,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  onPressed: enabled ? onDelete : null,
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  tooltip: 'Eliminar catálogo',
-                  style: IconButton.styleFrom(
-                    minimumSize: const Size(32, 32),
-                    padding: EdgeInsets.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    backgroundColor: colorScheme.secondaryContainer,
-                    foregroundColor: colorScheme.onSecondaryContainer,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _CategoryCard extends StatelessWidget {
   const _CategoryCard({
     super.key,
@@ -2180,7 +2097,10 @@ class _CategoryCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  _categoryIcon(category.nombre),
+                  _resolveCategoryIcon(
+                    iconKey: category.icono,
+                    name: category.nombre,
+                  ),
                   color: const Color(0xFF6D28D9),
                 ),
               ),
@@ -2936,22 +2856,130 @@ class _EmptyMenuState extends StatelessWidget {
   }
 }
 
-IconData _categoryIcon(String name) {
+class _CategoryEditorResult {
+  const _CategoryEditorResult({
+    required this.name,
+    required this.iconKey,
+    required this.generatedWithAi,
+    required this.aiConfidence,
+  });
+
+  final String name;
+  final String iconKey;
+  final bool generatedWithAi;
+  final double? aiConfidence;
+}
+
+class _CategoryIconOption {
+  const _CategoryIconOption({
+    required this.key,
+    required this.label,
+    required this.icon,
+  });
+
+  final String key;
+  final String label;
+  final IconData icon;
+}
+
+const List<_CategoryIconOption> _categoryIconOptions = [
+  _CategoryIconOption(key: 'restaurant', label: 'Restaurante', icon: Icons.restaurant_rounded),
+  _CategoryIconOption(key: 'fastfood', label: 'Comida rápida', icon: Icons.fastfood_rounded),
+  _CategoryIconOption(key: 'lunch_dining', label: 'Hamburguesas', icon: Icons.lunch_dining_rounded),
+  _CategoryIconOption(key: 'dinner_dining', label: 'Platos', icon: Icons.dinner_dining_rounded),
+  _CategoryIconOption(key: 'ramen_dining', label: 'Ramen', icon: Icons.ramen_dining_rounded),
+  _CategoryIconOption(key: 'local_pizza', label: 'Pizza', icon: Icons.local_pizza_rounded),
+  _CategoryIconOption(key: 'bakery_dining', label: 'Panadería', icon: Icons.bakery_dining_rounded),
+  _CategoryIconOption(key: 'icecream', label: 'Helados', icon: Icons.icecream_rounded),
+  _CategoryIconOption(key: 'cake', label: 'Postres', icon: Icons.cake_rounded),
+  _CategoryIconOption(key: 'emoji_food_beverage', label: 'Snacks', icon: Icons.emoji_food_beverage_rounded),
+  _CategoryIconOption(key: 'local_cafe', label: 'Café', icon: Icons.local_cafe_rounded),
+  _CategoryIconOption(key: 'local_bar', label: 'Bar', icon: Icons.local_bar_rounded),
+  _CategoryIconOption(key: 'wine_bar', label: 'Vinos', icon: Icons.wine_bar_rounded),
+  _CategoryIconOption(key: 'sports_bar', label: 'Bebidas', icon: Icons.sports_bar_rounded),
+  _CategoryIconOption(key: 'brunch_dining', label: 'Brunch', icon: Icons.brunch_dining_rounded),
+  _CategoryIconOption(key: 'egg_alt', label: 'Huevos', icon: Icons.egg_alt_rounded),
+  _CategoryIconOption(key: 'set_meal', label: 'Combos', icon: Icons.set_meal_rounded),
+  _CategoryIconOption(key: 'kebab_dining', label: 'Parrilla', icon: Icons.kebab_dining_rounded),
+  _CategoryIconOption(key: 'rice_bowl', label: 'Bowls', icon: Icons.rice_bowl_rounded),
+  _CategoryIconOption(key: 'takeout_dining', label: 'Para llevar', icon: Icons.takeout_dining_rounded),
+  _CategoryIconOption(key: 'delivery_dining', label: 'Delivery', icon: Icons.delivery_dining_rounded),
+  _CategoryIconOption(key: 'local_drink', label: 'Jugos', icon: Icons.local_drink_rounded),
+  _CategoryIconOption(key: 'liquor', label: 'Licores', icon: Icons.liquor_rounded),
+  _CategoryIconOption(key: 'tapas', label: 'Tapas', icon: Icons.tapas_rounded),
+  _CategoryIconOption(key: 'cookie', label: 'Galletas', icon: Icons.cookie_rounded),
+  _CategoryIconOption(key: 'breakfast_dining', label: 'Desayunos', icon: Icons.breakfast_dining_rounded),
+  _CategoryIconOption(key: 'soup_kitchen', label: 'Sopas', icon: Icons.soup_kitchen_rounded),
+  _CategoryIconOption(key: 'outdoor_grill', label: 'Asados', icon: Icons.outdoor_grill_rounded),
+  _CategoryIconOption(key: 'local_fire_department', label: 'Picante', icon: Icons.local_fire_department_rounded),
+  _CategoryIconOption(key: 'spa', label: 'Té', icon: Icons.spa_rounded),
+  _CategoryIconOption(key: 'eco', label: 'Veggie', icon: Icons.eco_rounded),
+  _CategoryIconOption(key: 'grass', label: 'Ensaladas', icon: Icons.grass_rounded),
+  _CategoryIconOption(key: 'emoji_nature', label: 'Natural', icon: Icons.emoji_nature_rounded),
+  _CategoryIconOption(key: 'nutrition', label: 'Saludable', icon: Icons.monitor_heart_rounded),
+  _CategoryIconOption(key: 'favorite', label: 'Favoritos', icon: Icons.favorite_rounded),
+  _CategoryIconOption(key: 'celebration', label: 'Especiales', icon: Icons.celebration_rounded),
+  _CategoryIconOption(key: 'redeem', label: 'Promos', icon: Icons.redeem_rounded),
+  _CategoryIconOption(key: 'storefront', label: 'Casa', icon: Icons.storefront_rounded),
+  _CategoryIconOption(key: 'star', label: 'Premium', icon: Icons.star_rounded),
+  _CategoryIconOption(key: 'diamond', label: 'Signature', icon: Icons.diamond_rounded),
+];
+
+_CategoryIconOption? _categoryIconOptionByKey(String? iconKey) {
+  final normalized = _normalizeCategoryIconKey(iconKey);
+  if (normalized == null) return null;
+  for (final option in _categoryIconOptions) {
+    if (option.key == normalized) return option;
+  }
+  return null;
+}
+
+String? _normalizeCategoryIconKey(String? iconKey) {
+  final normalized = iconKey?.trim();
+  if (normalized == null || normalized.isEmpty) {
+    return null;
+  }
+  return _categoryIconOptionByKeyInternal(normalized) ? normalized : null;
+}
+
+bool _categoryIconOptionByKeyInternal(String iconKey) {
+  for (final option in _categoryIconOptions) {
+    if (option.key == iconKey) return true;
+  }
+  return false;
+}
+
+String _suggestCategoryIconKey(String name) {
   final normalized = name.trim().toLowerCase();
   if (normalized.contains('bebida') || normalized.contains('cafe')) {
-    return Icons.local_cafe_rounded;
+    return 'local_cafe';
   }
   if (normalized.contains('perro') || normalized.contains('hot dog')) {
-    return Icons.pets_rounded;
+    return 'fastfood';
   }
   if (normalized.contains('hamburg')) {
-    return Icons.lunch_dining_rounded;
+    return 'lunch_dining';
   }
   if (normalized.contains('pizza')) {
-    return Icons.local_pizza_rounded;
+    return 'local_pizza';
   }
   if (normalized.contains('postre') || normalized.contains('helado')) {
-    return Icons.icecream_rounded;
+    return 'icecream';
   }
-  return Icons.fastfood_rounded;
+  if (normalized.contains('desayuno')) {
+    return 'breakfast_dining';
+  }
+  if (normalized.contains('ensalada') || normalized.contains('veg')) {
+    return 'eco';
+  }
+  return 'restaurant';
+}
+
+IconData _resolveCategoryIcon({String? iconKey, String? name}) {
+  final option = _categoryIconOptionByKey(iconKey);
+  if (option != null) {
+    return option.icon;
+  }
+  final suggestedKey = _suggestCategoryIconKey(name ?? '');
+  return _categoryIconOptionByKey(suggestedKey)?.icon ?? Icons.restaurant_rounded;
 }
