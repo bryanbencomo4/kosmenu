@@ -991,7 +991,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: const Color(0xFFF8F7FB),
       appBar: AppBar(
         backgroundColor: colorScheme.surfaceContainerHighest,
         foregroundColor: colorScheme.onSurface,
@@ -1036,222 +1036,247 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: (_loading || _isMutating) ? null : _createCategory,
-        backgroundColor: colorScheme.primary,
+        backgroundColor: const Color(0xFF6D28D9),
         foregroundColor: colorScheme.onPrimary,
         icon: const Icon(Icons.add),
-        label: const Text('Nueva Categoría'),
+        label: const Text('Nueva categoría'),
       ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      colorScheme.surfaceContainerHighest.withValues(
-                        alpha: 0.34,
-                      ),
-                      colorScheme.surface,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          RefreshIndicator(
-            onRefresh: _loadCategories,
-            color: colorScheme.primary,
-            child: SafeArea(
-              top: false,
-              child: Stack(
-                children: [
-                  ListView(
-                    controller: _scrollController,
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 120),
-                    children: [
-                      ClipRect(
-                        child: Align(
-                          alignment: Alignment.topCenter,
-                          heightFactor: headerHeightFactor,
-                          child: AnimatedOpacity(
-                            duration: const Duration(milliseconds: 140),
-                            opacity: headerOpacity,
-                            child: Transform.scale(
-                              scale: headerScale,
-                              alignment: Alignment.topCenter,
+      body: RefreshIndicator(
+        onRefresh: _loadCategories,
+        color: colorScheme.primary,
+        child: SafeArea(
+          top: false,
+          child: ListView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+            children: [
+              ClipRect(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  heightFactor: headerHeightFactor,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 140),
+                    opacity: headerOpacity,
+                    child: Transform.scale(
+                      scale: headerScale,
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x0D000000),
+                              blurRadius: 10,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: const Color(
+                                    0xFF6D28D9,
+                                  ).withValues(alpha: 0.1),
+                                  child: const Icon(
+                                    Icons.restaurant_menu,
+                                    color: Color(0xFF6D28D9),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    'Estructura del menú',
+                                    style: GoogleFonts.manrope(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: const Color(0xFF1F2555),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Organiza categorías claras para que agregar y encontrar productos sea más fácil.',
+                              style: GoogleFonts.manrope(
+                                color: const Color(0xFF6B7280),
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w500,
+                                height: 1.45,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            InkWell(
+                              onTap: _openAiMenuGenerator,
+                              borderRadius: BorderRadius.circular(12),
                               child: Container(
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(18),
-                                  color: colorScheme.surfaceContainerHigh,
-                                  border: Border.all(
-                                    color: colorScheme.outlineVariant,
+                                  borderRadius: BorderRadius.circular(12),
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFF6D28D9),
+                                      Color(0xFF9333EA),
+                                    ],
                                   ),
                                   boxShadow: const [
                                     BoxShadow(
-                                      color: Color(0x1F000000),
-                                      blurRadius: 22,
-                                      offset: Offset(0, 9),
+                                      color: Color(0x296D28D9),
+                                      blurRadius: 14,
+                                      offset: Offset(0, 6),
                                     ),
                                   ],
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                child: Row(
                                   children: [
-                                    Text(
-                                      'Estructura del menú',
-                                      style: GoogleFonts.manrope(
-                                        color: colorScheme.onSurface,
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 17,
-                                      ),
+                                    const Icon(
+                                      Icons.auto_awesome,
+                                      color: Colors.white,
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Organiza categorías claras para que agregar y encontrar productos sea más rápido.',
-                                      style: TextStyle(
-                                        color: colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: FilledButton.icon(
-                                      onPressed: _openAiMenuGenerator,
-                                      icon: const Icon(
-                                        Icons.auto_awesome_rounded,
-                                        size: 18,
-                                      ),
-                                      label: const Text('✨ Generar menú con IA'),
-                                      style: FilledButton.styleFrom(
-                                        minimumSize: const Size.fromHeight(52),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 18,
-                                          vertical: 14,
-                                        ),
-                                        backgroundColor: colorScheme.primary,
-                                        foregroundColor: colorScheme.onPrimary,
-                                        textStyle: GoogleFonts.manrope(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 14,
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(14),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        'Generar menú con IA',
+                                        style: GoogleFonts.manrope(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 15,
                                         ),
                                       ),
                                     ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        _StatChip(
-                                          label: 'Categorías',
-                                          value: '${_categories.length}',
-                                        ),
-                                        _StatChip(
-                                          label: 'Activas',
-                                          value: '$activeCategories',
-                                        ),
-                                        _StatChip(
-                                          label: 'Productos',
-                                          value: '$totalProducts',
-                                        ),
-                                      ],
+                                    const Icon(
+                                      Icons.arrow_forward_ios,
+                                      size: 16,
+                                      color: Colors.white,
                                     ),
                                   ],
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        switchInCurve: Curves.easeOut,
-                        switchOutCurve: Curves.easeIn,
-                        child: showCompactHeader
-                            ? Padding(
-                                key: const ValueKey('compact-category-header'),
-                                padding: const EdgeInsets.only(
-                                  top: 8,
-                                  bottom: 10,
-                                ),
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: Row(
-                                    children: [
-                                      _StatChip(
-                                        label: 'Categorías',
-                                        value: '${_categories.length}',
-                                      ),
-                                      const SizedBox(width: 8),
-                                      _StatChip(
-                                        label: 'Activas',
-                                        value: '$activeCategories',
-                                      ),
-                                      const SizedBox(width: 8),
-                                      _StatChip(
-                                        label: 'Productos',
-                                        value: '$totalProducts',
-                                      ),
-                                    ],
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _StatChip(
+                                    label: 'Categorías',
+                                    value: '${_categories.length}',
+                                    icon: Icons.folder_rounded,
+                                    tint: const Color(0xFF7C3AED),
                                   ),
                                 ),
-                              )
-                            : const SizedBox(
-                                key: ValueKey('compact-category-spacer'),
-                                height: 10,
-                              ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _StatChip(
+                                    label: 'Activas',
+                                    value: '$activeCategories',
+                                    icon: Icons.check_circle_rounded,
+                                    tint: const Color(0xFF16A34A),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _StatChip(
+                                    label: 'Productos',
+                                    value: '$totalProducts',
+                                    icon: Icons.inventory_2_rounded,
+                                    tint: const Color(0xFF3B82F6),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                      if (_categories.isEmpty)
-                        _EmptyMenuState(
-                          icon: Icons.category_outlined,
-                          title: 'No hay categorías en este menú',
-                          subtitle:
-                              'Crea tu primera categoría para empezar a cargar productos.',
-                          actionLabel: 'Crear primera categoría',
-                          onAction: _isMutating ? null : _createCategory,
-                        )
-                      else if (filtered.isEmpty)
-                        _EmptyMenuState(
-                          icon: Icons.search_off_rounded,
-                          title: 'Sin resultados para la búsqueda',
-                          subtitle:
-                              'Prueba otro término o limpia el filtro actual.',
-                          actionLabel: 'Limpiar búsqueda',
-                          onAction: () {
-                            _searchController.clear();
-                            setState(() => _searchQuery = '');
-                          },
-                        )
-                      else
-                        ...filtered.map(
-                          (category) => _CategoryCard(
-                            category: category,
-                            enabled: !_isMutating,
-                            productCount:
-                                _productCountByCategory[category.id] ?? 0,
-                            onOpen: () => _openProducts(category),
-                            onEdit: () => _editCategory(category),
-                            onDelete: () => _deleteCategory(category),
-                            onToggleActive: (value) =>
-                                _toggleCategoryActive(category, value),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                child: showCompactHeader
+                    ? Padding(
+                        key: const ValueKey('compact-category-header'),
+                        padding: const EdgeInsets.only(top: 4, bottom: 10),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _StatChip(
+                                label: 'Categorías',
+                                value: '${_categories.length}',
+                                icon: Icons.folder_rounded,
+                                tint: const Color(0xFF7C3AED),
+                              ),
+                              const SizedBox(width: 8),
+                              _StatChip(
+                                label: 'Activas',
+                                value: '$activeCategories',
+                                icon: Icons.check_circle_rounded,
+                                tint: const Color(0xFF16A34A),
+                              ),
+                              const SizedBox(width: 8),
+                              _StatChip(
+                                label: 'Productos',
+                                value: '$totalProducts',
+                                icon: Icons.inventory_2_rounded,
+                                tint: const Color(0xFF3B82F6),
+                              ),
+                            ],
                           ),
                         ),
-                    ],
-                  ),
-                ],
+                      )
+                    : const SizedBox(
+                        key: ValueKey('compact-category-spacer'),
+                        height: 10,
+                      ),
               ),
-            ),
+              if (_categories.isEmpty)
+                _EmptyMenuState(
+                  icon: Icons.category_outlined,
+                  title: 'No hay categorías en este menú',
+                  subtitle:
+                      'Crea tu primera categoría para empezar a cargar productos.',
+                  actionLabel: 'Crear primera categoría',
+                  onAction: _isMutating ? null : _createCategory,
+                )
+              else if (filtered.isEmpty)
+                _EmptyMenuState(
+                  icon: Icons.search_off_rounded,
+                  title: 'Sin resultados para la búsqueda',
+                  subtitle:
+                      'Prueba otro término o limpia el filtro actual.',
+                  actionLabel: 'Limpiar búsqueda',
+                  onAction: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                )
+              else
+                ...filtered.map(
+                  (category) => _CategoryCard(
+                    category: category,
+                    enabled: !_isMutating,
+                    productCount: _productCountByCategory[category.id] ?? 0,
+                    onOpen: () => _openProducts(category),
+                    onEdit: () => _editCategory(category),
+                    onDelete: () => _deleteCategory(category),
+                    onToggleActive: (value) =>
+                        _toggleCategoryActive(category, value),
+                  ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1373,153 +1398,225 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Card(
-      color: colorScheme.surfaceContainerHigh,
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 0,
-      shadowColor: Colors.black.withValues(alpha: 0.18),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: colorScheme.outlineVariant),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        category.nombre,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6D28D9).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  _categoryIcon(category.nombre),
+                  color: const Color(0xFF6D28D9),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      category.nombre,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15.5,
+                        color: const Color(0xFF1F2555),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$productCount producto${productCount == 1 ? '' : 's'}',
+                      style: GoogleFonts.manrope(
+                        color: const Color(0xFF6B7280),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (category.activo
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFFEF4444))
+                            .withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        category.activo ? 'Activa' : 'Oculta',
                         style: GoogleFonts.manrope(
-                          color: colorScheme.onSurface,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$productCount producto${productCount == 1 ? '' : 's'}',
-                        style: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
+                          color: category.activo
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFFEF4444),
                           fontSize: 12,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Switch.adaptive(
-                  value: category.activo,
-                  onChanged: enabled ? onToggleActive : null,
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(999),
-                color: category.activo
-                    ? colorScheme.primary.withValues(alpha: 0.18)
-                    : colorScheme.errorContainer.withValues(alpha: 0.42),
-              ),
-              child: Text(
-                category.activo ? 'Activa' : 'Oculta',
-                style: TextStyle(
-                  color: category.activo
-                      ? colorScheme.onPrimaryContainer
-                      : colorScheme.onErrorContainer,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11,
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                FilledButton.icon(
-                  onPressed: enabled ? onOpen : null,
-                  icon: const Icon(Icons.restaurant_menu_rounded, size: 16),
-                  label: const Text('Ver productos'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: colorScheme.primary.withValues(
-                      alpha: 0.16,
-                    ),
-                    foregroundColor: colorScheme.primary,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+              const SizedBox(width: 12),
+              Switch.adaptive(
+                value: category.activo,
+                onChanged: enabled ? onToggleActive : null,
+                activeTrackColor: const Color(0xFF6D28D9),
+                activeThumbColor: Colors.white,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _CategoryActionButton(
+                  icon: Icons.visibility,
+                  label: 'Ver',
+                  onTap: enabled ? onOpen : null,
                 ),
-                const SizedBox(width: 6),
-                IconButton(
-                  onPressed: enabled ? onEdit : null,
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  tooltip: 'Editar categoría',
-                  style: IconButton.styleFrom(
-                    minimumSize: const Size(32, 32),
-                    padding: EdgeInsets.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    backgroundColor: colorScheme.secondaryContainer,
-                    foregroundColor: colorScheme.onSecondaryContainer,
-                  ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _CategoryActionButton(
+                  icon: Icons.edit,
+                  label: 'Editar',
+                  onTap: enabled ? onEdit : null,
                 ),
-                const SizedBox(width: 6),
-                IconButton(
-                  onPressed: enabled ? onDelete : null,
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  tooltip: 'Eliminar categoría',
-                  style: IconButton.styleFrom(
-                    minimumSize: const Size(32, 32),
-                    padding: EdgeInsets.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    backgroundColor: colorScheme.secondaryContainer,
-                    foregroundColor: colorScheme.onSecondaryContainer,
-                  ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _CategoryActionButton(
+                  icon: Icons.delete,
+                  label: 'Eliminar',
+                  onTap: enabled ? onDelete : null,
+                  isDanger: true,
                 ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
 class _StatChip extends StatelessWidget {
-  const _StatChip({required this.label, required this.value});
+  const _StatChip({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.tint,
+  });
 
   final String label;
   final String value;
+  final IconData icon;
+  final Color tint;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colorScheme.primary.withValues(alpha: 0.35)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFEAE7F2)),
       ),
-      child: Text(
-        '$label: $value',
-        style: TextStyle(
-          color: colorScheme.onSurface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: tint.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 16, color: tint),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: GoogleFonts.manrope(
+              color: const Color(0xFF1F2555),
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.manrope(
+              color: const Color(0xFF6B7280),
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryActionButton extends StatelessWidget {
+  const _CategoryActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isDanger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool isDanger;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor = isDanger
+        ? const Color(0xFFDC2626)
+        : const Color(0xFF6B7280);
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 16, color: iconColor),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: isDanger
+            ? const Color(0xFFDC2626)
+            : const Color(0xFF111827),
+        side: BorderSide(color: const Color(0xFFD1D5DB).withValues(alpha: 0.6)),
+        minimumSize: const Size(0, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: GoogleFonts.manrope(
           fontWeight: FontWeight.w700,
-          fontSize: 12,
+          fontSize: 13,
         ),
       ),
     );
@@ -1580,4 +1677,24 @@ class _EmptyMenuState extends StatelessWidget {
       ),
     );
   }
+}
+
+IconData _categoryIcon(String name) {
+  final normalized = name.trim().toLowerCase();
+  if (normalized.contains('bebida') || normalized.contains('cafe')) {
+    return Icons.local_cafe_rounded;
+  }
+  if (normalized.contains('perro') || normalized.contains('hot dog')) {
+    return Icons.pets_rounded;
+  }
+  if (normalized.contains('hamburg')) {
+    return Icons.lunch_dining_rounded;
+  }
+  if (normalized.contains('pizza')) {
+    return Icons.local_pizza_rounded;
+  }
+  if (normalized.contains('postre') || normalized.contains('helado')) {
+    return Icons.icecream_rounded;
+  }
+  return Icons.fastfood_rounded;
 }
