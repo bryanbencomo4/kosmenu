@@ -46,6 +46,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   double _headerCollapse = 0;
   _ProductVisibilityFilter _visibilityFilter = _ProductVisibilityFilter.all;
   Timer? _aiImageRefreshTimer;
+  final Set<String> _aiRetryPromptProductIds = <String>{};
   final AiImageService _aiImageService = const AiImageService();
 
   @override
@@ -110,6 +111,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
     }
 
     try {
+      final previousById = {
+        for (final product in _products) product.id: product,
+      };
       final offset = reset ? 0 : _products.length;
       final rows = await Supabase.instance.client
           .from('productos')
@@ -126,12 +130,47 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 ProductModel.fromMap(Map<String, dynamic>.from(row as Map)),
           )
           .toList();
+      final completedAiProducts = products.where((product) {
+        final previous = previousById[product.id];
+        return _aiRetryPromptProductIds.contains(product.id) &&
+            previous != null &&
+            previous.hasAiImageInProgress &&
+            !product.hasAiImageInProgress &&
+            product.isAiGeneratedImage;
+      }).toList();
 
       if (!mounted) return;
       setState(() {
         _products = reset ? products : [..._products, ...products];
         _hasMoreProducts = products.length == _pageSize;
       });
+      if (completedAiProducts.isNotEmpty) {
+        final completedProduct = completedAiProducts.first;
+        _aiRetryPromptProductIds.remove(completedProduct.id);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final messenger = ScaffoldMessenger.of(context);
+          messenger.hideCurrentSnackBar();
+          messenger.showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Imagen generada correctamente ✨\n¿Quieres probar otra versión?',
+              ),
+              action: SnackBarAction(
+                label: 'Generar otra',
+                onPressed: () {
+                  final latestProduct = _products
+                      .where((item) => item.id == completedProduct.id)
+                      .cast<ProductModel?>()
+                      .firstWhere((item) => item != null, orElse: () => null);
+                  if (latestProduct == null) return;
+                  unawaited(_generateAiImageForProduct(latestProduct));
+                },
+              ),
+            ),
+          );
+        });
+      }
       _syncAiImageRefresh(_products);
     } catch (error) {
       if (!mounted) return;
@@ -403,28 +442,47 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 title: const Text('Cargar desde galería'),
                 onTap: () => Navigator.of(context).pop('gallery'),
               ),
-              ListTile(
-                leading: Icon(
-                  Icons.auto_awesome_rounded,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                child: Material(
                   color: canRequestAiImage
-                      ? colorScheme.primary
-                      : colorScheme.outline,
-                ),
-                title: Text(
-                  'Generar con IA',
-                  style: TextStyle(
-                    color: canRequestAiImage
-                        ? colorScheme.onSurface
-                        : colorScheme.outline,
+                      ? colorScheme.primary.withValues(alpha: 0.1)
+                      : colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    leading: Icon(
+                      Icons.auto_awesome,
+                      color: canRequestAiImage
+                          ? colorScheme.primary
+                          : colorScheme.outline,
+                    ),
+                    title: Text(
+                      '✨ Generar imagen con IA',
+                      style: TextStyle(
+                        color: canRequestAiImage
+                            ? colorScheme.onSurface
+                            : colorScheme.outline,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Imagen profesional en segundos (1 crédito)',
+                      style: TextStyle(
+                        color: canRequestAiImage
+                            ? colorScheme.onSurfaceVariant
+                            : colorScheme.outline,
+                      ),
+                    ),
+                    enabled: canRequestAiImage,
+                    onTap: canRequestAiImage
+                        ? () => Navigator.of(context).pop('ai')
+                        : null,
                   ),
                 ),
-                subtitle: const Text(
-                  'Cuesta 1 crédito y se procesa en segundo plano',
-                ),
-                enabled: canRequestAiImage,
-                onTap: canRequestAiImage
-                    ? () => Navigator.of(context).pop('ai')
-                    : null,
               ),
               if (hasOwnImage)
                 ListTile(
@@ -474,6 +532,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
       return;
     }
 
+    _aiRetryPromptProductIds.add(product.id);
+
     setState(() {
       _products = _products
           .map(
@@ -507,6 +567,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
       await _loadProducts(reset: true);
     } catch (error) {
       if (!mounted) return;
+      _aiRetryPromptProductIds.remove(product.id);
       final friendlyMessage = _formatAiImageErrorMessage(
         error.toString().replaceFirst('Bad state: ', ''),
       );
@@ -986,7 +1047,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                               product.id,
                                                             ),
                                                     onEditImage: () =>
-                                                        _openProductImageOptions(
+                                                        _generateAiImageForProduct(
                                                           product,
                                                         ),
                                                     onEdit: () =>
@@ -1005,6 +1066,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                       color: colorScheme
                                                           .onSurfaceVariant,
                                                     ),
+                                                    onOpenImageOptions: () =>
+                                                        _openProductImageOptions(
+                                                          product,
+                                                        ),
                                                   );
                                                 },
                                               )
@@ -1066,7 +1131,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                                 product.id,
                                                               ),
                                                       onEditImage: () =>
-                                                          _openProductImageOptions(
+                                                          _generateAiImageForProduct(
                                                             product,
                                                           ),
                                                       onEdit: () =>
@@ -1092,6 +1157,10 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                               color: colorScheme
                                                                   .onSurfaceVariant,
                                                             ),
+                                                          ),
+                                                      onOpenImageOptions: () =>
+                                                          _openProductImageOptions(
+                                                            product,
                                                           ),
                                                     ),
                                                   );
@@ -1147,6 +1216,7 @@ class _ProductCard extends StatelessWidget {
     required this.fallbackImageUrl,
     required this.isUpdatingImage,
     required this.onEditImage,
+    required this.onOpenImageOptions,
     required this.onEdit,
     required this.onDelete,
     required this.onToggleVisible,
@@ -1157,6 +1227,7 @@ class _ProductCard extends StatelessWidget {
   final String fallbackImageUrl;
   final bool isUpdatingImage;
   final VoidCallback onEditImage;
+  final VoidCallback onOpenImageOptions;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<bool> onToggleVisible;
@@ -1168,9 +1239,9 @@ class _ProductCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         color: colorScheme.surfaceContainerHigh,
         border: Border.all(color: colorScheme.outlineVariant),
         boxShadow: const [
@@ -1188,7 +1259,7 @@ class _ProductCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               GestureDetector(
-                onTap: isUpdatingImage ? null : onEditImage,
+                onTap: isUpdatingImage ? null : onOpenImageOptions,
                 child: _ProductThumb(
                   imageUrl: product.imagenUrl,
                   fallbackImageUrl: fallbackImageUrl,
@@ -1210,141 +1281,83 @@ class _ProductCard extends StatelessWidget {
                       style: GoogleFonts.manrope(
                         color: colorScheme.onSurface,
                         fontWeight: FontWeight.w800,
-                        fontSize: 16,
+                        fontSize: 17,
                       ),
                     ),
-                    if (product.descripcion.trim().isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        product.descripcion,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    const SizedBox(height: 8),
+                    Row(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: colorScheme.primary.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.sell_rounded,
-                                size: 14,
-                                color: colorScheme.primary,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Precio \$${product.precio.toStringAsFixed(2)}',
-                                style: TextStyle(
-                                  color: colorScheme.primary,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
+                        Icon(
+                          Icons.sell_rounded,
+                          size: 16,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Precio \$${product.precio.toStringAsFixed(2)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: colorScheme.primary,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                            ),
                           ),
                         ),
-                        if (!product.hasAiImageInProgress)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: colorScheme.secondaryContainer,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              'Imagen IA: 1 crédito',
-                              style: TextStyle(
-                                color: colorScheme.onSecondaryContainer,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
                       ],
                     ),
-                    if (product.hasAiImageInProgress ||
-                        product.hasAiImageFailure ||
-                        product.isAiGeneratedImage) ...[
-                      const SizedBox(height: 8),
-                      _AiImageStatusChip(product: product),
-                    ],
-                    if (product.hasAiImageFailure &&
-                        (product.aiImageErrorMessage ?? '')
-                            .trim()
-                            .isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        _formatAiImageErrorMessage(product.aiImageErrorMessage),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colorScheme.error,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
               dragHandle,
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Row(
-            children: [
-              Expanded(
-                child: _ProductVisibilityBadge(
-                  isVisible: product.disponible,
-                  onToggleVisible: onToggleVisible,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
             children: [
               FilledButton.icon(
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_outlined, size: 16),
-                label: const Text('Editar'),
+                onPressed: isUpdatingImage ? null : onEditImage,
+                icon: const Icon(Icons.auto_awesome, size: 18),
+                label: const Text('Mejorar imagen'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: colorScheme.primary.withValues(alpha: 0.16),
-                  foregroundColor: colorScheme.primary,
+                  backgroundColor: colorScheme.primary,
+                  foregroundColor: colorScheme.onPrimary,
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
+                    horizontal: 14,
+                    vertical: 10,
                   ),
-                  minimumSize: const Size(0, 32),
+                  minimumSize: const Size(0, 42),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: onEdit,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 42),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  side: BorderSide(color: colorScheme.outlineVariant),
+                  foregroundColor: colorScheme.onSurface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Editar'),
+              ),
+              const Spacer(),
               IconButton(
                 onPressed: onDelete,
                 tooltip: 'Eliminar producto',
                 icon: const Icon(Icons.delete_outline, size: 18),
                 style: IconButton.styleFrom(
-                  minimumSize: const Size(32, 32),
+                  minimumSize: const Size(38, 38),
                   padding: EdgeInsets.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   backgroundColor: colorScheme.secondaryContainer,
@@ -1400,76 +1413,6 @@ String _formatAiImageErrorMessage(String? rawMessage) {
   return firstLine.isEmpty ? 'No se pudo generar la imagen IA.' : firstLine;
 }
 
-class _ProductVisibilityBadge extends StatelessWidget {
-  const _ProductVisibilityBadge({
-    required this.isVisible,
-    required this.onToggleVisible,
-  });
-
-  final bool isVisible;
-  final ValueChanged<bool> onToggleVisible;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: () => onToggleVisible(!isVisible),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: isVisible
-                ? colorScheme.primary.withValues(alpha: 0.12)
-                : colorScheme.errorContainer.withValues(alpha: 0.28),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: isVisible
-                  ? colorScheme.primary.withValues(alpha: 0.35)
-                  : colorScheme.error.withValues(alpha: 0.3),
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isVisible
-                    ? Icons.visibility_rounded
-                    : Icons.visibility_off_rounded,
-                size: 16,
-                color: isVisible ? colorScheme.primary : colorScheme.error,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  isVisible ? 'Visible en web' : 'Oculto en web',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Icon(
-                isVisible ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
-                size: 20,
-                color: isVisible
-                    ? colorScheme.primary
-                    : colorScheme.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ProductThumb extends StatelessWidget {
   const _ProductThumb({
     required this.imageUrl,
@@ -1497,8 +1440,8 @@ class _ProductThumb extends StatelessWidget {
     final isAiFailed = aiImageStatus == 'failed';
 
     Widget iconFallback() => Container(
-      width: 72,
-      height: 72,
+      width: 100,
+      height: 100,
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: const Icon(Icons.fastfood_outlined),
     );
@@ -1506,8 +1449,8 @@ class _ProductThumb extends StatelessWidget {
     Widget networkWithFallback(String url, {String? backupUrl}) {
       return Image.network(
         url,
-        width: 72,
-        height: 72,
+        width: 100,
+        height: 100,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
           if (backupUrl != null &&
@@ -1515,8 +1458,8 @@ class _ProductThumb extends StatelessWidget {
               backupUrl != url) {
             return Image.network(
               backupUrl,
-              width: 72,
-              height: 72,
+              width: 100,
+              height: 100,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => iconFallback(),
             );
@@ -1533,10 +1476,35 @@ class _ProductThumb extends StatelessWidget {
         : iconFallback();
 
     final thumb = ClipRRect(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: Stack(
         children: [
           thumbChild,
+          if (isAiGeneratedImage && !isAiPending && !isAiFailed)
+            Positioned(
+              top: 6,
+              left: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withValues(
+                    alpha: 0.16,
+                  ),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'IA',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             right: 6,
             bottom: 6,
@@ -1572,68 +1540,6 @@ class _ProductThumb extends StatelessWidget {
     }
 
     return Hero(tag: heroTag!, child: thumb);
-  }
-}
-
-class _AiImageStatusChip extends StatelessWidget {
-  const _AiImageStatusChip({required this.product});
-
-  final ProductModel product;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isPending = product.hasAiImageInProgress;
-    final isFailed = product.hasAiImageFailure;
-    final backgroundColor = isPending
-        ? colorScheme.primary.withValues(alpha: 0.14)
-        : isFailed
-        ? colorScheme.errorContainer.withValues(alpha: 0.35)
-        : colorScheme.tertiaryContainer.withValues(alpha: 0.44);
-    final foregroundColor = isPending
-        ? colorScheme.primary
-        : isFailed
-        ? colorScheme.error
-        : colorScheme.tertiary;
-    final icon = isPending
-        ? Icons.hourglass_top_rounded
-        : isFailed
-        ? Icons.error_outline_rounded
-        : Icons.auto_awesome_rounded;
-    final label = isPending
-        ? (product.aiImageStatus == 'processing'
-              ? 'Generando imagen IA...'
-              : 'Imagen IA en cola')
-        : isFailed
-        ? 'Fallo la imagen IA'
-        : 'Imagen creada con IA';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: foregroundColor),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: foregroundColor,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 

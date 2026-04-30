@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
+import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -50,6 +51,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   Set<String> _availablePriceCurrencies = <String>{'USD'};
   bool _isSaving = false;
   bool _isUploadingImage = false;
+  final AiImageService _aiImageService = const AiImageService();
 
   @override
   void initState() {
@@ -233,6 +235,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (_isSaving || _isUploadingImage) return;
 
     final hasImage = _hasLocalImage || _hasRemoteImage;
+    final canRequestAiImage = widget.product != null;
     final colorScheme = Theme.of(context).colorScheme;
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -268,6 +271,48 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 ),
                 onTap: () => Navigator.of(context).pop('gallery'),
               ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                child: Material(
+                  color: canRequestAiImage
+                      ? colorScheme.primary.withValues(alpha: 0.1)
+                      : colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    leading: Icon(
+                      Icons.auto_awesome,
+                      color: canRequestAiImage
+                          ? colorScheme.primary
+                          : colorScheme.outline,
+                    ),
+                    title: Text(
+                      '✨ Generar imagen con IA',
+                      style: TextStyle(
+                        color: canRequestAiImage
+                            ? colorScheme.onSurface
+                            : colorScheme.outline,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Imagen profesional en segundos (1 crédito)',
+                      style: TextStyle(
+                        color: canRequestAiImage
+                            ? colorScheme.onSurfaceVariant
+                            : colorScheme.outline,
+                      ),
+                    ),
+                    enabled: canRequestAiImage,
+                    onTap: canRequestAiImage
+                        ? () => Navigator.of(context).pop('ai')
+                        : null,
+                  ),
+                ),
+              ),
               if (hasImage)
                 ListTile(
                   leading: Icon(
@@ -293,11 +338,118 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       case 'gallery':
         await _pickImage(ImageSource.gallery);
         break;
+      case 'ai':
+        await _generateAiImageForExistingProduct();
+        break;
       case 'remove':
         _removeCurrentImageSelection();
         break;
       default:
         break;
+    }
+  }
+
+  Future<bool?> _confirmAiImageGeneration() {
+    final product = widget.product;
+    if (product == null) {
+      return Future.value(false);
+    }
+
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          backgroundColor: colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            'Generar imagen con IA',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: Text(
+            'Se descontará 1 crédito para generar la imagen de "${product.nombre}" y el proceso continuará en segundo plano. ¿Deseas continuar?',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+              ),
+              label: const Text('Generar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _generateAiImageForExistingProduct() async {
+    final product = widget.product;
+    if (product == null) {
+      _showMessage('Guarda el producto primero para generar su imagen con IA.');
+      return;
+    }
+
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) {
+      _showMessage('No hay comercio activo para generar la imagen IA.');
+      return;
+    }
+
+    final confirmed = await _confirmAiImageGeneration();
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      final categoryName = widget.categories
+          .where((category) => category.id == _selectedCategoryId)
+          .map((category) => category.nombre)
+          .cast<String?>()
+          .firstWhere((name) => name != null, orElse: () => widget.product?.categoriaId)
+          ?.toString();
+      final response = await _aiImageService.enqueueProductImage(
+        comercioId: comercioId,
+        productId: product.id,
+        productName: _nameController.text.trim().isEmpty
+            ? product.nombre
+            : _nameController.text.trim(),
+        description: _descriptionController.text.trim().isEmpty
+            ? product.descripcion
+            : _descriptionController.text.trim(),
+        categoryName: categoryName,
+      );
+
+      if (!mounted) return;
+      final message = response['message']?.toString().trim();
+      _showMessage(
+        message?.isNotEmpty == true
+            ? message!
+            : 'Imagen IA en cola para ${product.nombre}.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _showMessage('No se pudo generar la imagen IA: $error');
     }
   }
 
@@ -554,7 +706,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                       : null,
                   isSaving: _isSaving,
                   isUploadingImage: _isUploadingImage,
+                  showAiAction:
+                      widget.isEditing &&
+                      !_hasLocalImage &&
+                      !_hasRemoteImage,
                   onTapImageAction: _showImageOptions,
+                  onGenerateAiImageAction: _generateAiImageForExistingProduct,
                 );
 
                 final formPanel = _FormPanel(
@@ -661,7 +818,9 @@ class _ImagePanel extends StatelessWidget {
     required this.heroTag,
     required this.isSaving,
     required this.isUploadingImage,
+    required this.showAiAction,
     required this.onTapImageAction,
+    required this.onGenerateAiImageAction,
   });
 
   final String? localImagePath;
@@ -670,7 +829,9 @@ class _ImagePanel extends StatelessWidget {
   final String? heroTag;
   final bool isSaving;
   final bool isUploadingImage;
+  final bool showAiAction;
   final VoidCallback onTapImageAction;
+  final VoidCallback onGenerateAiImageAction;
 
   Widget _wrapHero(Widget child) {
     if (heroTag == null || heroTag!.isEmpty) return child;
@@ -703,7 +864,7 @@ class _ImagePanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Foto del producto',
+            'Haz que tu producto se vea irresistible 🍔',
             style: GoogleFonts.manrope(
               color: colorScheme.onSurface,
               fontWeight: FontWeight.w700,
@@ -810,10 +971,27 @@ class _ImagePanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+          if (showAiAction) ...[
+            FilledButton.icon(
+              onPressed: isSaving ? null : onGenerateAiImageAction,
+              icon: const Icon(Icons.auto_awesome_rounded),
+              label: const Text('✨ Mejorar con IA'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+                textStyle: GoogleFonts.manrope(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           FilledButton.icon(
             onPressed: isSaving ? null : onTapImageAction,
-            icon: const Icon(Icons.photo_camera_rounded),
-            label: const Text('Cambiar foto'),
+            icon: const Icon(Icons.auto_awesome_rounded),
+            label: const Text('✨ Mejorar con IA'),
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(48),
               backgroundColor: colorScheme.primary,

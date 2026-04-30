@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -728,6 +729,157 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
     if (!mounted) return;
     await _refreshDashboard();
+  }
+
+  Future<void> _openBuyAiCreditsSheet() async {
+    if (!mounted) return;
+
+    final packages = <({String credits, String price, String description})>[
+      (
+        credits: '30 créditos',
+        price: '\$3',
+        description: 'Para completar imágenes iniciales',
+      ),
+      (
+        credits: '100 créditos',
+        price: '\$8',
+        description: 'Ideal para mantener tu menú actualizado',
+      ),
+      (
+        credits: '300 créditos',
+        price: '\$20',
+        description: 'Para catálogos grandes y promociones',
+      ),
+    ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Recargar créditos IA',
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: _darkText,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Elige un paquete para seguir generando imágenes con IA.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: _mutedText,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: packages.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final item = packages[index];
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFFE7E2F6)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: _purple.withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Icon(
+                                Icons.auto_awesome_rounded,
+                                color: _purple,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${item.credits} — ${item.price}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: _darkText,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    item.description,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12.3,
+                                      fontWeight: FontWeight.w500,
+                                      color: _mutedText,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  FilledButton.tonal(
+                                    onPressed: () {
+                                      Navigator.of(sheetContext).pop();
+                                      _showInfo(
+                                        'Pronto podrás comprar créditos desde la app.',
+                                      );
+                                    },
+                                    style: FilledButton.styleFrom(
+                                      foregroundColor: _purple,
+                                      backgroundColor: _purple.withValues(
+                                        alpha: 0.10,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'Elegir paquete',
+                                      style: GoogleFonts.poppins(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12.4,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _updateBusinessOnline(bool value) async {
@@ -1501,6 +1653,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
                             businessOnline: _businessOnline,
                             onToggleOnline: _updateBusinessOnline,
+                            onBuyAiCredits: _openBuyAiCreditsSheet,
                             darkText: _darkText,
                             mutedText: _mutedText,
                             purple: _purple,
@@ -2831,6 +2984,7 @@ class _CompactBusinessInfoCard extends StatelessWidget {
     required this.isUpdatingBusinessOnline,
     required this.businessOnline,
     required this.onToggleOnline,
+    required this.onBuyAiCredits,
     required this.darkText,
     required this.mutedText,
     required this.purple,
@@ -2842,6 +2996,7 @@ class _CompactBusinessInfoCard extends StatelessWidget {
   final bool isUpdatingBusinessOnline;
   final bool businessOnline;
   final ValueChanged<bool> onToggleOnline;
+  final VoidCallback onBuyAiCredits;
   final Color darkText;
   final Color mutedText;
   final Color purple;
@@ -2854,8 +3009,12 @@ class _CompactBusinessInfoCard extends StatelessWidget {
     final slugLabel = (comercio.slug ?? '').trim().isEmpty
         ? 'Sin slug'
         : '@${comercio.slug!.trim()}';
+    final isLowCredits = aiCreditsBalance <= 5;
+    final balanceText = aiCreditsBalance.toStringAsFixed(
+      aiCreditsBalance % 1 == 0 ? 0 : 2,
+    );
     final creditsLabel =
-        '${aiCreditsBalance.toStringAsFixed(aiCreditsBalance % 1 == 0 ? 0 : 2)} disponibles · ${aiCreditsUsed.toStringAsFixed(aiCreditsUsed % 1 == 0 ? 0 : 2)} usados';
+      '$balanceText disponibles · Has usado ${aiCreditsUsed.toStringAsFixed(aiCreditsUsed % 1 == 0 ? 0 : 2)}';
 
     Widget detailCard({
       required String label,
@@ -3006,7 +3165,7 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                     child: detailCard(
                       label: 'WhatsApp',
                       value: whatsappLabel,
-                      icon: Icons.phone_in_talk_outlined,
+                      icon: FontAwesomeIcons.whatsapp,
                       accent: const Color(0xFF16A34A),
                     ),
                   ),
@@ -3020,9 +3179,9 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                     ),
                   ),
                   SizedBox(
-                    width: infoCardWidth,
+                    width: constraints.maxWidth,
                     child: Container(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 11),
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF3EDFF),
                         borderRadius: BorderRadius.circular(16),
@@ -3034,15 +3193,15 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            width: 34,
-                            height: 34,
+                            width: 40,
+                            height: 40,
                             decoration: BoxDecoration(
                               color: purple.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(
                               Icons.auto_awesome_rounded,
-                              size: 18,
+                              size: 20,
                               color: purple,
                             ),
                           ),
@@ -3054,21 +3213,140 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                                 Text(
                                   'Créditos IA',
                                   style: GoogleFonts.poppins(
-                                    fontSize: 10.8,
+                                    fontSize: 11.5,
                                     color: mutedText,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                const SizedBox(height: 3),
                                 Text(
-                                  creditsLabel,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
+                                  'Te quedan $balanceText créditos',
                                   style: GoogleFonts.poppins(
-                                    fontSize: 12.5,
+                                    fontSize: 18,
                                     color: darkText,
                                     fontWeight: FontWeight.w700,
-                                    height: 1.2,
+                                    height: 1.15,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '1 crédito = 1 imagen profesional para tu menú',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12.4,
+                                    color: darkText,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Mejores fotos = más pedidos 🍔',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 12.1,
+                                    color: mutedText,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.3,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                if (isLowCredits)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFE9E9),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Icon(
+                                          Icons.warning_amber_rounded,
+                                          color: Color(0xFFDC2626),
+                                          size: 16,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Te quedan solo $balanceText créditos',
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 12.2,
+                                                  color: const Color(
+                                                    0xFFB91C1C,
+                                                  ),
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'Te estás quedando sin imágenes para tus productos.',
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 11.6,
+                                                  color: const Color(
+                                                    0xFFB91C1C,
+                                                  ),
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  Text(
+                                    creditsLabel,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 11.5,
+                                      color: mutedText,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                const SizedBox(height: 10),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: SizedBox(
+                                    width: double.infinity,
+                                    child: FilledButton.icon(
+                                      onPressed: onBuyAiCredits,
+                                      icon: Icon(
+                                        isLowCredits
+                                            ? Icons.bolt_rounded
+                                            : Icons.auto_awesome_rounded,
+                                        size: 18,
+                                      ),
+                                      style: FilledButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        backgroundColor: purple,
+                                        minimumSize: const Size.fromHeight(48),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      label: Text(
+                                        isLowCredits
+                                            ? 'Recargar ahora'
+                                            : 'Recargar créditos IA',
+                                        style: GoogleFonts.poppins(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 12.4,
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ],

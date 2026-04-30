@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/catalog.dart';
 import 'package:kosmenu_app/models/category.dart';
+import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -965,6 +966,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     setState(() => _showAppBarSearch = true);
   }
 
+  Future<void> _openAiMenuGenerator() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MagicOnboardingScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -1109,6 +1116,34 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       style: TextStyle(
                                         color: colorScheme.onSurfaceVariant,
                                       ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: FilledButton.icon(
+                                      onPressed: _openAiMenuGenerator,
+                                      icon: const Icon(
+                                        Icons.auto_awesome_rounded,
+                                        size: 18,
+                                      ),
+                                      label: const Text('✨ Generar menú con IA'),
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size.fromHeight(52),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 18,
+                                          vertical: 14,
+                                        ),
+                                        backgroundColor: colorScheme.primary,
+                                        foregroundColor: colorScheme.onPrimary,
+                                        textStyle: GoogleFonts.manrope(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(14),
+                                        ),
+                                      ),
+                                    ),
                                     ),
                                     const SizedBox(height: 10),
                                     Wrap(
