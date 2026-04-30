@@ -51,6 +51,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   Set<String> _availablePriceCurrencies = <String>{'USD'};
   bool _isSaving = false;
   bool _isUploadingImage = false;
+  bool _isLoadingAiCredits = false;
+  bool _isGeneratingDescription = false;
+  double _aiCreditsBalance = 0;
   final AiImageService _aiImageService = const AiImageService();
 
   @override
@@ -68,6 +71,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         widget.initialCategoryId ??
         (widget.categories.isNotEmpty ? widget.categories.first.id : null);
     _remoteImageUrl = product?.imagenUrl;
+    _loadAiCredits();
     _loadBusinessLogo();
     _loadPricingConfig();
   }
@@ -91,6 +95,56 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       return businessLogo;
     }
     return _defaultBrandLogoUrl;
+  }
+
+  String get _selectedCategoryName {
+    for (final category in widget.categories) {
+      if (category.id == _selectedCategoryId) {
+        return category.nombre.trim();
+      }
+    }
+    return '';
+  }
+
+  Map<String, dynamic> _responseMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((key, item) => MapEntry('$key', item));
+    }
+    return <String, dynamic>{};
+  }
+
+  Future<void> _loadAiCredits() async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) return;
+
+    if (mounted) {
+      setState(() => _isLoadingAiCredits = true);
+    }
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'get-ai-credits',
+        method: HttpMethod.get,
+        queryParameters: <String, String>{'commerce_id': comercioId},
+      );
+      final payload = _responseMap(response.data);
+      if (!mounted) return;
+      setState(() {
+        _aiCreditsBalance =
+            (payload['credits_balance'] as num?)?.toDouble() ??
+            double.tryParse('${payload['credits_balance'] ?? 0}') ??
+            0;
+      });
+    } catch (_) {
+      // Keep the screen functional even if credits can't be fetched here.
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingAiCredits = false);
+      }
+    }
   }
 
   Future<void> _loadBusinessLogo() async {
@@ -403,6 +457,173 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _showBuyCreditsSheet() async {
+    if (!mounted) return;
+    final colorScheme = Theme.of(context).colorScheme;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Te quedaste sin créditos IA',
+                  style: GoogleFonts.manrope(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 20,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Recarga para seguir generando imágenes y descripciones que convierten mejor.',
+                  style: GoogleFonts.manrope(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _showMessage(
+                        'La recarga de créditos IA se gestiona desde el dashboard.',
+                      );
+                    },
+                    icon: const Icon(Icons.auto_awesome_rounded),
+                    label: const Text('Ver opciones de recarga'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      backgroundColor: colorScheme.primary,
+                      foregroundColor: colorScheme.onPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _buildAiDescriptionSuggestion() {
+    final rawName = _nameController.text.trim();
+    final productName = rawName.isEmpty ? 'Este producto' : rawName;
+    final categoryName = _selectedCategoryName;
+    final existingDescription = _descriptionController.text.trim();
+
+    if (existingDescription.isNotEmpty) {
+      final normalized = existingDescription.endsWith('.')
+          ? existingDescription.substring(0, existingDescription.length - 1)
+          : existingDescription;
+      return '$productName: $normalized. Ideal para antojar desde el primer vistazo y destacar en tu menú.';
+    }
+
+    final categoryFragment = categoryName.isNotEmpty
+        ? 'de la categoría $categoryName'
+        : 'de tu menú';
+    return '$productName $categoryFragment, preparado para abrir el apetito con una presentación irresistible y un sabor que invita a pedirlo una y otra vez.';
+  }
+
+  Future<bool?> _confirmAiDescriptionGeneration() {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          backgroundColor: colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            'Generar descripción con IA',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: Text(
+            'Se descontará 1 crédito para generar una descripción optimizada para este producto. ¿Deseas continuar?',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+              ),
+              label: const Text('Generar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _onGenerateDescription() async {
+    if (_isGeneratingDescription || _isSaving) return;
+
+    if (_nameController.text.trim().isEmpty) {
+      _showMessage('Escribe el nombre del producto para generar la descripción.');
+      return;
+    }
+
+    if (_isLoadingAiCredits) {
+      return;
+    }
+
+    if (_aiCreditsBalance <= 0) {
+      await _showBuyCreditsSheet();
+      return;
+    }
+
+    final confirmed = await _confirmAiDescriptionGeneration();
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() => _isGeneratingDescription = true);
+
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      final result = _buildAiDescriptionSuggestion();
+      if (!mounted) return;
+      setState(() {
+        _descriptionController
+          ..text = result
+          ..selection = TextSelection.collapsed(offset: result.length);
+        _aiCreditsBalance = (_aiCreditsBalance - 1).clamp(0, double.infinity);
+      });
+      _showMessage('Descripción generada con IA');
+    } finally {
+      if (mounted) {
+        setState(() => _isGeneratingDescription = false);
+      }
+    }
+  }
+
   Future<void> _generateAiImageForExistingProduct() async {
     final product = widget.product;
     if (product == null) {
@@ -706,12 +927,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                       : null,
                   isSaving: _isSaving,
                   isUploadingImage: _isUploadingImage,
-                  showAiAction:
-                      widget.isEditing &&
-                      !_hasLocalImage &&
-                      !_hasRemoteImage,
+                  isGeneratingDescription: _isGeneratingDescription,
+                  isLoadingAiCredits: _isLoadingAiCredits,
                   onTapImageAction: _showImageOptions,
                   onGenerateAiImageAction: _generateAiImageForExistingProduct,
+                  onGenerateDescriptionAction: _onGenerateDescription,
                 );
 
                 final formPanel = _FormPanel(
@@ -742,6 +962,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                     if (value == null) return;
                     setState(() => _selectedPriceCurrency = value);
                   },
+                  isGeneratingDescription: _isGeneratingDescription,
+                  onGenerateDescription: _onGenerateDescription,
                   onSave: _save,
                 );
 
@@ -818,9 +1040,11 @@ class _ImagePanel extends StatelessWidget {
     required this.heroTag,
     required this.isSaving,
     required this.isUploadingImage,
-    required this.showAiAction,
+    required this.isGeneratingDescription,
+    required this.isLoadingAiCredits,
     required this.onTapImageAction,
     required this.onGenerateAiImageAction,
+    required this.onGenerateDescriptionAction,
   });
 
   final String? localImagePath;
@@ -829,9 +1053,11 @@ class _ImagePanel extends StatelessWidget {
   final String? heroTag;
   final bool isSaving;
   final bool isUploadingImage;
-  final bool showAiAction;
+  final bool isGeneratingDescription;
+  final bool isLoadingAiCredits;
   final VoidCallback onTapImageAction;
   final VoidCallback onGenerateAiImageAction;
+  final VoidCallback onGenerateDescriptionAction;
 
   Widget _wrapHero(Widget child) {
     if (heroTag == null || heroTag!.isEmpty) return child;
@@ -971,31 +1197,137 @@ class _ImagePanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          if (showAiAction) ...[
-            FilledButton.icon(
-              onPressed: isSaving ? null : onGenerateAiImageAction,
-              icon: const Icon(Icons.auto_awesome_rounded),
-              label: const Text('✨ Mejorar con IA'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-                backgroundColor: colorScheme.primary,
-                foregroundColor: colorScheme.onPrimary,
-                textStyle: GoogleFonts.manrope(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
-                ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: colorScheme.primary.withValues(alpha: 0.18),
               ),
             ),
-            const SizedBox(height: 10),
-          ],
-          FilledButton.icon(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '✨ Mejora tu producto con IA',
+                  style: GoogleFonts.manrope(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Genera imagen y descripción optimizada para vender más',
+                  style: GoogleFonts.manrope(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final stackButtons = constraints.maxWidth < 360;
+                    if (stackButtons) {
+                      return Column(
+                        children: [
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: isSaving ? null : onGenerateAiImageAction,
+                              icon: const Icon(Icons.auto_awesome),
+                              label: const Text('Mejorar imagen'),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: (isSaving || isGeneratingDescription || isLoadingAiCredits)
+                                  ? null
+                                  : onGenerateDescriptionAction,
+                              icon: isGeneratingDescription
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.text_fields),
+                              label: Text(
+                                isGeneratingDescription
+                                    ? 'Generando...'
+                                    : 'Generar descripción',
+                              ),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: isSaving ? null : onGenerateAiImageAction,
+                            icon: const Icon(Icons.auto_awesome),
+                            label: const Text('Mejorar imagen'),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(48),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: (isSaving || isGeneratingDescription || isLoadingAiCredits)
+                                ? null
+                                : onGenerateDescriptionAction,
+                            icon: isGeneratingDescription
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.text_fields),
+                            label: Text(
+                              isGeneratingDescription
+                                  ? 'Generando...'
+                                  : 'Generar descripción',
+                            ),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(48),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
             onPressed: isSaving ? null : onTapImageAction,
-            icon: const Icon(Icons.auto_awesome_rounded),
-            label: const Text('✨ Mejorar con IA'),
-            style: FilledButton.styleFrom(
+            icon: const Icon(Icons.photo_camera_rounded),
+            label: const Text('Abrir opciones de imagen'),
+            style: OutlinedButton.styleFrom(
               minimumSize: const Size.fromHeight(48),
-              backgroundColor: colorScheme.primary,
-              foregroundColor: colorScheme.onPrimary,
+              foregroundColor: colorScheme.onSurface,
+              side: BorderSide(color: colorScheme.outlineVariant),
               textStyle: GoogleFonts.manrope(
                 fontWeight: FontWeight.w800,
                 fontSize: 15,
@@ -1034,6 +1366,8 @@ class _FormPanel extends StatelessWidget {
     required this.validatePrice,
     required this.onCategoryChanged,
     required this.onPriceCurrencyChanged,
+    required this.isGeneratingDescription,
+    required this.onGenerateDescription,
     required this.onSave,
   });
 
@@ -1049,11 +1383,13 @@ class _FormPanel extends StatelessWidget {
   final TextEditingController descriptionController;
   final TextEditingController priceController;
   final bool isEditing;
+  final bool isGeneratingDescription;
   final FormFieldValidator<String> validateCategory;
   final FormFieldValidator<String> validateName;
   final FormFieldValidator<String> validatePrice;
   final ValueChanged<String?> onCategoryChanged;
   final ValueChanged<String?> onPriceCurrencyChanged;
+  final VoidCallback onGenerateDescription;
   final VoidCallback onSave;
 
   @override
@@ -1216,10 +1552,37 @@ class _FormPanel extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
                 decoration: const InputDecoration(
-                  hintText: 'Ingredientes, sabores o detalles clave',
+                  hintText:
+                      'Describe tu producto… o deja que la IA lo haga por ti 🍔',
                 ),
                 minLines: 2,
                 maxLines: 4,
+              ),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: (isSaving || isGeneratingDescription)
+                      ? null
+                      : onGenerateDescription,
+                  icon: isGeneratingDescription
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.auto_awesome, size: 16),
+                  label: Text(
+                    isGeneratingDescription
+                        ? 'Generando...'
+                        : 'Generar con IA (1 crédito)',
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: colorScheme.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               fieldLabel('Precio'),
