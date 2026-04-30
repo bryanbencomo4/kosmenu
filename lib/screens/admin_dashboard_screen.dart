@@ -1925,110 +1925,293 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
-      decoration: BoxDecoration(
-        color: purple,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x1A6D28D9),
-            blurRadius: 14,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.storefront_rounded, color: purple, size: 21),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13.5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    color: Colors.white.withValues(alpha: 0.86),
-                    fontWeight: FontWeight.w500,
-                    fontSize: 11.5,
-                    height: 1.15,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              FilledButton(
-                onPressed: onManageMenu,
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: purple,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
-                  minimumSize: const Size(0, 34),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  'Menú actual',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              FilledButton(
-                onPressed: onEdit,
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.white.withValues(alpha: 0.14),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
-                  minimumSize: const Size(0, 34),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  elevation: 0,
-                  side: const BorderSide(color: Colors.white24),
-                ),
-                child: Text(
-                  'Editar',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+    const background = Color(0xFFF0E8FF);
+    const surface = Colors.white;
+    const accentText = Color(0xFF7C3AED);
+    const darkText = Color(0xFF11183C);
+    const bodyText = Color(0xFF5E6282);
+    const success = Color(0xFF16A34A);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stackActions = constraints.maxWidth < 360;
+        final compactHeader = constraints.maxWidth < 430;
+
+        final editAction = _BusinessActionTile(
+          title: 'Configuración',
+          subtitle: 'Ajustes y perfil',
+          icon: Icons.settings_outlined,
+          accent: accentText,
+          onTap: onEdit,
+        );
+        final menuAction = _BusinessActionTile(
+          title: 'Menú digital',
+          subtitle: 'Productos y categorías',
+          icon: Icons.restaurant_menu_rounded,
+          accent: success,
+          onTap: onManageMenu,
+        );
+
+        return Container(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x140F172A),
+                blurRadius: 20,
+                offset: Offset(0, 10),
               ),
             ],
           ),
-        ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: surface.withValues(alpha: 0.9),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: accentText.withValues(alpha: 0.14),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.storefront_rounded,
+                            color: accentText,
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Centro de gestión',
+                          style: GoogleFonts.poppins(
+                            color: accentText,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Tu negocio',
+                          style: GoogleFonts.poppins(
+                            color: darkText,
+                            fontWeight: FontWeight.w700,
+                            fontSize: compactHeader ? 28 : 32,
+                            height: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: compactHeader ? 280 : 360,
+                          ),
+                          child: Text(
+                            'Administra la información de tu negocio y tu menú digital.',
+                            style: GoogleFonts.poppins(
+                              color: bodyText,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                              height: 1.45,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Container(
+                    width: compactHeader ? 96 : 128,
+                    height: compactHeader ? 96 : 128,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.white.withValues(alpha: 0.95),
+                          const Color(0xFFE4D7FF),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: compactHeader ? 70 : 92,
+                          height: compactHeader ? 70 : 92,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withValues(alpha: 0.42),
+                          ),
+                        ),
+                        Icon(
+                          Icons.store_mall_directory_rounded,
+                          size: compactHeader ? 42 : 56,
+                          color: purple.withValues(alpha: 0.72),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              if (stackActions)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    editAction,
+                    const SizedBox(height: 12),
+                    menuAction,
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(child: editAction),
+                    const SizedBox(width: 12),
+                    Expanded(child: menuAction),
+                  ],
+                ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: const BoxDecoration(
+                      color: success,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Estado del negocio:',
+                    style: GoogleFonts.poppins(
+                      color: bodyText,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDDF7E7),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      'Abierto',
+                      style: GoogleFonts.poppins(
+                        color: success,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BusinessActionTile extends StatelessWidget {
+  const _BusinessActionTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0F0F172A),
+                blurRadius: 10,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: accent, size: 26),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.poppins(
+                        color: const Color(0xFF11183C),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.poppins(
+                        color: const Color(0xFF5E6282),
+                        fontWeight: FontWeight.w500,
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 16,
+                color: accent,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
