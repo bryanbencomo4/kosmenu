@@ -3,27 +3,28 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CategoryIconAiSuggestion {
   const CategoryIconAiSuggestion({
-    required this.iconKey,
+    required this.emoji,
     required this.reason,
     required this.confidence,
     required this.creditsCharged,
   });
 
-  final String iconKey;
+  final String emoji;
   final String reason;
   final double confidence;
   final double creditsCharged;
 
   factory CategoryIconAiSuggestion.fromMap(Map<String, dynamic> map) {
     return CategoryIconAiSuggestion(
-      iconKey: map['icon_key']?.toString().trim() ?? '',
+      emoji: map['emoji']?.toString().trim() ??
+          '',
       reason: map['reason']?.toString().trim() ?? '',
       confidence: (map['confidence'] as num?)?.toDouble() ??
           double.tryParse('${map['confidence'] ?? 0.7}') ??
           0.7,
       creditsCharged: (map['credits_charged'] as num?)?.toDouble() ??
-          double.tryParse('${map['credits_charged'] ?? 0.5}') ??
-          0.5,
+          double.tryParse('${map['credits_charged'] ?? 1}') ??
+          1,
     );
   }
 }
@@ -62,7 +63,11 @@ class CategoryIconAiService {
         );
       }
 
-      return CategoryIconAiSuggestion.fromMap(data);
+      final suggestion = CategoryIconAiSuggestion.fromMap(data);
+      if (suggestion.emoji.isEmpty) {
+        throw StateError('No se pudo sugerir el emoji de la categoría.');
+      }
+      return suggestion;
     } on FunctionException catch (error) {
       throw StateError(
         _friendlyErrorMessage(
@@ -90,12 +95,15 @@ class CategoryIconAiService {
       return 'El servicio de iconos IA no está disponible en este momento. Inténtalo nuevamente en unos minutos.';
     }
     if (normalized.contains('gemini error')) {
-      return 'No se pudo generar el icono IA en este momento.';
+      return 'No se pudo sugerir el emoji con IA en este momento.';
+    }
+    if (normalized.contains('emoji')) {
+      return 'No se pudo sugerir el emoji de la categoría.';
     }
     if (normalized.contains('missing comercio_id')) {
       return 'No se encontró el comercio activo para generar el icono.';
     }
-    return 'No se pudo generar el icono IA.';
+    return 'No se pudo sugerir el emoji con IA.';
   }
 
   Map<String, dynamic> _responseMap(dynamic value) {

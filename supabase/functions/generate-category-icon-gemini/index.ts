@@ -4,7 +4,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import {
   AiUsageError,
   COST_CATEGORY_ICON,
-  addCredits,
   deductCredits,
   enforceAiLimits,
   hasEnoughCredits,
@@ -17,116 +16,60 @@ const corsHeaders = {
 };
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
+const FALLBACK_EMOJI = '🏷️';
 
-const ICON_OPTIONS = [
-  'restaurant',
-  'fastfood',
-  'lunch_dining',
-  'dinner_dining',
-  'ramen_dining',
-  'local_pizza',
-  'bakery_dining',
-  'icecream',
-  'cake',
-  'emoji_food_beverage',
-  'local_cafe',
-  'local_bar',
-  'wine_bar',
-  'sports_bar',
-  'brunch_dining',
-  'egg_alt',
-  'set_meal',
-  'kebab_dining',
-  'rice_bowl',
-  'takeout_dining',
-  'delivery_dining',
-  'local_drink',
-  'liquor',
-  'tapas',
-  'cookie',
-  'breakfast_dining',
-  'soup_kitchen',
-  'outdoor_grill',
-  'local_fire_department',
-  'spa',
-  'eco',
-  'grass',
-  'emoji_nature',
-  'nutrition',
-  'favorite',
-  'celebration',
-  'redeem',
-  'storefront',
-  'star',
-  'diamond',
-];
-
-const GENERIC_ICON_KEYS = new Set([
-  'restaurant',
-  'fastfood',
-  'emoji_food_beverage',
-]);
-
-const KEYWORD_ICON_RULES = [
-  { icon_key: 'diamond', keywords: ['premium', 'signature', 'deluxe', 'exclusive', 'gourmet'], reason: 'El titulo comunica una linea premium o signature.' },
-  { icon_key: 'star', keywords: ['top', 'especial', 'especiales', 'destacado', 'favorito', 'premium plus'], reason: 'El titulo resalta una seleccion destacada.' },
-  { icon_key: 'wine_bar', keywords: ['vino', 'vinos', 'wine', 'champagne', 'espumante', 'premium drink'], reason: 'El titulo apunta a vinos o bebidas premium.' },
-  { icon_key: 'sports_bar', keywords: ['bebida', 'bebidas', 'coctel', 'cocteles', 'cocktail', 'tragos', 'trago', 'cerveza', 'cervezas', 'bar'], reason: 'El titulo se relaciona con bebidas o cocteleria.' },
-  { icon_key: 'local_drink', keywords: ['jugo', 'jugos', 'smoothie', 'smoothies', 'refresco', 'refrescos', 'soda', 'limonada'], reason: 'El titulo se relaciona con bebidas frias o jugos.' },
-  { icon_key: 'local_cafe', keywords: ['cafe', 'cafes', 'coffee', 'latte', 'capuccino', 'espresso', 'mocha'], reason: 'El titulo se relaciona con cafe o bebidas calientes.' },
-  { icon_key: 'spa', keywords: ['te', 'tes', 'chai', 'infusion', 'infusiones'], reason: 'El titulo se relaciona con te o infusiones.' },
-  { icon_key: 'local_pizza', keywords: ['pizza', 'pizzas'], reason: 'El titulo menciona pizza.' },
-  { icon_key: 'lunch_dining', keywords: ['hamburguesa', 'hamburguesas', 'burger', 'burgers', 'smash'], reason: 'El titulo se relaciona con hamburguesas.' },
-  { icon_key: 'ramen_dining', keywords: ['ramen', 'noodle', 'noodles', 'fideos'], reason: 'El titulo se relaciona con ramen o noodles.' },
-  { icon_key: 'dinner_dining', keywords: ['plato', 'platos', 'fuerte', 'fuertes', 'almuerzo', 'cena', 'menu ejecutivo'], reason: 'El titulo se relaciona con platos fuertes.' },
-  { icon_key: 'bakery_dining', keywords: ['pan', 'panes', 'panaderia', 'panadería', 'croissant', 'croissants', 'horneado', 'horneados'], reason: 'El titulo se relaciona con panaderia.' },
-  { icon_key: 'icecream', keywords: ['helado', 'helados', 'gelato', 'sorbete'], reason: 'El titulo se relaciona con helados.' },
-  { icon_key: 'cake', keywords: ['postre', 'postres', 'torta', 'tortas', 'cake', 'dulce', 'dulces'], reason: 'El titulo se relaciona con postres.' },
-  { icon_key: 'cookie', keywords: ['galleta', 'galletas', 'cookie', 'cookies', 'biscuit'], reason: 'El titulo se relaciona con galletas.' },
-  { icon_key: 'breakfast_dining', keywords: ['desayuno', 'desayunos', 'breakfast', 'brunch matutino'], reason: 'El titulo se relaciona con desayunos.' },
-  { icon_key: 'brunch_dining', keywords: ['brunch'], reason: 'El titulo se relaciona con brunch.' },
-  { icon_key: 'egg_alt', keywords: ['huevo', 'huevos', 'omelette', 'omelet'], reason: 'El titulo se relaciona con huevos.' },
-  { icon_key: 'set_meal', keywords: ['combo', 'combos', 'promo combo', 'meal deal'], reason: 'El titulo se relaciona con combos.' },
-  { icon_key: 'kebab_dining', keywords: ['parrilla', 'kebab', 'shawarma', 'brocheta'], reason: 'El titulo se relaciona con parrilla o kebab.' },
-  { icon_key: 'rice_bowl', keywords: ['bowl', 'bowls', 'arroz', 'poke', 'poké'], reason: 'El titulo se relaciona con bowls o arroz.' },
-  { icon_key: 'takeout_dining', keywords: ['para llevar', 'takeout', 'pickup'], reason: 'El titulo se relaciona con pedidos para llevar.' },
-  { icon_key: 'delivery_dining', keywords: ['delivery', 'domicilio', 'envio', 'envío'], reason: 'El titulo se relaciona con delivery.' },
-  { icon_key: 'liquor', keywords: ['licor', 'licores', 'whisky', 'ron', 'vodka', 'gin', 'tequila'], reason: 'El titulo se relaciona con licores.' },
-  { icon_key: 'tapas', keywords: ['tapa', 'tapas', 'picada', 'picadas', 'aperitivo', 'aperitivos'], reason: 'El titulo se relaciona con tapas o aperitivos.' },
-  { icon_key: 'soup_kitchen', keywords: ['sopa', 'sopas', 'caldo', 'caldos', 'crema'], reason: 'El titulo se relaciona con sopas.' },
-  { icon_key: 'outdoor_grill', keywords: ['asado', 'asados', 'bbq', 'barbecue', 'grill', 'grilled'], reason: 'El titulo se relaciona con asados o grill.' },
-  { icon_key: 'local_fire_department', keywords: ['picante', 'spicy', 'hot', 'fuego'], reason: 'El titulo comunica comida picante.' },
-  { icon_key: 'eco', keywords: ['vegano', 'vegana', 'veggie', 'vegetariano', 'vegetariana'], reason: 'El titulo se relaciona con opciones veganas o vegetarianas.' },
-  { icon_key: 'grass', keywords: ['ensalada', 'ensaladas', 'green', 'greens'], reason: 'El titulo se relaciona con ensaladas.' },
-  { icon_key: 'emoji_nature', keywords: ['natural', 'organico', 'orgánico', 'fresh', 'fresco', 'fresco'], reason: 'El titulo comunica productos naturales.' },
-  { icon_key: 'nutrition', keywords: ['fit', 'saludable', 'healthy', 'light', 'proteina', 'proteína'], reason: 'El titulo se relaciona con comida saludable.' },
-  { icon_key: 'celebration', keywords: ['fiesta', 'party', 'celebracion', 'celebración', 'evento'], reason: 'El titulo comunica una linea festiva.' },
-  { icon_key: 'redeem', keywords: ['promo', 'promos', 'oferta', 'ofertas', 'descuento', 'descuentos'], reason: 'El titulo comunica promociones u ofertas.' },
-  { icon_key: 'storefront', keywords: ['casa', 'de la casa', 'house'], reason: 'El titulo comunica productos de la casa.' },
-  { icon_key: 'favorite', keywords: ['favorito', 'favoritos', 'best seller', 'recomendado', 'recomendados'], reason: 'El titulo comunica favoritos o recomendados.' },
+const EMOJI_RULES = [
+  { emoji: '🍔', keywords: ['hamburguesa', 'hamburguesas', 'burger', 'burgers'] },
+  { emoji: '🍕', keywords: ['pizza', 'pizzas'] },
+  { emoji: '🍗', keywords: ['pollo', 'pollos', 'chicken'] },
+  { emoji: '🥩', keywords: ['carnes', 'carne', 'parrilla', 'asado', 'asados', 'steak', 'bbq'] },
+  { emoji: '🍣', keywords: ['sushi'] },
+  { emoji: '🍝', keywords: ['pasta', 'pastas', 'spaghetti', 'lasagna', 'fideos'] },
+  { emoji: '🌮', keywords: ['taco', 'tacos', 'mexicana', 'mexicano', 'mexican'] },
+  { emoji: '🥗', keywords: ['ensalada', 'ensaladas', 'saludable', 'healthy', 'fit'] },
+  { emoji: '🍰', keywords: ['postre', 'postres', 'torta', 'tortas', 'cake', 'cakes'] },
+  { emoji: '🍦', keywords: ['helado', 'helados', 'ice cream', 'gelato'] },
+  { emoji: '🥐', keywords: ['pan', 'panes', 'panaderia', 'panadería', 'bakery'] },
+  { emoji: '☕', keywords: ['cafe', 'café', 'coffee'] },
+  { emoji: '🥤', keywords: ['bebida', 'bebidas', 'refresco', 'refrescos', 'jugo', 'jugos', 'soda'] },
+  { emoji: '🍺', keywords: ['cerveza', 'cervezas', 'bar'] },
+  { emoji: '🍷', keywords: ['vino', 'vinos', 'wine'] },
+  { emoji: '🎁', keywords: ['promocion', 'promoción', 'promociones', 'oferta', 'ofertas', 'descuento', 'descuentos', 'regalo', 'regalos'] },
+  { emoji: '🛵', keywords: ['delivery', 'reparto', 'envio', 'envío', 'domicilio'] },
+  { emoji: '🛍️', keywords: ['tienda', 'shop', 'store'] },
+  { emoji: '💊', keywords: ['farmacia', 'salud', 'medicina', 'medicinas'] },
+  { emoji: '💄', keywords: ['belleza', 'maquillaje', 'cosmetica', 'cosmética'] },
+  { emoji: '👕', keywords: ['ropa', 'moda', 'camisa', 'camiseta', 'vestuario'] },
+  { emoji: '💻', keywords: ['tecnologia', 'tecnología', 'electronica', 'electrónica', 'computador', 'computadora', 'laptop'] },
+  { emoji: '🐶', keywords: ['mascota', 'mascotas', 'pet', 'pets', 'perro', 'perros'] },
+  { emoji: '🧽', keywords: ['limpieza', 'aseo'] },
+  { emoji: '🏠', keywords: ['hogar', 'casa', 'home'] },
+  { emoji: '🛠️', keywords: ['ferreteria', 'ferretería', 'herramienta', 'herramientas', 'servicio', 'servicios', 'reparacion', 'reparación'] },
+  { emoji: '🎓', keywords: ['educacion', 'educación', 'curso', 'cursos', 'academia', 'clases'] },
+  { emoji: '🏋️', keywords: ['deporte', 'deportes', 'fitness', 'gym', 'gimnasio'] },
+  { emoji: '🚗', keywords: ['auto', 'autos', 'carro', 'carros', 'repuesto', 'repuestos'] },
+  { emoji: '🎵', keywords: ['musica', 'música', 'audio'] },
+  { emoji: '🎮', keywords: ['juego', 'juegos', 'gaming', 'gamer'] },
+  { emoji: '💎', keywords: ['premium', 'destacado', 'destacados', 'especial', 'especiales', 'deluxe', 'signature'] },
 ] as const;
 
 const SYSTEM_PROMPT =
-  'Eres un experto en taxonomias visuales para menus de restaurantes. ' +
-  'Debes elegir UN solo icono semantico para una categoria de menu usando exclusivamente una lista cerrada de claves permitidas. ' +
-  'No inventes claves. No respondas texto libre. Responde UNICAMENTE JSON valido con esta forma exacta: ' +
-  '{"icon_key": string, "reason": string, "confidence": number}. ' +
-  'icon_key debe ser uno de estos valores: ' + ICON_OPTIONS.join(', ') + '. ' +
-  'reason debe ser una frase breve en espanol. ' +
-  'confidence debe ser un numero entre 0 y 1. ' +
-  'Prioriza primero las palabras clave explicitas del titulo de la categoria. ' +
-  'Si el titulo contiene palabras como premium, signature, vinos, cafe, pizza, hamburguesas, postres o promos, el icono debe reflejarlas directamente. ' +
-  'Evita responder iconos demasiado genericos cuando el titulo ya da una pista clara. ' +
-  'Prioriza precision semantica, claridad para vendedor y coherencia con comida/bebidas. ' +
-  'Si la categoria es ambigua, elige un icono gastronomico neutral y util.';
+  'Eres un asistente experto en taxonomia comercial. ' +
+  'Debes sugerir exactamente un solo emoji Unicode estilo WhatsApp para representar una categoria. ' +
+  'No expliques de mas y no devuelvas texto fuera del JSON. ' +
+  'Responde UNICAMENTE JSON valido con esta forma exacta: ' +
+  '{"emoji": string, "reason": string, "confidence": number}. ' +
+  'emoji debe ser un solo emoji Unicode visible y apropiado para la categoria. ' +
+  'Si la categoria habla de hamburguesas usa 🍔, pizza 🍕, bebidas 🥤, postres 🍰, promociones 🎁, delivery 🛵, servicios 🛠️, mascotas 🐶, tecnologia 💻, belleza 💄. ' +
+  'reason debe ser breve en espanol. confidence debe estar entre 0 y 1.';
 
-type IconSuggestionResult = {
-  icon_key: string;
+type EmojiSuggestion = {
+  emoji: string;
   reason: string;
   confidence: number;
 };
 
-type KeywordSuggestion = IconSuggestionResult & {
+type KeywordEmojiSuggestion = EmojiSuggestion & {
   score: number;
 };
 
@@ -156,16 +99,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: 'Missing required field: category_name' }, 400);
     }
 
-    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
 
-    if (!geminiApiKey || !supabaseUrl || !serviceRoleKey) {
+    if (!supabaseUrl || !serviceRoleKey) {
       return jsonResponse(
-        {
-          error:
-            'Missing env vars. Required: GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY',
-        },
+        { error: 'Missing env vars. Required: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY' },
         500,
       );
     }
@@ -175,9 +115,35 @@ Deno.serve(async (req: Request) => {
     });
 
     await enforceAiLimits(supabase, comercioId);
+
+    const localSuggestion = suggestEmojiByKeyword(categoryName, context);
+    if (localSuggestion) {
+      return jsonResponse(
+        {
+          emoji: localSuggestion.emoji,
+          reason: localSuggestion.reason,
+          confidence: localSuggestion.confidence,
+          credits_charged: 0,
+        },
+        200,
+      );
+    }
+
+    if (!geminiApiKey) {
+      return jsonResponse(
+        {
+          emoji: FALLBACK_EMOJI,
+          reason: 'No hubo match local y la IA no esta configurada.',
+          confidence: 0.4,
+          credits_charged: 0,
+        },
+        200,
+      );
+    }
+
     await hasEnoughCredits(supabase, comercioId, COST_CATEGORY_ICON);
 
-    const suggestion = await generateIconSuggestionWithGemini({
+    const aiSuggestion = await suggestEmojiWithGemini({
       apiKey: geminiApiKey,
       supabase,
       comercioId,
@@ -185,59 +151,97 @@ Deno.serve(async (req: Request) => {
       context,
     });
 
-    let creditsCharged = false;
+    await deductCredits(supabase, comercioId, COST_CATEGORY_ICON, 'category_emoji_suggestion', {
+      function: 'generate-category-icon-gemini',
+      category_name: categoryName,
+      source: 'gemini',
+      emoji: aiSuggestion.emoji,
+    });
 
-    try {
-      await deductCredits(supabase, comercioId, COST_CATEGORY_ICON, 'category_icon_generation', {
-        function: 'generate-category-icon-gemini',
-        category_name: categoryName,
-        icon_key: suggestion.icon_key,
-      });
-      creditsCharged = true;
-
-      return jsonResponse(
-        {
-          ok: true,
-          comercio_id: comercioId,
-          category_name: categoryName,
-          icon_key: suggestion.icon_key,
-          reason: suggestion.reason,
-          confidence: suggestion.confidence,
-          credits_charged: COST_CATEGORY_ICON,
-        },
-        200,
-      );
-    } catch (error) {
-      if (creditsCharged) {
-        await addCredits(supabase, comercioId, COST_CATEGORY_ICON, 'category_icon_generation_refund', {
-          function: 'generate-category-icon-gemini',
-          category_name: categoryName,
-        });
-      }
-      throw error;
-    }
+    return jsonResponse(
+      {
+        emoji: aiSuggestion.emoji,
+        reason: aiSuggestion.reason,
+        confidence: aiSuggestion.confidence,
+        credits_charged: COST_CATEGORY_ICON,
+      },
+      200,
+    );
   } catch (error) {
     if (error instanceof AiUsageError) {
       return jsonResponse(error.toResponseBody(), error.status);
     }
 
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return jsonResponse({ error: message }, 500);
+    return jsonResponse(
+      {
+        emoji: FALLBACK_EMOJI,
+        reason: message || 'No se pudo sugerir un emoji.',
+        confidence: 0.35,
+        credits_charged: 0,
+      },
+      200,
+    );
   }
 });
 
-async function generateIconSuggestionWithGemini(params: {
+function suggestEmojiByKeyword(
+  categoryName: string,
+  context = '',
+): KeywordEmojiSuggestion | null {
+  const haystack = normalizeMatchText(`${categoryName} ${context}`);
+  if (!haystack) {
+    return null;
+  }
+
+  let bestRule: (typeof EMOJI_RULES)[number] | null = null;
+  let bestScore = 0;
+  let bestMatches: string[] = [];
+  const normalizedCategory = normalizeMatchText(categoryName);
+
+  for (const rule of EMOJI_RULES) {
+    const matches: string[] = [];
+    let score = 0;
+
+    for (const keyword of rule.keywords) {
+      const normalizedKeyword = normalizeMatchText(keyword);
+      if (!normalizedKeyword || !haystack.includes(normalizedKeyword)) {
+        continue;
+      }
+
+      matches.push(keyword);
+      score += normalizedKeyword.includes(' ') ? 5 : 3;
+      if (normalizedCategory.includes(normalizedKeyword)) {
+        score += 2;
+      }
+    }
+
+    if (score > bestScore) {
+      bestRule = rule;
+      bestScore = score;
+      bestMatches = matches;
+    }
+  }
+
+  if (!bestRule || bestScore < 3) {
+    return null;
+  }
+
+  return {
+    emoji: bestRule.emoji,
+    reason: `Keywords detectadas: ${bestMatches.join(', ')}`,
+    confidence: Math.min(0.82 + (bestScore * 0.02), 0.98),
+    score: bestScore,
+  };
+}
+
+async function suggestEmojiWithGemini(params: {
   apiKey: string;
   supabase: ReturnType<typeof createClient>;
   comercioId: string;
   categoryName: string;
   context: string;
-}): Promise<IconSuggestionResult> {
-  const keywordSuggestion = suggestIconFromKeywords(
-    params.categoryName,
-    params.context,
-  );
-
+}): Promise<EmojiSuggestion> {
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent` +
     `?key=${encodeURIComponent(params.apiKey)}`;
@@ -257,68 +261,59 @@ async function generateIconSuggestionWithGemini(params: {
               text:
                 `Categoria: ${params.categoryName}. ` +
                 (params.context ? `Contexto adicional: ${params.context}. ` : '') +
-                (keywordSuggestion
-                  ? `Palabras clave detectadas: ${keywordSuggestion.reason}. Icono recomendado por keywords: ${keywordSuggestion.icon_key}. `
-                  : '') +
-                'Devuelve el mejor icon_key posible para esta categoria.',
+                'Sugiere un solo emoji Unicode apropiado para representar la categoria.',
             },
           ],
         },
       ],
       generationConfig: {
-        temperature: 0.2,
+        temperature: 0.1,
         responseMimeType: 'application/json',
         responseSchema: {
           type: 'object',
           properties: {
-            icon_key: {
-              type: 'string',
-              enum: ICON_OPTIONS,
-            },
+            emoji: { type: 'string' },
             reason: { type: 'string' },
             confidence: { type: 'number' },
           },
-          required: ['icon_key', 'reason', 'confidence'],
+          required: ['emoji', 'reason', 'confidence'],
         },
       },
     }),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini error (${GEMINI_MODEL}): ${errorText}`);
+    throw new Error(`Gemini error (${GEMINI_MODEL}): ${await response.text()}`);
   }
 
   const completion = await response.json();
   await recordGeminiUsage(params.supabase, params.comercioId, completion?.usageMetadata);
 
-  const text = extractText(completion);
-  const parsed = safeParseJson(text);
-  const iconKey = normalizeString(parsed?.icon_key);
-
-  if (!ICON_OPTIONS.includes(iconKey)) {
-    return keywordSuggestion ?? heuristicFallback(params.categoryName, params.context);
-  }
-
-  if (
-    keywordSuggestion &&
-    (GENERIC_ICON_KEYS.has(iconKey) || keywordSuggestion.score >= 8)
-  ) {
-    return {
-      icon_key: keywordSuggestion.icon_key,
-      reason: keywordSuggestion.reason,
-      confidence: Math.max(
-        keywordSuggestion.confidence,
-        normalizeConfidence(parsed?.confidence),
-      ),
-    };
-  }
+  const parsed = safeParseJson(extractText(completion));
+  const emoji = normalizeEmoji(parsed?.emoji);
 
   return {
-    icon_key: iconKey,
-    reason: normalizeString(parsed?.reason) || 'Icono sugerido por IA para esta categoria.',
-    confidence: normalizeConfidence(parsed?.confidence),
+    emoji: emoji ?? FALLBACK_EMOJI,
+    reason: normalizeString(parsed?.reason) || 'Emoji sugerido por IA.',
+    confidence: normalizeConfidence(parsed?.confidence, emoji == null ? 0.45 : 0.78),
   };
+}
+
+function normalizeEmoji(value: unknown): string | null {
+  const emoji = normalizeString(value);
+  if (!emoji) {
+    return null;
+  }
+
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  const graphemes = [...segmenter.segment(emoji)].map((segment) => segment.segment);
+  if (graphemes.length !== 1) {
+    return null;
+  }
+
+  return /[\p{Extended_Pictographic}\p{Emoji_Presentation}]/u.test(emoji)
+    ? emoji
+    : null;
 }
 
 function extractText(payload: any): string {
@@ -343,88 +338,9 @@ function safeParseJson(value: string): Record<string, unknown> | null {
   }
 }
 
-function suggestIconFromKeywords(
-  categoryName: string,
-  context: string,
-): KeywordSuggestion | null {
-  const haystack = normalizeMatchText(`${categoryName} ${context}`);
-  if (!haystack) {
-    return null;
-  }
-
-  let bestRule: (typeof KEYWORD_ICON_RULES)[number] | null = null;
-  let bestScore = 0;
-  let bestMatches: string[] = [];
-
-  for (const rule of KEYWORD_ICON_RULES) {
-    const matches: string[] = [];
-    let score = 0;
-
-    for (const keyword of rule.keywords) {
-      const normalizedKeyword = normalizeMatchText(keyword);
-      if (!normalizedKeyword) continue;
-      if (!haystack.includes(normalizedKeyword)) continue;
-
-      matches.push(keyword);
-      score += normalizedKeyword.includes(' ') ? 5 : 3;
-      if (normalizeMatchText(categoryName).includes(normalizedKeyword)) {
-        score += 2;
-      }
-    }
-
-    if (score > bestScore) {
-      bestRule = rule;
-      bestScore = score;
-      bestMatches = matches;
-    }
-  }
-
-  if (!bestRule || bestScore < 3) {
-    return null;
-  }
-
-  return {
-    icon_key: bestRule.icon_key,
-    reason: `Keywords detectadas: ${bestMatches.join(', ') || bestRule.icon_key}`,
-    confidence: Math.min(0.74 + (bestScore * 0.025), 0.96),
-    score: bestScore,
-  };
-}
-
-function heuristicFallback(categoryName: string, context = ''): IconSuggestionResult {
-  const keywordSuggestion = suggestIconFromKeywords(categoryName, context);
-  if (keywordSuggestion) {
-    return {
-      icon_key: keywordSuggestion.icon_key,
-      reason: keywordSuggestion.reason,
-      confidence: keywordSuggestion.confidence,
-    };
-  }
-
-  const normalized = normalizeMatchText(categoryName);
-  if (normalized.includes('pizza')) return fixedResult('local_pizza');
-  if (normalized.includes('cafe') || normalized.includes('bebida caliente')) return fixedResult('local_cafe');
-  if (normalized.includes('bar') || normalized.includes('cerveza') || normalized.includes('trago')) return fixedResult('sports_bar');
-  if (normalized.includes('postre') || normalized.includes('torta')) return fixedResult('cake');
-  if (normalized.includes('helado')) return fixedResult('icecream');
-  if (normalized.includes('hamburg')) return fixedResult('lunch_dining');
-  if (normalized.includes('desayuno')) return fixedResult('breakfast_dining');
-  if (normalized.includes('veg') || normalized.includes('ensalada')) return fixedResult('eco');
-  if (normalized.includes('sopa')) return fixedResult('soup_kitchen');
-  return fixedResult('restaurant');
-}
-
-function fixedResult(iconKey: string): IconSuggestionResult {
-  return {
-    icon_key: iconKey,
-    reason: 'Icono sugerido por heuristica segura.',
-    confidence: 0.65,
-  };
-}
-
-function normalizeConfidence(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : Number(value ?? 0);
-  if (!Number.isFinite(parsed)) return 0.7;
+function normalizeConfidence(value: unknown, fallback = 0.7): number {
+  const parsed = typeof value === 'number' ? value : Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
   return Math.max(0, Math.min(1, parsed));
 }
 

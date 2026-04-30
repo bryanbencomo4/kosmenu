@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/catalog.dart';
@@ -372,14 +373,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
             borderRadius: BorderRadius.circular(18),
           ),
           title: Text(
-            'Generar icono con IA',
+            'Sugerir emoji con IA',
             style: GoogleFonts.manrope(
               color: colorScheme.onSurface,
               fontWeight: FontWeight.w800,
             ),
           ),
           content: Text(
-            'Se descontará 0.5 crédito para sugerir el mejor icono para esta categoría. ¿Deseas continuar?',
+            'Primero intentaremos resolver la categoría con reglas locales gratis. Si hace falta consultar IA, se descontará 1 crédito. ¿Deseas continuar?',
             style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
           actions: [
@@ -397,7 +398,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 backgroundColor: colorScheme.primary,
                 foregroundColor: colorScheme.onPrimary,
               ),
-              label: const Text('Generar'),
+              label: const Text('Sugerir'),
             ),
           ],
         );
@@ -415,7 +416,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       return 'La IA no está habilitada para este comercio.';
     }
     if (normalized.contains('gemini error')) {
-      return 'No se pudo generar el icono IA en este momento.';
+      return 'No se pudo sugerir el emoji con IA en este momento.';
     }
     if (normalized.contains('boot_error') ||
         normalized.contains('function failed to start') ||
@@ -423,7 +424,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         normalized.contains('functionexception')) {
       return 'El servicio de iconos IA no está disponible en este momento. Inténtalo nuevamente en unos minutos.';
     }
-    return message.isEmpty ? 'No se pudo generar el icono IA.' : message;
+    return message.isEmpty ? 'No se pudo sugerir el emoji con IA.' : message;
   }
 
   Future<_CategoryEditorResult?> _showCategoryEditorSheet({
@@ -431,17 +432,22 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     CategoryModel? category,
   }) async {
     final colorScheme = Theme.of(context).colorScheme;
+    final navigator = Navigator.of(context);
     final nameController = TextEditingController(text: category?.nombre ?? '');
-    var selectedIconKey = _normalizeCategoryIconKey(category?.icono) ??
-        _suggestCategoryIconKey(category?.nombre ?? '');
+    final emojiSearchController = TextEditingController();
+    var selectedIconValue = _normalizeStoredIconValue(category?.icono) ??
+      _suggestCategoryEmoji(category?.nombre ?? '');
     var generatedWithAi = category?.creadoPorIa == true;
     var aiConfidence = category?.confianzaIa;
     var isGeneratingAi = false;
+    var emojiSearchQuery = '';
+    var isSheetClosed = false;
     String? helperMessage;
 
     final result = await showModalBottomSheet<_CategoryEditorResult>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       backgroundColor: colorScheme.surface,
       shape: const RoundedRectangleBorder(
@@ -451,12 +457,34 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
             final media = MediaQuery.of(sheetContext);
-            final iconOption =
-                _categoryIconOptionByKey(selectedIconKey) ?? _categoryIconOptions.first;
+            final selectedEmojiOption = _categoryEmojiOptionByEmoji(selectedIconValue);
+            final selectedIconKey = _normalizeCategoryIconKey(selectedIconValue);
+            final legacyIconOption = selectedIconKey != null
+                ? _categoryIconOptionByKey(selectedIconKey)
+                : null;
+            final hasCustomImage = _isImageUrlContent(selectedIconValue);
+            final hasCustomSvg = _isSvgIconContent(selectedIconValue);
+            final isEmoji = _isEmojiContent(selectedIconValue);
+            final filteredEmojiOptions = _filterCategoryEmojiOptions(
+              name: nameController.text,
+              query: emojiSearchQuery,
+            );
+            final recommendedEmojiOptions = _recommendedCategoryEmojiOptions(
+              name: nameController.text,
+              query: emojiSearchQuery,
+            );
+            final previewLabel = hasCustomImage
+                ? 'Imagen URL antigua'
+                : hasCustomSvg
+                ? 'Icono SVG legado'
+                : isEmoji
+                ? (selectedEmojiOption?.label ?? 'Emoji personalizado')
+                : (legacyIconOption?.label ?? 'Icono legado');
 
             Future<void> generateWithAi() async {
               final categoryName = nameController.text.trim();
               if (categoryName.isEmpty) {
+                if (isSheetClosed || !sheetContext.mounted) return;
                 setSheetState(() {
                   helperMessage =
                       'Escribe primero el nombre de la categoría para usar IA.';
@@ -465,7 +493,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               }
 
               final confirmed = await _confirmCategoryAiIconGeneration();
-              if (confirmed != true) return;
+              if (confirmed != true || isSheetClosed || !mounted || !sheetContext.mounted) {
+                return;
+              }
 
               setSheetState(() {
                 isGeneratingAi = true;
@@ -477,40 +507,43 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   comercioId: SupabaseConfig.currentComercioId,
                   categoryName: categoryName,
                   context:
-                      'Selecciona un icono para una categoría de menú de restaurante.',
+                      'Sugiere un emoji estilo WhatsApp para una categoría comercial según las palabras clave del título.',
                 );
 
-                if (!mounted) return;
+                if (!mounted || isSheetClosed || !sheetContext.mounted) return;
                 setSheetState(() {
-                  selectedIconKey = suggestion.iconKey;
+                  selectedIconValue = suggestion.emoji;
                   generatedWithAi = true;
                   aiConfidence = suggestion.confidence;
                   helperMessage = suggestion.reason.isNotEmpty
-                      ? '${suggestion.reason} · ${suggestion.creditsCharged.toStringAsFixed(1)} crédito'
-                      : 'Icono generado con IA.';
+                      ? '${suggestion.reason} · ${suggestion.creditsCharged == 0 ? 'sin costo' : '${suggestion.creditsCharged.toStringAsFixed(0)} crédito'}'
+                      : 'Emoji sugerido con IA.';
                 });
               } catch (error) {
-                if (!mounted) return;
+                if (!mounted || isSheetClosed || !sheetContext.mounted) return;
                 setSheetState(() {
                   helperMessage = _formatCategoryIconAiErrorMessage(error);
                 });
               } finally {
-                if (mounted) {
+                if (mounted && !isSheetClosed && sheetContext.mounted) {
                   setSheetState(() => isGeneratingAi = false);
                 }
               }
             }
 
             return SafeArea(
+              top: false,
               child: Padding(
                 padding: EdgeInsets.fromLTRB(
                   20,
                   8,
                   20,
-                  max(20, media.viewInsets.bottom + 12),
+                  max(4, media.viewInsets.bottom + 12),
                 ),
-                child: SizedBox(
-                  height: media.size.height * 0.84,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: media.size.height - media.padding.top - media.padding.bottom - 12,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -529,7 +562,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                'Elige un icono manualmente o pide una sugerencia con IA.',
+                                'Elige un emoji manualmente o pide una sugerencia con IA.',
                                 style: GoogleFonts.manrope(
                                   color: colorScheme.onSurfaceVariant,
                                   fontWeight: FontWeight.w500,
@@ -569,10 +602,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                         color: const Color(0xFF6D28D9).withValues(alpha: 0.12),
                                         borderRadius: BorderRadius.circular(16),
                                       ),
-                                      child: Icon(
-                                        iconOption.icon,
-                                        color: const Color(0xFF6D28D9),
-                                        size: 28,
+                                      child: Center(
+                                        child: _buildCategoryIconVisual(
+                                          iconValue: selectedIconValue,
+                                          name: nameController.text.trim(),
+                                          size: 28,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(width: 14),
@@ -594,7 +629,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
-                                            iconOption.label,
+                                            previewLabel,
                                             style: GoogleFonts.manrope(
                                               color: colorScheme.onSurfaceVariant,
                                               fontWeight: FontWeight.w600,
@@ -630,8 +665,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                     : const Icon(Icons.auto_awesome_rounded),
                                 label: Text(
                                   isGeneratingAi
-                                      ? 'Generando...'
-                                      : 'Generar con IA (0.5 crédito)',
+                                      ? 'Sugiriendo...'
+                                      : 'Sugerir emoji con IA',
                                 ),
                                 style: OutlinedButton.styleFrom(
                                   minimumSize: const Size.fromHeight(48),
@@ -650,7 +685,81 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                               ],
                               const SizedBox(height: 16),
                               Text(
-                                'Iconos disponibles',
+                                'Recomendados',
+                                style: GoogleFonts.manrope(
+                                  color: colorScheme.onSurface,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14.5,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: recommendedEmojiOptions.map((option) {
+                                  final selected = option.emoji == selectedIconValue;
+                                  return InkWell(
+                                    onTap: () {
+                                      setSheetState(() {
+                                        selectedIconValue = option.emoji;
+                                        generatedWithAi = false;
+                                        aiConfidence = null;
+                                        helperMessage = null;
+                                      });
+                                    },
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Container(
+                                      width: 88,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                      decoration: BoxDecoration(
+                                        color: selected
+                                            ? const Color(0xFF6D28D9).withValues(alpha: 0.14)
+                                            : colorScheme.surfaceContainerHigh,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: selected
+                                              ? const Color(0xFF6D28D9)
+                                              : colorScheme.outlineVariant,
+                                        ),
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          Text(option.emoji, style: const TextStyle(fontSize: 26)),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            option.label,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: GoogleFonts.manrope(
+                                              color: colorScheme.onSurface,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                              const SizedBox(height: 16),
+                              TextField(
+                                controller: emojiSearchController,
+                                onChanged: (value) {
+                                  setSheetState(() => emojiSearchQuery = value);
+                                },
+                                decoration: InputDecoration(
+                                  prefixIcon: const Icon(Icons.search_rounded),
+                                  hintText: 'Buscar emoji por comida o negocio',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Emojis disponibles',
                                 style: GoogleFonts.manrope(
                                   color: colorScheme.onSurface,
                                   fontWeight: FontWeight.w800,
@@ -661,21 +770,21 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                               GridView.builder(
                                 shrinkWrap: true,
                                 physics: const NeverScrollableScrollPhysics(),
-                                itemCount: _categoryIconOptions.length,
+                                itemCount: filteredEmojiOptions.length,
                                 gridDelegate:
                                     const SliverGridDelegateWithFixedCrossAxisCount(
                                   crossAxisCount: 4,
                                   mainAxisSpacing: 10,
                                   crossAxisSpacing: 10,
-                                  childAspectRatio: 0.82,
+                                  childAspectRatio: 0.74,
                                 ),
                                 itemBuilder: (context, index) {
-                                  final option = _categoryIconOptions[index];
-                                  final selected = option.key == selectedIconKey;
+                                  final option = filteredEmojiOptions[index];
+                                  final selected = option.emoji == selectedIconValue;
                                   return InkWell(
                                     onTap: () {
                                       setSheetState(() {
-                                        selectedIconKey = option.key;
+                                        selectedIconValue = option.emoji;
                                         generatedWithAi = false;
                                         aiConfidence = null;
                                         helperMessage = null;
@@ -696,15 +805,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       ),
                                       padding: const EdgeInsets.all(10),
                                       child: Column(
+                                        mainAxisSize: MainAxisSize.min,
                                         mainAxisAlignment: MainAxisAlignment.center,
                                         children: [
-                                          Icon(
-                                            option.icon,
-                                            color: selected
-                                                ? const Color(0xFF6D28D9)
-                                                : colorScheme.onSurfaceVariant,
+                                          Text(
+                                            option.emoji,
+                                            style: const TextStyle(fontSize: 26),
                                           ),
-                                          const SizedBox(height: 8),
+                                          const SizedBox(height: 6),
                                           Text(
                                             option.label,
                                             maxLines: 2,
@@ -712,7 +820,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                             textAlign: TextAlign.center,
                                             style: GoogleFonts.manrope(
                                               color: colorScheme.onSurface,
-                                              fontSize: 11,
+                                              fontSize: 10.5,
                                               fontWeight: selected
                                                   ? FontWeight.w800
                                                   : FontWeight.w700,
@@ -724,45 +832,65 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                   );
                                 },
                               ),
+                              if (filteredEmojiOptions.isEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'No hay emojis para esa búsqueda. Prueba con comida, delivery, belleza o tecnología.',
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextButton(
-                              onPressed: () => Navigator.of(sheetContext).pop(),
-                              child: const Text('Cancelar'),
+                      SafeArea(
+                        top: false,
+                        minimum: const EdgeInsets.only(top: 14, bottom: 2),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextButton(
+                                onPressed: () {
+                                  isSheetClosed = true;
+                                  FocusManager.instance.primaryFocus?.unfocus();
+                                  navigator.pop();
+                                },
+                                child: const Text('Cancelar'),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: () {
-                                final draft = nameController.text.trim();
-                                if (draft.isEmpty) {
-                                  setSheetState(() {
-                                    helperMessage =
-                                        'Escribe un nombre para guardar la categoría.';
-                                  });
-                                  return;
-                                }
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: () {
+                                  final draft = nameController.text.trim();
+                                  if (draft.isEmpty) {
+                                    setSheetState(() {
+                                      helperMessage =
+                                          'Escribe un nombre para guardar la categoría.';
+                                    });
+                                    return;
+                                  }
 
-                                Navigator.of(sheetContext).pop(
-                                  _CategoryEditorResult(
-                                    name: draft,
-                                    iconKey: selectedIconKey,
-                                    generatedWithAi: generatedWithAi,
-                                    aiConfidence: aiConfidence,
-                                  ),
-                                );
-                              },
-                              child: const Text('Guardar categoría'),
+                                  isSheetClosed = true;
+                                  FocusManager.instance.primaryFocus?.unfocus();
+                                  navigator.pop(
+                                    _CategoryEditorResult(
+                                      name: draft,
+                                      iconValue: selectedIconValue,
+                                      generatedWithAi: generatedWithAi,
+                                      aiConfidence: aiConfidence,
+                                    ),
+                                  );
+                                },
+                                child: const Text('Guardar categoría'),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -773,6 +901,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         );
       },
     );
+    isSheetClosed = true;
     return result;
   }
 
@@ -799,7 +928,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         'comercio_id': SupabaseConfig.currentComercioId,
         'catalogo_id': _currentCatalogoId,
         'nombre': draft.name,
-        'icono': draft.iconKey,
+        'icono': draft.iconValue,
         'creado_por_ia': draft.generatedWithAi,
         'confianza_ia': draft.aiConfidence,
         'orden': maxOrder,
@@ -830,7 +959,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
 
     final didChange = draft.name != category.nombre ||
-        draft.iconKey != _normalizeCategoryIconKey(category.icono) ||
+    draft.iconValue != (_normalizeStoredIconValue(category.icono) ?? '') ||
         draft.generatedWithAi != (category.creadoPorIa == true) ||
         (draft.aiConfidence ?? -1) != (category.confianzaIa ?? -1);
 
@@ -844,7 +973,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           .from('categorias')
           .update({
             'nombre': draft.name,
-            'icono': draft.iconKey,
+            'icono': draft.iconValue,
             'creado_por_ia': draft.generatedWithAi,
             'confianza_ia': draft.aiConfidence,
           })
@@ -2096,12 +2225,12 @@ class _CategoryCard extends StatelessWidget {
                   color: const Color(0xFF6D28D9).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(
-                  _resolveCategoryIcon(
-                    iconKey: category.icono,
+                child: Center(
+                  child: _buildCategoryIconVisual(
+                    iconValue: category.icono,
                     name: category.nombre,
+                    size: 24,
                   ),
-                  color: const Color(0xFF6D28D9),
                 ),
               ),
               const SizedBox(width: 12),
@@ -2859,13 +2988,13 @@ class _EmptyMenuState extends StatelessWidget {
 class _CategoryEditorResult {
   const _CategoryEditorResult({
     required this.name,
-    required this.iconKey,
+    required this.iconValue,
     required this.generatedWithAi,
     required this.aiConfidence,
   });
 
   final String name;
-  final String iconKey;
+  final String iconValue;
   final bool generatedWithAi;
   final double? aiConfidence;
 }
@@ -2881,6 +3010,54 @@ class _CategoryIconOption {
   final String label;
   final IconData icon;
 }
+
+class _CategoryEmojiOption {
+  const _CategoryEmojiOption({
+    required this.emoji,
+    required this.label,
+    required this.keywords,
+  });
+
+  final String emoji;
+  final String label;
+  final List<String> keywords;
+}
+
+const List<_CategoryEmojiOption> _categoryEmojiOptions = [
+  _CategoryEmojiOption(emoji: '🍔', label: 'Hamburguesas', keywords: ['hamburguesa', 'burger', 'fast food']),
+  _CategoryEmojiOption(emoji: '🍕', label: 'Pizzas', keywords: ['pizza', 'italiana']),
+  _CategoryEmojiOption(emoji: '🍗', label: 'Pollo', keywords: ['pollo', 'chicken']),
+  _CategoryEmojiOption(emoji: '🥩', label: 'Carnes', keywords: ['carne', 'parrilla', 'asado']),
+  _CategoryEmojiOption(emoji: '🍣', label: 'Sushi', keywords: ['sushi', 'japonesa']),
+  _CategoryEmojiOption(emoji: '🍝', label: 'Pastas', keywords: ['pasta', 'spaghetti', 'lasagna']),
+  _CategoryEmojiOption(emoji: '🌮', label: 'Mexicana', keywords: ['taco', 'mexicana', 'burrito']),
+  _CategoryEmojiOption(emoji: '🥗', label: 'Saludable', keywords: ['ensalada', 'fit', 'healthy']),
+  _CategoryEmojiOption(emoji: '🍰', label: 'Postres', keywords: ['postre', 'cake', 'torta']),
+  _CategoryEmojiOption(emoji: '🍦', label: 'Helados', keywords: ['helado', 'gelato']),
+  _CategoryEmojiOption(emoji: '🥐', label: 'Panadería', keywords: ['pan', 'panaderia', 'bakery']),
+  _CategoryEmojiOption(emoji: '☕', label: 'Café', keywords: ['cafe', 'coffee']),
+  _CategoryEmojiOption(emoji: '🥤', label: 'Bebidas', keywords: ['bebida', 'jugo', 'refresco']),
+  _CategoryEmojiOption(emoji: '🍺', label: 'Bar', keywords: ['cerveza', 'bar']),
+  _CategoryEmojiOption(emoji: '🍷', label: 'Vinos', keywords: ['vino', 'wine']),
+  _CategoryEmojiOption(emoji: '🎁', label: 'Promociones', keywords: ['promo', 'oferta', 'descuento', 'regalo']),
+  _CategoryEmojiOption(emoji: '🛵', label: 'Delivery', keywords: ['delivery', 'envio', 'reparto']),
+  _CategoryEmojiOption(emoji: '🛍️', label: 'Tienda', keywords: ['tienda', 'shop', 'store']),
+  _CategoryEmojiOption(emoji: '💊', label: 'Salud', keywords: ['farmacia', 'salud']),
+  _CategoryEmojiOption(emoji: '💄', label: 'Belleza', keywords: ['belleza', 'maquillaje']),
+  _CategoryEmojiOption(emoji: '👕', label: 'Ropa', keywords: ['ropa', 'moda']),
+  _CategoryEmojiOption(emoji: '💻', label: 'Tecnología', keywords: ['tecnologia', 'electronica', 'computadora']),
+  _CategoryEmojiOption(emoji: '🐶', label: 'Mascotas', keywords: ['mascota', 'perro', 'pet']),
+  _CategoryEmojiOption(emoji: '🧽', label: 'Limpieza', keywords: ['limpieza', 'aseo']),
+  _CategoryEmojiOption(emoji: '🏠', label: 'Hogar', keywords: ['hogar', 'casa']),
+  _CategoryEmojiOption(emoji: '🛠️', label: 'Servicios', keywords: ['servicio', 'herramienta', 'ferreteria']),
+  _CategoryEmojiOption(emoji: '🎓', label: 'Educación', keywords: ['educacion', 'curso', 'academia']),
+  _CategoryEmojiOption(emoji: '🏋️', label: 'Deporte', keywords: ['fitness', 'gym', 'deporte']),
+  _CategoryEmojiOption(emoji: '🚗', label: 'Autos', keywords: ['auto', 'carro', 'repuesto']),
+  _CategoryEmojiOption(emoji: '🎵', label: 'Música', keywords: ['musica', 'audio']),
+  _CategoryEmojiOption(emoji: '🎮', label: 'Juegos', keywords: ['juego', 'gaming']),
+  _CategoryEmojiOption(emoji: '💎', label: 'Premium', keywords: ['premium', 'especial', 'destacado', 'deluxe']),
+  _CategoryEmojiOption(emoji: '🏷️', label: 'General', keywords: ['general', 'otros']),
+];
 
 const List<_CategoryIconOption> _categoryIconOptions = [
   _CategoryIconOption(key: 'restaurant', label: 'Restaurante', icon: Icons.restaurant_rounded),
@@ -2939,7 +3116,44 @@ String? _normalizeCategoryIconKey(String? iconKey) {
   if (normalized == null || normalized.isEmpty) {
     return null;
   }
+  if (_isSvgIconContent(normalized) || _isEmojiContent(normalized)) {
+    return null;
+  }
   return _categoryIconOptionByKeyInternal(normalized) ? normalized : null;
+}
+
+String? _normalizeStoredIconValue(String? value) {
+  final normalized = value?.trim();
+  if (normalized == null || normalized.isEmpty) {
+    return null;
+  }
+  return normalized;
+}
+
+bool _isSvgIconContent(String? value) {
+  final normalized = value?.trim().toLowerCase() ?? '';
+  return normalized.startsWith('<svg') && normalized.contains('</svg>');
+}
+
+bool _isImageUrlContent(String? value) {
+  final normalized = value?.trim() ?? '';
+  if (normalized.isEmpty) {
+    return false;
+  }
+  final uri = Uri.tryParse(normalized);
+  return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+}
+
+bool _isEmojiContent(String? value) {
+  final normalized = value?.trim() ?? '';
+  if (normalized.isEmpty) {
+    return false;
+  }
+  if (normalized.contains(' ')) {
+    return false;
+  }
+  return RegExp(r'[\u00A9\u00AE\u203C-\u3299\u{1F000}-\u{1FAFF}]', unicode: true)
+      .hasMatch(normalized) && normalized.runes.length <= 8;
 }
 
 bool _categoryIconOptionByKeyInternal(String iconKey) {
@@ -2975,6 +3189,107 @@ String _suggestCategoryIconKey(String name) {
   return 'restaurant';
 }
 
+_CategoryEmojiOption? _categoryEmojiOptionByEmoji(String? emoji) {
+  final normalized = _normalizeStoredIconValue(emoji);
+  if (normalized == null) {
+    return null;
+  }
+  for (final option in _categoryEmojiOptions) {
+    if (option.emoji == normalized) {
+      return option;
+    }
+  }
+  return null;
+}
+
+String _suggestCategoryEmoji(String name) {
+  final normalized = _normalizeEmojiSearchText(name);
+  for (final option in _categoryEmojiOptions) {
+    for (final keyword in option.keywords) {
+      if (normalized.contains(_normalizeEmojiSearchText(keyword))) {
+        return option.emoji;
+      }
+    }
+  }
+  return '🏷️';
+}
+
+List<_CategoryEmojiOption> _recommendedCategoryEmojiOptions({
+  required String name,
+  required String query,
+}) {
+  final suggestedEmoji = _suggestCategoryEmoji(name);
+  final suggestedOption = _categoryEmojiOptionByEmoji(suggestedEmoji);
+  final results = <_CategoryEmojiOption>[];
+
+  if (suggestedOption != null) {
+    results.add(suggestedOption);
+  }
+
+  for (final option in _filterCategoryEmojiOptions(name: name, query: query)) {
+    if (results.any((item) => item.emoji == option.emoji)) {
+      continue;
+    }
+    results.add(option);
+    if (results.length >= 6) {
+      break;
+    }
+  }
+
+  return results;
+}
+
+List<_CategoryEmojiOption> _filterCategoryEmojiOptions({
+  required String name,
+  required String query,
+}) {
+  final normalizedQuery = _normalizeEmojiSearchText(query);
+  final normalizedName = _normalizeEmojiSearchText(name);
+
+  final matching = _categoryEmojiOptions.where((option) {
+    if (normalizedQuery.isEmpty) {
+      return true;
+    }
+
+    if (_normalizeEmojiSearchText(option.label).contains(normalizedQuery)) {
+      return true;
+    }
+
+    return option.keywords.any(
+      (keyword) => _normalizeEmojiSearchText(keyword).contains(normalizedQuery),
+    );
+  }).toList();
+
+  matching.sort((left, right) {
+    final leftMatch = left.keywords.any(
+      (keyword) => normalizedName.contains(_normalizeEmojiSearchText(keyword)),
+    );
+    final rightMatch = right.keywords.any(
+      (keyword) => normalizedName.contains(_normalizeEmojiSearchText(keyword)),
+    );
+    if (leftMatch != rightMatch) {
+      return leftMatch ? -1 : 1;
+    }
+    return left.label.compareTo(right.label);
+  });
+
+  return matching;
+}
+
+String _normalizeEmojiSearchText(String? value) {
+  return (value ?? '')
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[áàäâ]'), 'a')
+      .replaceAll(RegExp(r'[éèëê]'), 'e')
+      .replaceAll(RegExp(r'[íìïî]'), 'i')
+      .replaceAll(RegExp(r'[óòöô]'), 'o')
+      .replaceAll(RegExp(r'[úùüû]'), 'u')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
 IconData _resolveCategoryIcon({String? iconKey, String? name}) {
   final option = _categoryIconOptionByKey(iconKey);
   if (option != null) {
@@ -2982,4 +3297,51 @@ IconData _resolveCategoryIcon({String? iconKey, String? name}) {
   }
   final suggestedKey = _suggestCategoryIconKey(name ?? '');
   return _categoryIconOptionByKey(suggestedKey)?.icon ?? Icons.restaurant_rounded;
+}
+
+Widget _buildCategoryIconVisual({
+  required String? iconValue,
+  String? name,
+  double size = 28,
+}) {
+  final normalized = _normalizeStoredIconValue(iconValue);
+  if (_isImageUrlContent(normalized)) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.35),
+      child: Image.network(
+        normalized!,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => Icon(
+          _resolveCategoryIcon(name: name),
+          color: const Color(0xFF6D28D9),
+          size: size,
+        ),
+      ),
+    );
+  }
+  if (_isSvgIconContent(normalized)) {
+    return SvgPicture.string(
+      normalized!,
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+    );
+  }
+  if (_isEmojiContent(normalized)) {
+    return Text(
+      normalized!,
+      style: TextStyle(
+        fontSize: size,
+        height: 1,
+      ),
+    );
+  }
+
+  return Icon(
+    _resolveCategoryIcon(iconKey: normalized, name: name),
+    color: const Color(0xFF6D28D9),
+    size: size,
+  );
 }

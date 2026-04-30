@@ -6,7 +6,7 @@ const INITIAL_AI_CREDITS = 30;
 const COST_IMAGE = 1;
 const COST_MENU = 0.5;
 const COST_BRANDING = 0.5;
-const COST_CATEGORY_ICON = 0.5;
+const COST_CATEGORY_ICON = 1;
 
 type AiUsageControlRow = {
   id: string;
