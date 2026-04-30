@@ -1,12 +1,17 @@
 // ignore_for_file: avoid_print
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/catalog.dart';
 import 'package:kosmenu_app/models/category.dart';
+import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
+import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
+import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -558,13 +563,19 @@ class CatalogCategoriesScreen extends StatefulWidget {
 class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   bool _loading = true;
   bool _isMutating = false;
+  bool _isSavingCategoryOrder = false;
   List<CategoryModel> _categories = <CategoryModel>[];
+  List<ProductModel> _products = <ProductModel>[];
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
   bool _showAppBarSearch = false;
   double _headerCollapse = 0;
+  int _selectedTabIndex = 0;
+  String? _selectedProductCategoryId;
   Map<String, int> _productCountByCategory = <String, int>{};
+  Timer? _aiImageRefreshTimer;
+  final AiImageService _aiImageService = const AiImageService();
 
   String get _currentCatalogoId => widget.catalog.id.trim();
 
@@ -585,6 +596,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
   @override
   void dispose() {
+    _aiImageRefreshTimer?.cancel();
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
@@ -621,7 +633,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
       if (!mounted) return;
       setState(() => _categories = categories);
-      await _loadProductCounts(categories);
+      await _loadProducts(categories);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -634,48 +646,397 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
   }
 
-  Future<void> _loadProductCounts(List<CategoryModel> categories) async {
+  Future<void> _loadProducts(List<CategoryModel> categories) async {
     final ids = categories
         .map((e) => e.id.trim())
         .where((e) => e.isNotEmpty)
         .toList();
+    final categoryIds = ids.toSet();
     if (ids.isEmpty) {
       if (!mounted) return;
-      setState(() => _productCountByCategory = <String, int>{});
+      setState(() {
+        _products = <ProductModel>[];
+        _productCountByCategory = <String, int>{};
+        _selectedProductCategoryId = null;
+      });
       return;
     }
 
     try {
       final rows = await Supabase.instance.client
           .from('productos')
-          .select('categoria_id')
+          .select()
           .eq('comercio_id', SupabaseConfig.currentComercioId)
-          .inFilter('categoria_id', ids);
+          .order('nombre', ascending: true);
+
+      final products = (rows as List<dynamic>)
+          .map(
+            (row) =>
+                ProductModel.fromMap(Map<String, dynamic>.from(row as Map)),
+          )
+          .where((product) => categoryIds.contains(product.categoriaId.trim()))
+          .toList()
+        ..sort((a, b) {
+          final categoryCompare = a.categoriaId.compareTo(b.categoriaId);
+          if (categoryCompare != 0) return categoryCompare;
+          final orderCompare = a.orden.compareTo(b.orden);
+          if (orderCompare != 0) return orderCompare;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
 
       final counts = <String, int>{};
-      for (final row in (rows as List<dynamic>)) {
-        final categoryId = row['categoria_id']?.toString().trim() ?? '';
+      for (final product in products) {
+        final categoryId = product.categoriaId.trim();
         if (categoryId.isEmpty) continue;
         counts.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
       }
 
       if (!mounted) return;
-      setState(() => _productCountByCategory = counts);
-    } catch (_) {
+      setState(() {
+        _products = products;
+        _productCountByCategory = counts;
+        if (_selectedProductCategoryId != null &&
+            !ids.contains(_selectedProductCategoryId)) {
+          _selectedProductCategoryId = null;
+        }
+      });
+      _syncAiImageRefresh(products);
+    } catch (error) {
       if (!mounted) return;
-      setState(() => _productCountByCategory = <String, int>{});
+      setState(() {
+        _products = <ProductModel>[];
+        _productCountByCategory = <String, int>{};
+        _selectedProductCategoryId = null;
+      });
+      _showMessage('No se pudieron cargar productos: $error');
     }
   }
 
   List<CategoryModel> get _filteredCategories {
-    final query = _searchQuery.trim().toLowerCase();
+    final query = _normalizedText(_searchQuery);
     if (query.isEmpty) return _categories;
     return _categories.where((category) {
       final productCount = (_productCountByCategory[category.id] ?? 0)
           .toString();
-      return category.nombre.toLowerCase().contains(query) ||
+      return _normalizedText(category.nombre).contains(query) ||
           productCount.contains(query);
     }).toList();
+  }
+
+  Map<String, CategoryModel> get _categoryById {
+    return {
+      for (final category in _categories)
+        _normalizedId(category.id): category,
+    };
+  }
+
+  String _categoryNameFor(String categoryId) {
+    return _categoryById[_normalizedId(categoryId)]?.nombre ?? 'Sin categoría';
+  }
+
+  bool _matchesProductQuery(ProductModel product) {
+    final query = _normalizedText(_searchQuery);
+    if (query.isEmpty) return true;
+    return _normalizedText(product.nombre).contains(query) ||
+        _normalizedText(product.descripcion).contains(query) ||
+        _normalizedText(_categoryNameFor(product.categoriaId)).contains(query);
+  }
+
+  List<ProductModel> get _searchFilteredProducts {
+    final query = _normalizedText(_searchQuery);
+    if (query.isEmpty) return List<ProductModel>.from(_products);
+    return _products.where(_matchesProductQuery).toList();
+  }
+
+  List<ProductModel> get _filteredProductsForCategoryTab {
+    final products = _searchFilteredProducts;
+    final selectedCategoryId = _normalizedId(_selectedProductCategoryId);
+    if (selectedCategoryId.isEmpty) {
+      return products;
+    }
+    return products
+        .where(
+          (product) => _normalizedId(product.categoriaId) == selectedCategoryId,
+        )
+        .toList();
+  }
+
+  List<ProductModel> get _hiddenProducts {
+    return _searchFilteredProducts
+        .where((product) => !product.disponible)
+        .toList();
+  }
+
+  List<CategoryModel> get _hiddenCategories {
+    return _filteredCategories.where((category) => !category.activo).toList();
+  }
+
+  Future<void> _openProductFormDirect({
+    ProductModel? product,
+    String? initialCategoryId,
+  }) async {
+    if (_categories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Crea una categoría antes de agregar productos.'),
+        ),
+      );
+      return;
+    }
+
+    final didSave = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ProductFormScreen(
+          categories: _categories,
+          product: product,
+          initialCategoryId:
+              product?.categoriaId ??
+              initialCategoryId ??
+              _selectedProductCategoryId ??
+              _categories.first.id,
+        ),
+      ),
+    );
+
+    if (didSave == true) {
+      await _loadCategories();
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _toggleProductVisible(ProductModel product, bool value) async {
+    final previous = List<ProductModel>.from(_products);
+
+    setState(() {
+      _products = _products
+          .map(
+            (item) => item.id == product.id
+                ? item.copyWith(disponible: value)
+                : item,
+          )
+          .toList();
+    });
+
+    try {
+      await Supabase.instance.client
+          .from('productos')
+          .update({'disponible': value})
+          .eq('id', product.id);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _products = previous);
+      _showMessage('No se pudo actualizar visibilidad: $error');
+    }
+  }
+
+  Future<void> _deleteProduct(ProductModel product) async {
+    if (_isMutating) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          backgroundColor: colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            'Eliminar producto',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: Text(
+            '¿Eliminar "${product.nombre}"?',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+              ),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || confirm != true) return;
+
+    final previous = List<ProductModel>.from(_products);
+    setState(() {
+      _products = _products.where((item) => item.id != product.id).toList();
+      _productCountByCategory.update(
+        product.categoriaId,
+        (value) => value > 0 ? value - 1 : 0,
+        ifAbsent: () => 0,
+      );
+    });
+
+    try {
+      final deletedRows = await Supabase.instance.client
+          .from('productos')
+          .delete()
+          .eq('id', product.id)
+          .select('id');
+
+      if ((deletedRows as List<dynamic>).isEmpty) {
+        throw Exception('No se pudo confirmar el borrado en la base de datos.');
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _products = previous;
+        final counts = <String, int>{};
+        for (final item in previous) {
+          counts.update(item.categoriaId, (value) => value + 1, ifAbsent: () => 1);
+        }
+        _productCountByCategory = counts;
+      });
+      _showMessage('No se pudo eliminar producto: $error');
+    }
+  }
+
+  Future<bool?> _confirmAiImageGeneration(ProductModel product) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          backgroundColor: colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            'Generar imagen con IA',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: Text(
+            'Se descontará 1 crédito para generar la imagen de "${product.nombre}" y el proceso continuará en segundo plano. ¿Deseas continuar?',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+              ),
+              label: const Text('Generar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _generateAiImageForProduct(ProductModel product) async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) {
+      _showMessage('No hay comercio activo para generar la imagen IA.');
+      return;
+    }
+
+    final confirmed = await _confirmAiImageGeneration(product);
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      _products = _products
+          .map(
+            (item) => item.id == product.id
+                ? item.copyWith(
+                    aiImageStatus: 'pending',
+                    clearAiImageErrorMessage: true,
+                  )
+                : item,
+          )
+          .toList();
+    });
+    _syncAiImageRefresh(_products);
+
+    try {
+      final response = await _aiImageService.enqueueProductImage(
+        comercioId: comercioId,
+        productId: product.id,
+        productName: product.nombre,
+        description: product.descripcion,
+        categoryName: _categoryNameFor(product.categoriaId),
+      );
+
+      if (!mounted) return;
+      final message = response['message']?.toString().trim();
+      _showMessage(
+        message?.isNotEmpty == true
+            ? message!
+            : 'Imagen IA en cola para ${product.nombre}.',
+      );
+      await _loadCategories();
+    } catch (error) {
+      if (!mounted) return;
+      final friendlyMessage = _formatAiImageErrorMessage(
+        error.toString().replaceFirst('Bad state: ', ''),
+      );
+      setState(() {
+        _products = _products
+            .map(
+              (item) => item.id == product.id
+                  ? item.copyWith(
+                      aiImageStatus: 'failed',
+                      aiImageErrorMessage: friendlyMessage,
+                    )
+                  : item,
+            )
+            .toList();
+      });
+      _showMessage(friendlyMessage);
+    }
+  }
+
+  void _syncAiImageRefresh(List<ProductModel> products) {
+    final hasPendingAiImages = products.any(
+      (product) => product.hasAiImageInProgress,
+    );
+    if (!hasPendingAiImages) {
+      _aiImageRefreshTimer?.cancel();
+      _aiImageRefreshTimer = null;
+      return;
+    }
+
+    _aiImageRefreshTimer ??= Timer.periodic(const Duration(seconds: 7), (_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_loadCategories());
+    });
   }
 
   Future<String?> _showNameDialog({
@@ -861,6 +1222,65 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
   }
 
+  Future<void> _onCategoryReorder(int oldIndex, int newIndex) async {
+    if (_isSavingCategoryOrder || _isMutating) return;
+
+    final originalList = List<CategoryModel>.from(_categories);
+    final updated = List<CategoryModel>.from(_categories);
+
+    if (newIndex > oldIndex) newIndex -= 1;
+    final item = updated.removeAt(oldIndex);
+    updated.insert(newIndex, item);
+
+    setState(() {
+      _categories = updated;
+      _isSavingCategoryOrder = true;
+    });
+
+    try {
+      for (var index = 0; index < updated.length; index++) {
+        final row = updated[index];
+        await Supabase.instance.client
+            .from('categorias')
+            .update({'orden': index})
+            .eq('comercio_id', SupabaseConfig.currentComercioId)
+            .eq('catalogo_id', _currentCatalogoId)
+            .eq('id', row.id);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _categories = updated
+            .asMap()
+            .entries
+            .map(
+              (entry) => CategoryModel(
+                id: entry.value.id,
+                comercioId: entry.value.comercioId,
+                catalogoId: entry.value.catalogoId,
+                nombre: entry.value.nombre,
+                orden: entry.key,
+                activo: entry.value.activo,
+                icono: entry.value.icono,
+                creadoPorIa: entry.value.creadoPorIa,
+                confianzaIa: entry.value.confianzaIa,
+              ),
+            )
+            .toList();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _categories = originalList);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar el nuevo orden: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSavingCategoryOrder = false);
+      }
+    }
+  }
+
   Future<void> _deleteCategory(CategoryModel category) async {
     if (_isMutating) return;
 
@@ -972,10 +1392,403 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     );
   }
 
+  String _formatAiImageErrorMessage(String? rawMessage) {
+    final message = (rawMessage ?? '').trim();
+    if (message.isEmpty) {
+      return 'No se pudo generar la imagen IA.';
+    }
+
+    final normalized = message.toLowerCase();
+
+    if (normalized.contains('resource_exhausted') ||
+        normalized.contains('prepayment credits are depleted') ||
+        normalized.contains('gemini image generation failed (429)')) {
+      return 'Google Gemini no tiene saldo disponible en este momento. Recarga créditos del proyecto e inténtalo de nuevo.';
+    }
+
+    if (normalized.contains('not enough credits')) {
+      return 'Este comercio no tiene créditos IA suficientes para generar la imagen.';
+    }
+
+    if (normalized.contains('unauthorized request') ||
+        normalized.contains('worker secret')) {
+      return 'El servicio interno de imágenes IA no está disponible ahora mismo.';
+    }
+
+    if (normalized.contains('producto no encontrado')) {
+      return 'No se encontró el producto para generar su imagen IA.';
+    }
+
+    if (normalized.contains('ya tiene una imagen manual')) {
+      return 'Este producto ya tiene una imagen manual.';
+    }
+
+    final firstLine = message.split('\n').first.trim();
+    return firstLine.isEmpty ? 'No se pudo generar la imagen IA.' : firstLine;
+  }
+
+  String _normalizedId(String? value) {
+    return value?.trim() ?? '';
+  }
+
+  String _normalizedText(String? value) {
+    return value?.trim().toLowerCase() ?? '';
+  }
+
+  Future<void> _openQuickCreateSheet() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.category_rounded),
+                title: const Text('Nueva categoría'),
+                subtitle: const Text('Crea una sección nueva en tu menú'),
+                onTap: () => Navigator.of(context).pop('category'),
+              ),
+              ListTile(
+                leading: Icon(Icons.inventory_2_rounded, color: colorScheme.primary),
+                title: const Text('Nuevo producto'),
+                subtitle: const Text('Agrega un producto sin entrar a la categoría'),
+                onTap: () => Navigator.of(context).pop('product'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    switch (action) {
+      case 'category':
+        await _createCategory();
+        break;
+      case 'product':
+        await _openProductFormDirect();
+        break;
+      default:
+        break;
+    }
+  }
+
+  Widget _buildContextualFab() {
+    switch (_selectedTabIndex) {
+      case 1:
+        return FloatingActionButton.extended(
+          onPressed: (_loading || _isMutating) ? null : _createCategory,
+          backgroundColor: const Color(0xFF6D28D9),
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.add),
+          label: const Text('Nueva categoría'),
+        );
+      case 2:
+        return FloatingActionButton.extended(
+          onPressed: (_loading || _isMutating) ? null : _openProductFormDirect,
+          backgroundColor: const Color(0xFF6D28D9),
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.add),
+          label: const Text('Nuevo producto'),
+        );
+      default:
+        return FloatingActionButton.extended(
+          onPressed: (_loading || _isMutating) ? null : _openQuickCreateSheet,
+          backgroundColor: const Color(0xFF6D28D9),
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.add),
+          label: const Text('Crear'),
+        );
+    }
+  }
+
+  List<Widget> _buildCurrentTabSections() {
+    switch (_selectedTabIndex) {
+      case 0:
+        return _buildAllTabSections();
+      case 1:
+        return _buildCategoriesTabSections();
+      case 2:
+        return _buildProductsTabSections();
+      case 3:
+        return _buildHiddenTabSections();
+      default:
+        return _buildAllTabSections();
+    }
+  }
+
+  List<Widget> _buildAllTabSections() {
+    final featuredCategories = _filteredCategories.take(3).toList();
+    final featuredProducts = _searchFilteredProducts.take(6).toList();
+
+    return [
+      _DashboardSectionHeader(
+        title: 'Atajos del vendedor',
+        subtitle: 'Gestiona categorías y productos sin cambiar de pantalla.',
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          Expanded(
+            child: _QuickActionCard(
+              icon: Icons.category_rounded,
+              title: 'Nueva categoría',
+              subtitle: 'Organiza tu menú',
+              onTap: _createCategory,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _QuickActionCard(
+              icon: Icons.inventory_2_rounded,
+              title: 'Nuevo producto',
+              subtitle: 'Vende más rápido',
+              onTap: _openProductFormDirect,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 18),
+      _DashboardSectionHeader(
+        title: 'Categorías principales',
+        subtitle: 'Edita o entra a las categorías más relevantes.',
+      ),
+      const SizedBox(height: 10),
+      if (featuredCategories.isEmpty)
+        _EmptyMenuState(
+          icon: Icons.category_outlined,
+          title: 'No hay categorías para mostrar',
+          subtitle: 'Crea una categoría para empezar a construir tu menú.',
+          actionLabel: 'Crear categoría',
+          onAction: _createCategory,
+        )
+      else
+        ...featuredCategories.map(
+          (category) => _CategoryCard(
+            category: category,
+            enabled: !_isMutating,
+            productCount: _productCountByCategory[category.id] ?? 0,
+            onOpen: () => _openProducts(category),
+            onEdit: () => _editCategory(category),
+            onDelete: () => _deleteCategory(category),
+            onToggleActive: (value) => _toggleCategoryActive(category, value),
+          ),
+        ),
+      const SizedBox(height: 6),
+      _DashboardSectionHeader(
+        title: 'Productos del menú',
+        subtitle: 'Edita, oculta o mejora imágenes sin entrar a la categoría.',
+      ),
+      const SizedBox(height: 10),
+      if (featuredProducts.isEmpty)
+        _EmptyMenuState(
+          icon: Icons.inventory_2_outlined,
+          title: 'No hay productos que coincidan con tu búsqueda',
+          subtitle: 'Prueba otro término o crea un producto nuevo.',
+          actionLabel: 'Nuevo producto',
+          onAction: _openProductFormDirect,
+        )
+      else
+        ...featuredProducts.map(_buildProductCard),
+    ];
+  }
+
+  List<Widget> _buildCategoriesTabSections() {
+    final filtered = _filteredCategories;
+    if (filtered.isEmpty) {
+      return [
+        _EmptyMenuState(
+          icon: Icons.category_outlined,
+          title: 'No hay categorías en este menú',
+          subtitle: 'Crea tu primera categoría para empezar a cargar productos.',
+          actionLabel: 'Crear primera categoría',
+          onAction: _isMutating ? null : _createCategory,
+        ),
+      ];
+    }
+
+    if (_searchQuery.trim().isNotEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(
+            'Desactiva la búsqueda para reordenar categorías.',
+            style: GoogleFonts.manrope(
+              color: const Color(0xFF6B7280),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        ...filtered.map(
+          (category) => _CategoryCard(
+            key: ValueKey('category-${category.id}'),
+            category: category,
+            enabled: !_isMutating,
+            productCount: _productCountByCategory[category.id] ?? 0,
+            onOpen: () => _openProducts(category),
+            onEdit: () => _editCategory(category),
+            onDelete: () => _deleteCategory(category),
+            onToggleActive: (value) => _toggleCategoryActive(category, value),
+          ),
+        ),
+      ];
+    }
+
+    return [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(
+          _isSavingCategoryOrder
+              ? 'Guardando nuevo orden...'
+              : 'Arrastra las categorías para cambiar su orden.',
+          style: GoogleFonts.manrope(
+            color: const Color(0xFF6B7280),
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      ReorderableListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        buildDefaultDragHandles: false,
+        itemCount: _categories.length,
+        onReorder: _onCategoryReorder,
+        itemBuilder: (context, index) {
+          final category = _categories[index];
+          return _CategoryCard(
+            key: ValueKey('category-${category.id}'),
+            category: category,
+            enabled: !_isMutating && !_isSavingCategoryOrder,
+            productCount: _productCountByCategory[category.id] ?? 0,
+            onOpen: () => _openProducts(category),
+            onEdit: () => _editCategory(category),
+            onDelete: () => _deleteCategory(category),
+            onToggleActive: (value) => _toggleCategoryActive(category, value),
+            dragHandle: ReorderableDelayedDragStartListener(
+              index: index,
+              child: Icon(
+                Icons.drag_indicator_rounded,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          );
+        },
+      ),
+    ];
+  }
+
+  List<Widget> _buildProductsTabSections() {
+    final products = _filteredProductsForCategoryTab;
+    return [
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                selected: _selectedProductCategoryId == null,
+                showCheckmark: false,
+                label: const Text('Todas'),
+                onSelected: (_) => setState(() => _selectedProductCategoryId = null),
+              ),
+            ),
+            ..._categories.map(
+              (category) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  selected: _selectedProductCategoryId == category.id,
+                  showCheckmark: false,
+                  label: Text(category.nombre),
+                  onSelected: (_) =>
+                      setState(() => _selectedProductCategoryId = category.id),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 14),
+      if (products.isEmpty)
+        _EmptyMenuState(
+          icon: Icons.inventory_2_outlined,
+          title: 'No hay productos para mostrar',
+          subtitle: 'Prueba otra categoría o crea un producto nuevo.',
+          actionLabel: 'Nuevo producto',
+          onAction: _openProductFormDirect,
+        )
+      else
+        ...products.map(_buildProductCard),
+    ];
+  }
+
+  List<Widget> _buildHiddenTabSections() {
+    final hiddenCategories = _hiddenCategories;
+    final hiddenProducts = _hiddenProducts;
+
+    if (hiddenCategories.isEmpty && hiddenProducts.isEmpty) {
+      return [
+        _EmptyMenuState(
+          icon: Icons.visibility_rounded,
+          title: 'No hay elementos ocultos',
+          subtitle: 'Aquí verás categorías y productos ocultos para reactivarlos rápido.',
+          actionLabel: 'Ir a productos',
+          onAction: () => setState(() => _selectedTabIndex = 2),
+        ),
+      ];
+    }
+
+    return [
+      if (hiddenCategories.isNotEmpty) ...[
+        _DashboardSectionHeader(
+          title: 'Categorías ocultas',
+          subtitle: 'Actívalas de nuevo o edítalas sin salir del dashboard.',
+        ),
+        const SizedBox(height: 10),
+        ...hiddenCategories.map(
+          (category) => _CategoryCard(
+            category: category,
+            enabled: !_isMutating,
+            productCount: _productCountByCategory[category.id] ?? 0,
+            onOpen: () => _openProducts(category),
+            onEdit: () => _editCategory(category),
+            onDelete: () => _deleteCategory(category),
+            onToggleActive: (value) => _toggleCategoryActive(category, value),
+          ),
+        ),
+        const SizedBox(height: 6),
+      ],
+      if (hiddenProducts.isNotEmpty) ...[
+        _DashboardSectionHeader(
+          title: 'Productos ocultos',
+          subtitle: 'Vuélvelos a mostrar, edítalos o elimínalos desde aquí.',
+        ),
+        const SizedBox(height: 10),
+        ...hiddenProducts.map(_buildProductCard),
+      ],
+    ];
+  }
+
+  Widget _buildProductCard(ProductModel product) {
+    return _DashboardProductCard(
+      key: ValueKey('dashboard-product-${product.id}'),
+      product: product,
+      categoryName: _categoryNameFor(product.categoriaId),
+      onEdit: () => _openProductFormDirect(product: product),
+      onToggleVisible: () => _toggleProductVisible(product, !product.disponible),
+      onImproveImage: () => _generateAiImageForProduct(product),
+      onDelete: () => _deleteProduct(product),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final filtered = _filteredCategories;
     final totalProducts = _productCountByCategory.values.fold<int>(
       0,
       (sum, count) => sum + count,
@@ -984,8 +1797,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     final headerScale = (1 - (_headerCollapse * 0.2)).clamp(0.82, 1.0);
     final headerOpacity = (1 - (_headerCollapse * 1.45)).clamp(0.0, 1.0);
     final headerHeightFactor = (1 - (_headerCollapse * 1.4)).clamp(0.0, 1.0);
-    final showCompactHeader = _headerCollapse > 0.86;
-
     if (_loading) {
       return const BrandedLoadingScreen(withScaffold: true);
     }
@@ -1011,7 +1822,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 style: TextStyle(color: colorScheme.onSurface),
                 cursorColor: colorScheme.primary,
                 decoration: InputDecoration(
-                  hintText: 'Buscar categoría...',
+                  hintText: 'Buscar categorías y productos...',
                   hintStyle: TextStyle(
                     color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
                   ),
@@ -1030,17 +1841,11 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
             icon: Icon(
               _showAppBarSearch ? Icons.close_rounded : Icons.search_rounded,
             ),
-            tooltip: _showAppBarSearch ? 'Cerrar búsqueda' : 'Buscar categoría',
+            tooltip: _showAppBarSearch ? 'Cerrar búsqueda' : 'Buscar en el menú',
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: (_loading || _isMutating) ? null : _createCategory,
-        backgroundColor: const Color(0xFF6D28D9),
-        foregroundColor: colorScheme.onPrimary,
-        icon: const Icon(Icons.add),
-        label: const Text('Nueva categoría'),
-      ),
+      floatingActionButton: _buildContextualFab(),
       body: RefreshIndicator(
         onRefresh: _loadCategories,
         color: colorScheme.primary,
@@ -1051,229 +1856,176 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
             children: [
-              ClipRect(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  heightFactor: headerHeightFactor,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 140),
-                    opacity: headerOpacity,
-                    child: Transform.scale(
-                      scale: headerScale,
-                      alignment: Alignment.topCenter,
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x0D000000),
-                              blurRadius: 10,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 24,
-                                  backgroundColor: const Color(
-                                    0xFF6D28D9,
-                                  ).withValues(alpha: 0.1),
-                                  child: const Icon(
-                                    Icons.restaurant_menu,
-                                    color: Color(0xFF6D28D9),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    'Estructura del menú',
-                                    style: GoogleFonts.manrope(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      color: const Color(0xFF1F2555),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Organiza categorías claras para que agregar y encontrar productos sea más fácil.',
-                              style: GoogleFonts.manrope(
-                                color: const Color(0xFF6B7280),
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w500,
-                                height: 1.45,
+                ClipRect(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: headerHeightFactor,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 140),
+                      opacity: headerOpacity,
+                      child: Transform.scale(
+                        scale: headerScale,
+                        alignment: Alignment.topCenter,
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x0D000000),
+                                blurRadius: 10,
+                                offset: Offset(0, 4),
                               ),
-                            ),
-                            const SizedBox(height: 16),
-                            InkWell(
-                              onTap: _openAiMenuGenerator,
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  gradient: const LinearGradient(
-                                    colors: [
-                                      Color(0xFF6D28D9),
-                                      Color(0xFF9333EA),
-                                    ],
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 24,
+                                    backgroundColor: const Color(0xFF6D28D9)
+                                        .withValues(alpha: 0.1),
+                                    child: const Icon(
+                                      Icons.restaurant_menu,
+                                      color: Color(0xFF6D28D9),
+                                    ),
                                   ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x296D28D9),
-                                      blurRadius: 14,
-                                      offset: Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.auto_awesome,
-                                      color: Colors.white,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        'Generar menú con IA',
-                                        style: GoogleFonts.manrope(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 15,
-                                        ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Estructura del menú',
+                                      style: GoogleFonts.manrope(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF1F2555),
                                       ),
                                     ),
-                                    const Icon(
-                                      Icons.arrow_forward_ios,
-                                      size: 16,
-                                      color: Colors.white,
-                                    ),
-                                  ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Administra categorías y productos desde un solo dashboard para reducir clicks del vendedor.',
+                                style: GoogleFonts.manrope(
+                                  color: const Color(0xFF6B7280),
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w500,
+                                  height: 1.45,
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 16),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _StatChip(
-                                    label: 'Categorías',
-                                    value: '${_categories.length}',
-                                    icon: Icons.folder_rounded,
-                                    tint: const Color(0xFF7C3AED),
+                              const SizedBox(height: 16),
+                              InkWell(
+                                onTap: _openAiMenuGenerator,
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                    gradient: const LinearGradient(
+                                      colors: [
+                                        Color(0xFF6D28D9),
+                                        Color(0xFF9333EA),
+                                      ],
+                                    ),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x296D28D9),
+                                        blurRadius: 14,
+                                        offset: Offset(0, 6),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.auto_awesome, color: Colors.white),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          'Generar menú con IA',
+                                          style: GoogleFonts.manrope(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                      ),
+                                      const Icon(
+                                        Icons.arrow_forward_ios,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: _StatChip(
-                                    label: 'Activas',
-                                    value: '$activeCategories',
-                                    icon: Icons.check_circle_rounded,
-                                    tint: const Color(0xFF16A34A),
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _StatChip(
+                                      label: 'Categorías',
+                                      value: '${_categories.length}',
+                                      icon: Icons.folder_rounded,
+                                      tint: const Color(0xFF7C3AED),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: _StatChip(
-                                    label: 'Productos',
-                                    value: '$totalProducts',
-                                    icon: Icons.inventory_2_rounded,
-                                    tint: const Color(0xFF3B82F6),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _StatChip(
+                                      label: 'Activas',
+                                      value: '$activeCategories',
+                                      icon: Icons.check_circle_rounded,
+                                      tint: const Color(0xFF16A34A),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ],
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _StatChip(
+                                      label: 'Productos',
+                                      value: '$totalProducts',
+                                      icon: Icons.inventory_2_rounded,
+                                      tint: const Color(0xFF3B82F6),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                child: showCompactHeader
-                    ? Padding(
-                        key: const ValueKey('compact-category-header'),
-                        padding: const EdgeInsets.only(top: 4, bottom: 10),
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              _StatChip(
-                                label: 'Categorías',
-                                value: '${_categories.length}',
-                                icon: Icons.folder_rounded,
-                                tint: const Color(0xFF7C3AED),
-                              ),
-                              const SizedBox(width: 8),
-                              _StatChip(
-                                label: 'Activas',
-                                value: '$activeCategories',
-                                icon: Icons.check_circle_rounded,
-                                tint: const Color(0xFF16A34A),
-                              ),
-                              const SizedBox(width: 8),
-                              _StatChip(
-                                label: 'Productos',
-                                value: '$totalProducts',
-                                icon: Icons.inventory_2_rounded,
-                                tint: const Color(0xFF3B82F6),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : const SizedBox(
-                        key: ValueKey('compact-category-spacer'),
-                        height: 10,
+                const SizedBox(height: 12),
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1ECFB),
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x0A1F2555),
+                        blurRadius: 16,
+                        offset: Offset(0, 6),
                       ),
-              ),
-              if (_categories.isEmpty)
-                _EmptyMenuState(
-                  icon: Icons.category_outlined,
-                  title: 'No hay categorías en este menú',
-                  subtitle:
-                      'Crea tu primera categoría para empezar a cargar productos.',
-                  actionLabel: 'Crear primera categoría',
-                  onAction: _isMutating ? null : _createCategory,
-                )
-              else if (filtered.isEmpty)
-                _EmptyMenuState(
-                  icon: Icons.search_off_rounded,
-                  title: 'Sin resultados para la búsqueda',
-                  subtitle:
-                      'Prueba otro término o limpia el filtro actual.',
-                  actionLabel: 'Limpiar búsqueda',
-                  onAction: () {
-                    _searchController.clear();
-                    setState(() => _searchQuery = '');
-                  },
-                )
-              else
-                ...filtered.map(
-                  (category) => _CategoryCard(
-                    category: category,
-                    enabled: !_isMutating,
-                    productCount: _productCountByCategory[category.id] ?? 0,
-                    onOpen: () => _openProducts(category),
-                    onEdit: () => _editCategory(category),
-                    onDelete: () => _deleteCategory(category),
-                    onToggleActive: (value) =>
-                        _toggleCategoryActive(category, value),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: _DashboardTopTabs(
+                      selectedIndex: _selectedTabIndex,
+                      tabs: const ['Todos', 'Categorías', 'Productos', 'Ocultos'],
+                      onSelected: (index) {
+                        if (!mounted) return;
+                        setState(() => _selectedTabIndex = index);
+                      },
+                    ),
                   ),
                 ),
+                const SizedBox(height: 14),
+                ..._buildCurrentTabSections(),
             ],
           ),
         ),
@@ -1379,6 +2131,7 @@ class _CatalogCard extends StatelessWidget {
 
 class _CategoryCard extends StatelessWidget {
   const _CategoryCard({
+    super.key,
     required this.category,
     required this.enabled,
     required this.productCount,
@@ -1386,6 +2139,7 @@ class _CategoryCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onToggleActive,
+    this.dragHandle,
   });
 
   final CategoryModel category;
@@ -1395,6 +2149,7 @@ class _CategoryCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final ValueChanged<bool> onToggleActive;
+  final Widget? dragHandle;
 
   @override
   Widget build(BuildContext context) {
@@ -1481,11 +2236,19 @@ class _CategoryCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Switch.adaptive(
-                value: category.activo,
-                onChanged: enabled ? onToggleActive : null,
-                activeTrackColor: const Color(0xFF6D28D9),
-                activeThumbColor: Colors.white,
+              Column(
+                children: [
+                  if (dragHandle != null) ...[
+                    dragHandle!,
+                    const SizedBox(height: 4),
+                  ],
+                  Switch.adaptive(
+                    value: category.activo,
+                    onChanged: enabled ? onToggleActive : null,
+                    activeTrackColor: const Color(0xFF6D28D9),
+                    activeThumbColor: Colors.white,
+                  ),
+                ],
               ),
             ],
           ),
@@ -1617,6 +2380,500 @@ class _CategoryActionButton extends StatelessWidget {
         textStyle: GoogleFonts.manrope(
           fontWeight: FontWeight.w700,
           fontSize: 13,
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardSectionHeader extends StatelessWidget {
+  const _DashboardSectionHeader({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.manrope(
+            color: const Color(0xFF1F2555),
+            fontWeight: FontWeight.w800,
+            fontSize: 16,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: GoogleFonts.manrope(
+            color: const Color(0xFF6B7280),
+            fontWeight: FontWeight.w500,
+            fontSize: 12.5,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickActionCard extends StatelessWidget {
+  const _QuickActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x0D000000),
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: const Color(0xFF6D28D9).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: const Color(0xFF6D28D9)),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: GoogleFonts.manrope(
+                color: const Color(0xFF1F2555),
+                fontWeight: FontWeight.w800,
+                fontSize: 14.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: GoogleFonts.manrope(
+                color: const Color(0xFF6B7280),
+                fontWeight: FontWeight.w500,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardTopTabs extends StatelessWidget {
+  const _DashboardTopTabs({
+    required this.tabs,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final List<String> tabs;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 380;
+        final tabMinWidth = compact ? 88.0 : 104.0;
+
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (var index = 0; index < tabs.length; index++) ...[
+                ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: tabMinWidth),
+                  child: _DashboardTopTabItem(
+                    label: tabs[index],
+                    isSelected: selectedIndex == index,
+                    compact: compact,
+                    onTap: () => onSelected(index),
+                  ),
+                ),
+                if (index != tabs.length - 1) const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DashboardTopTabItem extends StatelessWidget {
+  const _DashboardTopTabItem({
+    required this.label,
+    required this.isSelected,
+    required this.compact,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool isSelected;
+  final bool compact;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: isSelected ? Colors.white : Colors.transparent,
+        boxShadow: isSelected
+            ? const [
+                BoxShadow(
+                  color: Color(0x141F2555),
+                  blurRadius: 12,
+                  offset: Offset(0, 4),
+                ),
+              ]
+            : const [],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 14 : 18,
+              vertical: compact ? 12 : 13,
+            ),
+            child: Center(
+              child: AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                style: GoogleFonts.manrope(
+                  fontSize: compact ? 12 : 12.5,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w700,
+                  color: isSelected
+                      ? const Color(0xFF1F2555)
+                      : const Color(0xFF6B7280),
+                  letterSpacing: 0,
+                ),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardProductCard extends StatelessWidget {
+  const _DashboardProductCard({
+    super.key,
+    required this.product,
+    required this.categoryName,
+    required this.onEdit,
+    required this.onToggleVisible,
+    required this.onImproveImage,
+    required this.onDelete,
+  });
+
+  final ProductModel product;
+  final String categoryName;
+  final VoidCallback onEdit;
+  final VoidCallback onToggleVisible;
+  final VoidCallback onImproveImage;
+  final VoidCallback onDelete;
+
+  Color _statusColor() {
+    if (product.hasAiImageFailure) return const Color(0xFFDC2626);
+    if (product.hasAiImageInProgress) return const Color(0xFF7C3AED);
+    if (product.isAiGeneratedImage) return const Color(0xFF2563EB);
+    return const Color(0xFF6B7280);
+  }
+
+  String _statusLabel() {
+    if (product.hasAiImageInProgress) return 'Generando imagen...';
+    if (product.hasAiImageFailure) return 'Error al generar imagen';
+    if (product.isAiGeneratedImage) return 'IA';
+    return 'Manual';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = _statusColor();
+
+    Widget thumb() {
+      final imageUrl = product.imagenUrl?.trim();
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: Image.network(
+            imageUrl,
+            width: 72,
+            height: 72,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _ProductThumbPlaceholder(
+              icon: product.isAiGeneratedImage
+                  ? Icons.auto_awesome_rounded
+                  : Icons.fastfood_rounded,
+            ),
+          ),
+        );
+      }
+      return _ProductThumbPlaceholder(
+        icon: product.isAiGeneratedImage
+            ? Icons.auto_awesome_rounded
+            : Icons.fastfood_rounded,
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              thumb(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      product.nombre,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(
+                        color: const Color(0xFF1F2555),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15.5,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      categoryName,
+                      style: GoogleFonts.manrope(
+                        color: const Color(0xFF6B7280),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '4${product.precio.toStringAsFixed(2)}',
+                      style: GoogleFonts.manrope(
+                        color: const Color(0xFF6D28D9),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _ProductStatusPill(
+                          label: product.disponible ? 'Visible' : 'Oculto',
+                          color: product.disponible
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFFEF4444),
+                        ),
+                        _ProductStatusPill(
+                          label: _statusLabel(),
+                          color: statusColor,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 520;
+              if (compact) {
+                return Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _CategoryActionButton(
+                            icon: Icons.edit,
+                            label: 'Editar',
+                            onTap: onEdit,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _CategoryActionButton(
+                            icon: product.disponible
+                                ? Icons.visibility_off_rounded
+                                : Icons.visibility_rounded,
+                            label: product.disponible ? 'Ocultar' : 'Mostrar',
+                            onTap: onToggleVisible,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _CategoryActionButton(
+                            icon: Icons.auto_awesome_rounded,
+                            label: 'Mejorar IA',
+                            onTap: onImproveImage,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _CategoryActionButton(
+                            icon: Icons.delete,
+                            label: 'Eliminar',
+                            onTap: onDelete,
+                            isDanger: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(
+                    child: _CategoryActionButton(
+                      icon: Icons.edit,
+                      label: 'Editar',
+                      onTap: onEdit,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _CategoryActionButton(
+                      icon: product.disponible
+                          ? Icons.visibility_off_rounded
+                          : Icons.visibility_rounded,
+                      label: product.disponible ? 'Ocultar' : 'Mostrar',
+                      onTap: onToggleVisible,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _CategoryActionButton(
+                      icon: Icons.auto_awesome_rounded,
+                      label: 'Mejorar IA',
+                      onTap: onImproveImage,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _CategoryActionButton(
+                      icon: Icons.delete,
+                      label: 'Eliminar',
+                      onTap: onDelete,
+                      isDanger: true,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProductThumbPlaceholder extends StatelessWidget {
+  const _ProductThumbPlaceholder({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 72,
+      height: 72,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F1FB),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Icon(icon, color: const Color(0xFF6D28D9)),
+    );
+  }
+}
+
+class _ProductStatusPill extends StatelessWidget {
+  const _ProductStatusPill({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.manrope(
+          color: color,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
