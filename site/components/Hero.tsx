@@ -1,64 +1,93 @@
+import Image from 'next/image';
 import Link from 'next/link';
-import { ChevronRight, MessageCircle, ShoppingBag, Sparkles } from 'lucide-react';
+import {
+  ChevronRight,
+  MessageCircle,
+  QrCode,
+  Sparkles,
+  CheckCircle2,
+  BarChart3,
+} from 'lucide-react';
 
 type HeroProps = {
   whatsappHref: string;
   demoHref: string;
 };
 
-const featuredProducts = [
-  {
-    name: 'Hamburguesa Clásica',
-    note: 'Carne, queso, lechuga, tomate y salsa.',
-    price: '$6.900',
-    emoji: '🍔',
-  },
-  {
-    name: 'Papas Deluxe',
-    note: 'Papas a la francesa con cheddar y tocino.',
-    price: '$4.500',
-    emoji: '🍟',
-  },
-] as const;
-
 export function Hero({ whatsappHref, demoHref }: HeroProps) {
   return (
-    <section id="inicio" className="mx-auto max-w-7xl px-6 pb-16 pt-10 sm:pt-16 lg:pb-24 lg:pt-18">
-      <div className="grid items-center gap-14 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+    <section id="inicio" className="mx-auto max-w-7xl px-6 pb-16 pt-12 sm:pt-16 lg:pb-24 lg:pt-20">
+      <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-10">
         <div className="max-w-2xl text-center lg:text-left">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#FACC15]/15 bg-[#251d42]/45 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.26em] text-[#FACC15] backdrop-blur-xl">
+          <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-4 py-2 text-[13px] font-semibold text-[#FACC15] shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl">
+            <span className="text-sm">🚀</span>
+            Aumenta tus pedidos sin depender de apps externas
+          </div>
+
+          <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-[#FACC15]/15 bg-[#251d42]/45 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.26em] text-[#FACC15] backdrop-blur-xl">
             <Sparkles className="h-3.5 w-3.5 text-[#FACC15]" />
             Foodtech para tu negocio
           </div>
 
-          <h1 className="mt-6 font-[var(--font-display)] text-4xl font-black tracking-[-0.04em] text-white sm:text-5xl lg:text-[4.15rem] lg:leading-[0.98]">
-            Tu menú digital,
+          <h1 className="mt-7 font-[var(--font-display)] text-4xl font-black tracking-[-0.05em] text-white sm:text-5xl lg:text-[4.3rem] lg:leading-[0.95]">
+            Recibe pedidos por WhatsApp
             <br />
-            tus pedidos y
-            <br />
-            tu delivery en un
+            y digitaliza tu menú
             <br />
             <span className="bg-gradient-to-r from-[#b675ff] to-[#7C3AED] bg-clip-text text-transparent">
-              solo lugar.
+              en minutos.
             </span>
           </h1>
 
-          <p className="mx-auto mt-6 max-w-lg text-[1.05rem] leading-8 text-slate-300/90 lg:mx-0">
-            Crea un menú online profesional para tu negocio, recibe pedidos por WhatsApp,
-            comparte tu QR y permite que tus clientes sigan su orden en tiempo real.
+          <p className="mx-auto mt-6 max-w-xl text-[1.05rem] leading-8 text-slate-300/88 lg:mx-0">
+            Menú digital profesional, pedidos por WhatsApp y seguimiento en tiempo real. Todo en un solo lugar.
           </p>
 
-          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">
-            <Link
-              href={whatsappHref}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-[#FACC15] px-6 py-4 text-sm font-bold text-[#0B0F1A] shadow-[0_24px_60px_-24px_rgba(250,204,21,0.8)] transition-all duration-300 hover:scale-105 hover:bg-[#fde047]"
-            >
-              Solicitar demo
-              <MessageCircle className="h-4 w-4" />
-            </Link>
+          <p className="mx-auto mt-4 max-w-xl text-[1.02rem] font-semibold text-slate-100 lg:mx-0">
+            Empieza a vender más sin apps complicadas ni comisiones
+          </p>
+
+          <div className="mt-8 grid gap-4 sm:grid-cols-3 sm:gap-5">
+            {[
+              { label: 'Menú digital', detail: 'con link y QR', icon: CheckCircle2 },
+              { label: 'Pedidos directos', detail: 'por WhatsApp', icon: MessageCircle },
+              { label: 'Seguimiento del pedido', detail: 'en tiempo real', icon: Sparkles },
+            ].map((item) => {
+              const Icon = item.icon;
+
+              return (
+              <div
+                key={item.label}
+                className="flex items-center justify-center gap-3 text-left text-sm font-medium text-slate-100 lg:justify-start"
+              >
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-violet-400/20 bg-violet-500/10 text-violet-300 shadow-[0_10px_24px_-18px_rgba(124,58,237,0.95)]">
+                  <Icon className="h-4.5 w-4.5" />
+                </span>
+                <span className="leading-5">
+                  <span className="block">{item.label}</span>
+                  <span className="block text-slate-300">{item.detail}</span>
+                </span>
+              </div>
+            );})}
+          </div>
+
+          <div className="mt-11 flex flex-col justify-center gap-4 sm:flex-row lg:justify-start lg:items-start">
+            <div className="flex flex-col items-center lg:items-start">
+              <Link
+                href={whatsappHref}
+                className="inline-flex scale-100 items-center justify-center gap-2 rounded-full bg-[#FACC15] px-8 py-4 text-base font-bold text-[#0B0F1A] shadow-[0_34px_90px_-18px_rgba(250,204,21,1)] transition-all duration-300 hover:scale-[1.04] hover:bg-[#fde047] hover:shadow-[0_40px_100px_-16px_rgba(250,204,21,1)]"
+              >
+                Empieza gratis ahora
+                <MessageCircle className="h-4 w-4" />
+              </Link>
+              <p className="mt-3 text-xs font-medium text-slate-300/85">
+                Sin tarjeta • Configuración en 2 minutos
+              </p>
+            </div>
+
             <Link
               href={demoHref}
-              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-transparent px-6 py-4 text-sm font-semibold text-white transition-all duration-300 hover:scale-105 hover:border-violet-300/30 hover:bg-white/5"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-[#11182a]/55 px-6 py-4 text-base font-medium text-white/84 transition-all duration-300 hover:border-violet-300/20 hover:bg-white/6 hover:text-white"
             >
               Ver demo
               <ChevronRight className="h-4 w-4" />
@@ -67,154 +96,71 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
 
           <div className="mt-10 grid gap-3 sm:grid-cols-3">
             {[
-              { label: 'Link propio y QR', icon: 'QR' },
-              { label: 'Pedidos por WhatsApp', icon: 'WA' },
-              { label: 'Tracking del pedido', icon: 'TR' },
+              { label: 'Comparte tu menú en segundos', detail: '(QR + link)', icon: 'QR' },
+              { label: 'Recibe pedidos sin apps', detail: '', icon: 'WA' },
+              { label: 'Tus clientes ven su pedido', detail: 'en tiempo real', icon: 'TR' },
             ].map((item) => (
               <div
-                key={item.label}
-                className="flex items-center gap-3 rounded-2xl border border-white/10 bg-[#0c1220]/85 px-4 py-3 text-sm font-medium text-slate-100 backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-violet-400/30 hover:bg-[#11192b]"
+                key={`${item.label}-${item.icon}`}
+                className="flex min-h-[92px] items-center gap-3 rounded-2xl border border-white/8 bg-[#0d1525]/82 px-4 py-4 text-sm font-medium text-slate-100 shadow-[0_14px_34px_-24px_rgba(0,0,0,0.95)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-violet-400/30 hover:bg-[#11192b]"
               >
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-500/10 text-[10px] font-bold text-violet-200">
-                  {item.icon}
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-500/10 text-violet-200">
+                  {item.icon === 'QR' ? <QrCode className="h-4.5 w-4.5" /> : null}
+                  {item.icon === 'WA' ? <MessageCircle className="h-4.5 w-4.5 text-emerald-300" /> : null}
+                  {item.icon === 'TR' ? <BarChart3 className="h-4.5 w-4.5" /> : null}
                 </span>
-                <span>{item.label}</span>
+                <span>
+                  {item.label}
+                  {item.detail ? <span className="block text-xs text-violet-300/90">{item.detail}</span> : null}
+                </span>
               </div>
             ))}
           </div>
         </div>
 
         <div className="relative mx-auto flex w-full max-w-[42rem] justify-center lg:justify-end">
-          <div className="absolute left-[8%] top-[28%] h-48 w-48 rounded-full bg-violet-700/25 blur-3xl" />
-          <div className="absolute right-[8%] top-[16%] h-44 w-44 rounded-full bg-violet-500/18 blur-3xl" />
+          <div className="absolute left-[10%] top-[22%] h-56 w-56 rounded-full bg-violet-700/25 blur-3xl" />
+          <div className="absolute right-[6%] top-[10%] h-64 w-64 rounded-full bg-violet-500/22 blur-3xl" />
 
-          <div className="relative flex w-full max-w-[39rem] items-start justify-center lg:justify-end">
-            <div className="relative z-20 w-[20.5rem] rounded-[2.2rem] border border-white/18 bg-[#111621] p-3 shadow-[0_38px_120px_-38px_rgba(0,0,0,1)]">
-              <div className="absolute left-1/2 top-3 h-5 w-28 -translate-x-1/2 rounded-full bg-black/65" />
-              <div className="rounded-[1.8rem] border border-white/8 bg-[#161b28] p-4 shadow-inner shadow-black/45">
-                <div className="flex items-center justify-between text-[10px] text-slate-400">
-                  <span>9:41</span>
-                  <span>4G</span>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between rounded-2xl border border-white/8 bg-[#0f1420] px-3 py-2.5">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FACC15] text-[11px] font-black text-[#22160d]">
-                      B
-                    </span>
-                    <div>
-                      <p className="text-sm font-semibold text-white">Bistró del Barrio</p>
-                      <p className="text-[11px] text-slate-400">45 min de demora • Pickup</p>
-                    </div>
-                  </div>
-                  <span className="text-xs text-slate-400">⌕</span>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-white/8 bg-gradient-to-r from-[#161c29] to-[#111827] p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Combo del día</p>
-                      <p className="mt-1 text-[11px] text-slate-400">Hamburguesa • Papas • Bebida</p>
-                      <p className="mt-2 text-lg font-black text-white">$9.900</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <span className="text-3xl">🍔</span>
-                      <button
-                        type="button"
-                        className="rounded-full bg-[#7C3AED] px-3 py-1 text-[11px] font-bold text-white transition-all duration-300 hover:scale-105 hover:bg-[#8b5cf6]"
-                      >
-                        Pedir ahora
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-white">Categorías</p>
-                    <p className="text-[11px] font-medium text-violet-300">Ver todas</p>
-                  </div>
-                  <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                    {[
-                      { label: 'Desayunos', emoji: '🍳' },
-                      { label: 'Combos', emoji: '🍟' },
-                      { label: 'Bebidas', emoji: '🥤' },
-                      { label: 'Postres', emoji: '🧁' },
-                    ].map((item) => (
-                      <div key={item.label} className="rounded-2xl border border-white/8 bg-[#0f1420] px-2 py-3">
-                        <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-xl bg-white/6 text-lg">
-                          {item.emoji}
-                        </div>
-                        <p className="mt-2 text-[10px] font-medium leading-3 text-slate-300">{item.label}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <p className="text-sm font-semibold text-white">Productos destacados</p>
-                  <div className="mt-3 space-y-2.5">
-                    {featuredProducts.map((item) => (
-                      <div
-                        key={item.name}
-                        className="rounded-2xl border border-white/8 bg-[#0f1420] p-3 transition-all duration-300 hover:border-violet-400/30"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#1d2434] text-2xl">
-                            {item.emoji}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-[13px] font-semibold text-white">{item.name}</p>
-                                <p className="mt-1 text-[10px] leading-4 text-slate-400">{item.note}</p>
-                              </div>
-                              <button
-                                type="button"
-                                className="rounded-full bg-[#7C3AED] px-2.5 py-1 text-[10px] font-semibold text-white transition-all duration-300 hover:scale-105"
-                              >
-                                Agregar
-                              </button>
-                            </div>
-                            <p className="mt-2 text-[12px] font-bold text-white">{item.price}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-4 flex items-center justify-between rounded-2xl bg-[#6d28d9] px-4 py-3 shadow-[0_18px_50px_-24px_rgba(124,58,237,0.95)]">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                    <ShoppingBag className="h-4 w-4" />
-                    <span>Ver carrito • 3 items</span>
-                  </div>
-                  <span className="text-sm font-bold text-white">$18.300</span>
-                </div>
+          <div className="relative z-20 w-full max-w-[40rem]">
+            <div className="mb-5 flex justify-center lg:hidden">
+              <div className="rounded-[1.4rem] border border-white/12 bg-[#121931]/90 px-5 py-3 text-sm font-semibold text-slate-100 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.85)] backdrop-blur-xl">
+                <span className="mr-2 text-amber-300">★★★★★</span>
+                4.9/5 • Más de 100 negocios ya venden con esto
               </div>
             </div>
 
-            <div className="absolute right-0 top-[4.6rem] z-10 hidden w-[11.5rem] rounded-[1.8rem] border border-white/10 bg-[#121826]/92 p-4 shadow-[0_32px_100px_-34px_rgba(0,0,0,1)] lg:block">
-              <div className="rounded-[1.35rem] border border-white/8 bg-[#151b29] p-4">
-                <p className="text-sm font-semibold text-white">Estado del pedido</p>
-                <div className="mt-5 space-y-4">
-                  {[
-                    ['Pedido recibido', '12:35 PM', 'bg-[#84cc16]'],
-                    ['En preparación', '12:40 PM', 'bg-[#84cc16]'],
-                    ['En camino', '12:55 PM', 'bg-[#84cc16]'],
-                    ['Entregado', '01:10 PM', 'bg-[#7C3AED]'],
-                  ].map(([label, time, dot], index) => (
-                    <div key={label} className="relative pl-6">
-                      {index < 3 ? <span className="absolute left-[7px] top-4 h-8 w-px bg-white/15" /> : null}
-                      <span className={`absolute left-0 top-1.5 h-3.5 w-3.5 rounded-full ${dot}`} />
-                      <p className="text-[12px] font-semibold text-white">{label}</p>
-                      <p className="mt-0.5 text-[10px] text-slate-400">{time}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-5 rounded-2xl border border-white/8 bg-[#0e1320] px-3 py-3">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Tiempo estimado</p>
-                  <p className="mt-2 text-sm font-bold text-white">25 - 35 min</p>
+            <div className="relative mx-auto w-full max-w-[39rem] lg:mr-0">
+              <Image
+                src="/hero-app-header.png"
+                alt="Vista de la app de elmenuxfa en un iPhone mostrando el menú y el flujo de pedido"
+                width={1024}
+                height={1536}
+                priority
+                className="relative z-10 h-auto w-full drop-shadow-[0_44px_120px_rgba(0,0,0,0.88)] select-none"
+              />
+
+              <div className="absolute -right-6 top-[28%] z-20 hidden w-[14.5rem] rounded-[1.9rem] border border-white/12 bg-[linear-gradient(180deg,rgba(30,41,59,0.94),rgba(46,16,101,0.88))] px-5 py-5 text-white shadow-[0_24px_70px_-26px_rgba(124,58,237,0.8)] backdrop-blur-xl lg:block">
+                <div className="text-amber-300">★★★★★</div>
+                <p className="mt-3 text-[2rem] font-black tracking-[-0.05em]">4.9/5</p>
+                <p className="mt-3 text-sm leading-6 text-slate-200/90">
+                  Más de 100 negocios ya venden con esto
+                </p>
+                <div className="mt-4 flex items-center gap-2">
+                  <div className="flex -space-x-2">
+                    {['A', 'L', 'M', 'R'].map((item, index) => (
+                      <span
+                        key={item}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#1a2340] bg-gradient-to-br from-[#f8d34f] to-[#7C3AED] text-xs font-bold text-white"
+                        style={{ zIndex: 10 - index }}
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-100">
+                    +100
+                  </span>
                 </div>
               </div>
             </div>
