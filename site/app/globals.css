@@ -92,6 +92,8 @@ body {
 
 .hero-orbit-system {
   overflow: visible;
+  animation: orbitSpin 28s linear infinite;
+  transform-origin: center;
 }
 
 .hero-orbit {
@@ -161,7 +163,7 @@ body {
 @keyframes fadeUp {
   from {
     opacity: 0;
-    transform: translate3d(0, 18px, 0) scale(0.985);
+    transform: translate3d(0, 26px, 0) scale(0.975);
   }
   to {
     opacity: 1;
@@ -175,7 +177,16 @@ body {
     transform: translate3d(0, 0, 0);
   }
   50% {
-    transform: translate3d(0, -8px, 0);
+    transform: translate3d(0, -24px, 0);
+  }
+}
+
+@keyframes orbitSpin {
+  from {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  to {
+    transform: translate3d(0, 0, 0) rotate(360deg);
   }
 }
 
@@ -208,12 +219,15 @@ body {
 
 .animate-fade-up {
   opacity: 0;
-  animation: fadeUp 720ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: fadeUp 900ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  backface-visibility: hidden;
   will-change: transform, opacity;
 }
 
 .animate-float-slow {
-  animation: floatSlow 6.2s ease-in-out infinite;
+  animation: floatSlow 4.4s ease-in-out infinite;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 .animate-glow-pulse {
@@ -246,7 +260,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-fade-up,
+  .hero-orbit-system,
   .animate-float-slow,
   .animate-glow-pulse,
   .animate-shine,
@@ -257,6 +271,11 @@ body {
   .animation-delay-700 {
     animation: none !important;
     opacity: 1;
+    transform: none !important;
+  }
+
+  .animate-fade-up {
+    animation: checkoutFadeIn 220ms ease-out forwards !important;
     transform: none !important;
   }
 
