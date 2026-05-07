@@ -100,7 +100,7 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
               y digitaliza tu menú
             </span>
             <span className="animate-fade-up animation-delay-700 block will-change-transform will-change-opacity">
-              <span className="bg-gradient-to-r from-[#bf87ff] to-[#7C3AED] bg-clip-text text-transparent">
+              <span className="inline-block pr-[0.08em] bg-gradient-to-r from-[#bf87ff] to-[#7C3AED] bg-clip-text text-transparent">
                 en minutos.
               </span>
             </span>
@@ -184,29 +184,6 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
                 </div>
               </div>
             </div>
-
-            <div className="hidden overflow-hidden rounded-[1.9rem] border border-white/8 bg-white/6 xl:grid xl:grid-cols-4 xl:px-1 xl:py-1">
-              {supportCards.map((item, index) => {
-                const Icon = item.icon;
-
-                return (
-                  <div
-                    key={item.title}
-                    className={`animate-fade-up flex min-h-[100px] items-center gap-4 bg-[#0d1323]/96 px-5 py-4 text-slate-100 transition-all duration-300 hover:-translate-y-1 hover:bg-[#11192b] will-change-transform will-change-opacity ${
-                      index === 0 ? 'animation-delay-300' : 'animation-delay-500'
-                    }`}
-                  >
-                    <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-violet-400/18 bg-violet-500/10 text-violet-300">
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <span>
-                      <span className="block text-[1.35rem] font-semibold leading-6 text-white">{item.title}</span>
-                      <span className="mt-1 block text-base text-slate-300">{item.description}</span>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         </div>
 
@@ -267,7 +244,30 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+
+        <div className="mt-10 hidden gap-px overflow-hidden rounded-[1.9rem] border border-white/8 bg-white/6 lg:grid lg:grid-cols-2 xl:grid-cols-4 xl:px-1 xl:py-1">
+          {supportCards.map((item, index) => {
+            const Icon = item.icon;
+
+            return (
+              <div
+                key={item.title}
+                className={`animate-fade-up flex min-h-[104px] items-center gap-4 bg-[#0d1323]/96 px-6 py-5 text-slate-100 transition-all duration-300 hover:-translate-y-1 hover:bg-[#11192b] will-change-transform will-change-opacity ${
+                  index === 0 ? 'animation-delay-300' : 'animation-delay-500'
+                }`}
+              >
+                <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-violet-400/18 bg-violet-500/10 text-violet-300">
+                  <Icon className="h-5 w-5" />
+                </span>
+                <span>
+                  <span className="block text-lg font-semibold leading-tight text-white">{item.title}</span>
+                  <span className="mt-1 block text-sm leading-5 text-slate-300">{item.description}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
