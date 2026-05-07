@@ -1,4 +1,3 @@
-// @ts-nocheck
 'use client';
 
 import Head from 'next/head';
@@ -89,6 +88,13 @@ type MetodoPagoRow = {
   alias?: string | null;
   descripcion?: string | null;
   detalles?: string | null;
+  nota?: string | null;
+  moneda?: string | null;
+  currency?: string | null;
+  moneda_codigo?: string | null;
+  tasa_cambio?: number | string | null;
+  exchange_rate?: number | string | null;
+  rate?: number | string | null;
 };
 
 type MenuData = {
@@ -127,6 +133,91 @@ const categoryTitleRevealOffsetPx = 30;
 
 type MotionIntensity = 'subtle' | 'medium' | 'strong';
 type MotionDirection = 'up' | 'down' | 'left' | 'right' | 'none';
+
+type GoogleLatLngLike = {
+  lat(): number;
+  lng(): number;
+};
+
+type GooglePlaceResult = {
+  formatted_address?: string;
+  name?: string;
+  geometry?: {
+    location?: GoogleLatLngLike | null;
+  } | null;
+};
+
+type GoogleMapHandle = {
+  panTo(point: DeliveryPoint): void;
+  setZoom(zoom: number): void;
+  addListener(event: string, listener: () => void): void;
+  getCenter(): GoogleLatLngLike | null;
+};
+
+type GoogleGeocoder = {
+  geocode(
+    request: { location?: DeliveryPoint; address?: string },
+    callback: (results: GooglePlaceResult[] | null, status: string) => void,
+  ): void;
+};
+
+type GoogleAutocomplete = {
+  bindTo(name: string, map: GoogleMapHandle): void;
+  addListener(event: string, listener: () => void): void;
+  getPlace(): GooglePlaceResult | null;
+};
+
+type GoogleMapsApi = {
+  maps?: {
+    Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMapHandle;
+    Geocoder: new () => GoogleGeocoder;
+    places?: {
+      Autocomplete?: new (input: HTMLInputElement, options: { fields: string[] }) => GoogleAutocomplete;
+    };
+  };
+};
+
+type LeafletCenter = {
+  lat: number;
+  lng: number;
+};
+
+type LeafletMapHandle = {
+  setView(coords: [number, number], zoom: number): LeafletMapHandle;
+  getCenter(): LeafletCenter | null;
+  on(event: string, handler: () => void): void;
+  remove(): void;
+};
+
+type LeafletTileLayer = {
+  addTo(map: LeafletMapHandle): void;
+};
+
+type LeafletApi = {
+  map(element: HTMLElement, options: Record<string, unknown>): LeafletMapHandle;
+  tileLayer(url: string, options: Record<string, unknown>): LeafletTileLayer;
+};
+
+type WindowWithExternalMaps = Window & typeof globalThis & Record<string, unknown> & {
+  google?: GoogleMapsApi;
+  L?: LeafletApi;
+};
+
+type MapPickerHandle = {
+  remove?: () => void;
+  panTo?: (point: DeliveryPoint) => void;
+  setZoom?: (zoom: number) => void;
+  setView?: (coords: [number, number], zoom: number) => unknown;
+};
+
+type ValidationDetail = {
+  path?: string;
+  message?: string;
+};
+
+function getWindowWithExternalMaps() {
+  return window as WindowWithExternalMaps;
+}
 
 const MOTION_TOKENS = {
   duration: {
@@ -168,11 +259,11 @@ const defaultProductImage =
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-let googleMapsScriptPromise: Promise<any> | null = null;
-let leafletAssetsPromise: Promise<any> | null = null;
+let googleMapsScriptPromise: Promise<GoogleMapsApi | null> | null = null;
+let leafletAssetsPromise: Promise<LeafletApi | null> | null = null;
 
 function waitForGoogleMapsReady(timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
+  return new Promise<GoogleMapsApi | null>((resolve, reject) => {
     if (typeof window === 'undefined') {
       resolve(null);
       return;
@@ -180,8 +271,9 @@ function waitForGoogleMapsReady(timeoutMs = 10000) {
 
     const startedAt = Date.now();
     const tick = () => {
-      if ((window as any).google?.maps) {
-        resolve((window as any).google);
+      const windowWithMaps = getWindowWithExternalMaps();
+      if (windowWithMaps.google?.maps) {
+        resolve(windowWithMaps.google);
         return;
       }
 
@@ -199,7 +291,8 @@ function waitForGoogleMapsReady(timeoutMs = 10000) {
 
 function loadGoogleMapsApi() {
   if (typeof window === 'undefined') return Promise.resolve(null);
-  if ((window as any).google?.maps) return Promise.resolve((window as any).google);
+  const windowWithMaps = getWindowWithExternalMaps();
+  if (windowWithMaps.google?.maps) return Promise.resolve(windowWithMaps.google);
   if (!googleMapsJsApiKey) return Promise.resolve(null);
   if (googleMapsScriptPromise) return googleMapsScriptPromise;
 
@@ -215,14 +308,14 @@ function loadGoogleMapsApi() {
     }
 
     const callbackName = '__kosmenuGoogleMapsReady';
-    (window as any)[callbackName] = () => {
+    windowWithMaps[callbackName] = () => {
       waitForGoogleMapsReady()
         .then((google) => {
-          delete (window as any)[callbackName];
+          delete windowWithMaps[callbackName];
           resolve(google);
         })
         .catch((error) => {
-          delete (window as any)[callbackName];
+          delete windowWithMaps[callbackName];
           reject(error);
         });
     };
@@ -233,7 +326,7 @@ function loadGoogleMapsApi() {
     script.defer = true;
     script.dataset.kosmenuGoogleMaps = '1';
     script.onerror = (error) => {
-      delete (window as any)[callbackName];
+      delete windowWithMaps[callbackName];
       reject(error);
     };
     document.head.appendChild(script);
@@ -244,7 +337,8 @@ function loadGoogleMapsApi() {
 
 function loadLeafletAssets() {
   if (typeof window === 'undefined') return Promise.resolve(null);
-  if ((window as any).L) return Promise.resolve((window as any).L);
+  const windowWithMaps = getWindowWithExternalMaps();
+  if (windowWithMaps.L) return Promise.resolve(windowWithMaps.L);
   if (leafletAssetsPromise) return leafletAssetsPromise;
 
   leafletAssetsPromise = new Promise((resolve, reject) => {
@@ -259,7 +353,7 @@ function loadLeafletAssets() {
 
     const existingScript = document.querySelector('script[data-kosmenu-leaflet="1"]') as HTMLScriptElement | null;
     if (existingScript) {
-      existingScript.addEventListener('load', () => resolve((window as any).L));
+      existingScript.addEventListener('load', () => resolve(getWindowWithExternalMaps().L ?? null));
       existingScript.addEventListener('error', reject);
       return;
     }
@@ -269,7 +363,7 @@ function loadLeafletAssets() {
     script.async = true;
     script.defer = true;
     script.dataset.kosmenuLeaflet = '1';
-    script.onload = () => resolve((window as any).L);
+    script.onload = () => resolve(getWindowWithExternalMaps().L ?? null);
     script.onerror = (error) => reject(error);
     document.head.appendChild(script);
   });
@@ -396,7 +490,7 @@ function usePrefersReducedMotion() {
   return prefersReducedMotion;
 }
 
-function motionDelay(index: number, step = MOTION_TOKENS.staggerStep) {
+function motionDelay(index: number, step: number = MOTION_TOKENS.staggerStep) {
   return Math.max(0, index) * step;
 }
 
@@ -626,7 +720,7 @@ function paymentMethodDetails(method: MetodoPagoRow) {
 }
 
 function paymentMethodCurrency(method: MetodoPagoRow) {
-  const explicit = ((method as any).moneda ?? (method as any).currency ?? (method as any).moneda_codigo ?? '')
+  const explicit = (method.moneda ?? method.currency ?? method.moneda_codigo ?? '')
     .toString()
     .trim();
   if (explicit.length > 0) {
@@ -680,9 +774,9 @@ function parseExchangeRate(value: unknown) {
 
 function paymentMethodExchangeRate(method: MetodoPagoRow) {
   const directRate =
-    parseExchangeRate((method as any).exchange_rate) ??
-    parseExchangeRate((method as any).tasa_cambio) ??
-    parseExchangeRate((method as any).rate);
+    parseExchangeRate(method.exchange_rate) ??
+    parseExchangeRate(method.tasa_cambio) ??
+    parseExchangeRate(method.rate);
   if (directRate) return directRate;
 
   const detalles = (method.detalles ?? '').toString().trim();
@@ -1290,10 +1384,10 @@ export default function PublicMenuPage() {
   const statsCardsRef = useRef<HTMLDivElement | null>(null);
   const mapPickerContainerRef = useRef<HTMLDivElement | null>(null);
   const mapPickerSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const mapPickerMapRef = useRef<any>(null);
-  const mapPickerMarkerRef = useRef<any>(null);
-  const mapPickerGeocoderRef = useRef<any>(null);
-  const mapPickerAutocompleteRef = useRef<any>(null);
+  const mapPickerMapRef = useRef<MapPickerHandle | null>(null);
+  const mapPickerMarkerRef = useRef<unknown>(null);
+  const mapPickerGeocoderRef = useRef<GoogleGeocoder | null>(null);
+  const mapPickerAutocompleteRef = useRef<GoogleAutocomplete | null>(null);
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
   const shouldReturnToMenuOnEmptyCartRef = useRef(false);
   const [infoSections, setInfoSections] = useState({
@@ -2432,7 +2526,7 @@ export default function PublicMenuPage() {
             setIsMapPickerLoading(false);
             return;
           }
-          geocoder.geocode({ location: point }, (results: any, status: string) => {
+          geocoder.geocode({ location: point }, (results: GooglePlaceResult[] | null, status: string) => {
             if (disposed) return;
             markResolvedPoint(point);
             if (status === 'OK' && results?.[0]?.formatted_address) {
@@ -2637,7 +2731,8 @@ export default function PublicMenuPage() {
         .replace(/\s+/g, '-')
         .replace(/[^a-zA-Z0-9._-]/g, '')
         .toLowerCase();
-      const storagePath = `${resolvedComercioId}/${orderId}/${Date.now()}-${sanitizedFileName || 'comprobante.jpg'}`;
+      const proofUploadKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const storagePath = `${resolvedComercioId}/${proofUploadKey}-${sanitizedFileName || 'comprobante.jpg'}`;
       const { error: uploadError } = await supabase.storage
         .from('comprobantes')
         .upload(storagePath, paymentMeta.proofFile, {
@@ -2744,7 +2839,7 @@ export default function PublicMenuPage() {
 
       let message = responsePayload?.error ?? 'No se pudo guardar el pedido.';
       if (response.status === 400 && validationDetails.length > 0) {
-        const fieldMessages = validationDetails.map((detail: any) => {
+        const fieldMessages = validationDetails.map((detail: ValidationDetail) => {
           const path = (detail?.path ?? '').toString();
           if (path.includes('telefono_cliente')) {
             return 'Por favor verifica tu numero de telefono/WhatsApp.';
@@ -4217,14 +4312,14 @@ export default function PublicMenuPage() {
                                   <div key={`info-${method.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                                     <p className="text-sm font-bold text-slate-800">{paymentMethodLabel(method)}</p>
                                     <div className="mt-1 space-y-1 text-xs text-slate-600">
-                                      {(method as any).nota || method.descripcion ? (
-                                        <p>Nota: {(method as any).nota ?? method.descripcion}</p>
+                                      {method.nota || method.descripcion ? (
+                                        <p>Nota: {method.nota ?? method.descripcion}</p>
                                       ) : null}
-                                      {(method as any).moneda || (method as any).currency ? (
-                                        <p>Moneda: {(method as any).moneda ?? (method as any).currency}</p>
+                                      {method.moneda || method.currency ? (
+                                        <p>Moneda: {method.moneda ?? method.currency}</p>
                                       ) : null}
-                                      {(method as any).tasa_cambio || (method as any).exchange_rate ? (
-                                        <p>Tasa de cambio: {(method as any).tasa_cambio ?? (method as any).exchange_rate}</p>
+                                      {method.tasa_cambio || method.exchange_rate ? (
+                                        <p>Tasa de cambio: {method.tasa_cambio ?? method.exchange_rate}</p>
                                       ) : null}
                                       {paymentMethodDetails(method).slice(0, 2).map((detail, index) => (
                                         <p key={`${method.id}-detail-${index}`}>{detail}</p>
@@ -4319,7 +4414,7 @@ export default function PublicMenuPage() {
                       const map = mapPickerMapRef.current;
                       if (!geocoder || !map) return;
                       setIsMapPickerLoading(true);
-                      geocoder.geocode({ address: query }, (results: any, status: string) => {
+                      geocoder.geocode({ address: query }, (results: GooglePlaceResult[] | null, status: string) => {
                         if (status !== 'OK' || !results?.[0]?.geometry?.location) {
                           setIsMapPickerLoading(false);
                           return;
@@ -4346,7 +4441,7 @@ export default function PublicMenuPage() {
                       const map = mapPickerMapRef.current;
                       if (!geocoder || !map) return;
                       setIsMapPickerLoading(true);
-                      geocoder.geocode({ address: query }, (results: any, status: string) => {
+                      geocoder.geocode({ address: query }, (results: GooglePlaceResult[] | null, status: string) => {
                         if (status !== 'OK' || !results?.[0]?.geometry?.location) {
                           setIsMapPickerLoading(false);
                           return;

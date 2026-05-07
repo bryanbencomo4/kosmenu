@@ -1,11 +1,12 @@
-// @ts-nocheck
 'use client';
 
-import { createClient } from '@supabase/supabase-js';
-import { CreditCard, MapPin, MessageCircle, Package, Phone, Store, User } from 'lucide-react';
+import { createClient, REALTIME_POSTGRES_CHANGES_LISTEN_EVENT } from '@supabase/supabase-js';
+import type { RealtimePostgresChangesFilter, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import { CreditCard, MapPin, MessageCircle, Package, Phone, Store } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 
 type OrderStatus =
   | 'pendiente'
@@ -68,6 +69,33 @@ type PedidoRow = {
       whatsapp_enabled?: boolean;
       updated_at?: string;
     } | null;
+    comercio_latitud?: number | string | null;
+    latitud_comercio?: number | string | null;
+    business_latitude?: number | string | null;
+    comercio_longitud?: number | string | null;
+    longitud_comercio?: number | string | null;
+    business_longitude?: number | string | null;
+    comercio_direccion?: string;
+    direccion_comercio?: string;
+    business_address?: string;
+    comercio_nombre?: string;
+    nombre_comercio?: string;
+    business_name?: string;
+    nombre_negocio?: string;
+    telefono_comercio?: string;
+    comercio_telefono?: string;
+    business_phone?: string;
+    delivery_delegate?: {
+      status?: string;
+      accepted_at?: string;
+      arrived_at?: string;
+      completed_at?: string;
+    } | null;
+    cancellation?: {
+      reason?: string;
+      source?: string;
+      cancelled_at?: string;
+    } | null;
     items?: Array<{
       nombre?: string;
       cantidad?: number;
@@ -76,6 +104,42 @@ type PedidoRow = {
     delivery?: DeliveryPayload | null;
   } | null;
 };
+
+type GoogleMapPoint = { lat: number; lng: number };
+
+type GoogleMapLayer = {
+  setMap(map: GoogleMapInstance | null): void;
+};
+
+type GoogleLatLngBounds = {
+  extend(point: GoogleMapPoint): void;
+};
+
+type GoogleMapInstance = {
+  panTo(point: GoogleMapPoint): void;
+  setZoom(zoom: number): void;
+  fitBounds(bounds: GoogleLatLngBounds, padding?: number): void;
+};
+
+type GoogleMapsApi = {
+  maps?: {
+    Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMapInstance;
+    Marker: new (options: Record<string, unknown>) => GoogleMapLayer;
+    Polyline: new (options: Record<string, unknown>) => GoogleMapLayer;
+    LatLngBounds: new () => GoogleLatLngBounds;
+    SymbolPath: {
+      CIRCLE: unknown;
+    };
+  };
+};
+
+type WindowWithGoogleMaps = Window & typeof globalThis & Record<string, unknown> & {
+  google?: GoogleMapsApi;
+};
+
+function getWindowWithGoogleMaps() {
+  return window as WindowWithGoogleMaps;
+}
 
 type ComercioRow = {
   id: string;
@@ -106,10 +170,10 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
 
-let googleMapsScriptPromise: Promise<any> | null = null;
+let googleMapsScriptPromise: Promise<GoogleMapsApi | null> | null = null;
 
 function waitForGoogleMapsReady(timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
+  return new Promise<GoogleMapsApi | null>((resolve, reject) => {
     if (typeof window === 'undefined') {
       resolve(null);
       return;
@@ -117,8 +181,9 @@ function waitForGoogleMapsReady(timeoutMs = 10000) {
 
     const startedAt = Date.now();
     const tick = () => {
-      if ((window as any).google?.maps) {
-        resolve((window as any).google);
+      const windowWithMaps = getWindowWithGoogleMaps();
+      if (windowWithMaps.google?.maps) {
+        resolve(windowWithMaps.google);
         return;
       }
 
@@ -136,7 +201,8 @@ function waitForGoogleMapsReady(timeoutMs = 10000) {
 
 function loadGoogleMapsApi() {
   if (typeof window === 'undefined') return Promise.resolve(null);
-  if ((window as any).google?.maps) return Promise.resolve((window as any).google);
+  const windowWithMaps = getWindowWithGoogleMaps();
+  if (windowWithMaps.google?.maps) return Promise.resolve(windowWithMaps.google);
   if (!googleMapsJsApiKey) return Promise.resolve(null);
   if (googleMapsScriptPromise) return googleMapsScriptPromise;
 
@@ -152,14 +218,14 @@ function loadGoogleMapsApi() {
     }
 
     const callbackName = '__kosmenuOrderTrackingGoogleMapsReady';
-    (window as any)[callbackName] = () => {
+    windowWithMaps[callbackName] = () => {
       waitForGoogleMapsReady()
         .then((google) => {
-          delete (window as any)[callbackName];
+          delete windowWithMaps[callbackName];
           resolve(google);
         })
         .catch((error) => {
-          delete (window as any)[callbackName];
+          delete windowWithMaps[callbackName];
           reject(error);
         });
     };
@@ -170,7 +236,7 @@ function loadGoogleMapsApi() {
     script.defer = true;
     script.dataset.kosmenuGoogleMaps = '1';
     script.onerror = (error) => {
-      delete (window as any)[callbackName];
+      delete windowWithMaps[callbackName];
       reject(error);
     };
     document.head.appendChild(script);
@@ -348,7 +414,7 @@ function buildWhatsAppLink(orderId: string, status: OrderStatus, comercio: Comer
 }
 
 function resolveWhatsappNotificationsEnabled(order: PedidoRow | null | undefined) {
-  const value = (order?.detalles as any)?.notifications?.whatsapp_enabled;
+  const value = order?.detalles?.notifications?.whatsapp_enabled;
   return value !== false;
 }
 
@@ -385,9 +451,9 @@ export default function OrderTrackingPage() {
   const realtimeConnectedRef = useRef(false);
   const autoCancelAttemptedRef = useRef(false);
   const deliveryMapRef = useRef<HTMLDivElement | null>(null);
-  const deliveryMapInstanceRef = useRef<any>(null);
-  const deliveryMapMarkersRef = useRef<any[]>([]);
-  const deliveryMapPolylinesRef = useRef<any[]>([]);
+  const deliveryMapInstanceRef = useRef<GoogleMapInstance | null>(null);
+  const deliveryMapMarkersRef = useRef<GoogleMapLayer[]>([]);
+  const deliveryMapPolylinesRef = useRef<GoogleMapLayer[]>([]);
   const [deliveryMapError, setDeliveryMapError] = useState('');
 
   const resolvedStatus = useMemo(() => normalizeStatus(order?.estado), [order?.estado]);
@@ -753,22 +819,20 @@ export default function OrderTrackingPage() {
 
     void loadInitial();
 
-    const realtimeConfig: any = {
-      event: '*',
+    const derivedComercioId = orderId.includes('-') ? orderId.slice(0, orderId.lastIndexOf('-')).trim() : '';
+    const realtimeConfig: RealtimePostgresChangesFilter<`${REALTIME_POSTGRES_CHANGES_LISTEN_EVENT.ALL}`> = {
+      event: REALTIME_POSTGRES_CHANGES_LISTEN_EVENT.ALL,
       schema: 'public',
       table: 'pedidos',
+      ...(derivedComercioId ? { filter: `comercio_id=eq.${derivedComercioId}` } : {}),
     };
-
-    const derivedComercioId = orderId.includes('-') ? orderId.slice(0, orderId.lastIndexOf('-')).trim() : '';
-    if (derivedComercioId) {
-      realtimeConfig.filter = `comercio_id=eq.${derivedComercioId}`;
-    }
 
     const channel = supabase
       .channel(`order-tracking-${orderId}`)
-      .on('postgres_changes', realtimeConfig, async (payload: any) => {
+      .on('postgres_changes', realtimeConfig, async (payload: RealtimePostgresChangesPayload<PedidoRow>) => {
         if (!active) return;
-        const candidate = (payload?.new ?? payload?.record ?? null) as PedidoRow | null;
+        const candidate =
+          payload.eventType === REALTIME_POSTGRES_CHANGES_LISTEN_EVENT.DELETE ? null : payload.new;
         await applyIncomingOrder(candidate, 'realtime');
       })
       .subscribe((status: string) => {
@@ -826,19 +890,19 @@ export default function OrderTrackingPage() {
 
   const businessLat =
     toNumberOrNull(comercio?.latitud) ??
-    toNumberOrNull((order?.detalles as any)?.comercio_latitud) ??
-    toNumberOrNull((order?.detalles as any)?.latitud_comercio) ??
-    toNumberOrNull((order?.detalles as any)?.business_latitude);
+    toNumberOrNull(order?.detalles?.comercio_latitud) ??
+    toNumberOrNull(order?.detalles?.latitud_comercio) ??
+    toNumberOrNull(order?.detalles?.business_latitude);
   const businessLng =
     toNumberOrNull(comercio?.longitud) ??
-    toNumberOrNull((order?.detalles as any)?.comercio_longitud) ??
-    toNumberOrNull((order?.detalles as any)?.longitud_comercio) ??
-    toNumberOrNull((order?.detalles as any)?.business_longitude);
+    toNumberOrNull(order?.detalles?.comercio_longitud) ??
+    toNumberOrNull(order?.detalles?.longitud_comercio) ??
+    toNumberOrNull(order?.detalles?.business_longitude);
   const hasBusinessCoords = businessLat !== null && businessLng !== null;
 
   const businessMapSrc = hasBusinessCoords
     ? `https://www.google.com/maps?q=${encodeURIComponent(`${businessLat},${businessLng}`)}&z=15&output=embed`
-    : `https://www.google.com/maps?q=${encodeURIComponent((comercio?.direccion ?? (order?.detalles as any)?.comercio_direccion ?? comercio?.nombre ?? (order?.detalles as any)?.comercio_nombre ?? 'elmenuxfa.com').toString())}&z=15&output=embed`;
+    : `https://www.google.com/maps?q=${encodeURIComponent((comercio?.direccion ?? order?.detalles?.comercio_direccion ?? comercio?.nombre ?? order?.detalles?.comercio_nombre ?? 'elmenuxfa.com').toString())}&z=15&output=embed`;
 
   const deliveryMapSrc = hasDeliveryCoords
     ? `https://www.google.com/maps?q=${encodeURIComponent(`${deliveryLat},${deliveryLng}`)}&z=15&output=embed`
@@ -864,7 +928,7 @@ export default function OrderTrackingPage() {
   const cashPaymentAmount = toNumberOrNull(order?.detalles?.pago_con);
   const cashChangeAmount = toNumberOrNull(order?.detalles?.cambio_de) ?? 0;
   const orderNotes = (order?.detalles?.order_notes ?? '').toString().trim();
-  const deliveryDelegate = ((order?.detalles as any)?.delivery_delegate ?? null) as Record<string, unknown> | null;
+  const deliveryDelegate = order?.detalles?.delivery_delegate ?? null;
   const deliveryDelegateStatus = (deliveryDelegate?.status ?? '').toString().trim().toLowerCase();
   const deliveryDelegateAcceptedAt = (deliveryDelegate?.accepted_at ?? '').toString().trim();
   const deliveryDelegateArrivedAt = (deliveryDelegate?.arrived_at ?? '').toString().trim();
@@ -908,17 +972,17 @@ export default function OrderTrackingPage() {
   const contactEmail = (order?.cliente_email ?? order?.detalles?.cliente_email ?? '').toString().trim();
   const businessName = (
     comercio?.nombre ??
-    (order?.detalles as any)?.comercio_nombre ??
-    (order?.detalles as any)?.nombre_comercio ??
-    (order?.detalles as any)?.business_name ??
-    (order?.detalles as any)?.nombre_negocio ??
+    order?.detalles?.comercio_nombre ??
+    order?.detalles?.nombre_comercio ??
+    order?.detalles?.business_name ??
+    order?.detalles?.nombre_negocio ??
     ''
   ).toString().trim();
   const businessAddress = (
     comercio?.direccion ??
-    (order?.detalles as any)?.comercio_direccion ??
-    (order?.detalles as any)?.direccion_comercio ??
-    (order?.detalles as any)?.business_address ??
+    order?.detalles?.comercio_direccion ??
+    order?.detalles?.direccion_comercio ??
+    order?.detalles?.business_address ??
     ''
   ).toString().trim();
   const businessPhoneRaw = (
@@ -926,9 +990,9 @@ export default function OrderTrackingPage() {
     comercio?.telefono ??
     comercio?.telefonos ??
     comercio?.celular ??
-    (order?.detalles as any)?.telefono_comercio ??
-    (order?.detalles as any)?.comercio_telefono ??
-    (order?.detalles as any)?.business_phone ??
+    order?.detalles?.telefono_comercio ??
+    order?.detalles?.comercio_telefono ??
+    order?.detalles?.business_phone ??
     ''
   ).toString().trim();
 
@@ -1116,7 +1180,7 @@ export default function OrderTrackingPage() {
     deliveryDelegateStatus === 'arrived' &&
     displayStatus !== 'cancelado' &&
     displayStatus !== 'entregado';
-  const cancellationMeta = (order?.detalles as any)?.cancellation ?? null;
+  const cancellationMeta = order?.detalles?.cancellation ?? null;
 
   useEffect(() => {
     if (!pendingExpired || autoCancelAttemptedRef.current) return;
@@ -1150,9 +1214,15 @@ export default function OrderTrackingPage() {
   }
 
   if (!order) {
+    const missingOrderStyle: CSSProperties & { '--tracking-primary': string } = {
+      backgroundColor: trackingSurface,
+      border: '1px solid color-mix(in srgb, var(--tracking-primary) 18%, white)',
+      '--tracking-primary': trackingPrimary,
+    };
+
     return (
       <main className="grid min-h-screen place-items-center px-6 text-slate-900" style={{ background: trackingBackground, fontFamily: bodyFontFamily }}>
-        <section className="max-w-lg rounded-3xl p-8 text-center shadow-xl" style={{ backgroundColor: trackingSurface, border: '1px solid color-mix(in srgb, var(--tracking-primary) 18%, white)', ['--tracking-primary' as any]: trackingPrimary }}>
+        <section className="max-w-lg rounded-3xl p-8 text-center shadow-xl" style={missingOrderStyle}>
           <p className="text-lg font-bold text-slate-950" style={{ fontFamily: titleFontFamily }}>Pedido no encontrado</p>
           <p className="mt-2 text-sm text-slate-600">Verifica el enlace o intenta de nuevo en unos minutos.</p>
           <Link

@@ -46,6 +46,18 @@ type CreateOrderPayload = {
   orderNotes?: string;
 };
 
+type CreateOrderItemInput = {
+  product_id?: unknown;
+  productId?: unknown;
+  nombre?: unknown;
+  cantidad?: unknown;
+  precio?: unknown;
+};
+
+type NotificationsInput = {
+  whatsapp_enabled?: boolean;
+};
+
 const ItemSchema = z.object({
   product_id: z.string().min(1, 'items[].product_id es requerido.'),
   nombre: z.string().trim().optional(),
@@ -106,6 +118,10 @@ const OrderSchema = z.object({
 
 function normalizeText(value: unknown) {
   return (value ?? '').toString().trim();
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 function normalizeDigits(value: unknown) {
@@ -201,10 +217,10 @@ export async function POST(request: Request) {
     const rawDelivery = normalizeDelivery(body.delivery ?? incomingDetalles.delivery);
     const rawItems = Array.isArray(body.items)
       ? body.items.map((item) => ({
-          product_id: normalizeText((item as any)?.product_id ?? (item as any)?.productId),
-          nombre: normalizeText((item as any)?.nombre),
-          cantidad: Number((item as any)?.cantidad),
-          precio: Number((item as any)?.precio),
+          product_id: normalizeText((item as CreateOrderItemInput)?.product_id ?? (item as CreateOrderItemInput)?.productId),
+          nombre: normalizeText((item as CreateOrderItemInput)?.nombre),
+          cantidad: Number((item as CreateOrderItemInput)?.cantidad),
+          precio: Number((item as CreateOrderItemInput)?.precio),
         }))
       : [];
 
@@ -251,10 +267,9 @@ export async function POST(request: Request) {
     }));
     const paymentMethod = normalizePaymentMethod(body.paymentMethod ?? incomingDetalles.metodo_pago);
     const orderNotes = normalizeText(body.orderNotes ?? incomingDetalles.order_notes);
+    const notifications = asRecord(incomingDetalles.notifications) as NotificationsInput;
     const whatsappNotificationsEnabled =
-      typeof (incomingDetalles as any)?.notifications?.whatsapp_enabled === 'boolean'
-        ? Boolean((incomingDetalles as any).notifications.whatsapp_enabled)
-        : true;
+      typeof notifications.whatsapp_enabled === 'boolean' ? notifications.whatsapp_enabled : true;
     const paymentReferenceLast4 = normalizeDigits(body.paymentReferenceLast4 ?? incomingDetalles.referencia_pago).slice(-4);
     const paymentProofUrl = normalizeText(body.paymentProofUrl ?? incomingDetalles.comprobante_url);
     const cashPaymentAmount = Number(body.cashPaymentAmount ?? incomingDetalles.pago_con ?? 0);

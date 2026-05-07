@@ -1,10 +1,74 @@
-// @ts-nocheck
 import { createHash } from 'crypto';
 import { NextResponse } from 'next/server';
 
 import { getServerSupabaseClient } from '../../../_lib/supabase-server';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{24,160}$/;
+
+type JsonRecord = Record<string, unknown>;
+
+type DeliveryInvitationRow = {
+  id: string;
+  pedido_id?: string | null;
+  comercio_id?: string | null;
+  order_id?: string | null;
+  status?: string | null;
+  invited_phone?: string | null;
+  invited_note?: string | null;
+  expires_at?: string | null;
+  accepted_at?: string | null;
+  arrived_at?: string | null;
+  completed_at?: string | null;
+  revoked_at?: string | null;
+  last_seen_at?: string | null;
+  accepted_by_name?: string | null;
+  metadata?: JsonRecord | null;
+};
+
+type PedidoRow = {
+  id: string;
+  estado?: string | null;
+  detalles?: JsonRecord | null;
+  nombre_cliente?: string | null;
+  telefono_cliente?: string | null;
+  cliente_email?: string | null;
+  comercio_id?: string | null;
+  created_at?: string | null;
+};
+
+type ComercioRow = {
+  id: string;
+  nombre?: string | null;
+  slug?: string | null;
+  direccion?: string | null;
+  latitud?: number | string | null;
+  longitud?: number | string | null;
+  whatsapp?: string | null;
+  telefono?: string | null;
+  telefonos?: string | null;
+  celular?: string | null;
+  logo_url?: string | null;
+};
+
+type InvitationContext = {
+  invitation: DeliveryInvitationRow;
+  pedido: PedidoRow | null;
+  comercio: ComercioRow | null;
+};
+
+type DeliveryRequestBody = {
+  action?: unknown;
+  acceptedByName?: unknown;
+};
+
+type SupabaseErrorWithCode = {
+  code?: string;
+  message?: string;
+};
+
+function asRecord(value: unknown): JsonRecord {
+  return typeof value === 'object' && value !== null ? (value as JsonRecord) : {};
+}
 
 function normalizeStatus(value: unknown) {
   const raw = (value ?? '').toString().trim().toLowerCase();
@@ -29,21 +93,22 @@ function sha256Hex(input: string) {
   return createHash('sha256').update(input).digest('hex');
 }
 
-function parseDelivery(detalles: any) {
-  const delivery = detalles?.delivery ?? {};
-  const coordinates = delivery?.coordinates ?? {};
+function parseDelivery(detalles: unknown) {
+  const detallesRecord = asRecord(detalles);
+  const delivery = asRecord(detallesRecord.delivery);
+  const coordinates = asRecord(delivery.coordinates);
   const lat = Number(
-    coordinates?.lat ?? delivery?.lat ?? delivery?.latitude ?? delivery?.latitud,
+    coordinates.lat ?? delivery.lat ?? delivery.latitude ?? delivery.latitud,
   );
   const lng = Number(
-    coordinates?.lng ?? delivery?.lng ?? delivery?.longitude ?? delivery?.longitud,
+    coordinates.lng ?? delivery.lng ?? delivery.longitude ?? delivery.longitud,
   );
 
   return {
-    mode: (delivery?.mode ?? 'pickup').toString().trim().toLowerCase(),
-    address: (delivery?.address ?? '').toString().trim(),
-    reference: (delivery?.reference ?? '').toString().trim(),
-    instructions: (delivery?.instructions ?? '').toString().trim(),
+    mode: (delivery.mode ?? 'pickup').toString().trim().toLowerCase(),
+    address: (delivery.address ?? '').toString().trim(),
+    reference: (delivery.reference ?? '').toString().trim(),
+    instructions: (delivery.instructions ?? '').toString().trim(),
     coordinates:
       Number.isFinite(lat) && Number.isFinite(lng)
         ? { lat, lng }
@@ -64,8 +129,8 @@ function invitedStatePayload(message: string, code: string, status = 410) {
 
 async function updatePedidoDelegateSnapshot(
   supabase: ReturnType<typeof getServerSupabaseClient>,
-  pedido: any,
-  invitation: any,
+  pedido: PedidoRow,
+  invitation: DeliveryInvitationRow,
   patch: Record<string, unknown>,
 ) {
   const currentDetalles =
@@ -148,24 +213,17 @@ async function loadInvitationContext(supabase: ReturnType<typeof getServerSupaba
   }
 
   return {
-    invitation,
-    pedido,
-    comercio,
-  };
+    invitation: invitation as DeliveryInvitationRow,
+    pedido: (pedido as PedidoRow | null) ?? null,
+    comercio: (comercio as ComercioRow | null) ?? null,
+  } satisfies InvitationContext;
 }
 
-function buildPayload(context: {
-  invitation: any;
-  pedido: any;
-  comercio: any;
-}) {
+function buildPayload(context: InvitationContext) {
   const invitation = context.invitation;
   const pedido = context.pedido;
   const comercio = context.comercio;
-  const detalles =
-    pedido?.detalles && typeof pedido.detalles === 'object'
-      ? (pedido.detalles as Record<string, unknown>)
-      : {};
+  const detalles = asRecord(pedido?.detalles);
   const delivery = parseDelivery(detalles);
   const orderStatus = normalizeOrderStatus(pedido?.estado);
   const invitationStatus = normalizeStatus(invitation?.status);
@@ -316,7 +374,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
       return invitedStatePayload('El enlace de delivery no es valido.', 'INVALID_TOKEN', 400);
     }
 
-    const body = await request.json().catch(() => ({}));
+    const body = (await request.json().catch(() => ({}))) as DeliveryRequestBody;
     const action = (body?.action ?? '').toString().trim().toLowerCase();
     const acceptedByName = (body?.acceptedByName ?? '').toString().trim().slice(0, 80);
 
@@ -385,7 +443,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
         .maybeSingle();
 
       if (acceptError) {
-        const code = (acceptError as any)?.code ?? '';
+        const code = (acceptError as SupabaseErrorWithCode | null)?.code ?? '';
         if (code === '23505') {
           return NextResponse.json(
             { ok: false, code: 'ORDER_ALREADY_ASSIGNED', error: 'Otro repartidor ya acepto esta entrega.' },

@@ -14,6 +14,11 @@ type SendOrderNotificationOptions = {
   trackingUrl?: string;
 };
 
+type WasenderErrorPayload = {
+  message?: string;
+  error?: string;
+};
+
 const DEFAULT_WASENDER_ENDPOINT = 'https://wasenderapi.com/api/send-message';
 
 function normalizeStatusLabel(status: string) {
@@ -170,7 +175,7 @@ export async function sendOrderNotification(
 
   if (!response.ok) {
     const message = typeof payload === 'object' && payload !== null
-      ? ((payload as any).message ?? (payload as any).error ?? '')
+      ? (((payload as WasenderErrorPayload).message ?? (payload as WasenderErrorPayload).error ?? '').toString())
       : String(payload ?? '');
     const normalizedMessage = message.toLowerCase();
 

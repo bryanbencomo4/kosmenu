@@ -7,6 +7,32 @@ type Params = {
   params: Promise<{ orderId: string }>;
 };
 
+type PedidoRow = {
+  id: string;
+  comercio_id?: string | null;
+  estado?: string | null;
+  created_at?: string | null;
+  detalles?: {
+    order_id?: string | null;
+    notifications?: Record<string, unknown> | null;
+    delivery_delegate?: Record<string, unknown> | null;
+    cancellation?: Record<string, unknown> | null;
+    [key: string]: unknown;
+  } | null;
+};
+
+type ComercioSummary = {
+  id?: string | null;
+  nombre?: string | null;
+  direccion?: string | null;
+  latitud?: number | string | null;
+  longitud?: number | string | null;
+  whatsapp?: string | null;
+  telefono?: string | null;
+  telefonos?: string | null;
+  celular?: string | null;
+};
+
 const CONFIRMATION_TIMEOUT_MS = 15 * 60 * 1000;
 
 function normalizeStatus(value: unknown) {
@@ -40,7 +66,7 @@ async function findOrderByOrderId(supabase: ReturnType<typeof getServerSupabaseC
     throw new Error(error.message);
   }
 
-  return (rows ?? []).find((row: any) => row?.detalles?.order_id === orderId) ?? null;
+  return ((rows ?? []) as PedidoRow[]).find((row) => row?.detalles?.order_id === orderId) ?? null;
 }
 
 export async function GET(_: Request, { params }: Params) {
@@ -59,7 +85,7 @@ export async function GET(_: Request, { params }: Params) {
       return NextResponse.json({ ok: true, data: null }, { status: 200 });
     }
 
-    let comercio: any = null;
+    let comercio: ComercioSummary | null = null;
     if (order.comercio_id) {
       const comercioResult = await supabase
         .from('comercios')

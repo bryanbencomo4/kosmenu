@@ -1,4 +1,3 @@
-// @ts-nocheck
 'use client';
 
 import {
@@ -18,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 
 type InvitePayload = {
   invitation?: {
@@ -40,6 +40,7 @@ type InvitePayload = {
     currency?: string;
     items?: Array<{ nombre?: string; cantidad?: number; precio?: number }>;
     notes?: string;
+    createdAt?: string | null;
   };
   delivery?: {
     mode?: string;
@@ -255,9 +256,9 @@ function InfoCard({
   action,
 }: {
   title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  action?: React.ReactNode;
+  icon: ReactNode;
+  children: ReactNode;
+  action?: ReactNode;
 }) {
   return (
     <article className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">

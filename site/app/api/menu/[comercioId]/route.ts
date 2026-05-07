@@ -13,6 +13,10 @@ type Params = {
   params: Promise<{ comercioId: string }>;
 };
 
+type ProductoRow = {
+  disponible?: boolean | null;
+};
+
 async function isOwnerEmailVerified(
   supabase: ReturnType<typeof getServerSupabaseClient>,
   ownerId: string,
@@ -125,7 +129,7 @@ export async function GET(_: Request, { params }: Params) {
       throw new Error(marketRatesResult.error.message);
     }
 
-    const productos = (productosResult.data ?? []).filter((producto: any) => {
+    const productos = (productosResult.data ?? []).filter((producto: ProductoRow) => {
       if (typeof producto?.disponible === 'boolean') {
         return producto.disponible;
       }
