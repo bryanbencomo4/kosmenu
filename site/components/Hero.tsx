@@ -68,150 +68,150 @@ const orbitParticles = [
 
 export function Hero({ whatsappHref, demoHref }: HeroProps) {
   return (
-    <section id="inicio" className="hero-shell relative isolate overflow-hidden">
+    <section id="inicio" className="hero-shell relative isolate overflow-hidden px-0">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
         <div className="hero-grid absolute inset-0 opacity-80" />
-        <div className="hero-glow-violet absolute left-[34%] top-[6%] h-[31rem] w-[31rem] -translate-x-1/2 lg:left-[58%] lg:top-[12%] lg:h-[38rem] lg:w-[38rem]" />
+        <div className="hero-glow-violet absolute left-[34%] top-[8%] h-[19rem] w-[19rem] -translate-x-1/2 opacity-65 sm:h-[24rem] sm:w-[24rem] lg:left-[58%] lg:top-[12%] lg:h-[38rem] lg:w-[38rem] lg:opacity-100" />
         <div className="hero-glow-violet hero-glow-secondary absolute left-[68%] top-[18%] hidden h-[33rem] w-[33rem] -translate-x-1/2 lg:block" />
-        <div className="hero-glow-cyan absolute bottom-[-14%] right-[-10%] h-[26rem] w-[26rem] lg:h-[34rem] lg:w-[34rem]" />
+        <div className="hero-glow-cyan absolute bottom-[-10%] right-[-24%] h-[18rem] w-[18rem] opacity-55 sm:right-[-14%] sm:h-[22rem] sm:w-[22rem] lg:bottom-[-14%] lg:right-[-10%] lg:h-[34rem] lg:w-[34rem] lg:opacity-100" />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-7xl px-6 pb-12 pt-8 sm:pt-10 lg:pb-16 lg:pt-14">
+      <div className="relative z-10 mx-auto max-w-7xl px-5 pb-10 pt-6 sm:px-6 sm:pb-12 sm:pt-8 lg:pb-16 lg:pt-14">
         <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-10 xl:gap-12">
-        <div className="max-w-[48rem] text-center lg:text-left">
-          <div className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-4 py-2 text-[13px] font-semibold text-white shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl will-change-transform will-change-opacity">
+        <div className="mx-auto max-w-[36rem] text-center lg:mx-0 lg:max-w-[48rem] lg:text-left">
+          <div className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl will-change-transform will-change-opacity sm:px-4 sm:py-2 sm:text-[13px]">
             <span className="text-sm">🚀</span>
             Aumenta tus pedidos sin depender de apps externas
           </div>
 
-          <div className="animate-fade-up animation-delay-100 mt-4 inline-flex items-center gap-2 text-[13px] font-bold uppercase tracking-[0.22em] text-[#FACC15] will-change-transform will-change-opacity">
-            <Sparkles className="h-3.5 w-3.5 text-[#FACC15]" />
+          <div className="animate-fade-up animation-delay-100 mt-4 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#FACC15] will-change-transform will-change-opacity sm:text-[13px] sm:tracking-[0.22em]">
+            <Sparkles className="h-3 w-3 text-[#FACC15] sm:h-3.5 sm:w-3.5" />
             Foodtech para tu negocio
           </div>
 
-          <h1 className="mt-4 font-[var(--font-display)] text-5xl font-black tracking-[-0.06em] text-white sm:text-[3.6rem] lg:text-[4.25rem] xl:text-[4.45rem] lg:leading-[0.95]">
-            <span className="animate-fade-up animation-delay-200 block will-change-transform will-change-opacity lg:whitespace-nowrap">
-              Recibe pedidos
+          <h1 className="mt-4 font-[var(--font-display)] text-[2.55rem] font-black leading-[0.95] tracking-[-0.05em] text-white sm:text-[3.4rem] lg:text-[4.25rem] xl:text-[4.45rem]">
+            <span className="animate-fade-up animation-delay-200 inline will-change-transform will-change-opacity lg:block lg:whitespace-nowrap">
+              Recibe pedidos{' '}
             </span>
-            <span className="animate-fade-up animation-delay-300 block will-change-transform will-change-opacity lg:whitespace-nowrap">
-              por WhatsApp
+            <span className="animate-fade-up animation-delay-300 inline will-change-transform will-change-opacity lg:block lg:whitespace-nowrap">
+              por WhatsApp{' '}
             </span>
-            <span className="animate-fade-up animation-delay-500 block will-change-transform will-change-opacity lg:whitespace-nowrap">
-              y digitaliza tu menú
+            <span className="animate-fade-up animation-delay-500 inline will-change-transform will-change-opacity lg:block lg:whitespace-nowrap">
+              y digitaliza tu menú{' '}
             </span>
-            <span className="animate-fade-up animation-delay-700 block will-change-transform will-change-opacity">
+            <span className="animate-fade-up animation-delay-700 inline will-change-transform will-change-opacity lg:block">
               <span className="inline-block pr-[0.08em] bg-gradient-to-r from-[#bf87ff] to-[#7C3AED] bg-clip-text text-transparent">
                 en minutos.
               </span>
             </span>
           </h1>
 
-          <p className="animate-fade-up animation-delay-300 mx-auto mt-4 max-w-[38rem] text-[1.02rem] leading-8 text-slate-300/88 will-change-transform will-change-opacity lg:mx-0">
+          <p className="animate-fade-up animation-delay-300 mx-auto mt-4 max-w-[34rem] text-sm leading-6 text-slate-300/88 will-change-transform will-change-opacity sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[38rem] lg:text-[1.02rem] lg:leading-8">
             Menú digital profesional, pedidos por WhatsApp y seguimiento en tiempo real. Todo en un solo lugar.
           </p>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-3 sm:gap-5">
+          <div className="mt-5 grid gap-3 md:grid-cols-3 md:gap-4">
             {heroHighlights.map((item, index) => {
               const Icon = item.icon;
 
               return (
                 <div
                   key={item.label}
-                  className={`animate-fade-up flex items-center justify-center gap-3 text-left text-[0.95rem] font-medium text-slate-100 will-change-transform will-change-opacity lg:justify-start ${
+                  className={`animate-fade-up flex items-center gap-3 rounded-[1.15rem] border border-white/8 bg-[#0d1323]/72 px-3.5 py-3 text-left text-sm font-medium text-slate-100 will-change-transform will-change-opacity md:justify-start md:text-[0.95rem] ${
                     index === 0 ? 'animation-delay-300' : 'animation-delay-500'
                   }`}
                 >
-                  <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-violet-400/22 bg-violet-500/10 text-violet-300 shadow-[0_12px_24px_-20px_rgba(124,58,237,0.95)]">
-                    <Icon className="h-4.5 w-4.5" />
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-400/22 bg-violet-500/10 text-violet-300 shadow-[0_12px_24px_-20px_rgba(124,58,237,0.95)] md:h-10 md:w-10">
+                    <Icon className="h-4 w-4 md:h-4.5 md:w-4.5" />
                   </span>
                   <span className="leading-5">
                     <span className="block">{item.label}</span>
-                    <span className="block text-slate-300">{item.detail}</span>
+                    <span className="block text-slate-300/90">{item.detail}</span>
                   </span>
                 </div>
               );
             })}
           </div>
 
-          <div className="mt-6 flex flex-col justify-center gap-4 sm:flex-row lg:justify-start lg:items-start">
+          <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row lg:items-start lg:justify-start">
             <div className="animate-fade-up animation-delay-500 flex flex-col items-center will-change-transform will-change-opacity lg:items-start">
               <Link
                 href={whatsappHref}
-                className="group relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-full bg-[#FACC15] px-9 py-4 text-[1.02rem] font-bold text-[#0B0F1A] shadow-[0_34px_90px_-18px_rgba(250,204,21,1)] transition-all duration-300 hover:scale-[1.04] hover:bg-[#fde047] hover:shadow-[0_40px_100px_-16px_rgba(250,204,21,1)] active:scale-95"
+                className="group relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-full bg-[#FACC15] px-6 py-4 text-base font-bold text-[#0B0F1A] shadow-[0_34px_90px_-18px_rgba(250,204,21,1)] transition-all duration-300 hover:scale-[1.04] hover:bg-[#fde047] hover:shadow-[0_40px_100px_-16px_rgba(250,204,21,1)] active:scale-95 sm:w-auto sm:px-9"
               >
                 <span className="animate-shine absolute inset-y-0 -left-1/3 w-1/3 -skew-x-12 bg-white/30 blur-md" />
                 Empieza gratis ahora
                 <MessageCircle className="h-4 w-4" />
               </Link>
-              <p className="mt-3 text-xs font-medium text-slate-300/85">
+              <p className="mt-3 text-center text-xs font-medium text-slate-300/85 lg:text-left">
                 Sin tarjeta • Configuración en 2 minutos • Cancela cuando quieras
               </p>
             </div>
 
             <Link
               href={demoHref}
-              className="animate-fade-up animation-delay-500 inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-[#11182a]/55 px-8 py-4 text-[1.02rem] font-medium text-white/84 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-300/20 hover:bg-white/6 hover:text-white will-change-transform will-change-opacity"
+              className="animate-fade-up animation-delay-500 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/12 bg-[#11182a]/55 px-8 py-4 text-base font-medium text-white/84 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-300/20 hover:bg-white/6 hover:text-white will-change-transform will-change-opacity sm:w-auto"
             >
               Ver demo
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>
 
-          <div className="animate-fade-up animation-delay-500 mt-8 flex flex-col gap-5 will-change-transform will-change-opacity">
-            <div className="flex flex-col gap-4 rounded-[1.65rem] border border-white/8 bg-[#0d1323]/74 px-5 py-4 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-6">
-              <div className="flex items-center gap-4">
-                <div className="flex -space-x-3">
+          <div className="animate-fade-up animation-delay-500 mt-7 flex flex-col gap-5 will-change-transform will-change-opacity">
+            <div className="flex flex-col items-center gap-4 rounded-[1.45rem] border border-white/8 bg-[#0d1323]/74 px-4 py-4 text-center backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:text-left">
+              <div className="flex flex-col items-center gap-4 sm:flex-row">
+                <div className="flex -space-x-2.5 sm:-space-x-3">
                   {avatarTokens.map((item, index) => (
                     <span
                       key={item}
-                      className="inline-flex h-11 w-11 items-center justify-center rounded-full border-2 border-[#0d1323] bg-[linear-gradient(135deg,#f3d062,#7C3AED)] text-sm font-bold text-white"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border-2 border-[#0d1323] bg-[linear-gradient(135deg,#f3d062,#7C3AED)] text-[11px] font-bold text-white sm:h-11 sm:w-11 sm:text-sm"
                       style={{ zIndex: 10 - index }}
                     >
                       {item}
                     </span>
                   ))}
-                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-full border-2 border-[#0d1323] bg-[#40307a] text-sm font-bold text-white">
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border-2 border-[#0d1323] bg-[#40307a] text-[11px] font-bold text-white sm:h-11 sm:w-11 sm:text-sm">
                     +100
                   </span>
                 </div>
 
                 <div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[1.5rem] leading-none text-[#FACC15]">★★★★★</span>
-                    <span className="text-[2rem] font-black tracking-[-0.04em] text-white">4.9/5</span>
+                  <div className="flex items-center justify-center gap-2 sm:justify-start sm:gap-3">
+                    <span className="text-[1.05rem] leading-none text-[#FACC15] sm:text-[1.5rem]">★★★★★</span>
+                    <span className="text-[1.35rem] font-black tracking-[-0.04em] text-white sm:text-[2rem]">4.9/5</span>
                   </div>
-                  <p className="mt-1 text-sm text-slate-300">Más de 100 negocios ya venden con esto</p>
+                  <p className="mt-1 text-xs text-slate-300 sm:text-sm">Más de 100 negocios ya venden con esto</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full max-w-[42rem] justify-center will-change-transform will-change-opacity lg:-mt-5 lg:justify-end">
+        <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full max-w-[24rem] justify-center pt-1 will-change-transform will-change-opacity sm:max-w-[28rem] lg:-mt-5 lg:max-w-[42rem] lg:justify-end lg:pt-0">
           <div
             aria-hidden="true"
-            className="hero-orbit-system absolute left-1/2 top-1/2 h-[42rem] w-[42rem] -translate-x-1/2 -translate-y-1/2 lg:left-[56%] xl:left-[58%]"
+            className="hero-orbit-system absolute left-1/2 top-1/2 h-[20rem] w-[20rem] -translate-x-1/2 -translate-y-1/2 opacity-55 sm:h-[26rem] sm:w-[26rem] sm:opacity-70 lg:left-[56%] lg:h-[42rem] lg:w-[42rem] lg:opacity-100 xl:left-[58%]"
           >
-            <div className="hero-glow-violet animate-glow-pulse absolute left-1/2 top-1/2 h-[17rem] w-[17rem] -translate-x-1/2 -translate-y-1/2 lg:h-[20rem] lg:w-[20rem]" />
-            <div className="hero-glow-violet hero-glow-secondary animate-glow-pulse animation-delay-200 absolute left-1/2 top-1/2 h-[23rem] w-[23rem] -translate-x-1/2 -translate-y-1/2 lg:h-[27rem] lg:w-[27rem]" />
-            <div className="hero-glow-cyan animate-glow-pulse animation-delay-300 absolute left-[70%] top-[66%] h-[16rem] w-[16rem] -translate-x-1/2 -translate-y-1/2 lg:h-[19rem] lg:w-[19rem]" />
+            <div className="hero-glow-violet animate-glow-pulse absolute left-1/2 top-1/2 h-[11rem] w-[11rem] -translate-x-1/2 -translate-y-1/2 lg:h-[20rem] lg:w-[20rem]" />
+            <div className="hero-glow-violet hero-glow-secondary animate-glow-pulse animation-delay-200 absolute left-1/2 top-1/2 hidden h-[23rem] w-[23rem] -translate-x-1/2 -translate-y-1/2 sm:block lg:h-[27rem] lg:w-[27rem]" />
+            <div className="hero-glow-cyan animate-glow-pulse animation-delay-300 absolute left-[70%] top-[66%] h-[10rem] w-[10rem] -translate-x-1/2 -translate-y-1/2 sm:h-[13rem] sm:w-[13rem] lg:h-[19rem] lg:w-[19rem]" />
 
-            <div className="hero-orbit hero-orbit-1 absolute left-1/2 top-1/2 h-[20rem] w-[20rem] -translate-x-1/2 -translate-y-1/2" />
-            <div className="hero-orbit hero-orbit-2 absolute left-1/2 top-1/2 h-[28rem] w-[28rem] -translate-x-1/2 -translate-y-1/2" />
-            <div className="hero-orbit hero-orbit-3 absolute left-1/2 top-1/2 h-[36rem] w-[36rem] -translate-x-1/2 -translate-y-1/2" />
+            <div className="hero-orbit hero-orbit-1 absolute left-1/2 top-1/2 h-[14rem] w-[14rem] -translate-x-1/2 -translate-y-1/2 sm:h-[18rem] sm:w-[18rem] lg:h-[20rem] lg:w-[20rem]" />
+            <div className="hero-orbit hero-orbit-2 absolute left-1/2 top-1/2 h-[19rem] w-[19rem] -translate-x-1/2 -translate-y-1/2 sm:h-[24rem] sm:w-[24rem] lg:h-[28rem] lg:w-[28rem]" />
+            <div className="hero-orbit hero-orbit-3 absolute left-1/2 top-1/2 hidden h-[36rem] w-[36rem] -translate-x-1/2 -translate-y-1/2 lg:block" />
             <div className="hero-orbit hero-orbit-4 absolute left-1/2 top-1/2 hidden h-[44rem] w-[44rem] -translate-x-1/2 -translate-y-1/2 lg:block" />
 
             {orbitNodes.map((className) => (
-              <span key={className} className={`hero-node absolute ${className}`} />
+              <span key={className} className={`hero-node absolute hidden sm:block ${className}`} />
             ))}
 
             {orbitParticles.map((className) => (
-              <span key={className} className={`hero-particle absolute ${className}`} />
+              <span key={className} className={`hero-particle absolute hidden sm:block ${className}`} />
             ))}
           </div>
 
-          <div className="relative z-20 w-full max-w-[38rem] lg:max-w-[39rem]">
-            <div className="mb-5 flex justify-center lg:hidden">
+          <div className="relative z-20 w-full max-w-[19rem] sm:max-w-[24rem] lg:max-w-[39rem]">
+            <div className="hidden justify-center lg:hidden">
               <div className="animate-fade-up animation-delay-500 rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(28,33,67,0.84),rgba(22,27,51,0.68))] px-5 py-4 text-sm font-semibold text-slate-100 shadow-[0_20px_48px_-26px_rgba(91,33,182,0.62)] backdrop-blur-2xl transition-transform duration-300 hover:-translate-y-1 will-change-transform will-change-opacity">
                 <p className="text-sm text-slate-200">Hoy</p>
                 <p className="mt-2 text-3xl font-black tracking-[-0.05em] text-white">+38%</p>
@@ -219,14 +219,14 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
               </div>
             </div>
 
-            <div className="relative mx-auto w-full max-w-[34rem] lg:mr-0 lg:translate-x-0 xl:translate-x-2">
+            <div className="relative mx-auto w-full lg:mr-0 lg:translate-x-0 xl:translate-x-2">
               <Image
                 src="/hero-app-header.png"
                 alt="Vista de la app de elmenuxfa en un iPhone mostrando el menú y el flujo de pedido"
                 width={1024}
                 height={1536}
                 priority
-                className="animate-float-slow relative z-10 ml-auto h-auto w-full max-w-[34rem] select-none drop-shadow-[0_48px_120px_rgba(0,0,0,0.82)] will-change-transform"
+                className="animate-float-slow relative z-10 mx-auto h-auto w-full max-w-[19rem] select-none drop-shadow-[0_36px_90px_rgba(0,0,0,0.68)] will-change-transform sm:max-w-[24rem] lg:ml-auto lg:max-w-[34rem] lg:drop-shadow-[0_48px_120px_rgba(0,0,0,0.82)]"
               />
 
               <div className="animate-fade-up animation-delay-500 absolute right-4 top-[18%] z-20 hidden w-[11.5rem] rounded-[1.9rem] border border-white/10 bg-[linear-gradient(180deg,rgba(34,39,78,0.84),rgba(20,25,49,0.72))] px-4 py-4 text-white shadow-[0_24px_64px_-28px_rgba(124,58,237,0.72)] backdrop-blur-2xl transition-transform duration-300 hover:-translate-y-1 lg:block will-change-transform will-change-opacity xl:right-6">

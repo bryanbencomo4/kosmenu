@@ -68,22 +68,23 @@ const phoneScreens = [
 export function DemoSection() {
   return (
     <section id="demo" className="border-y border-white/8 bg-[#0b101b]">
-      <div className="mx-auto max-w-7xl px-6 py-16 lg:py-20">
+      <div className="mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:py-20">
         <div className="grid gap-6 lg:grid-cols-[minmax(0,0.44fr)_minmax(0,1fr)] lg:items-start">
-          <div className="max-w-sm">
+          <div className="max-w-md">
             <span className="inline-flex rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-violet-200">
               Demo visual
             </span>
-            <h2 className="mt-5 font-[var(--font-display)] text-3xl font-black tracking-[-0.03em] text-white sm:text-[2.35rem]">
+            <h2 className="mt-4 font-[var(--font-display)] text-[2rem] font-black leading-[1.02] tracking-[-0.03em] text-white sm:mt-5 sm:text-[2.35rem]">
               Así se ve la experiencia de tus clientes
             </h2>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="hide-scrollbar -mx-5 overflow-x-auto px-5 pb-2 sm:mx-0 sm:px-0 lg:overflow-visible">
+            <div className="flex snap-x snap-mandatory gap-4 lg:grid lg:grid-cols-2 xl:grid-cols-4">
             {phoneScreens.map((screen, index) => (
               <article
                 key={screen.title}
-                className="relative rounded-[1.4rem] border border-white/10 bg-[#0f1522] p-3 shadow-[0_28px_80px_-45px_rgba(0,0,0,1)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-2 hover:border-violet-400/30"
+                className="relative min-w-[17.25rem] snap-center rounded-[1.4rem] border border-white/10 bg-[#0f1522] p-3 shadow-[0_28px_80px_-45px_rgba(0,0,0,1)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-2 hover:border-violet-400/30 sm:min-w-[18.5rem] lg:min-w-0"
               >
                 {index > 0 ? <span className="absolute -left-3 top-1/2 hidden -translate-y-1/2 text-xl text-white/45 xl:block">›</span> : null}
                 <div className="mx-auto h-2 w-16 rounded-full bg-white/10" />
@@ -109,6 +110,7 @@ export function DemoSection() {
                 <p className="mt-3 text-center text-sm font-semibold text-white">{index + 1}. {screen.title}</p>
               </article>
             ))}
+            </div>
           </div>
         </div>
       </div>
