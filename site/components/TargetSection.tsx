@@ -18,7 +18,7 @@ const benefits = [
 
 export function TargetSection() {
   return (
-    <section className="border-y border-white/8 bg-[#0a0f1a]">
+    <section className="perf-section border-y border-white/8 bg-[#0a0f1a]">
       <div className="mx-auto grid max-w-7xl gap-8 px-5 py-14 sm:px-6 lg:grid-cols-[minmax(0,0.42fr)_minmax(0,1fr)] lg:items-center lg:py-18">
         <div>
           <span className="inline-flex rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-violet-200">

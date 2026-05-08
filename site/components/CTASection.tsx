@@ -8,7 +8,7 @@ type CTASectionProps = {
 
 export function CTASection({ whatsappHref, demoHref }: CTASectionProps) {
   return (
-    <section id="cta" className="mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:py-18">
+    <section id="cta" className="perf-section mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:py-18">
       <div className="overflow-hidden rounded-[1.8rem] border border-violet-400/20 bg-[linear-gradient(90deg,#7c3aed_0%,#5120a9_38%,#161022_100%)] shadow-[0_35px_120px_-45px_rgba(124,58,237,0.95)] sm:rounded-[2rem]">
         <div className="grid gap-6 px-5 py-6 sm:px-7 sm:py-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:px-10 lg:py-10">
           <div className="flex flex-col items-center gap-4 text-center lg:flex-row lg:items-start lg:text-left">

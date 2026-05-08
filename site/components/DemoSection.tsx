@@ -67,7 +67,7 @@ const phoneScreens = [
 
 export function DemoSection() {
   return (
-    <section id="demo" className="border-y border-white/8 bg-[#0b101b]">
+    <section id="demo" className="perf-section border-y border-white/8 bg-[#0b101b]">
       <div className="mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:py-20">
         <div className="grid gap-6 lg:grid-cols-[minmax(0,0.44fr)_minmax(0,1fr)] lg:items-start">
           <div className="max-w-md">
@@ -84,7 +84,7 @@ export function DemoSection() {
             {phoneScreens.map((screen, index) => (
               <article
                 key={screen.title}
-                className="relative min-w-[17.25rem] snap-center rounded-[1.4rem] border border-white/10 bg-[#0f1522] p-3 shadow-[0_28px_80px_-45px_rgba(0,0,0,1)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-2 hover:border-violet-400/30 sm:min-w-[18.5rem] lg:min-w-0"
+                className="relative min-w-[17.25rem] snap-center rounded-[1.4rem] border border-white/10 bg-[#0f1522] p-3 shadow-[0_28px_80px_-45px_rgba(0,0,0,1)] transition-all duration-300 hover:-translate-y-2 hover:border-violet-400/30 sm:min-w-[18.5rem] lg:min-w-0"
               >
                 {index > 0 ? <span className="absolute -left-3 top-1/2 hidden -translate-y-1/2 text-xl text-white/45 xl:block">›</span> : null}
                 <div className="mx-auto h-2 w-16 rounded-full bg-white/10" />

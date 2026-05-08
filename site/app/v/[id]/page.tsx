@@ -1698,31 +1698,107 @@ export default function PublicMenuPage() {
   useEffect(() => {
     if (filteredCategorias.length === 0) return;
 
-    const getActiveCategoryByViewport = () => {
-      let selectedId = filteredCategorias[0].id;
-      let minDistance = Number.POSITIVE_INFINITY;
-      const stickyOffset = getCategoryScrollOffset(stickySearchCardRef.current);
+    let categoryAnchors: Array<{ id: string; top: number }> = [];
+    let scrollFrameId = 0;
+    let refreshFrameId = 0;
 
-      for (const categoria of filteredCategorias) {
-        const section = document.getElementById(`categoria-${categoria.id}`);
-        if (!section) continue;
-        const distance = Math.abs(section.getBoundingClientRect().top - stickyOffset);
-        if (distance < minDistance) {
-          minDistance = distance;
-          selectedId = categoria.id;
-        }
+    const updateActiveCategoryFromScroll = () => {
+      if (categoryAnchors.length === 0) {
+        return;
       }
 
-      setActiveCategoryId(selectedId);
+      const currentScrollTop = window.scrollY + 8;
+      let selectedId = categoryAnchors[0].id;
+
+      for (const anchor of categoryAnchors) {
+        if (currentScrollTop < anchor.top) {
+          break;
+        }
+        selectedId = anchor.id;
+      }
+
+      setActiveCategoryId((currentId) => (currentId === selectedId ? currentId : selectedId));
     };
 
-    getActiveCategoryByViewport();
-    window.addEventListener('scroll', getActiveCategoryByViewport, { passive: true });
-    window.addEventListener('resize', getActiveCategoryByViewport);
+    const rebuildCategoryAnchors = () => {
+      const stickyOffset = getCategoryScrollOffset(stickySearchCardRef.current);
+
+      categoryAnchors = filteredCategorias
+        .map((categoria) => {
+          const section = categorySectionRefs.current[categoria.id];
+          if (!section) {
+            return null;
+          }
+
+          return {
+            id: categoria.id,
+            top: Math.max(0, window.scrollY + section.getBoundingClientRect().top - stickyOffset),
+          };
+        })
+        .filter((anchor): anchor is { id: string; top: number } => anchor !== null)
+        .sort((left, right) => left.top - right.top);
+    };
+
+    const scheduleActiveCategoryUpdate = () => {
+      if (scrollFrameId !== 0) {
+        return;
+      }
+
+      scrollFrameId = window.requestAnimationFrame(() => {
+        scrollFrameId = 0;
+        updateActiveCategoryFromScroll();
+      });
+    };
+
+    const scheduleAnchorRefresh = () => {
+      if (refreshFrameId !== 0) {
+        return;
+      }
+
+      refreshFrameId = window.requestAnimationFrame(() => {
+        refreshFrameId = 0;
+        rebuildCategoryAnchors();
+        updateActiveCategoryFromScroll();
+      });
+    };
+
+    scheduleAnchorRefresh();
+
+    const resizeObserver =
+      typeof window.ResizeObserver === 'undefined'
+        ? null
+        : new window.ResizeObserver(() => {
+            scheduleAnchorRefresh();
+          });
+
+    if (resizeObserver) {
+      if (stickySearchCardRef.current) {
+        resizeObserver.observe(stickySearchCardRef.current);
+      }
+
+      for (const categoria of filteredCategorias) {
+        const section = categorySectionRefs.current[categoria.id];
+        if (section) {
+          resizeObserver.observe(section);
+        }
+      }
+    }
+
+    window.addEventListener('scroll', scheduleActiveCategoryUpdate, { passive: true });
+    window.addEventListener('resize', scheduleAnchorRefresh);
 
     return () => {
-      window.removeEventListener('scroll', getActiveCategoryByViewport);
-      window.removeEventListener('resize', getActiveCategoryByViewport);
+      if (scrollFrameId !== 0) {
+        window.cancelAnimationFrame(scrollFrameId);
+      }
+
+      if (refreshFrameId !== 0) {
+        window.cancelAnimationFrame(refreshFrameId);
+      }
+
+      resizeObserver?.disconnect();
+      window.removeEventListener('scroll', scheduleActiveCategoryUpdate);
+      window.removeEventListener('resize', scheduleAnchorRefresh);
     };
   }, [filteredCategorias]);
 

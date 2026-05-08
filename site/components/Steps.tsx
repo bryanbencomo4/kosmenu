@@ -8,7 +8,7 @@ const steps = [
 
 export function Steps() {
   return (
-    <section id="como-funciona" className="border-y border-white/8 bg-[#0a101c]">
+    <section id="como-funciona" className="perf-section border-y border-white/8 bg-[#0a101c]">
       <div className="mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:py-20">
         <div className="mx-auto max-w-4xl text-center">
           <span className="inline-flex rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-violet-200">

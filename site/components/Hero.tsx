@@ -187,7 +187,7 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
           </div>
         </div>
 
-        <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full max-w-[24rem] justify-center pt-1 will-change-transform will-change-opacity sm:max-w-[28rem] lg:-mt-5 lg:max-w-[42rem] lg:justify-end lg:pt-0">
+        <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full max-w-[24rem] justify-center pt-1 sm:max-w-[28rem] lg:-mt-5 lg:max-w-[42rem] lg:justify-end lg:pt-0">
           <div
             aria-hidden="true"
             className="hero-orbit-system absolute left-1/2 top-1/2 h-[20rem] w-[20rem] -translate-x-1/2 -translate-y-1/2 opacity-55 sm:h-[26rem] sm:w-[26rem] sm:opacity-70 lg:left-[56%] lg:h-[42rem] lg:w-[42rem] lg:opacity-100 xl:left-[58%]"
@@ -226,7 +226,7 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
                 width={1024}
                 height={1536}
                 priority
-                className="animate-float-slow relative z-10 mx-auto h-auto w-full max-w-[19rem] select-none drop-shadow-[0_36px_90px_rgba(0,0,0,0.68)] will-change-transform sm:max-w-[24rem] lg:ml-auto lg:max-w-[34rem] lg:drop-shadow-[0_48px_120px_rgba(0,0,0,0.82)]"
+                className="animate-float-slow relative z-10 mx-auto h-auto w-full max-w-[19rem] select-none drop-shadow-[0_36px_90px_rgba(0,0,0,0.68)] sm:max-w-[24rem] lg:ml-auto lg:max-w-[34rem] lg:drop-shadow-[0_48px_120px_rgba(0,0,0,0.82)]"
               />
 
               <div className="animate-fade-up animation-delay-500 absolute right-4 top-[18%] z-20 hidden w-[11.5rem] rounded-[1.9rem] border border-white/10 bg-[linear-gradient(180deg,rgba(34,39,78,0.84),rgba(20,25,49,0.72))] px-4 py-4 text-white shadow-[0_24px_64px_-28px_rgba(124,58,237,0.72)] backdrop-blur-2xl transition-transform duration-300 hover:-translate-y-1 lg:block will-change-transform will-change-opacity xl:right-6">

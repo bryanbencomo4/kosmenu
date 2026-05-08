@@ -19,7 +19,7 @@ const footerGroups = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/10 bg-[#090d16]">
+    <footer className="perf-section border-t border-white/10 bg-[#090d16]">
       <div className="mx-auto grid max-w-7xl gap-10 px-6 py-10 lg:grid-cols-[1.25fr_0.8fr_0.8fr_0.8fr_0.8fr]">
         <div>
           <div className="flex items-center gap-3">

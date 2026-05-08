@@ -53,6 +53,11 @@ body {
   min-height: 100vh;
 }
 
+.perf-section {
+  content-visibility: auto;
+  contain-intrinsic-size: 900px;
+}
+
 .hide-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -89,6 +94,11 @@ body {
   position: relative;
   z-index: 20;
   background: #0b0f1a;
+}
+
+.home-performance-tuned [class*='backdrop-blur'] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 @media (min-width: 1024px) {
@@ -157,6 +167,11 @@ body {
 
 .hero-glow-cyan {
   background: radial-gradient(circle, rgba(14, 165, 233, 0.17) 0%, rgba(20, 184, 166, 0.12) 38%, transparent 74%);
+}
+
+.home-performance-tuned .hero-glow-violet,
+.home-performance-tuned .hero-glow-cyan {
+  filter: blur(34px);
 }
 
 .hero-orbit-system {
@@ -293,6 +308,10 @@ body {
   will-change: transform, opacity;
 }
 
+.home-performance-tuned .animate-fade-up {
+  will-change: auto;
+}
+
 .animate-float-slow {
   animation: floatSlow 4.4s ease-in-out infinite;
   backface-visibility: hidden;
@@ -306,6 +325,37 @@ body {
 .animate-shine {
   animation: shine 3.6s ease-in-out infinite;
   pointer-events: none;
+}
+
+.home-performance-tuned .animate-glow-pulse,
+.home-performance-tuned .animate-shine {
+  animation: none !important;
+}
+
+.home-performance-tuned .hero-orbit-system,
+.home-performance-tuned .animate-float-slow {
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
+@media (max-width: 1023px) {
+  .home-performance-tuned .hero-orbit-system,
+  .home-performance-tuned .animate-float-slow {
+    animation: none !important;
+    will-change: auto;
+  }
+}
+
+@media (min-width: 1024px) {
+  .home-performance-tuned .hero-orbit-system {
+    animation: orbitSpin 42s linear infinite;
+    contain: paint;
+  }
+
+  .home-performance-tuned .animate-float-slow {
+    animation: floatSlow 6.2s ease-in-out infinite;
+    contain: paint;
+  }
 }
 
 .animation-delay-100 {
