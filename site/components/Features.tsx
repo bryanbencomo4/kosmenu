@@ -76,7 +76,7 @@ const stats = [
 
 export function Features() {
   return (
-    <section id="beneficios" className="relative overflow-hidden border-t border-white/8 bg-[#050816]">
+    <section id="beneficios" className="relative overflow-hidden border-t border-white/8 bg-[#050816] lg:min-h-full">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(255,255,255,0.65)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.65)_1px,transparent_1px)] [background-size:64px_64px]" />
         <div className="absolute left-[-18%] top-[6%] h-[24rem] w-[24rem] rounded-full bg-[radial-gradient(circle,rgba(124,58,237,0.28)_0%,rgba(124,58,237,0.08)_42%,transparent_72%)] blur-3xl sm:h-[30rem] sm:w-[30rem]" />
@@ -84,7 +84,7 @@ export function Features() {
         <div className="absolute inset-x-0 bottom-0 h-32 bg-[linear-gradient(180deg,transparent,rgba(5,8,22,0.72))]" />
       </div>
 
-      <div className="relative z-10 mx-auto grid max-w-7xl gap-6 px-5 py-16 sm:px-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-stretch lg:gap-7 lg:py-24">
+      <div className="relative z-10 mx-auto grid max-w-7xl gap-6 px-5 py-16 sm:px-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-stretch lg:gap-7 lg:py-16 xl:py-20">
         <div className="animate-fade-up relative overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(15,20,35,0.94),rgba(10,14,26,0.88))] p-6 shadow-[0_40px_120px_-54px_rgba(0,0,0,1)] backdrop-blur-2xl sm:p-8 lg:p-10">
           <div aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(196,181,253,0.7),transparent)]" />
           <div aria-hidden="true" className="absolute -left-14 top-16 h-40 w-40 rounded-full bg-violet-500/14 blur-3xl" />

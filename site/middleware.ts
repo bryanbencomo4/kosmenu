@@ -5,6 +5,7 @@ const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.we
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml']);
 const CANONICAL_HOST = 'www.elmenuxfa.com';
 const CANONICAL_REDIRECT_HOSTS = new Set(['elmenuxfa.com', 'kosmenu.vercel.app']);
+const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 
 function applySecurityHeaders(response: NextResponse) {
   response.headers.set(
@@ -38,6 +39,10 @@ function requestProto(request: NextRequest) {
     .toLowerCase();
 }
 
+function requestHostname(host: string) {
+  return host.split(':')[0].trim().toLowerCase();
+}
+
 function shouldPreserveHostForWellKnown(pathname: string) {
   return pathname === '/.well-known/apple-app-site-association' ||
       pathname === '/.well-known/assetlinks.json';
@@ -60,11 +65,18 @@ function isExcludedPath(pathname: string) {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const host = requestHost(request);
+  const hostname = requestHostname(host);
   const proto = requestProto(request);
+  const isLocalDevelopmentHost = LOCAL_DEVELOPMENT_HOSTS.has(hostname);
 
   const needsCanonicalHost =
-    CANONICAL_REDIRECT_HOSTS.has(host) && !shouldPreserveHostForWellKnown(pathname);
-  const needsHttps = proto === 'http' && !shouldPreserveHostForWellKnown(pathname);
+    !isLocalDevelopmentHost &&
+    CANONICAL_REDIRECT_HOSTS.has(hostname) &&
+    !shouldPreserveHostForWellKnown(pathname);
+  const needsHttps =
+    !isLocalDevelopmentHost &&
+    proto === 'http' &&
+    !shouldPreserveHostForWellKnown(pathname);
 
   if (needsCanonicalHost || needsHttps) {
     const redirectUrl = request.nextUrl.clone();
