@@ -1,43 +1,246 @@
+import {
+  LayoutGrid,
+  Link2,
+  LockKeyhole,
+  QrCode,
+  Shield,
+  ShoppingBag,
+  Sparkles,
+  Store,
+  TrendingUp,
+  Truck,
+  Zap,
+} from 'lucide-react';
+
 const steps = [
-  'Configura tu comercio',
-  'Carga productos',
-  'Comparte link o QR',
-  'Cliente arma pedido',
-  'Gestionas entrega',
+  {
+    number: 1,
+    title: 'Configura\ntu comercio',
+    description: 'Personaliza tu identidad\ny deja listo tu canal de venta.',
+    badgeClass: 'border-violet-300/22 bg-violet-500/14 text-violet-100 shadow-[0_0_28px_rgba(192,132,252,0.35)]',
+    iconShellClass: 'border-violet-400/30 bg-violet-500/10 text-violet-200 shadow-[0_0_40px_rgba(168,85,247,0.34)]',
+    dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.95)]',
+    glowClass: 'shadow-[0_0_0_1px_rgba(192,132,252,0.2),0_0_42px_rgba(168,85,247,0.24)]',
+    featured: false,
+    icon: <Store className="h-10 w-10" />,
+  },
+  {
+    number: 2,
+    title: 'Carga\nproductos',
+    description: 'Organiza categorías,\nprecios y productos\ndestacados.',
+    badgeClass: 'border-violet-300/20 bg-violet-500/10 text-violet-100 shadow-[0_0_20px_rgba(167,139,250,0.22)]',
+    iconShellClass: 'border-violet-400/28 bg-violet-500/10 text-violet-200 shadow-[0_0_34px_rgba(129,140,248,0.28)]',
+    dotClass: 'bg-violet-200 shadow-[0_0_12px_rgba(196,181,253,0.95)]',
+    glowClass: 'shadow-[0_0_0_1px_rgba(167,139,250,0.15),0_0_34px_rgba(129,140,248,0.16)]',
+    featured: false,
+    icon: <LayoutGrid className="h-10 w-10" />,
+  },
+  {
+    number: 3,
+    title: 'Comparte\nlink o QR',
+    description: 'Llévalo a WhatsApp, redes,\nmesas y piezas impresas.',
+    badgeClass: 'border-sky-300/24 bg-sky-500/12 text-sky-50 shadow-[0_0_26px_rgba(56,189,248,0.34)]',
+    iconShellClass: 'border-sky-400/34 bg-sky-500/10 text-sky-100 shadow-[0_0_44px_rgba(56,189,248,0.38)]',
+    dotClass: 'bg-sky-300 shadow-[0_0_14px_rgba(125,211,252,0.95)]',
+    glowClass: 'border-sky-300/32 shadow-[0_0_0_1px_rgba(125,211,252,0.3),0_0_54px_rgba(59,130,246,0.3)]',
+    featured: true,
+    icon: (
+      <div className="relative h-11 w-11">
+        <Link2 className="absolute left-0 top-0 h-9 w-9" />
+        <QrCode className="absolute bottom-0 right-0 h-5 w-5" />
+      </div>
+    ),
+  },
+  {
+    number: 4,
+    title: 'Cliente arma\npedido',
+    description: 'El cliente elige, confirma\ny entiende mejor su pedido.',
+    badgeClass: 'border-cyan-300/24 bg-cyan-500/12 text-cyan-50 shadow-[0_0_24px_rgba(34,211,238,0.3)]',
+    iconShellClass: 'border-cyan-400/30 bg-cyan-500/10 text-cyan-100 shadow-[0_0_38px_rgba(34,211,238,0.32)]',
+    dotClass: 'bg-cyan-200 shadow-[0_0_14px_rgba(165,243,252,0.95)]',
+    glowClass: 'shadow-[0_0_0_1px_rgba(34,211,238,0.16),0_0_40px_rgba(34,211,238,0.2)]',
+    featured: false,
+    icon: <ShoppingBag className="h-10 w-10" />,
+  },
+  {
+    number: 5,
+    title: 'Gestionas\nentrega',
+    description: 'Coordina pickup o delivery\ncon menos fricción.',
+    badgeClass: 'border-violet-300/22 bg-violet-500/12 text-violet-100 shadow-[0_0_22px_rgba(192,132,252,0.26)]',
+    iconShellClass: 'border-violet-400/28 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.3)]',
+    dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.9)]',
+    glowClass: 'shadow-[0_0_0_1px_rgba(192,132,252,0.16),0_0_38px_rgba(168,85,247,0.22)]',
+    featured: false,
+    icon: <Truck className="h-10 w-10" />,
+  },
+] as const;
+
+const trustItems = [
+  {
+    label: 'Listo en minutos',
+    icon: Zap,
+    iconClass: 'border-yellow-400/18 bg-yellow-500/12 text-[#FACC15]',
+  },
+  {
+    label: 'Sin tarjeta de crédito',
+    icon: Shield,
+    iconClass: 'border-violet-400/18 bg-violet-500/10 text-violet-200',
+  },
+  {
+    label: 'Seguro y confiable',
+    icon: LockKeyhole,
+    iconClass: 'border-cyan-400/18 bg-cyan-500/10 text-cyan-200',
+  },
+  {
+    label: 'Escala tu negocio',
+    icon: TrendingUp,
+    iconClass: 'border-yellow-400/18 bg-yellow-500/10 text-yellow-300',
+  },
 ] as const;
 
 export function Steps() {
   return (
-    <section id="como-funciona" className="perf-section border-y border-white/8 bg-[#0a101c]">
-      <div className="mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:py-20">
-        <div className="mx-auto max-w-4xl text-center">
-          <span className="inline-flex rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-violet-200">
+    <section id="como-funciona" className="perf-section relative overflow-hidden border-y border-white/8 bg-[#07101b]">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,0.48)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.48)_1px,transparent_1px)] [background-size:56px_56px]" />
+        <div className="absolute left-[-8%] top-[18%] h-[26rem] w-[26rem] rounded-full bg-[radial-gradient(circle,rgba(124,58,237,0.22)_0%,rgba(124,58,237,0.08)_38%,transparent_72%)] blur-3xl" />
+        <div className="absolute right-[-10%] top-[14%] h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,rgba(6,182,212,0.18)_0%,rgba(6,182,212,0.08)_36%,transparent_72%)] blur-3xl" />
+      </div>
+
+      <div className="mx-auto max-w-[1240px] px-5 py-12 sm:px-6 lg:px-8 lg:py-14">
+        <div className="mx-auto max-w-5xl text-center">
+          <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-5 py-2 text-[11px] font-bold uppercase tracking-[0.26em] text-violet-200 shadow-[0_0_0_1px_rgba(167,139,250,0.08)]">
+            <Sparkles className="h-3.5 w-3.5" />
             Cómo funciona
           </span>
-          <h2 className="mt-4 font-[var(--font-display)] text-[2rem] font-black leading-[1.02] tracking-[-0.03em] text-white sm:mt-5 sm:text-[2.55rem]">
-            Cinco pasos para empezar a vender con una experiencia más clara
+          <h2 className="mt-4 font-[var(--font-display)] text-[2.1rem] font-black leading-[0.96] tracking-[-0.05em] text-white sm:text-[3rem] lg:text-[3.8rem]">
+            <span className="block">Cinco pasos para empezar</span>
+            <span className="block">a vender con una experiencia más clara</span>
           </h2>
+          <p className="mx-auto mt-4 max-w-3xl text-base leading-[1.55] text-slate-300/84 sm:text-[1.05rem] lg:text-[1.12rem]">
+            Todo lo que necesitas para recibir pedidos por WhatsApp
+            <br className="hidden sm:block" />
+            y digitalizar tu menú <span className="font-semibold text-[#FACC15]">en minutos.</span>
+          </p>
         </div>
 
-        <div className="mt-10 grid gap-4 lg:grid-cols-5 lg:gap-0">
-          {steps.map((step, index) => (
-            <article key={step} className="relative rounded-[1.4rem] border border-white/10 bg-[#0d1420]/76 px-5 py-5 text-left shadow-[0_22px_70px_-42px_rgba(0,0,0,1)] lg:rounded-none lg:border-0 lg:bg-transparent lg:px-2 lg:py-0 lg:text-center lg:shadow-none">
-              {index < steps.length - 1 ? (
-                <span className="absolute left-[57%] top-[30px] hidden h-px w-[86%] bg-gradient-to-r from-[#7C3AED] to-transparent lg:block" />
-              ) : null}
-              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-violet-400/25 bg-[#5b21b6] text-base font-black text-white shadow-[0_18px_40px_-20px_rgba(124,58,237,0.95)] lg:mx-auto lg:h-14 lg:w-14">
-                {index + 1}
+        <div className="relative mt-10 lg:mt-10">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 1280 520"
+            className="pointer-events-none absolute inset-x-0 top-[-44px] hidden h-[520px] w-full lg:block"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="steps-line-main" x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="rgba(168,85,247,0.0)" />
+                <stop offset="20%" stopColor="rgba(192,132,252,0.55)" />
+                <stop offset="52%" stopColor="rgba(96,165,250,0.95)" />
+                <stop offset="80%" stopColor="rgba(103,232,249,0.55)" />
+                <stop offset="100%" stopColor="rgba(34,211,238,0.0)" />
+              </linearGradient>
+              <linearGradient id="steps-arc-top" x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="rgba(168,85,247,0.0)" />
+                <stop offset="18%" stopColor="rgba(168,85,247,0.16)" />
+                <stop offset="52%" stopColor="rgba(192,132,252,0.22)" />
+                <stop offset="100%" stopColor="rgba(34,211,238,0.16)" />
+              </linearGradient>
+              <linearGradient id="steps-arc-bottom" x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="rgba(168,85,247,0.18)" />
+                <stop offset="50%" stopColor="rgba(168,85,247,0.08)" />
+                <stop offset="100%" stopColor="rgba(34,211,238,0.18)" />
+              </linearGradient>
+              <filter id="steps-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="7" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <path d="M70 254 H1210" stroke="url(#steps-line-main)" strokeWidth="2.5" fill="none" />
+            <path d="M72 286 C170 110, 1110 110, 1210 286" stroke="url(#steps-arc-top)" strokeWidth="1.5" fill="none" />
+            <path d="M78 302 C210 450, 1070 450, 1202 302" stroke="url(#steps-arc-bottom)" strokeWidth="1.5" fill="none" />
+            <path d="M88 280 C132 240, 176 240, 220 280" stroke="rgba(168,85,247,0.24)" strokeDasharray="3 7" strokeWidth="1.2" fill="none" />
+            <circle cx="83" cy="316" r="4.5" fill="rgba(216,180,254,0.96)" filter="url(#steps-glow)" />
+            <circle cx="90" cy="164" r="4" fill="rgba(216,180,254,0.96)" filter="url(#steps-glow)" />
+            <circle cx="262" cy="255" r="5" fill="rgba(233,213,255,0.98)" filter="url(#steps-glow)" />
+            <circle cx="506" cy="255" r="5" fill="rgba(233,213,255,0.98)" filter="url(#steps-glow)" />
+            <circle cx="642" cy="207" r="4.5" fill="rgba(125,211,252,1)" filter="url(#steps-glow)" />
+            <circle cx="738" cy="255" r="5" fill="rgba(125,211,252,0.98)" filter="url(#steps-glow)" />
+            <circle cx="978" cy="255" r="5" fill="rgba(165,243,252,0.98)" filter="url(#steps-glow)" />
+            <circle cx="1222" cy="303" r="3" fill="rgba(250,204,21,0.95)" filter="url(#steps-glow)" />
+            <circle cx="994" cy="493" r="2.5" fill="rgba(165,243,252,0.85)" filter="url(#steps-glow)" />
+            <circle cx="503" cy="486" r="4" fill="rgba(216,180,254,0.96)" filter="url(#steps-glow)" />
+          </svg>
+
+          <div className="grid gap-5 lg:grid-cols-5 lg:gap-7">
+            {steps.map((step, index) => (
+              <article
+                key={step.title}
+                className={`relative flex min-h-[18rem] flex-col overflow-hidden rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(18,24,39,0.9),rgba(12,18,30,0.92))] px-5 pb-4 pt-5 text-center shadow-[0_28px_70px_-44px_rgba(0,0,0,1)] backdrop-blur-sm transition-transform duration-300 lg:min-h-[18.1rem] lg:px-5 ${step.glowClass}`}
+              >
+                <div className={`absolute left-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full border text-[1.55rem] font-black leading-none ${step.badgeClass}`}>
+                  <span className="translate-y-[-1px] text-[1.65rem]">{step.number}</span>
+                </div>
+
+                <div className={`mx-auto mt-4 flex h-20 w-20 items-center justify-center rounded-full border-2 ${step.iconShellClass}`}>
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-[#0b1321]/86">
+                    {step.icon}
+                  </div>
+                </div>
+
+                <h3 className="mt-5 whitespace-pre-line font-[var(--font-display)] text-[1.05rem] font-black leading-[1.02] tracking-[-0.04em] text-white sm:text-[1.22rem]">
+                  {step.title}
+                </h3>
+
+                <p className="mt-3 whitespace-pre-line text-[0.92rem] leading-[1.42] text-slate-300/80">
+                  {step.description}
+                </p>
+
+                <div className="mt-auto pt-4">
+                  <div className="flex items-center justify-center gap-2">
+                    {steps.map((_, dotIndex) => (
+                      <span
+                        key={`${step.number}-${dotIndex}`}
+                        className={`h-2.5 w-2.5 rounded-full ${
+                          dotIndex === index
+                            ? step.dotClass
+                            : 'border border-white/10 bg-white/10'
+                        }`}
+                      />
+                    ))}
+                  </div>
+
+                  {step.featured ? (
+                    <div className="mt-5 flex justify-center">
+                      <span className="inline-flex rounded-full border border-sky-400/24 bg-sky-500/14 px-4 py-1.5 text-[0.74rem] font-bold uppercase tracking-[0.14em] text-sky-300 shadow-[0_0_24px_rgba(59,130,246,0.24)]">
+                        Paso clave
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-10 flex justify-center lg:mt-12">
+          <div className="flex w-full max-w-[760px] flex-col overflow-hidden rounded-full border border-white/10 bg-[linear-gradient(180deg,rgba(17,22,36,0.9),rgba(12,18,29,0.92))] shadow-[0_24px_60px_-40px_rgba(0,0,0,1)] sm:flex-row">
+            {trustItems.map(({ label, icon: Icon, iconClass }, index) => (
+              <div
+                key={label}
+                className={`flex items-center gap-3 px-5 py-4 text-sm text-slate-200/92 sm:flex-1 sm:justify-center ${
+                  index < trustItems.length - 1 ? 'border-b border-white/8 sm:border-b-0 sm:border-r' : ''
+                } border-white/8`}
+              >
+                <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full border ${iconClass}`}>
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="font-medium">{label}</span>
               </div>
-              <p className="mt-4 text-[1rem] font-bold leading-6 text-white lg:mt-5 lg:text-[1.05rem]">{step}</p>
-              <p className="mt-2 max-w-[18rem] text-sm leading-6 text-slate-400 lg:mx-auto lg:mt-3 lg:max-w-[11rem] lg:text-[13px]">
-                {index === 0 && 'Personaliza tu identidad y deja listo tu canal de venta.'}
-                {index === 1 && 'Organiza categorías, precios y productos destacados.'}
-                {index === 2 && 'Llévalo a WhatsApp, redes, mesas y piezas impresas.'}
-                {index === 3 && 'El cliente elige, confirma y entiende mejor su pedido.'}
-                {index === 4 && 'Coordina pickup o delivery con menos fricción.'}
-              </p>
-            </article>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </section>
