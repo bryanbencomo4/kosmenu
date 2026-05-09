@@ -104,8 +104,8 @@ export function Features() {
         <div className="absolute inset-x-0 bottom-0 h-40 bg-[linear-gradient(180deg,transparent,rgba(5,9,22,0.8))]" />
       </div>
 
-      <div className="relative z-10 mx-auto grid max-w-[1240px] gap-4 px-5 py-14 sm:px-6 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1.56fr)] lg:items-stretch lg:gap-4 lg:pt-32 lg:pb-16 xl:pt-32 xl:pb-20">
-        <div className="animate-fade-up relative overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_86%_16%,rgba(192,132,252,0.12),transparent_20%),linear-gradient(180deg,rgba(15,20,35,0.98),rgba(7,12,23,0.97))] px-6 py-7 shadow-[0_40px_120px_-54px_rgba(0,0,0,1)] sm:px-8 sm:py-8 lg:px-11 lg:py-11">
+      <div className="relative z-10 mx-auto grid max-w-[1240px] gap-4 px-4 py-10 sm:px-6 sm:py-14 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1.56fr)] lg:items-stretch lg:gap-4 lg:pt-32 lg:pb-16 xl:pt-32 xl:pb-20">
+        <div className="animate-fade-up relative overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_86%_16%,rgba(192,132,252,0.12),transparent_20%),linear-gradient(180deg,rgba(15,20,35,0.98),rgba(7,12,23,0.97))] px-5 py-6 shadow-[0_40px_120px_-54px_rgba(0,0,0,1)] sm:px-8 sm:py-8 lg:px-11 lg:py-11">
           <div aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(196,181,253,0.55),transparent)]" />
           <div aria-hidden="true" className="absolute -bottom-10 -left-10 h-36 w-36 rounded-full bg-[radial-gradient(circle,rgba(168,85,247,0.85)_0%,rgba(168,85,247,0.22)_34%,transparent_72%)] blur-2xl" />
           <div aria-hidden="true" className="absolute -right-24 top-12 h-[26rem] w-[26rem] rounded-full border border-violet-400/10" />
@@ -119,34 +119,35 @@ export function Features() {
               <Sparkles className="h-3.5 w-3.5 text-[#FACC15]" />
               ¿Qué es ElMenuxFA.com?
             </span>
-            <h2 className="mt-7 max-w-[34rem] font-[var(--font-display)] text-[2.15rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[2.8rem] lg:text-[4.1rem]">
-              <span className="block">Una plataforma</span>
+            <h2 className="mt-6 max-w-[28rem] font-[var(--font-display)] text-[1.7rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[2.35rem] lg:max-w-[31rem] lg:text-[3.3rem]">
+              <span className="block">Vende mejor</span>
+              <span className="block">con un menú digital</span>
               <span className="block">
-                para{' '}
+                y{' '}
                 <span className="bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                  vender mejor
+                  pedidos claros
                 </span>
               </span>
-              <span className="block">sin depender de</span>
-              <span className="block">catálogos manuales</span>
             </h2>
-            <p className="mt-7 max-w-[31rem] text-[1.02rem] leading-[1.72] text-slate-300/88 lg:text-[1.12rem]">
-              Elmenuxfa.com digitaliza tu menú, organiza tus pedidos y se integra con WhatsApp para que vendas más, con menos esfuerzo y más control.
+            <p className="mt-4 max-w-[27rem] text-[0.93rem] leading-[1.55] text-slate-300/88 lg:mt-5 lg:max-w-[29rem] lg:text-[1rem] lg:leading-[1.62]">
+              Publica tu menú, compártelo por link o QR y recibe pedidos organizados por WhatsApp sin perder tiempo entre mensajes.
             </p>
 
-            <div className="mt-10 grid gap-3 sm:grid-cols-3 lg:mt-auto">
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:mt-auto">
               {stats.map(({ value, label, icon: Icon, iconClass, valueClass }, index) => (
                 <article
                   key={label}
-                  className={`animate-fade-up rounded-[1.35rem] border border-white/8 bg-[linear-gradient(180deg,rgba(20,25,42,0.84),rgba(12,17,29,0.82))] px-4 py-5 shadow-[0_24px_48px_-32px_rgba(0,0,0,0.95)] ${
+                  className={`animate-fade-up rounded-[1.35rem] border border-white/8 bg-[linear-gradient(180deg,rgba(20,25,42,0.84),rgba(12,17,29,0.82))] px-4 py-4 shadow-[0_24px_48px_-32px_rgba(0,0,0,0.95)] ${
+                    index === 2 ? 'col-span-2 sm:col-span-1' : ''
+                  } ${
                     index === 0 ? 'animation-delay-100' : index === 1 ? 'animation-delay-200' : 'animation-delay-300'
                   }`}
                 >
                   <span className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border ${iconClass}`}>
                     <Icon className="h-5 w-5" />
                   </span>
-                  <p className={`mt-5 text-[1.7rem] font-black tracking-[-0.05em] ${valueClass}`}>{value}</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-300/88">{label}</p>
+                  <p className={`mt-4 text-[1.45rem] font-black tracking-[-0.05em] sm:text-[1.7rem] ${valueClass}`}>{value}</p>
+                  <p className="mt-1 text-[0.85rem] leading-5 text-slate-300/88 sm:text-sm sm:leading-6">{label}</p>
                 </article>
               ))}
             </div>
@@ -157,18 +158,18 @@ export function Features() {
           {features.map(({ title, description, icon: Icon, iconClass, arrowClass }, index) => (
             <article
               key={title}
-              className={`animate-fade-up group relative flex min-h-[17.4rem] flex-col overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(13,19,33,0.96),rgba(10,15,26,0.92))] px-6 py-7 shadow-[0_26px_80px_-48px_rgba(0,0,0,1)] transition-all duration-300 hover:-translate-y-1 hover:border-white/16 sm:px-6 sm:py-7 ${
+              className={`animate-fade-up group relative flex min-h-[14.5rem] flex-col overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(13,19,33,0.96),rgba(10,15,26,0.92))] px-5 py-6 shadow-[0_26px_80px_-48px_rgba(0,0,0,1)] transition-all duration-300 hover:-translate-y-1 hover:border-white/16 sm:min-h-[17.4rem] sm:px-6 sm:py-7 ${
                 index < 2 ? 'animation-delay-100' : index < 4 ? 'animation-delay-200' : 'animation-delay-300'
               }`}
             >
               <div aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.2),transparent)] opacity-80" />
               <div className="relative z-10 flex h-full flex-col">
-                <span className={`inline-flex h-16 w-16 items-center justify-center rounded-[1.2rem] border ${iconClass}`}>
-                  <Icon className="h-6 w-6" />
+                <span className={`inline-flex h-14 w-14 items-center justify-center rounded-[1rem] border ${iconClass} sm:h-16 sm:w-16 sm:rounded-[1.2rem]`}>
+                  <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
                 </span>
-                <h3 className="mt-7 max-w-[13rem] font-[var(--font-display)] text-[1.12rem] font-bold leading-[1.15] text-white lg:text-[1.22rem]">{title}</h3>
-                <p className="mt-3 max-w-[15rem] text-[0.98rem] leading-[1.6] text-slate-300/78">{description}</p>
-                <span className={`mt-auto inline-flex h-11 w-11 items-center justify-center rounded-full border bg-white/[0.02] transition-transform duration-300 group-hover:translate-x-1 ${arrowClass}`}>
+                <h3 className="mt-5 max-w-none font-[var(--font-display)] text-[1.02rem] font-bold leading-[1.12] text-white sm:mt-7 sm:max-w-[13rem] sm:text-[1.12rem] lg:text-[1.22rem]">{title}</h3>
+                <p className="mt-3 max-w-none text-[0.9rem] leading-[1.5] text-slate-300/78 sm:max-w-[15rem] sm:text-[0.98rem] sm:leading-[1.6]">{description}</p>
+                <span className={`mt-5 inline-flex h-10 w-10 items-center justify-center rounded-full border bg-white/[0.02] transition-transform duration-300 group-hover:translate-x-1 sm:mt-auto sm:h-11 sm:w-11 ${arrowClass}`}>
                   <ArrowRight className="h-4 w-4" />
                 </span>
               </div>

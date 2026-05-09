@@ -107,24 +107,24 @@ export function Steps() {
         <div className="absolute right-[-10%] top-[14%] h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,rgba(6,182,212,0.18)_0%,rgba(6,182,212,0.08)_36%,transparent_72%)] blur-3xl" />
       </div>
 
-      <div className="mx-auto max-w-[1240px] px-5 py-12 sm:px-6 lg:px-8 lg:py-14">
+      <div className="mx-auto max-w-[1240px] px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
         <div className="mx-auto max-w-5xl text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-5 py-2 text-[11px] font-bold uppercase tracking-[0.26em] text-violet-200 shadow-[0_0_0_1px_rgba(167,139,250,0.08)]">
             <Sparkles className="h-3.5 w-3.5" />
             Cómo funciona
           </span>
-          <h2 className="mt-4 font-[var(--font-display)] text-[2.1rem] font-black leading-[0.96] tracking-[-0.05em] text-white sm:text-[3rem] lg:text-[3.8rem]">
+          <h2 className="mt-4 font-[var(--font-display)] text-[1.9rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[3rem] lg:text-[3.8rem]">
             <span className="block">Cinco pasos para empezar</span>
             <span className="block">a vender con una experiencia más clara</span>
           </h2>
-          <p className="mx-auto mt-4 max-w-3xl text-base leading-[1.55] text-slate-300/84 sm:text-[1.05rem] lg:text-[1.12rem]">
+          <p className="mx-auto mt-4 max-w-3xl text-[0.95rem] leading-[1.55] text-slate-300/84 sm:text-[1.05rem] lg:text-[1.12rem]">
             Todo lo que necesitas para recibir pedidos por WhatsApp
             <br className="hidden sm:block" />
             y digitalizar tu menú <span className="font-semibold text-[#FACC15]">en minutos.</span>
           </p>
         </div>
 
-        <div className="relative mt-10 lg:mt-10">
+        <div className="relative mt-8 lg:mt-10">
           <svg
             aria-hidden="true"
             viewBox="0 0 1280 520"
@@ -174,27 +174,27 @@ export function Steps() {
             <circle cx="503" cy="486" r="4" fill="rgba(216,180,254,0.96)" filter="url(#steps-glow)" />
           </svg>
 
-          <div className="grid gap-5 lg:grid-cols-5 lg:gap-7">
+          <div className="hide-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 lg:grid lg:overflow-visible lg:pb-0 lg:grid-cols-5 lg:gap-7">
             {steps.map((step, index) => (
               <article
                 key={step.title}
-                className={`relative flex min-h-[18rem] flex-col overflow-hidden rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(18,24,39,0.9),rgba(12,18,30,0.92))] px-5 pb-4 pt-5 text-center shadow-[0_28px_70px_-44px_rgba(0,0,0,1)] backdrop-blur-sm transition-transform duration-300 lg:min-h-[18.1rem] lg:px-5 ${step.glowClass}`}
+                className={`relative flex min-h-[17rem] min-w-[16rem] max-w-[16rem] snap-center flex-col overflow-hidden rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(18,24,39,0.9),rgba(12,18,30,0.92))] px-4 pb-4 pt-5 text-center shadow-[0_28px_70px_-44px_rgba(0,0,0,1)] backdrop-blur-sm transition-transform duration-300 sm:min-w-[17rem] sm:max-w-[17rem] lg:min-h-[18.1rem] lg:min-w-0 lg:max-w-none lg:px-5 ${step.glowClass}`}
               >
                 <div className={`absolute left-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full border text-[1.55rem] font-black leading-none ${step.badgeClass}`}>
                   <span className="translate-y-[-1px] text-[1.65rem]">{step.number}</span>
                 </div>
 
-                <div className={`mx-auto mt-4 flex h-20 w-20 items-center justify-center rounded-full border-2 ${step.iconShellClass}`}>
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-[#0b1321]/86">
+                <div className={`mx-auto mt-4 flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-full border-2 ${step.iconShellClass} sm:h-20 sm:w-20`}>
+                  <div className="flex h-[3.6rem] w-[3.6rem] items-center justify-center rounded-full border border-white/10 bg-[#0b1321]/86 sm:h-16 sm:w-16">
                     {step.icon}
                   </div>
                 </div>
 
-                <h3 className="mt-5 whitespace-pre-line font-[var(--font-display)] text-[1.05rem] font-black leading-[1.02] tracking-[-0.04em] text-white sm:text-[1.22rem]">
+                <h3 className="mt-5 whitespace-pre-line font-[var(--font-display)] text-[1rem] font-black leading-[1.02] tracking-[-0.04em] text-white sm:text-[1.22rem]">
                   {step.title}
                 </h3>
 
-                <p className="mt-3 whitespace-pre-line text-[0.92rem] leading-[1.42] text-slate-300/80">
+                <p className="mt-3 whitespace-pre-line text-[0.88rem] leading-[1.4] text-slate-300/80 sm:text-[0.92rem] sm:leading-[1.42]">
                   {step.description}
                 </p>
 
@@ -226,11 +226,11 @@ export function Steps() {
         </div>
 
         <div className="mt-10 flex justify-center lg:mt-12">
-          <div className="flex w-full max-w-[760px] flex-col overflow-hidden rounded-full border border-white/10 bg-[linear-gradient(180deg,rgba(17,22,36,0.9),rgba(12,18,29,0.92))] shadow-[0_24px_60px_-40px_rgba(0,0,0,1)] sm:flex-row">
+          <div className="grid w-full max-w-[760px] overflow-hidden rounded-[1.6rem] border border-white/10 bg-[linear-gradient(180deg,rgba(17,22,36,0.9),rgba(12,18,29,0.92))] shadow-[0_24px_60px_-40px_rgba(0,0,0,1)] sm:flex sm:rounded-full">
             {trustItems.map(({ label, icon: Icon, iconClass }, index) => (
               <div
                 key={label}
-                className={`flex items-center gap-3 px-5 py-4 text-sm text-slate-200/92 sm:flex-1 sm:justify-center ${
+                className={`flex items-center gap-3 px-4 py-3.5 text-[0.88rem] text-slate-200/92 sm:flex-1 sm:justify-center sm:px-5 sm:py-4 sm:text-sm ${
                   index < trustItems.length - 1 ? 'border-b border-white/8 sm:border-b-0 sm:border-r' : ''
                 } border-white/8`}
               >

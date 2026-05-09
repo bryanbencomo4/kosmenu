@@ -77,9 +77,9 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
         <div className="hero-glow-cyan absolute bottom-[-10%] right-[-24%] h-[18rem] w-[18rem] opacity-55 sm:right-[-14%] sm:h-[22rem] sm:w-[22rem] lg:bottom-[-14%] lg:right-[-10%] lg:h-[34rem] lg:w-[34rem] lg:opacity-100" />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-7xl px-5 pb-10 pt-6 sm:px-6 sm:pb-12 sm:pt-8 lg:pb-16 lg:pt-14">
+      <div className="relative z-10 mx-auto max-w-7xl px-4 pb-10 pt-6 sm:px-6 sm:pb-12 sm:pt-8 lg:pb-16 lg:pt-14">
         <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-10 xl:gap-12">
-        <div className="mx-auto max-w-[36rem] text-center lg:mx-0 lg:max-w-[48rem] lg:text-left">
+        <div className="mx-auto min-w-0 max-w-[36rem] text-center lg:mx-0 lg:max-w-[48rem] lg:text-left">
           <div className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl will-change-transform will-change-opacity sm:px-4 sm:py-2 sm:text-[13px]">
             <span className="text-sm">🚀</span>
             Vende por WhatsApp sin apps de terceros
@@ -90,41 +90,41 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
             Hecho para negocios de comida
           </div>
 
-          <h1 className="mx-auto mt-4 max-w-[22rem] font-[var(--font-display)] text-[2.35rem] font-black leading-[0.96] tracking-[-0.05em] text-white sm:max-w-[34rem] sm:text-[3.2rem] lg:mx-0 lg:max-w-[46rem] lg:text-[4.15rem] xl:text-[4.35rem]">
+          <h1 className="mx-auto mt-4 max-w-[18.5rem] font-[var(--font-display)] text-[2rem] font-black leading-[0.96] tracking-[-0.05em] text-white sm:max-w-[32rem] sm:text-[3rem] lg:mx-0 lg:max-w-[36rem] lg:text-[3.55rem] xl:text-[3.8rem]">
             <span className="animate-fade-up animation-delay-200 block will-change-transform will-change-opacity">
               Menú digital para
             </span>
             <span className="animate-fade-up animation-delay-300 block will-change-transform will-change-opacity">
-              recibir pedidos por WhatsApp
+              vender por WhatsApp
             </span>
             <span className="animate-fade-up animation-delay-500 block will-change-transform will-change-opacity">
               <span className="inline-block pr-[0.04em] bg-gradient-to-r from-[#d4b2ff] via-[#bf87ff] to-[#7C3AED] bg-clip-text text-transparent">
-                sin desorden ni comisiones
+                sin caos ni comisiones
               </span>
             </span>
           </h1>
 
-          <p className="animate-fade-up animation-delay-300 mx-auto mt-5 max-w-[35rem] text-sm leading-6 text-slate-300/88 will-change-transform will-change-opacity sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[40rem] lg:text-[1.02rem] lg:leading-8">
-            Crea tu catálogo, comparte tu link o QR y recibe pedidos organizados directamente en WhatsApp. Ideal para restaurantes, dark kitchens, food trucks y emprendimientos de comida.
+          <p className="animate-fade-up animation-delay-300 mx-auto mt-5 max-w-[31rem] text-[0.95rem] leading-6 text-slate-300/88 will-change-transform will-change-opacity sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[33rem] lg:text-[0.98rem] lg:leading-7">
+            Comparte tu menú por link o QR y recibe pedidos organizados en WhatsApp, sin depender de apps de terceros.
           </p>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4 xl:gap-4">
+          <div className="mt-6 grid grid-cols-2 gap-3">
             {heroHighlights.map((item, index) => {
               const Icon = item.icon;
 
               return (
                 <div
                   key={item.label}
-                  className={`animate-fade-up flex items-center gap-3 rounded-[1.15rem] border border-white/8 bg-[#0d1323]/72 px-3.5 py-3 text-left text-sm font-medium text-slate-100 will-change-transform will-change-opacity md:justify-start md:text-[0.95rem] ${
+                  className={`animate-fade-up flex min-h-[6.5rem] min-w-0 items-start gap-3 rounded-[1.2rem] border border-white/8 bg-[#0d1323]/72 px-3.5 py-3.5 text-left text-[0.88rem] font-medium text-slate-100 will-change-transform will-change-opacity sm:min-h-[7rem] sm:px-4 sm:py-4 sm:text-[0.95rem] ${
                     index === 0 ? 'animation-delay-300' : index < 3 ? 'animation-delay-500' : 'animation-delay-700'
                   }`}
                 >
-                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-400/22 bg-violet-500/10 text-violet-300 shadow-[0_12px_24px_-20px_rgba(124,58,237,0.95)] md:h-10 md:w-10">
-                    <Icon className="h-4 w-4 md:h-4.5 md:w-4.5" />
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-400/22 bg-violet-500/10 text-violet-300 shadow-[0_12px_24px_-20px_rgba(124,58,237,0.95)] sm:h-10 sm:w-10">
+                    <Icon className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
                   </span>
-                  <span className="leading-5">
-                    <span className="block">{item.label}</span>
-                    <span className="block text-slate-300/90">{item.detail}</span>
+                  <span className="min-w-0 leading-tight">
+                    <span className="block text-[1em] font-semibold text-white">{item.label}</span>
+                    <span className="mt-1 block text-[0.98em] leading-[1.25] text-slate-300/90">{item.detail}</span>
                   </span>
                 </div>
               );
@@ -183,7 +183,7 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
           </div>
         </div>
 
-        <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full max-w-[20rem] justify-center pt-2 sm:max-w-[25rem] lg:-mt-5 lg:max-w-[42rem] lg:justify-end lg:pt-0">
+        <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full min-w-0 max-w-[20rem] justify-center pt-2 sm:max-w-[25rem] lg:-mt-5 lg:max-w-[42rem] lg:justify-end lg:pt-0">
           <div
             aria-hidden="true"
             className="hero-orbit-system absolute left-1/2 top-1/2 h-[20rem] w-[20rem] -translate-x-1/2 -translate-y-1/2 opacity-55 sm:h-[26rem] sm:w-[26rem] sm:opacity-70 lg:left-[56%] lg:h-[42rem] lg:w-[42rem] lg:opacity-100 xl:left-[58%]"
@@ -242,7 +242,7 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
         </div>
         </div>
 
-        <div className="mt-10 hidden gap-px overflow-hidden rounded-[1.9rem] border border-white/8 bg-white/6 lg:grid lg:grid-cols-2 xl:grid-cols-4 xl:px-1 xl:py-1">
+        <div className="mt-8 hidden gap-px overflow-hidden rounded-[1.9rem] border border-white/8 bg-white/6 lg:grid lg:grid-cols-2 xl:grid-cols-4 xl:px-1 xl:py-1">
           {supportCards.map((item, index) => {
             const Icon = item.icon;
 
