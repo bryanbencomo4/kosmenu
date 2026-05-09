@@ -20,7 +20,8 @@ type HeroProps = {
 const heroHighlights = [
   { label: 'Menú digital', detail: 'con link y QR', icon: QrCode },
   { label: 'Pedidos directos', detail: 'por WhatsApp', icon: MessageCircle },
-  { label: 'Seguimiento del pedido', detail: 'en tiempo real', icon: Boxes },
+  { label: 'Tracking del pedido', detail: 'en tiempo real', icon: Boxes },
+  { label: 'Sin comisiones', detail: 'por cada pedido', icon: CircleDollarSign },
 ] as const;
 
 const supportCards = [
@@ -81,36 +82,33 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
         <div className="mx-auto max-w-[36rem] text-center lg:mx-0 lg:max-w-[48rem] lg:text-left">
           <div className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl will-change-transform will-change-opacity sm:px-4 sm:py-2 sm:text-[13px]">
             <span className="text-sm">🚀</span>
-            Aumenta tus pedidos sin depender de apps externas
+            Vende por WhatsApp sin apps de terceros
           </div>
 
           <div className="animate-fade-up animation-delay-100 mt-4 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#FACC15] will-change-transform will-change-opacity sm:text-[13px] sm:tracking-[0.22em]">
             <Sparkles className="h-3 w-3 text-[#FACC15] sm:h-3.5 sm:w-3.5" />
-            Foodtech para tu negocio
+            Hecho para negocios de comida
           </div>
 
-          <h1 className="mt-4 font-[var(--font-display)] text-[2.55rem] font-black leading-[0.95] tracking-[-0.05em] text-white sm:text-[3.4rem] lg:text-[4.25rem] xl:text-[4.45rem]">
-            <span className="animate-fade-up animation-delay-200 inline will-change-transform will-change-opacity lg:block lg:whitespace-nowrap">
-              Recibe pedidos{' '}
+          <h1 className="mx-auto mt-4 max-w-[22rem] font-[var(--font-display)] text-[2.35rem] font-black leading-[0.96] tracking-[-0.05em] text-white sm:max-w-[34rem] sm:text-[3.2rem] lg:mx-0 lg:max-w-[46rem] lg:text-[4.15rem] xl:text-[4.35rem]">
+            <span className="animate-fade-up animation-delay-200 block will-change-transform will-change-opacity">
+              Menú digital para
             </span>
-            <span className="animate-fade-up animation-delay-300 inline will-change-transform will-change-opacity lg:block lg:whitespace-nowrap">
-              por WhatsApp{' '}
+            <span className="animate-fade-up animation-delay-300 block will-change-transform will-change-opacity">
+              recibir pedidos por WhatsApp
             </span>
-            <span className="animate-fade-up animation-delay-500 inline will-change-transform will-change-opacity lg:block lg:whitespace-nowrap">
-              y digitaliza tu menú{' '}
-            </span>
-            <span className="animate-fade-up animation-delay-700 inline will-change-transform will-change-opacity lg:block">
-              <span className="inline-block pr-[0.08em] bg-gradient-to-r from-[#bf87ff] to-[#7C3AED] bg-clip-text text-transparent">
-                en minutos.
+            <span className="animate-fade-up animation-delay-500 block will-change-transform will-change-opacity">
+              <span className="inline-block pr-[0.04em] bg-gradient-to-r from-[#d4b2ff] via-[#bf87ff] to-[#7C3AED] bg-clip-text text-transparent">
+                sin desorden ni comisiones
               </span>
             </span>
           </h1>
 
-          <p className="animate-fade-up animation-delay-300 mx-auto mt-4 max-w-[34rem] text-sm leading-6 text-slate-300/88 will-change-transform will-change-opacity sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[38rem] lg:text-[1.02rem] lg:leading-8">
-            Menú digital profesional, pedidos por WhatsApp y seguimiento en tiempo real. Todo en un solo lugar.
+          <p className="animate-fade-up animation-delay-300 mx-auto mt-5 max-w-[35rem] text-sm leading-6 text-slate-300/88 will-change-transform will-change-opacity sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[40rem] lg:text-[1.02rem] lg:leading-8">
+            Crea tu catálogo, comparte tu link o QR y recibe pedidos organizados directamente en WhatsApp. Ideal para restaurantes, dark kitchens, food trucks y emprendimientos de comida.
           </p>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-3 md:gap-4">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4 xl:gap-4">
             {heroHighlights.map((item, index) => {
               const Icon = item.icon;
 
@@ -118,7 +116,7 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
                 <div
                   key={item.label}
                   className={`animate-fade-up flex items-center gap-3 rounded-[1.15rem] border border-white/8 bg-[#0d1323]/72 px-3.5 py-3 text-left text-sm font-medium text-slate-100 will-change-transform will-change-opacity md:justify-start md:text-[0.95rem] ${
-                    index === 0 ? 'animation-delay-300' : 'animation-delay-500'
+                    index === 0 ? 'animation-delay-300' : index < 3 ? 'animation-delay-500' : 'animation-delay-700'
                   }`}
                 >
                   <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-400/22 bg-violet-500/10 text-violet-300 shadow-[0_12px_24px_-20px_rgba(124,58,237,0.95)] md:h-10 md:w-10">
@@ -133,29 +131,27 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
             })}
           </div>
 
-          <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row lg:items-start lg:justify-start">
-            <div className="animate-fade-up animation-delay-500 flex flex-col items-center will-change-transform will-change-opacity lg:items-start">
-              <Link
-                href={whatsappHref}
-                className="group relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-full bg-[#FACC15] px-6 py-4 text-base font-bold text-[#0B0F1A] shadow-[0_34px_90px_-18px_rgba(250,204,21,1)] transition-all duration-300 hover:scale-[1.04] hover:bg-[#fde047] hover:shadow-[0_40px_100px_-16px_rgba(250,204,21,1)] active:scale-95 sm:w-auto sm:px-9"
-              >
-                <span className="animate-shine absolute inset-y-0 -left-1/3 w-1/3 -skew-x-12 bg-white/30 blur-md" />
-                Empieza gratis ahora
-                <MessageCircle className="h-4 w-4" />
-              </Link>
-              <p className="mt-3 text-center text-xs font-medium text-slate-300/85 lg:text-left">
-                Sin tarjeta • Configuración en 2 minutos • Cancela cuando quieras
-              </p>
-            </div>
-
+          <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row lg:items-start lg:justify-start">
+            <Link
+              href={whatsappHref}
+              className="group animate-fade-up animation-delay-500 relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-full bg-[#FACC15] px-6 py-4 text-base font-bold text-[#0B0F1A] shadow-[0_34px_90px_-18px_rgba(250,204,21,1)] transition-all duration-300 hover:scale-[1.04] hover:bg-[#fde047] hover:shadow-[0_40px_100px_-16px_rgba(250,204,21,1)] active:scale-95 sm:w-auto sm:px-9"
+            >
+              <span className="animate-shine absolute inset-y-0 -left-1/3 w-1/3 -skew-x-12 bg-white/30 blur-md" />
+              Crear mi menú gratis
+              <Rocket className="h-4 w-4" />
+            </Link>
             <Link
               href={demoHref}
               className="animate-fade-up animation-delay-500 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/12 bg-[#11182a]/55 px-8 py-4 text-base font-medium text-white/84 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-300/20 hover:bg-white/6 hover:text-white will-change-transform will-change-opacity sm:w-auto"
             >
-              Ver demo
+              Ver demo real
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>
+
+          <p className="animate-fade-up animation-delay-700 mt-3 text-center text-xs font-medium text-slate-300/85 sm:text-sm lg:text-left">
+            Sin app para tus clientes · Sin comisión por pedido · Listo en minutos
+          </p>
 
           <div className="animate-fade-up animation-delay-500 mt-7 flex flex-col gap-5 will-change-transform will-change-opacity">
             <div className="flex flex-col items-center gap-4 rounded-[1.45rem] border border-white/8 bg-[#0d1323]/74 px-4 py-4 text-center backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:text-left">
@@ -180,14 +176,14 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
                     <span className="text-[1.05rem] leading-none text-[#FACC15] sm:text-[1.5rem]">★★★★★</span>
                     <span className="text-[1.35rem] font-black tracking-[-0.04em] text-white sm:text-[2rem]">4.9/5</span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-300 sm:text-sm">Más de 100 negocios ya venden con esto</p>
+                  <p className="mt-1 text-xs text-slate-300 sm:text-sm">Más de 100 negocios ya reciben pedidos con elmenuxfa</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full max-w-[24rem] justify-center pt-1 sm:max-w-[28rem] lg:-mt-5 lg:max-w-[42rem] lg:justify-end lg:pt-0">
+        <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full max-w-[20rem] justify-center pt-2 sm:max-w-[25rem] lg:-mt-5 lg:max-w-[42rem] lg:justify-end lg:pt-0">
           <div
             aria-hidden="true"
             className="hero-orbit-system absolute left-1/2 top-1/2 h-[20rem] w-[20rem] -translate-x-1/2 -translate-y-1/2 opacity-55 sm:h-[26rem] sm:w-[26rem] sm:opacity-70 lg:left-[56%] lg:h-[42rem] lg:w-[42rem] lg:opacity-100 xl:left-[58%]"
@@ -210,7 +206,7 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
             ))}
           </div>
 
-          <div className="relative z-20 w-full max-w-[19rem] sm:max-w-[24rem] lg:max-w-[39rem]">
+          <div className="relative z-20 w-full max-w-[16.75rem] sm:max-w-[22.5rem] lg:max-w-[39rem]">
             <div className="hidden justify-center lg:hidden">
               <div className="animate-fade-up animation-delay-500 rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(28,33,67,0.84),rgba(22,27,51,0.68))] px-5 py-4 text-sm font-semibold text-slate-100 shadow-[0_20px_48px_-26px_rgba(91,33,182,0.62)] backdrop-blur-2xl transition-transform duration-300 hover:-translate-y-1 will-change-transform will-change-opacity">
                 <p className="text-sm text-slate-200">Hoy</p>

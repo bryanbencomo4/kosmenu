@@ -7,6 +7,7 @@ import { Footer } from '../components/Footer';
 import { Hero } from '../components/Hero';
 import { HeroFeaturesReveal } from '../components/HeroFeaturesReveal';
 import { Navbar } from '../components/Navbar';
+import { PricingSection } from '../components/PricingSection';
 import { Steps } from '../components/Steps';
 import { TargetSection } from '../components/TargetSection';
 
@@ -64,6 +65,7 @@ export default function HomePage() {
 
         <div className="hero-features-next">
           <Steps />
+          <PricingSection whatsappHref={whatsappHref} />
           <DemoSection />
           <TargetSection />
           <CTASection whatsappHref={whatsappHref} demoHref={demoHref} />

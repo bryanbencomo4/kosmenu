@@ -84,7 +84,7 @@ export function Features() {
         <div className="absolute inset-x-0 bottom-0 h-32 bg-[linear-gradient(180deg,transparent,rgba(5,8,22,0.72))]" />
       </div>
 
-      <div className="relative z-10 mx-auto grid max-w-7xl gap-6 px-5 py-16 sm:px-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-stretch lg:gap-7 lg:py-16 xl:py-20">
+      <div className="relative z-10 mx-auto grid max-w-7xl gap-6 px-5 py-16 sm:px-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-stretch lg:gap-7 lg:pt-32 lg:pb-16 xl:pt-36 xl:pb-20">
         <div className="animate-fade-up relative overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(15,20,35,0.94),rgba(10,14,26,0.88))] p-6 shadow-[0_40px_120px_-54px_rgba(0,0,0,1)] backdrop-blur-2xl sm:p-8 lg:p-10">
           <div aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(196,181,253,0.7),transparent)]" />
           <div aria-hidden="true" className="absolute -left-14 top-16 h-40 w-40 rounded-full bg-violet-500/14 blur-3xl" />
