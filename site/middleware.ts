@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known'];
+const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known', '/business'];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml']);
 const CANONICAL_HOST = 'www.elmenuxfa.com';
 const CANONICAL_REDIRECT_HOSTS = new Set(['elmenuxfa.com', 'kosmenu.vercel.app']);
+const BUSINESS_HOSTS = new Set(['business.elmenuxfa.com']);
 const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 
 function applySecurityHeaders(response: NextResponse) {
@@ -86,6 +87,12 @@ export function middleware(request: NextRequest) {
   }
 
   if (pathname === '/') {
+    if (BUSINESS_HOSTS.has(hostname)) {
+      const rewriteUrl = request.nextUrl.clone();
+      rewriteUrl.pathname = '/business';
+      return applySecurityHeaders(NextResponse.rewrite(rewriteUrl));
+    }
+
     return applySecurityHeaders(NextResponse.next());
   }
 
