@@ -16,10 +16,15 @@ type GoogleMapInstance = {
   setZoom: (zoom: number) => void;
   getZoom: () => number | undefined;
   panTo?: (location: { lat: number; lng: number }) => void;
+  addListener?: (eventName: string, handler: () => void) => GoogleMapListener | void;
 };
 
 type GoogleMapMarker = {
   setMap: (map: GoogleMapInstance | null) => void;
+};
+
+type GoogleMapListener = {
+  remove: () => void;
 };
 
 type GoogleMapSize = unknown;
@@ -249,6 +254,8 @@ export function MapDiscoverySection() {
 
   useEffect(() => {
     let cancelled = false;
+    let revealTimeoutId: number | null = null;
+    let removeTilesListener: (() => void) | null = null;
 
     async function attachMap() {
       if (!googleMapsJsApiKey || !mapRef.current) {
@@ -276,6 +283,34 @@ export function MapDiscoverySection() {
 
       mapInstanceRef.current = map;
 
+      const revealMap = () => {
+        if (cancelled) {
+          return;
+        }
+
+        setMapMode('google');
+
+        if (revealTimeoutId) {
+          window.clearTimeout(revealTimeoutId);
+          revealTimeoutId = null;
+        }
+
+        if (removeTilesListener) {
+          removeTilesListener();
+          removeTilesListener = null;
+        }
+      };
+
+      const tilesListener = typeof map.addListener === 'function'
+        ? map.addListener('tilesloaded', revealMap)
+        : undefined;
+
+      if (tilesListener && typeof tilesListener.remove === 'function') {
+        removeTilesListener = () => tilesListener.remove();
+      }
+
+      revealTimeoutId = window.setTimeout(revealMap, 1800);
+
       markersRef.current = discoveryPins.map(
         (pin) =>
           new google.maps.Marker({
@@ -289,14 +324,21 @@ export function MapDiscoverySection() {
             },
           }),
       );
-
-      setMapMode('google');
     }
 
     attachMap();
 
     return () => {
       cancelled = true;
+
+      if (revealTimeoutId) {
+        window.clearTimeout(revealTimeoutId);
+      }
+
+      if (removeTilesListener) {
+        removeTilesListener();
+      }
+
       mapInstanceRef.current = null;
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
@@ -304,79 +346,95 @@ export function MapDiscoverySection() {
   }, []);
 
   return (
-    <section id="mapa" className="relative z-10 px-4 pb-3 sm:px-6 lg:-mt-2 lg:px-8">
-      <div className="mx-auto max-w-[1320px] rounded-[1.2rem] border border-white/8 bg-[#07101d]/80 p-1.5 shadow-[0_35px_90px_-55px_rgba(15,23,42,1)] sm:rounded-[1.35rem] sm:p-2 lg:rounded-[1.45rem]">
-        <div className="relative min-h-[220px] overflow-hidden rounded-[1rem] border border-white/8 bg-[#08111f] sm:min-h-[240px] sm:rounded-[1.15rem] lg:min-h-[222px] lg:rounded-[1.2rem]">
+    <section id="mapa" className="relative z-10 px-3 pb-4 pt-3 sm:px-6 lg:pt-3 lg:px-8">
+      <div className="mx-auto max-w-[1440px] rounded-[1.25rem] border border-white/8 bg-[#07101d]/80 p-1.5 shadow-[0_35px_90px_-55px_rgba(15,23,42,1)] sm:rounded-[1.5rem] sm:p-2.5 lg:rounded-[1.6rem]">
+        <div className="relative min-h-[320px] overflow-hidden rounded-[1rem] border border-white/8 bg-[#08111f] min-[430px]:min-h-[340px] sm:min-h-[360px] sm:rounded-[1.2rem] lg:min-h-[380px] xl:min-h-[400px] lg:rounded-[1.35rem]">
           <div ref={mapRef} className={`absolute inset-0 ${mapMode === 'google' ? 'opacity-100' : 'opacity-0'}`} />
 
           {mapMode !== 'google' ? <MapPlaceholder pins={discoveryPins} /> : null}
 
           {mapMode === 'loading' ? (
-            <div className="absolute right-4 top-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#07111f]/88 px-3 py-2 text-xs font-semibold text-slate-200 backdrop-blur">
+            <div className="absolute right-3 top-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#07111f]/88 px-2.5 py-1.5 text-[11px] font-semibold text-slate-200 backdrop-blur sm:right-4 sm:top-4 sm:px-3 sm:py-2 sm:text-xs">
               <LoaderCircle className="h-4 w-4 animate-spin text-cyan-300" />
               Cargando mapa...
             </div>
           ) : null}
 
-          <div className="absolute inset-x-0 top-0 h-14 bg-[linear-gradient(180deg,rgba(7,17,31,0.95)_0%,rgba(7,17,31,0)_100%)]" />
+          <div className="absolute inset-x-0 top-0 h-16 bg-[linear-gradient(180deg,rgba(7,17,31,0.95)_0%,rgba(7,17,31,0)_100%)] sm:h-20" />
 
-          <div className="absolute right-2 top-1/2 z-10 hidden -translate-y-1/2 flex-col gap-1.5 sm:flex">
-            <button type="button" aria-label="Acercar mapa" onClick={() => adjustZoom(1)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
-              <Plus className="h-3.5 w-3.5" />
+          <div className="absolute bottom-3 right-3 z-10 flex items-center gap-2 sm:hidden">
+            <button type="button" aria-label="Acercar mapa" onClick={() => adjustZoom(1)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
+              <Plus className="h-4 w-4" />
             </button>
-            <button type="button" aria-label="Alejar mapa" onClick={() => adjustZoom(-1)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
-              <Minus className="h-3.5 w-3.5" />
+            <button type="button" aria-label="Alejar mapa" onClick={() => adjustZoom(-1)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
+              <Minus className="h-4 w-4" />
             </button>
-            <button type="button" aria-label="Centrar mapa" onClick={recenterMap} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
-              <LocateFixed className="h-3.5 w-3.5" />
+            <button type="button" aria-label="Centrar mapa" onClick={recenterMap} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
+              <LocateFixed className="h-4 w-4" />
             </button>
           </div>
 
-          <div className="absolute left-2.5 top-2.5 z-10 hidden w-[208px] rounded-[0.95rem] border border-white/10 bg-[#08111f]/94 p-2 shadow-[0_30px_60px_-30px_rgba(15,23,42,1)] backdrop-blur xl:block">
+          <div className="absolute right-3 top-1/2 z-10 hidden -translate-y-1/2 flex-col gap-2 sm:flex">
+            <button type="button" aria-label="Acercar mapa" onClick={() => adjustZoom(1)} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
+              <Plus className="h-4 w-4" />
+            </button>
+            <button type="button" aria-label="Alejar mapa" onClick={() => adjustZoom(-1)} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
+              <Minus className="h-4 w-4" />
+            </button>
+            <button type="button" aria-label="Centrar mapa" onClick={recenterMap} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
+              <LocateFixed className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="absolute left-4 top-4 z-10 hidden w-[312px] rounded-[1.2rem] border border-white/10 bg-[#08111f]/94 p-3.5 shadow-[0_30px_60px_-30px_rgba(15,23,42,1)] backdrop-blur xl:block">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-[13px] font-black text-white">Cerca de ti</p>
-                <p className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-slate-400">3 abiertos ahora</p>
+                <p className="text-base font-black text-white">Cerca de ti</p>
+                <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">3 abiertos ahora</p>
               </div>
-              <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-0.5 text-[8px] font-bold text-emerald-300">Live</span>
+              <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold text-emerald-300">Live</span>
             </div>
-            <div className="mt-2 space-y-1.5">
-              {nearbyBusinesses.slice(0, 1).map((business) => (
-                <div key={business.id} className="grid grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-1.5 rounded-[0.75rem] border border-white/8 bg-white/5 px-1.5 py-1.5">
-                  <FoodArtwork theme={business.artwork} title={business.name} variant="thumb" className="min-h-[34px]" />
+            <div className="mt-3 space-y-2.5">
+              {nearbyBusinesses.map((business) => (
+                <div key={business.id} className="grid grid-cols-[54px_minmax(0,1fr)_auto] items-center gap-3 rounded-[1rem] border border-white/8 bg-white/5 px-2.5 py-2.5">
+                  <FoodArtwork theme={business.artwork} title={business.name} variant="thumb" className="min-h-[54px]" />
                   <div className="min-w-0">
-                    <p className="truncate text-[10px] font-semibold text-white">{business.name}</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[8px] text-slate-300">
-                      <span className="inline-flex items-center gap-1"><Star className="h-2.5 w-2.5 text-[#FACC15]" />{business.rating}</span>
+                    <p className="truncate text-[13px] font-semibold text-white">{business.name}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">{business.category}</p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-300">
+                      <span className="inline-flex items-center gap-1"><Star className="h-3 w-3 text-[#FACC15]" />{business.rating}</span>
                       <span>• {business.distance}</span>
                       <span>• {business.eta}</span>
                     </div>
                   </div>
-                  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/12 px-1.5 py-0.5 text-[6px] font-black tracking-[0.12em] text-emerald-300">ABIERTO</span>
+                  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/12 px-2 py-1 text-[8px] font-black tracking-[0.14em] text-emerald-300">ABIERTO</span>
                 </div>
               ))}
             </div>
-            <button type="button" className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-violet-300">
+            <button type="button" className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-violet-300">
               Ver 2 negocios más
               <ChevronRight className="h-3.5 w-3.5" />
             </button>
           </div>
 
-          <div className="absolute bottom-2.5 left-2.5 z-10 right-12 hidden rounded-full border border-white/10 bg-[#08111f]/88 px-3 py-1.5 text-[12px] font-medium text-slate-200 backdrop-blur lg:flex xl:hidden">
+          <div className="absolute bottom-4 left-4 z-10 right-16 hidden rounded-full border border-white/10 bg-[#08111f]/88 px-4 py-2 text-[13px] font-medium text-slate-200 backdrop-blur lg:flex xl:hidden">
             Mapa oscuro, pines por categoría y negocios cercanos abiertos ahora.
           </div>
         </div>
 
-        <div className="mt-2.5 xl:hidden">
-          <div className="rounded-[1rem] border border-white/10 bg-[#08111f]/94 p-2.5 backdrop-blur sm:p-3">
+        <div className="mt-3 xl:hidden sm:mt-4">
+          <div className="rounded-[1.05rem] border border-white/10 bg-[#08111f]/94 p-3 backdrop-blur sm:rounded-[1.15rem] sm:p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm font-black text-white">Cerca de ti</p>
-              <button type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-violet-300">
+              <div>
+                <p className="text-base font-black text-white">Cerca de ti</p>
+                <p className="mt-1 text-[12px] text-slate-400">Negocios abiertos con tiempos y distancia estimada.</p>
+              </div>
+              <button type="button" className="inline-flex items-center gap-1 text-[13px] font-semibold text-violet-300 sm:text-sm">
                 Ver más
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-3.5 grid gap-2.5 sm:mt-4 sm:grid-cols-2 lg:grid-cols-3">
               {nearbyBusinesses.map((business) => (
                 <NearbyBusinessCard key={business.id} business={business} />
               ))}

@@ -4,7 +4,7 @@ type FoodArtworkProps = {
   theme: FoodArtworkTheme;
   title: string;
   className?: string;
-  variant?: 'default' | 'thumb';
+  variant?: 'default' | 'thumb' | 'promo';
 };
 
 const artworkStyles: Record<
@@ -100,6 +100,27 @@ export function FoodArtwork({
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.08)_0%,rgba(8,13,24,0.18)_45%,rgba(8,13,24,0.58)_100%)]" />
         <span className="sr-only">{title}</span>
+      </div>
+    );
+  }
+
+  if (variant === 'promo') {
+    return (
+      <div
+        className={`relative isolate overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#0b1220] ${className}`}
+      >
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${style.image})`, backgroundPosition: style.position }}
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.03)_0%,rgba(8,13,24,0.08)_36%,rgba(8,13,24,0.56)_100%)]" />
+        <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,0.4)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.4)_1px,transparent_1px)] [background-size:28px_28px]" />
+        <div className="absolute inset-x-0 bottom-0 h-24 bg-[linear-gradient(180deg,rgba(8,13,24,0)_0%,rgba(8,13,24,0.8)_100%)]" />
+        <div className="absolute inset-x-0 bottom-0 p-4">
+          <p className="truncate text-lg font-black tracking-[-0.03em] text-white drop-shadow-[0_10px_22px_rgba(0,0,0,0.45)]">
+            {title}
+          </p>
+        </div>
       </div>
     );
   }

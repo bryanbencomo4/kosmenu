@@ -40,9 +40,9 @@ const footerColumns = [
 
 export function ConsumerFooter() {
   return (
-    <footer id="ayuda" className="border-t border-white/10 bg-[#050912] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-      <div className="mx-auto grid max-w-[1320px] gap-6 lg:gap-8 xl:grid-cols-[1.1fr_2fr_1.35fr] xl:items-start">
-        <div>
+    <footer id="ayuda" className="border-t border-white/10 bg-[#050912] px-3 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="mx-auto grid max-w-[1440px] gap-6 sm:gap-8 lg:gap-10 xl:grid-cols-[1.1fr_2.6fr_1.4fr] xl:items-start">
+        <div className="order-1">
           <div className="flex items-center gap-3">
             <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-violet-400/25 bg-violet-500/10">
               <Image
@@ -69,9 +69,9 @@ export function ConsumerFooter() {
           </div>
         </div>
 
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:gap-5">
+        <div className="order-3 grid gap-x-10 gap-y-6 sm:grid-cols-2 sm:gap-y-8 lg:grid-cols-4 xl:order-2 xl:gap-x-14 xl:gap-y-8">
           {footerColumns.map((column) => (
-            <div key={column.title}>
+            <div key={column.title} className="min-w-0">
               <h3 className="text-sm font-black uppercase tracking-[0.18em] text-white">{column.title}</h3>
               <ul className="mt-3 space-y-2">
                 {column.links.map((link) => (
@@ -89,7 +89,7 @@ export function ConsumerFooter() {
           ))}
         </div>
 
-        <div id="newsletter" className="rounded-[1rem] border border-white/10 bg-[#07111f]/78 p-4 shadow-[0_30px_90px_-60px_rgba(124,58,237,0.85)]">
+        <div id="newsletter" className="order-2 rounded-[1rem] border border-white/10 bg-[#07111f]/78 p-4 shadow-[0_30px_90px_-60px_rgba(124,58,237,0.85)] xl:order-3">
           <p className="text-[13px] font-bold text-white">Recibe promociones exclusivas</p>
 
           <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -104,7 +104,7 @@ export function ConsumerFooter() {
             <button
               type="button"
               aria-label="Suscribirme al boletín de promociones"
-              className="inline-flex h-11 items-center justify-center rounded-[0.85rem] bg-[#FACC15] px-5 text-sm font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
+              className="inline-flex h-11 w-full items-center justify-center rounded-[0.85rem] bg-[#FACC15] px-5 text-sm font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047] sm:w-auto"
             >
               Suscribirme
             </button>

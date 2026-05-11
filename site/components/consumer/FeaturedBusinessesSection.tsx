@@ -8,10 +8,10 @@ type FeaturedBusinessesSectionProps = {
 
 export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSectionProps) {
   return (
-    <section id="favoritos" className="px-4 pb-4 pt-3 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1320px]">
+    <section id="favoritos" className="px-3 pb-4 pt-3 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1440px]">
         <div className="mb-3 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <h2 className="text-[1.2rem] font-black tracking-[-0.04em] text-white sm:text-[1.4rem] lg:text-[1.55rem]">
+          <h2 className="text-[1.15rem] font-black tracking-[-0.04em] text-white sm:text-[1.55rem] lg:text-[1.8rem]">
             Explora negocios destacados
           </h2>
           <button type="button" className="text-xs font-semibold text-violet-300 sm:text-sm">
@@ -19,16 +19,16 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
           </button>
         </div>
 
-        <div className="hide-scrollbar flex gap-2.5 overflow-x-auto pb-2 md:grid md:grid-cols-2 md:overflow-visible lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 xl:gap-5">
           {businesses.map((business) => (
             <article
               key={business.id}
-              className="min-w-[82vw] rounded-[1rem] border border-white/10 bg-[#07111f]/82 p-3 shadow-[0_30px_90px_-55px_rgba(15,23,42,1)] backdrop-blur-xl sm:min-w-[260px] md:min-w-0"
+              className="rounded-[1.05rem] border border-white/10 bg-[#07111f]/82 p-3.5 shadow-[0_30px_90px_-55px_rgba(15,23,42,1)] backdrop-blur-xl sm:rounded-[1.15rem] sm:p-4"
             >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
+              <div className="flex flex-col gap-3 min-[460px]:flex-row min-[460px]:items-start min-[460px]:justify-between">
+                <div className="flex min-w-0 items-start gap-3.5">
                   <span
-                    className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/12 text-sm font-black text-white"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/12 text-sm font-black text-white sm:h-12 sm:w-12"
                     style={{ backgroundColor: `${business.accent}22` }}
                   >
                     {business.name
@@ -38,26 +38,40 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
                       .join('')}
                   </span>
                   <div className="min-w-0">
-                    <h3 className="truncate text-base font-bold tracking-[-0.03em] text-white">{business.name}</h3>
-                    <p className="truncate text-[11px] text-slate-400">{business.cuisine}</p>
+                    <h3 className="text-[16px] font-bold leading-tight tracking-[-0.03em] text-white sm:text-[17px]">{business.name}</h3>
+                    <p className="mt-1 text-[12px] leading-5 text-slate-400">{business.cuisine}</p>
                   </div>
                 </div>
-                <span className="rounded-full border border-emerald-400/28 bg-emerald-500/12 px-2 py-0.5 text-[8px] font-black tracking-[0.14em] text-emerald-300">
+                <span className="self-start rounded-full border border-emerald-400/28 bg-emerald-500/12 px-2.5 py-1 text-[9px] font-black tracking-[0.14em] text-emerald-300">
                   {business.status}
                 </span>
               </div>
 
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-300">
-                <span className="inline-flex items-center gap-1"><Star className="h-3 w-3 text-[#FACC15]" />{business.rating}</span>
-                <span>• {business.distance} km</span>
-                <span>• {business.tags[0]}</span>
-                <span>• {business.zone.split(' ')[0]}</span>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-slate-300">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-2.5 py-1">
+                  <Star className="h-3.5 w-3.5 text-[#FACC15]" />
+                  {business.rating}
+                </span>
+                <span className="rounded-full bg-white/5 px-2.5 py-1">{business.distance} km</span>
+                <span className="rounded-full bg-white/5 px-2.5 py-1">{business.zone}</span>
+                <span className="rounded-full bg-white/5 px-2.5 py-1">{business.eta}</span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {business.tags.map((tag) => (
+                  <span
+                    key={`${business.id}-${tag}`}
+                    className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-200"
+                  >
+                    {tag}
+                  </span>
+                ))}
               </div>
 
               <button
                 type="button"
                 aria-label={`Ver menú de ${business.name}`}
-                className="mt-3 inline-flex h-9 w-full items-center justify-center rounded-[0.85rem] bg-[#FACC15] text-[11px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047] sm:w-[92px]"
+                className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[1rem] bg-[#FACC15] text-[13px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
               >
                 Ver menú
               </button>

@@ -18,11 +18,11 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
   };
 
   return (
-    <section id="promociones" className="px-4 pb-3 pt-4 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1320px]">
+    <section id="promociones" className="px-3 pb-3 pt-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1440px]">
         <div className="mb-3 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div>
-            <h2 className="text-[1.2rem] font-black tracking-[-0.04em] text-white sm:text-[1.4rem] lg:text-[1.55rem]">
+            <h2 className="text-[1.15rem] font-black tracking-[-0.04em] text-white sm:text-[1.55rem] lg:text-[1.8rem]">
               Negocios promocionados del día 🔥
             </h2>
           </div>
@@ -49,34 +49,34 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
 
         <div
           ref={sliderRef}
-          className="hide-scrollbar flex gap-2.5 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory] sm:gap-3"
+          className="hide-scrollbar flex gap-3 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory] sm:gap-4"
         >
           {businesses.map((business) => (
             <article
               key={business.id}
-              className="min-w-[82vw] max-w-[82vw] flex-1 snap-start rounded-[1.1rem] border border-white/10 bg-[#07111f]/80 p-2.5 shadow-[0_28px_80px_-50px_rgba(124,58,237,0.85)] backdrop-blur-xl sm:min-w-[240px] sm:max-w-[255px] sm:rounded-[1.2rem]"
+              className="min-w-[88vw] max-w-[88vw] flex-1 snap-start rounded-[1.15rem] border border-white/10 bg-[#07111f]/80 p-3 shadow-[0_28px_80px_-50px_rgba(124,58,237,0.85)] backdrop-blur-xl min-[430px]:min-w-[82vw] min-[430px]:max-w-[82vw] sm:min-w-[290px] sm:max-w-[300px] sm:rounded-[1.25rem] sm:p-3.5 lg:min-w-[308px] lg:max-w-[320px]"
             >
               <div className="relative">
-                <FoodArtwork theme={business.artwork} title={business.name} className="min-h-[120px] sm:min-h-[126px]" />
+                <FoodArtwork theme={business.artwork} title={business.name} variant="promo" className="min-h-[168px] min-[430px]:min-h-[178px] sm:min-h-[188px] lg:min-h-[196px]" />
 
-                <span className="absolute left-3 top-3 rounded-full border border-[#FACC15]/24 bg-[#151109]/92 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#FACC15] shadow-[0_10px_20px_-12px_rgba(0,0,0,0.9)] backdrop-blur">
+                <span className="absolute left-2.5 top-2.5 rounded-full border border-[#FACC15]/24 bg-[#151109]/82 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#FACC15] shadow-[0_10px_20px_-12px_rgba(0,0,0,0.9)] backdrop-blur sm:left-3 sm:top-3 sm:px-3 sm:py-1.5 sm:text-[10px]">
                   {business.promoLabel}
                 </span>
 
                 <button
                   type="button"
                   aria-label={`Guardar ${business.name} en favoritos`}
-                  className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/14 bg-[#07111f]/75 text-white transition-all duration-300 hover:border-rose-400/40 hover:text-rose-300 sm:h-10 sm:w-10"
+                  className="absolute right-2.5 top-2.5 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/14 bg-[#07111f]/75 text-white transition-all duration-300 hover:border-rose-400/40 hover:text-rose-300 sm:right-3 sm:top-3 sm:h-10 sm:w-10"
                 >
                   <Heart className="h-4.5 w-4.5" />
                 </button>
               </div>
 
-              <div className="mt-2.5">
-                <h3 className="text-base font-black tracking-[-0.04em] text-white">{business.name}</h3>
-                <p className="mt-0.5 text-[11px] text-slate-400">{business.category} artesanales</p>
+              <div className="mt-3.5">
+                <h3 className="text-[17px] font-black tracking-[-0.04em] text-white sm:text-lg">{business.name}</h3>
+                <p className="mt-1 text-[12px] text-slate-300">{business.category} artesanales</p>
 
-                <div className="mt-2.5 flex flex-wrap gap-2 text-[11px] text-slate-300">
+                <div className="mt-3 flex flex-wrap gap-2 text-[12px] text-slate-300">
                   <span className="inline-flex items-center gap-1">
                     <Star className="h-3.5 w-3.5 text-[#FACC15]" />
                     {business.rating}
@@ -94,7 +94,7 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
                 <button
                   type="button"
                   aria-label={`Ver catálogo de ${business.name}`}
-                  className="mt-3 inline-flex h-9 w-full items-center justify-center rounded-[0.85rem] bg-[#FACC15] text-[11px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047] sm:w-[102px]"
+                  className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[1rem] bg-[#FACC15] text-[13px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
                 >
                   Ver catálogo
                 </button>

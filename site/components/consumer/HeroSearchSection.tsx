@@ -19,9 +19,9 @@ const quickFilters = [
 
 export function HeroSearchSection() {
   return (
-    <section id="explorar" className="relative -mt-px px-4 pb-0 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1320px] overflow-hidden rounded-b-[1.5rem] border border-t-0 border-white/8 bg-[linear-gradient(180deg,#040814_0%,#07101b_58%,#040814_100%)] shadow-[0_45px_120px_-70px_rgba(76,29,149,0.95)] sm:rounded-b-[1.65rem] lg:rounded-b-[1.85rem]">
-        <div className="relative overflow-hidden px-4 pb-8 pt-8 sm:px-8 sm:pb-10 sm:pt-10 lg:px-12 lg:pb-12 lg:pt-12">
+    <section id="explorar" className="relative -mt-px px-3 pb-0 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1440px] overflow-hidden rounded-b-[1.5rem] border border-t-0 border-white/8 bg-[linear-gradient(180deg,#040814_0%,#07101b_58%,#040814_100%)] shadow-[0_45px_120px_-70px_rgba(76,29,149,0.95)] sm:rounded-b-[1.65rem] lg:rounded-b-[1.85rem]">
+        <div className="relative overflow-hidden px-4 pb-7 pt-6 sm:px-8 sm:pb-10 sm:pt-10 lg:px-14 lg:pb-12 lg:pt-12">
           <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.72)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.72)_1px,transparent_1px)] [background-size:64px_64px]" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_34%,rgba(124,58,237,0.28),transparent_22%),radial-gradient(circle_at_88%_30%,rgba(34,211,238,0.14),transparent_20%),radial-gradient(circle_at_50%_16%,rgba(124,58,237,0.1),transparent_26%)]" />
 
@@ -48,9 +48,9 @@ export function HeroSearchSection() {
             </div>
           </div>
 
-          <div className="relative z-10 mx-auto max-w-[1160px] text-center">
+          <div className="relative z-10 mx-auto max-w-[1320px] text-center">
             <h1
-              className="mx-auto max-w-[980px] font-[var(--font-display)] text-[2rem] font-black leading-[0.9] tracking-[-0.065em] text-white sm:text-[3rem] lg:text-[5rem]"
+              className="mx-auto max-w-[1060px] font-[var(--font-display)] text-[2.3rem] font-black leading-[0.92] tracking-[-0.065em] text-white min-[430px]:text-[2.55rem] sm:text-[3rem] lg:text-[5rem]"
               style={{ textWrap: 'balance' }}
             >
               <span className="block">Encuentra tus negocios</span>
@@ -59,56 +59,58 @@ export function HeroSearchSection() {
               </span>
             </h1>
 
-            <p className="mx-auto mt-4 max-w-[920px] text-[13px] leading-6 text-slate-300 sm:text-[1.15rem] lg:text-[1.35rem]">
+            <p className="mx-auto mt-3.5 max-w-[30rem] text-[14px] leading-6 text-slate-300 sm:mt-4 sm:max-w-[980px] sm:text-[1.15rem] lg:text-[1.35rem]">
               Busca restaurantes, cafés, pizzerías, comida rápida y ubicaciones cercanas.
             </p>
 
-            <div className="mx-auto mt-6 max-w-[1240px] rounded-[1.8rem] border border-violet-400/24 bg-[#070d18]/82 p-2 shadow-[0_40px_120px_-60px_rgba(124,58,237,0.95)] backdrop-blur-xl sm:rounded-[2.2rem] sm:p-2.5 lg:mt-8">
-              <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center">
-                <label className="relative flex-1 overflow-hidden rounded-[1.5rem] border border-white/8 bg-[#060c18] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                  <span className="sr-only">Buscar negocios o platos</span>
-                  <Search className="pointer-events-none absolute left-6 top-1/2 h-7 w-7 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="search"
-                    placeholder="Busca hamburguesas, sushi, pizza, café o tu negocio..."
-                    className="h-14 w-full bg-transparent pl-16 pr-5 text-[15px] text-white outline-none transition-all duration-300 placeholder:text-slate-500 sm:h-16 sm:text-[1rem] lg:h-[5.2rem] lg:text-[1.1rem]"
-                  />
-                </label>
+            <div className="mx-auto mt-5 max-w-[1320px] rounded-[1.45rem] border border-violet-400/24 bg-[#070d18]/82 p-2 shadow-[0_40px_120px_-60px_rgba(124,58,237,0.95)] backdrop-blur-xl sm:mt-6 sm:rounded-[1.85rem] sm:p-2 lg:mt-8 lg:max-w-[1160px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
+              <div className="flex flex-col gap-2.5 lg:gap-3">
+                <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:rounded-full lg:border lg:border-violet-400/28 lg:bg-[#060b16]/90 lg:p-[0.3rem] lg:shadow-[0_28px_100px_-55px_rgba(124,58,237,0.95)]">
+                  <label className="relative flex-1 overflow-hidden rounded-[1.2rem] border border-white/8 bg-[#060c18] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:rounded-[1.5rem] lg:rounded-full lg:border-0 lg:bg-transparent lg:shadow-none">
+                    <span className="sr-only">Buscar negocios o platos</span>
+                    <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400 sm:left-5 sm:h-6 sm:w-6 lg:left-6 lg:h-6 lg:w-6" />
+                    <input
+                      type="search"
+                      placeholder="Busca hamburguesas, sushi, pizza, café o tu negocio..."
+                      className="h-[3.2rem] w-full bg-transparent pl-12 pr-4 text-[14px] text-white outline-none transition-all duration-300 placeholder:text-[13px] placeholder:text-slate-500 sm:h-[3.65rem] sm:pl-[3.7rem] sm:pr-5 sm:text-[0.97rem] lg:h-[4rem] lg:pl-[4rem] lg:pr-6 lg:text-[0.96rem]"
+                    />
+                  </label>
 
-                <button
-                  type="button"
-                  aria-label="Buscar negocios destacados"
-                  className="inline-flex h-14 w-full items-center justify-center gap-3 rounded-[1.4rem] bg-[#FACC15] px-8 text-[1.1rem] font-black text-[#0B1120] shadow-[0_22px_60px_-20px_rgba(250,204,21,0.9)] transition-all duration-300 hover:bg-[#fde047] sm:h-16 sm:w-auto lg:h-[5.2rem] lg:min-w-[190px]"
-                >
-                  <Search className="h-6 w-6" />
-                  Buscar
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    aria-label="Buscar negocios destacados"
+                    className="inline-flex h-11 w-full items-center justify-center gap-2.5 rounded-[1rem] bg-[#FACC15] px-5 text-[0.96rem] font-black text-[#0B1120] shadow-[0_22px_60px_-20px_rgba(250,204,21,0.9)] transition-all duration-300 hover:bg-[#fde047] sm:h-[3.65rem] sm:w-auto sm:rounded-[1.2rem] sm:px-6 sm:text-[1rem] lg:h-[4rem] lg:min-w-[154px] lg:rounded-full lg:px-7"
+                  >
+                    <Search className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+                    Buscar
+                  </button>
+                </div>
 
-              <div className="hide-scrollbar mt-4 -mx-1 flex gap-2.5 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0 lg:gap-4">
-                {quickFilters.map((filter) => {
-                  const Icon = filter.icon;
-                  const isOpenNow = filter.label === 'Abiertos ahora';
+                <div className="hide-scrollbar mt-3 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1.5 sm:mx-0 sm:mt-3.5 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0 lg:gap-2.5">
+                  {quickFilters.map((filter) => {
+                    const Icon = filter.icon;
+                    const isOpenNow = filter.label === 'Abiertos ahora';
 
-                  return (
-                    <button
-                      key={filter.label}
-                      type="button"
-                      aria-label={`Filtrar por ${filter.label}`}
-                      className="inline-flex h-12 shrink-0 items-center gap-2.5 rounded-[1rem] border border-white/10 bg-white/[0.04] px-4 text-[13px] font-semibold text-slate-100 transition-all duration-300 hover:border-violet-400/30 hover:bg-white/[0.07] sm:h-[3.6rem] sm:px-5 sm:text-[15px]"
-                    >
-                      <Icon className="h-5 w-5 text-violet-300" />
-                      {filter.label}
-                      {isOpenNow ? (
-                        <span className="ml-1 inline-flex h-7 w-14 items-center rounded-full bg-violet-500/25 p-[3px] shadow-[inset_0_0_0_1px_rgba(167,139,250,0.3)]">
-                          <span className="ml-auto h-5.5 w-5.5 rounded-full bg-white shadow-[0_2px_8px_rgba(255,255,255,0.45)]" />
-                        </span>
-                      ) : (
-                        <ChevronDown className="h-4 w-4 text-slate-500" />
-                      )}
-                    </button>
-                  );
-                })}
+                    return (
+                      <button
+                        key={filter.label}
+                        type="button"
+                        aria-label={`Filtrar por ${filter.label}`}
+                        className="inline-flex h-10 shrink-0 items-center gap-2 rounded-[0.9rem] border border-white/10 bg-white/[0.04] px-3 text-[11px] font-semibold text-slate-100 transition-all duration-300 hover:border-violet-400/30 hover:bg-white/[0.07] sm:h-[3rem] sm:px-4 sm:text-[13px] lg:h-[2.95rem] lg:px-4.5 lg:text-[13px]"
+                      >
+                        <Icon className="h-4 w-4 text-violet-300 sm:h-[1.05rem] sm:w-[1.05rem]" />
+                        {filter.label}
+                        {isOpenNow ? (
+                          <span className="ml-1 inline-flex h-5 w-10 items-center rounded-full bg-violet-500/25 p-[3px] shadow-[inset_0_0_0_1px_rgba(167,139,250,0.3)] sm:h-6 sm:w-12">
+                            <span className="ml-auto h-4 w-4 rounded-full bg-white shadow-[0_2px_8px_rgba(255,255,255,0.45)] sm:h-4.5 sm:w-4.5" />
+                          </span>
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 text-slate-500" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>

@@ -26,7 +26,7 @@ const benefits = [
 export function UserBenefitsSection() {
   return (
     <section className="px-4 pb-4 pt-3 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1320px] rounded-[1.15rem] border border-white/10 bg-[#07101d]/84 p-2 shadow-[0_36px_120px_-70px_rgba(124,58,237,0.9)] sm:p-3">
+      <div className="mx-auto max-w-[1440px] rounded-[1.15rem] border border-white/10 bg-[#07101d]/84 p-2 shadow-[0_36px_120px_-70px_rgba(124,58,237,0.9)] sm:p-3">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {benefits.map((benefit) => {
             const Icon = benefit.icon;
