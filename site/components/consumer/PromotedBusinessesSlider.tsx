@@ -18,16 +18,16 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
   };
 
   return (
-    <section id="promociones" className="px-4 pb-3 pt-3 sm:px-6 lg:px-8">
+    <section id="promociones" className="px-4 pb-3 pt-4 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1320px]">
-        <div className="mb-3 flex items-center justify-between gap-4">
+        <div className="mb-3 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div>
-            <h2 className="text-[1.35rem] font-black tracking-[-0.04em] text-white sm:text-[1.55rem]">
+            <h2 className="text-[1.2rem] font-black tracking-[-0.04em] text-white sm:text-[1.4rem] lg:text-[1.55rem]">
               Negocios promocionados del día 🔥
             </h2>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 sm:flex">
             <button
               type="button"
               aria-label="Ver promociones anteriores"
@@ -49,24 +49,24 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
 
         <div
           ref={sliderRef}
-          className="hide-scrollbar flex gap-3 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory]"
+          className="hide-scrollbar flex gap-2.5 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory] sm:gap-3"
         >
           {businesses.map((business) => (
             <article
               key={business.id}
-              className="min-w-[240px] max-w-[255px] flex-1 snap-start rounded-[1.2rem] border border-white/10 bg-[#07111f]/80 p-2.5 shadow-[0_28px_80px_-50px_rgba(124,58,237,0.85)] backdrop-blur-xl"
+              className="min-w-[82vw] max-w-[82vw] flex-1 snap-start rounded-[1.1rem] border border-white/10 bg-[#07111f]/80 p-2.5 shadow-[0_28px_80px_-50px_rgba(124,58,237,0.85)] backdrop-blur-xl sm:min-w-[240px] sm:max-w-[255px] sm:rounded-[1.2rem]"
             >
               <div className="relative">
-                <FoodArtwork theme={business.artwork} title={business.name} className="min-h-[126px]" />
+                <FoodArtwork theme={business.artwork} title={business.name} className="min-h-[120px] sm:min-h-[126px]" />
 
-                <span className="absolute left-3 top-3 rounded-full border border-[#FACC15]/28 bg-[#FACC15]/12 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#FACC15]">
+                <span className="absolute left-3 top-3 rounded-full border border-[#FACC15]/24 bg-[#151109]/92 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#FACC15] shadow-[0_10px_20px_-12px_rgba(0,0,0,0.9)] backdrop-blur">
                   {business.promoLabel}
                 </span>
 
                 <button
                   type="button"
                   aria-label={`Guardar ${business.name} en favoritos`}
-                  className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/14 bg-[#07111f]/75 text-white transition-all duration-300 hover:border-rose-400/40 hover:text-rose-300"
+                  className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/14 bg-[#07111f]/75 text-white transition-all duration-300 hover:border-rose-400/40 hover:text-rose-300 sm:h-10 sm:w-10"
                 >
                   <Heart className="h-4.5 w-4.5" />
                 </button>
@@ -94,7 +94,7 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
                 <button
                   type="button"
                   aria-label={`Ver catálogo de ${business.name}`}
-                  className="mt-3 inline-flex h-9 w-[102px] items-center justify-center rounded-[0.85rem] bg-[#FACC15] text-[11px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
+                  className="mt-3 inline-flex h-9 w-full items-center justify-center rounded-[0.85rem] bg-[#FACC15] text-[11px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047] sm:w-[102px]"
                 >
                   Ver catálogo
                 </button>

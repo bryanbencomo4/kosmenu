@@ -10,20 +10,20 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
   return (
     <section id="favoritos" className="px-4 pb-4 pt-3 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1320px]">
-        <div className="mb-3 flex items-center justify-between gap-4">
-          <h2 className="text-[1.35rem] font-black tracking-[-0.04em] text-white sm:text-[1.55rem]">
+        <div className="mb-3 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <h2 className="text-[1.2rem] font-black tracking-[-0.04em] text-white sm:text-[1.4rem] lg:text-[1.55rem]">
             Explora negocios destacados
           </h2>
-          <button type="button" className="text-sm font-semibold text-violet-300">
+          <button type="button" className="text-xs font-semibold text-violet-300 sm:text-sm">
             Ver todos &gt;
           </button>
         </div>
 
-        <div className="hide-scrollbar flex gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible">
+        <div className="hide-scrollbar flex gap-2.5 overflow-x-auto pb-2 md:grid md:grid-cols-2 md:overflow-visible lg:grid-cols-3 xl:grid-cols-5">
           {businesses.map((business) => (
             <article
               key={business.id}
-              className="min-w-[240px] rounded-[1rem] border border-white/10 bg-[#07111f]/82 p-3 shadow-[0_30px_90px_-55px_rgba(15,23,42,1)] backdrop-blur-xl"
+              className="min-w-[82vw] rounded-[1rem] border border-white/10 bg-[#07111f]/82 p-3 shadow-[0_30px_90px_-55px_rgba(15,23,42,1)] backdrop-blur-xl sm:min-w-[260px] md:min-w-0"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
@@ -57,7 +57,7 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
               <button
                 type="button"
                 aria-label={`Ver menú de ${business.name}`}
-                className="mt-3 inline-flex h-9 w-[92px] items-center justify-center rounded-[0.85rem] bg-[#FACC15] text-[11px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
+                className="mt-3 inline-flex h-9 w-full items-center justify-center rounded-[0.85rem] bg-[#FACC15] text-[11px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047] sm:w-[92px]"
               >
                 Ver menú
               </button>

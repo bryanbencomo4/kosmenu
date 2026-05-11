@@ -11,7 +11,7 @@ export function NearbyBusinessCard({ business }: NearbyBusinessCardProps) {
   return (
     <article className="rounded-[1rem] border border-white/10 bg-[#09111f]/90 p-2.5 shadow-[0_22px_60px_-34px_rgba(15,23,42,1)] transition-all duration-300 hover:border-violet-400/25">
       <div className="grid grid-cols-[60px_minmax(0,1fr)] gap-3">
-        <FoodArtwork theme={business.artwork} title={business.name} className="min-h-[60px]" />
+        <FoodArtwork theme={business.artwork} title={business.name} variant="thumb" className="min-h-[60px]" />
 
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-3">

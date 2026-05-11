@@ -41,7 +41,7 @@ const footerColumns = [
 export function ConsumerFooter() {
   return (
     <footer id="ayuda" className="border-t border-white/10 bg-[#050912] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-      <div className="mx-auto grid max-w-[1320px] gap-8 xl:grid-cols-[1.2fr_0.72fr_0.72fr_0.82fr_0.82fr_1.45fr] xl:items-start">
+      <div className="mx-auto grid max-w-[1320px] gap-6 lg:gap-8 xl:grid-cols-[1.1fr_2fr_1.35fr] xl:items-start">
         <div>
           <div className="flex items-center gap-3">
             <span className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-violet-400/25 bg-violet-500/10">
@@ -69,23 +69,25 @@ export function ConsumerFooter() {
           </div>
         </div>
 
-        {footerColumns.map((column) => (
-          <div key={column.title}>
-            <h3 className="text-sm font-black uppercase tracking-[0.18em] text-white">{column.title}</h3>
-            <ul className="mt-3 space-y-2">
-              {column.links.map((link) => (
-                <li key={link.label}>
-                  <Link
-                    href={link.href}
-                    className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 xl:gap-5">
+          {footerColumns.map((column) => (
+            <div key={column.title}>
+              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-white">{column.title}</h3>
+              <ul className="mt-3 space-y-2">
+                {column.links.map((link) => (
+                  <li key={link.label}>
+                    <Link
+                      href={link.href}
+                      className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
+                    >
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
 
         <div id="newsletter" className="rounded-[1rem] border border-white/10 bg-[#07111f]/78 p-4 shadow-[0_30px_90px_-60px_rgba(124,58,237,0.85)]">
           <p className="text-[13px] font-bold text-white">Recibe promociones exclusivas</p>

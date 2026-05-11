@@ -4,6 +4,7 @@ type FoodArtworkProps = {
   theme: FoodArtworkTheme;
   title: string;
   className?: string;
+  variant?: 'default' | 'thumb';
 };
 
 const artworkStyles: Record<
@@ -80,8 +81,28 @@ const artworkStyles: Record<
   },
 };
 
-export function FoodArtwork({ theme, title, className = '' }: FoodArtworkProps) {
+export function FoodArtwork({
+  theme,
+  title,
+  className = '',
+  variant = 'default',
+}: FoodArtworkProps) {
   const style = artworkStyles[theme];
+
+  if (variant === 'thumb') {
+    return (
+      <div
+        className={`relative isolate overflow-hidden rounded-[1rem] border border-white/10 bg-[#0b1220] ${className}`}
+      >
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${style.image})`, backgroundPosition: style.position }}
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.08)_0%,rgba(8,13,24,0.18)_45%,rgba(8,13,24,0.58)_100%)]" />
+        <span className="sr-only">{title}</span>
+      </div>
+    );
+  }
 
   return (
     <div
