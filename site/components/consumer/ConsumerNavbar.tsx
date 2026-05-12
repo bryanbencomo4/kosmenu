@@ -4,7 +4,9 @@ import { useState } from 'react';
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { Heart, MapPin, Menu, Search, TicketPercent, User2, X } from 'lucide-react';
+import { ArrowUpRight, Heart, MapPin, Menu, Search, Store, TicketPercent, User2, X } from 'lucide-react';
+
+const businessCtaHref = 'https://business.elmenuxfa.com';
 
 const navLinks: Array<{
   label: string;
@@ -65,6 +67,14 @@ export function ConsumerNavbar() {
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-3">
+            <a
+              href={businessCtaHref}
+              className="hidden h-11 items-center justify-center gap-2 rounded-[1rem] border border-[#FACC15]/28 bg-[#FACC15]/10 px-4 text-[13px] font-bold text-[#FACC15] transition-all duration-300 hover:border-[#FACC15]/45 hover:bg-[#FACC15]/14 lg:inline-flex"
+            >
+              <Store className="h-4.5 w-4.5" />
+              Para negocios
+            </a>
+
             <button
               type="button"
               aria-label="Iniciar sesión próximamente"
@@ -118,6 +128,22 @@ export function ConsumerNavbar() {
 
         {isMobileMenuOpen ? (
           <div className="border-b border-white/8 px-3 py-3 sm:px-6 lg:hidden">
+            <div className="mb-3">
+              <a
+                href={businessCtaHref}
+                className="inline-flex w-full items-center justify-between gap-3 rounded-[1rem] border border-[#FACC15]/24 bg-[#FACC15]/10 px-4 py-3 text-left text-[13px] font-semibold text-[#FDE68A] transition-all duration-300 hover:border-[#FACC15]/40 hover:bg-[#FACC15]/14"
+              >
+                <span className="inline-flex min-w-0 items-center gap-3">
+                  <Store className="h-4.5 w-4.5 shrink-0 text-[#FACC15]" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] font-bold text-[#FDE68A]">Lleva tu negocio a ElMenúXFA</span>
+                    <span className="mt-0.5 block text-[11px] text-[#FDE68A]/75">Ir a la página para contratar el servicio</span>
+                  </span>
+                </span>
+                <ArrowUpRight className="h-4.5 w-4.5 shrink-0 text-[#FACC15]" />
+              </a>
+            </div>
+
             <nav className="grid gap-2">
               {navLinks.map((item) => {
                 const Icon = item.icon;
