@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
+import Link from 'next/link';
 import { ChevronLeft, ChevronRight, Clock3, Heart, MapPin, Star } from 'lucide-react';
 
 import type { PromotedBusiness } from '../../data/consumerBusinesses';
@@ -136,13 +137,13 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
                   </p>
                 </div>
 
-                <button
-                  type="button"
+                <Link
+                  href={featuredBusiness.href ?? '#'}
                   aria-label={`Ver catálogo de ${featuredBusiness.name}`}
                   className="mt-2.5 inline-flex h-10 w-full items-center justify-center rounded-[0.95rem] bg-[#FACC15] text-[12px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047] min-[560px]:mt-auto min-[560px]:h-11 min-[560px]:w-[160px] min-[560px]:rounded-[1rem] min-[560px]:text-[13px]"
                 >
                   Ver catálogo
-                </button>
+                </Link>
               </div>
             </div>
           </article>
@@ -192,13 +193,13 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
                   </span>
                 </div>
 
-                <button
-                  type="button"
+                <Link
+                  href={business.href ?? '#'}
                   aria-label={`Ver catálogo de ${business.name}`}
                   className="mt-3 inline-flex h-9.5 w-full items-center justify-center rounded-[0.9rem] bg-[#FACC15] text-[11px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
                 >
                   Ver catálogo
-                </button>
+                </Link>
               </div>
             </article>
           ))}

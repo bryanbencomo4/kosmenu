@@ -13,6 +13,7 @@ export type NearbyBusiness = {
   id: string;
   name: string;
   category: string;
+  href?: string;
   rating: string;
   distance: string;
   eta: string;

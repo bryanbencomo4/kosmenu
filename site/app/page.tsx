@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
 
+import { getPublicConsumerHomeData } from './_lib/public-consumer-home';
 import { ConsumerHomePage } from '../components/consumer/ConsumerHomePage';
 
 const canonicalUrl = 'https://www.elmenuxfa.com';
+
+export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: 'ElMenúXFA | Descubre negocios, menús y promociones cerca de ti',
@@ -37,6 +40,8 @@ export const metadata: Metadata = {
   },
 };
 
-export default function HomePage() {
-  return <ConsumerHomePage />;
+export default async function HomePage() {
+  const homeData = await getPublicConsumerHomeData();
+
+  return <ConsumerHomePage {...homeData} />;
 }

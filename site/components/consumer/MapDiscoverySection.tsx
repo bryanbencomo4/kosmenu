@@ -4,12 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, LoaderCircle, LocateFixed, Minus, Plus, Star } from 'lucide-react';
 
 import {
-  discoveryPins,
-  nearbyBusinesses,
   type DiscoveryPin,
+  type NearbyBusiness,
 } from '../../data/consumerBusinesses';
 import { NearbyBusinessCard } from './NearbyBusinessCard';
 import { FoodArtwork } from './FoodArtwork';
+
+type MapDiscoverySectionProps = {
+  nearbyBusinesses: NearbyBusiness[];
+  discoveryPins: DiscoveryPin[];
+};
 
 type GoogleMapInstance = {
   setCenter: (location: { lat: number; lng: number }) => void;
@@ -213,7 +217,7 @@ function MapPlaceholder({ pins }: { pins: DiscoveryPin[] }) {
   );
 }
 
-export function MapDiscoverySection() {
+export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDiscoverySectionProps) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<GoogleMapInstance | null>(null);
   const markersRef = useRef<GoogleMapMarker[]>([]);
@@ -343,7 +347,7 @@ export function MapDiscoverySection() {
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
     };
-  }, []);
+  }, [discoveryPins]);
 
   return (
     <section id="mapa" className="relative z-10 px-3 pb-4 pt-3 sm:px-6 lg:pt-3 lg:px-8">

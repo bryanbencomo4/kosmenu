@@ -1,14 +1,16 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { ChevronDown, ChevronLeft, ChevronRight, Clock3, Heart, MapPin, SlidersHorizontal, Star } from 'lucide-react';
 
 import type { FeaturedBusiness } from '../../data/consumerBusinesses';
-import { directoryTotalBusinesses, directoryTotalPages } from '../../data/consumerBusinesses';
 import { FoodArtwork } from './FoodArtwork';
 
 type FeaturedBusinessesSectionProps = {
   businesses: FeaturedBusiness[];
+  totalBusinesses: number;
+  totalPages: number;
 };
 
 type PaginationItem = number | 'ellipsis';
@@ -16,6 +18,10 @@ type PaginationItem = number | 'ellipsis';
 const itemsPerPage = 10;
 
 function buildPagination(currentPage: number, totalPages: number): PaginationItem[] {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
   if (currentPage <= 3) {
     return [1, 2, 3, 4, 5, 'ellipsis', totalPages];
   }
@@ -27,15 +33,16 @@ function buildPagination(currentPage: number, totalPages: number): PaginationIte
   return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages];
 }
 
-export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSectionProps) {
+export function FeaturedBusinessesSection({ businesses, totalBusinesses, totalPages }: FeaturedBusinessesSectionProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [mobileVisibleCount, setMobileVisibleCount] = useState(4);
+  const resolvedTotalPages = Math.max(1, totalPages);
   const pageOffset = ((currentPage - 1) * 2) % businesses.length;
   const visibleBusinesses = Array.from({ length: Math.min(itemsPerPage, businesses.length) }, (_, index) => {
     return businesses[(pageOffset + index) % businesses.length];
   });
   const mobileBusinesses = businesses.slice(0, mobileVisibleCount);
-  const paginationItems = buildPagination(currentPage, directoryTotalPages);
+  const paginationItems = buildPagination(currentPage, resolvedTotalPages);
 
   return (
     <section id="favoritos" className="px-3 pb-4 pt-3 sm:px-6 lg:px-8">
@@ -49,7 +56,7 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
 
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:w-auto lg:flex-nowrap">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 sm:text-[11px]">
-              {directoryTotalBusinesses} negocios encontrados
+              {totalBusinesses} negocios encontrados
             </p>
 
             <button
@@ -129,13 +136,13 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
                     ))}
                   </div>
 
-                  <button
-                    type="button"
+                  <Link
+                    href={business.href ?? '#'}
                     aria-label={`Ver catálogo de ${business.name}`}
                     className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-[0.95rem] bg-[#FACC15] text-[12px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
                   >
                     Ver catálogo
-                  </button>
+                  </Link>
                 </div>
               </div>
             </article>
@@ -198,13 +205,13 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
                   ))}
                 </div>
 
-                <button
-                  type="button"
+                <Link
+                  href={business.href ?? '#'}
                   aria-label={`Ver catálogo de ${business.name}`}
                   className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-[0.9rem] bg-[#FACC15] text-[12px] font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
                 >
                   Ver catálogo
-                </button>
+                </Link>
               </div>
             </article>
           ))}
@@ -225,7 +232,8 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
           )}
         </div>
 
-        <div className="mt-5 hidden flex-wrap items-center justify-center gap-2 sm:gap-2.5 md:flex">
+        {resolvedTotalPages > 1 ? (
+          <div className="mt-5 hidden flex-wrap items-center justify-center gap-2 sm:gap-2.5 md:flex">
           <button
             type="button"
             aria-label="Página anterior"
@@ -262,14 +270,15 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
           <button
             type="button"
             aria-label="Página siguiente"
-            disabled={currentPage === directoryTotalPages}
-            onClick={() => setCurrentPage((page) => Math.min(directoryTotalPages, page + 1))}
+            disabled={currentPage === resolvedTotalPages}
+            onClick={() => setCurrentPage((page) => Math.min(resolvedTotalPages, page + 1))}
             className="inline-flex h-10 items-center gap-2 rounded-full border border-white/10 bg-[#07111f]/78 px-4 text-sm font-semibold text-slate-200 transition-all duration-300 hover:border-violet-400/25 hover:bg-[#0c1729] disabled:cursor-not-allowed disabled:opacity-45"
           >
             Siguiente
             <ChevronRight className="h-4 w-4" />
           </button>
-        </div>
+          </div>
+        ) : null}
       </div>
     </section>
   );

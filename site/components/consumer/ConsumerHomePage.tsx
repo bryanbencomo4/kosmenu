@@ -1,7 +1,9 @@
 import {
-  categories,
-  featuredBusinesses,
-  promotedBusinesses,
+  type ConsumerCategory,
+  type DiscoveryPin,
+  type FeaturedBusiness,
+  type NearbyBusiness,
+  type PromotedBusiness,
 } from '../../data/consumerBusinesses';
 import { CategoryChips } from './CategoryChips';
 import { ConsumerFooter } from './ConsumerFooter';
@@ -12,7 +14,25 @@ import { MapDiscoverySection } from './MapDiscoverySection';
 import { PromotedBusinessesSlider } from './PromotedBusinessesSlider';
 import { UserBenefitsSection } from './UserBenefitsSection';
 
-export function ConsumerHomePage() {
+type ConsumerHomePageProps = {
+  categories: ConsumerCategory[];
+  featuredBusinesses: FeaturedBusiness[];
+  promotedBusinesses: PromotedBusiness[];
+  nearbyBusinesses: NearbyBusiness[];
+  discoveryPins: DiscoveryPin[];
+  totalBusinesses: number;
+  totalPages: number;
+};
+
+export function ConsumerHomePage({
+  categories,
+  featuredBusinesses,
+  promotedBusinesses,
+  nearbyBusinesses,
+  discoveryPins,
+  totalBusinesses,
+  totalPages,
+}: ConsumerHomePageProps) {
   return (
     <main className="min-h-screen bg-[#040814] text-white">
       <div className="relative isolate overflow-hidden">
@@ -21,9 +41,9 @@ export function ConsumerHomePage() {
         <ConsumerNavbar />
         <HeroSearchSection />
         <PromotedBusinessesSlider businesses={promotedBusinesses} />
-        <MapDiscoverySection />
+        <MapDiscoverySection nearbyBusinesses={nearbyBusinesses} discoveryPins={discoveryPins} />
         <CategoryChips items={categories} />
-        <FeaturedBusinessesSection businesses={featuredBusinesses} />
+        <FeaturedBusinessesSection businesses={featuredBusinesses} totalBusinesses={totalBusinesses} totalPages={totalPages} />
         <UserBenefitsSection />
         <ConsumerFooter />
       </div>
