@@ -12,7 +12,13 @@ export function NearbyBusinessCard({ business, className = '' }: NearbyBusinessC
   return (
     <article className={`rounded-[1rem] border border-white/10 bg-[#09111f]/90 p-3 shadow-[0_22px_60px_-34px_rgba(15,23,42,1)] transition-all duration-300 hover:border-violet-400/25 sm:rounded-[1.15rem] sm:p-3.5 ${className}`}>
       <div className="grid grid-cols-[58px_minmax(0,1fr)] gap-3 sm:grid-cols-[68px_minmax(0,1fr)] sm:gap-3.5">
-        <FoodArtwork theme={business.artwork} title={business.name} variant="thumb" className="min-h-[58px] sm:min-h-[68px]" />
+        <FoodArtwork
+          theme={business.artwork}
+          title={business.name}
+          imageUrl={business.imageUrl}
+          variant="thumb"
+          className="min-h-[58px] sm:min-h-[68px]"
+        />
 
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-3">

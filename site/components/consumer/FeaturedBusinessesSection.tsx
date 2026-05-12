@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, ChevronLeft, ChevronRight, Clock3, Heart, MapPin, SlidersHorizontal, Star } from 'lucide-react';
 
@@ -10,12 +10,27 @@ import { FoodArtwork } from './FoodArtwork';
 type FeaturedBusinessesSectionProps = {
   businesses: FeaturedBusiness[];
   totalBusinesses: number;
-  totalPages: number;
+  allBusinessesTotal: number;
+  hasActiveFilters: boolean;
+  activeSummary: string[];
+  favoriteKeys: ReadonlySet<string>;
+  onToggleFavorite: (businessKey: string) => void;
+  onClearFilters: () => void;
+  onOpenFilters: () => void;
 };
 
 type PaginationItem = number | 'ellipsis';
 
+type SortOption = 'relevance' | 'rating' | 'distance' | 'name';
+
 const itemsPerPage = 10;
+const sortOptionOrder: SortOption[] = ['relevance', 'rating', 'distance', 'name'];
+const sortOptionLabels: Record<SortOption, string> = {
+  relevance: 'Relevancia',
+  rating: 'Mejor rating',
+  distance: 'Más cerca',
+  name: 'A-Z',
+};
 
 function buildPagination(currentPage: number, totalPages: number): PaginationItem[] {
   if (totalPages <= 5) {
@@ -33,16 +48,57 @@ function buildPagination(currentPage: number, totalPages: number): PaginationIte
   return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages];
 }
 
-export function FeaturedBusinessesSection({ businesses, totalBusinesses, totalPages }: FeaturedBusinessesSectionProps) {
+export function FeaturedBusinessesSection({
+  businesses,
+  totalBusinesses,
+  allBusinessesTotal,
+  hasActiveFilters,
+  activeSummary,
+  favoriteKeys,
+  onToggleFavorite,
+  onClearFilters,
+  onOpenFilters,
+}: FeaturedBusinessesSectionProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [mobileVisibleCount, setMobileVisibleCount] = useState(4);
-  const resolvedTotalPages = Math.max(1, totalPages);
-  const pageOffset = ((currentPage - 1) * 2) % businesses.length;
-  const visibleBusinesses = Array.from({ length: Math.min(itemsPerPage, businesses.length) }, (_, index) => {
-    return businesses[(pageOffset + index) % businesses.length];
-  });
-  const mobileBusinesses = businesses.slice(0, mobileVisibleCount);
+  const [sortBy, setSortBy] = useState<SortOption>('relevance');
+  const sortedBusinesses = useMemo(() => {
+    const nextBusinesses = [...businesses];
+
+    switch (sortBy) {
+      case 'rating':
+        return nextBusinesses.sort((a, b) => Number.parseFloat(b.rating) - Number.parseFloat(a.rating) || a.name.localeCompare(b.name, 'es'));
+      case 'distance':
+        return nextBusinesses.sort(
+          (a, b) => Number.parseFloat(a.distance) - Number.parseFloat(b.distance) || a.name.localeCompare(b.name, 'es'),
+        );
+      case 'name':
+        return nextBusinesses.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+      default:
+        return nextBusinesses;
+    }
+  }, [businesses, sortBy]);
+  const resolvedTotalPages = Math.max(1, Math.ceil(sortedBusinesses.length / itemsPerPage));
+  const pageStart = (currentPage - 1) * itemsPerPage;
+  const visibleBusinesses = sortedBusinesses.slice(pageStart, pageStart + itemsPerPage);
+  const mobileBusinesses = sortedBusinesses.slice(0, mobileVisibleCount);
   const paginationItems = buildPagination(currentPage, resolvedTotalPages);
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setMobileVisibleCount(4);
+  }, [businesses, sortBy]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, resolvedTotalPages));
+  }, [resolvedTotalPages]);
+
+  const cycleSortOption = () => {
+    setSortBy((currentSort) => {
+      const currentIndex = sortOptionOrder.indexOf(currentSort);
+      return sortOptionOrder[(currentIndex + 1) % sortOptionOrder.length];
+    });
+  };
 
   return (
     <section id="favoritos" className="px-3 pb-4 pt-3 sm:px-6 lg:px-8">
@@ -56,31 +112,60 @@ export function FeaturedBusinessesSection({ businesses, totalBusinesses, totalPa
 
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:w-auto lg:flex-nowrap">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 sm:text-[11px]">
-              {totalBusinesses} negocios encontrados
+              {hasActiveFilters ? `${totalBusinesses} de ${allBusinessesTotal} negocios encontrados` : `${totalBusinesses} negocios encontrados`}
             </p>
 
             <button
               type="button"
-              aria-label="Ordenar por relevancia"
+              aria-label={`Orden actual: ${sortOptionLabels[sortBy]}. Cambiar orden.`}
+              onClick={cycleSortOption}
               className="inline-flex h-10 items-center justify-between gap-2 rounded-full border border-white/10 bg-[#07111f]/72 px-4 text-[12px] font-semibold text-slate-200 transition-all duration-300 hover:border-violet-400/25 hover:bg-[#0c1729]"
             >
               <span className="sm:hidden">Ordenar</span>
-              <span className="hidden sm:inline">Ordenar por: Relevancia</span>
+              <span className="hidden sm:inline">Ordenar por: {sortOptionLabels[sortBy]}</span>
               <ChevronDown className="h-4 w-4 text-slate-400" />
             </button>
 
             <button
               type="button"
-              aria-label="Abrir filtros"
+              aria-label={hasActiveFilters ? 'Limpiar filtros activos' : 'Ir a los filtros de exploración'}
+              onClick={hasActiveFilters ? onClearFilters : onOpenFilters}
               className="inline-flex h-10 items-center gap-2 rounded-full border border-white/10 bg-[#07111f]/72 px-4 text-[12px] font-semibold text-slate-200 transition-all duration-300 hover:border-violet-400/25 hover:bg-[#0c1729]"
             >
               <SlidersHorizontal className="h-4 w-4 text-violet-300" />
-              Filtros
+              {hasActiveFilters ? 'Limpiar filtros' : 'Ir a filtros'}
             </button>
           </div>
         </div>
 
-        <div className="grid gap-3 md:hidden">
+        {activeSummary.length > 0 ? (
+          <div className="mb-4 flex flex-wrap gap-2">
+            {activeSummary.map((item) => (
+              <span
+                key={item}
+                className="inline-flex items-center rounded-full border border-violet-400/26 bg-violet-500/12 px-3 py-1 text-[11px] font-semibold text-violet-100"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {sortedBusinesses.length === 0 ? (
+          <div className="rounded-[1.15rem] border border-white/10 bg-[#07111f]/78 px-5 py-8 text-center shadow-[0_26px_80px_-56px_rgba(15,23,42,1)]">
+            <h3 className="text-lg font-black tracking-[-0.03em] text-white">No encontramos negocios con esos filtros</h3>
+            <p className="mt-2 text-sm text-slate-400">Prueba otra búsqueda o limpia los filtros para volver al directorio completo.</p>
+            <button
+              type="button"
+              onClick={onClearFilters}
+              className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-[#FACC15] px-5 text-sm font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
+            >
+              Ver todos los negocios
+            </button>
+          </div>
+        ) : null}
+
+        {sortedBusinesses.length > 0 ? <div className="grid gap-3 md:hidden">
           {mobileBusinesses.map((business) => (
             <article
               key={`mobile-${business.id}`}
@@ -88,13 +173,25 @@ export function FeaturedBusinessesSection({ businesses, totalBusinesses, totalPa
             >
               <div className="grid grid-cols-[108px_minmax(0,1fr)] gap-3 p-3 min-[390px]:grid-cols-[118px_minmax(0,1fr)] min-[390px]:p-3.5">
                 <div className="relative">
-                  <FoodArtwork theme={business.artwork} title={business.name} variant="showcase" className="min-h-[118px] rounded-[0.95rem]" />
+                  <FoodArtwork
+                    theme={business.artwork}
+                    title={business.name}
+                    imageUrl={business.imageUrl}
+                    variant="showcase"
+                    className="min-h-[118px] rounded-[0.95rem]"
+                  />
                   <button
                     type="button"
+                    aria-pressed={favoriteKeys.has(business.href ?? business.id)}
+                    onClick={() => onToggleFavorite(business.href ?? business.id)}
                     aria-label={`Guardar ${business.name} en favoritos`}
-                    className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/14 bg-[#07111f]/72 text-white transition-all duration-300 hover:border-rose-400/40 hover:text-rose-300"
+                    className={`absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border bg-[#07111f]/72 transition-all duration-300 ${
+                      favoriteKeys.has(business.href ?? business.id)
+                        ? 'border-rose-400/45 text-rose-300'
+                        : 'border-white/14 text-white hover:border-rose-400/40 hover:text-rose-300'
+                    }`}
                   >
-                    <Heart className="h-4 w-4" />
+                    <Heart className={`h-4 w-4 ${favoriteKeys.has(business.href ?? business.id) ? 'fill-current' : ''}`} />
                   </button>
                 </div>
 
@@ -147,23 +244,35 @@ export function FeaturedBusinessesSection({ businesses, totalBusinesses, totalPa
               </div>
             </article>
           ))}
-        </div>
+        </div> : null}
 
-        <div className="hidden gap-3 md:grid md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 xl:gap-4">
+        {sortedBusinesses.length > 0 ? <div className="hidden gap-3 md:grid md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 xl:gap-4">
           {visibleBusinesses.map((business) => (
             <article
               key={`${currentPage}-${business.id}`}
               className="overflow-hidden rounded-[1.05rem] border border-white/10 bg-[#07111f]/82 shadow-[0_30px_90px_-55px_rgba(15,23,42,1)] backdrop-blur-xl"
             >
               <div className="relative">
-                <FoodArtwork theme={business.artwork} title={business.name} variant="showcase" className="min-h-[118px] rounded-none border-0" />
+                <FoodArtwork
+                  theme={business.artwork}
+                  title={business.name}
+                  imageUrl={business.imageUrl}
+                  variant="showcase"
+                  className="min-h-[118px] rounded-none border-0"
+                />
 
                 <button
                   type="button"
+                  aria-pressed={favoriteKeys.has(business.href ?? business.id)}
+                  onClick={() => onToggleFavorite(business.href ?? business.id)}
                   aria-label={`Guardar ${business.name} en favoritos`}
-                  className="absolute right-2.5 top-2.5 inline-flex h-8.5 w-8.5 items-center justify-center rounded-full border border-white/14 bg-[#07111f]/72 text-white transition-all duration-300 hover:border-rose-400/40 hover:text-rose-300"
+                  className={`absolute right-2.5 top-2.5 inline-flex h-8.5 w-8.5 items-center justify-center rounded-full border bg-[#07111f]/72 transition-all duration-300 ${
+                    favoriteKeys.has(business.href ?? business.id)
+                      ? 'border-rose-400/45 text-rose-300'
+                      : 'border-white/14 text-white hover:border-rose-400/40 hover:text-rose-300'
+                  }`}
                 >
-                  <Heart className="h-4 w-4" />
+                  <Heart className={`h-4 w-4 ${favoriteKeys.has(business.href ?? business.id) ? 'fill-current' : ''}`} />
                 </button>
               </div>
 
@@ -215,14 +324,14 @@ export function FeaturedBusinessesSection({ businesses, totalBusinesses, totalPa
               </div>
             </article>
           ))}
-        </div>
+        </div> : null}
 
-        <div className="mt-5 md:hidden">
-          {mobileVisibleCount < businesses.length ? (
+        {sortedBusinesses.length > 0 ? <div className="mt-5 md:hidden">
+          {mobileVisibleCount < sortedBusinesses.length ? (
             <button
               type="button"
               aria-label="Cargar más catálogos"
-              onClick={() => setMobileVisibleCount((count) => Math.min(businesses.length, count + 3))}
+              onClick={() => setMobileVisibleCount((count) => Math.min(sortedBusinesses.length, count + 3))}
               className="inline-flex h-11 w-full items-center justify-center rounded-full border border-violet-400/28 bg-violet-500/10 px-5 text-sm font-bold text-white transition-all duration-300 hover:border-violet-300/45 hover:bg-violet-500/16"
             >
               Cargar más catálogos
@@ -230,9 +339,9 @@ export function FeaturedBusinessesSection({ businesses, totalBusinesses, totalPa
           ) : (
             <p className="text-center text-[12px] text-slate-500">Mostrando todos los catálogos destacados por ahora.</p>
           )}
-        </div>
+        </div> : null}
 
-        {resolvedTotalPages > 1 ? (
+        {sortedBusinesses.length > 0 && resolvedTotalPages > 1 ? (
           <div className="mt-5 hidden flex-wrap items-center justify-center gap-2 sm:gap-2.5 md:flex">
           <button
             type="button"

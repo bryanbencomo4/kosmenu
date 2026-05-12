@@ -9,9 +9,17 @@ import { FoodArtwork } from './FoodArtwork';
 
 type PromotedBusinessesSliderProps = {
   businesses: PromotedBusiness[];
+  favoriteKeys: ReadonlySet<string>;
+  onToggleFavorite: (businessKey: string) => void;
+  onViewAllPromotions: () => void;
 };
 
-export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSliderProps) {
+export function PromotedBusinessesSlider({
+  businesses,
+  favoriteKeys,
+  onToggleFavorite,
+  onViewAllPromotions,
+}: PromotedBusinessesSliderProps) {
   const sliderRef = useRef<HTMLDivElement | null>(null);
   const [featuredBusiness, ...secondaryBusinesses] = businesses;
 
@@ -45,6 +53,7 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
 
           <button
             type="button"
+            onClick={onViewAllPromotions}
             className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-violet-300 transition-colors duration-300 hover:text-violet-200 sm:text-sm"
           >
             Ver todas las promociones
@@ -81,6 +90,7 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
                 <FoodArtwork
                   theme={featuredBusiness.artwork}
                   title={featuredBusiness.name}
+                  imageUrl={featuredBusiness.imageUrl}
                   variant="showcase"
                   className="min-h-[158px] min-[390px]:min-h-[166px] min-[560px]:min-h-[205px] xl:min-h-[208px]"
                 />
@@ -98,10 +108,16 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
 
                 <button
                   type="button"
+                  aria-pressed={favoriteKeys.has(featuredBusiness.href ?? featuredBusiness.id)}
+                  onClick={() => onToggleFavorite(featuredBusiness.href ?? featuredBusiness.id)}
                   aria-label={`Guardar ${featuredBusiness.name} en favoritos`}
-                  className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/14 bg-[#07111f]/75 text-white transition-all duration-300 hover:border-rose-400/40 hover:text-rose-300"
+                  className={`absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full border bg-[#07111f]/75 transition-all duration-300 ${
+                    favoriteKeys.has(featuredBusiness.href ?? featuredBusiness.id)
+                      ? 'border-rose-400/45 text-rose-300'
+                      : 'border-white/14 text-white hover:border-rose-400/40 hover:text-rose-300'
+                  }`}
                 >
-                  <Heart className="h-4.5 w-4.5" />
+                  <Heart className={`h-4.5 w-4.5 ${favoriteKeys.has(featuredBusiness.href ?? featuredBusiness.id) ? 'fill-current' : ''}`} />
                 </button>
               </div>
 
@@ -157,6 +173,7 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
                 <FoodArtwork
                   theme={business.artwork}
                   title={business.name}
+                  imageUrl={business.imageUrl}
                   variant="showcase"
                   className="min-h-[98px] min-[390px]:min-h-[108px] sm:min-h-[118px]"
                 />
@@ -167,10 +184,16 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
 
                 <button
                   type="button"
+                  aria-pressed={favoriteKeys.has(business.href ?? business.id)}
+                  onClick={() => onToggleFavorite(business.href ?? business.id)}
                   aria-label={`Guardar ${business.name} en favoritos`}
-                  className="absolute right-2.5 top-2.5 inline-flex h-8.5 w-8.5 items-center justify-center rounded-full border border-white/14 bg-[#07111f]/75 text-white transition-all duration-300 hover:border-rose-400/40 hover:text-rose-300"
+                  className={`absolute right-2.5 top-2.5 inline-flex h-8.5 w-8.5 items-center justify-center rounded-full border bg-[#07111f]/75 transition-all duration-300 ${
+                    favoriteKeys.has(business.href ?? business.id)
+                      ? 'border-rose-400/45 text-rose-300'
+                      : 'border-white/14 text-white hover:border-rose-400/40 hover:text-rose-300'
+                  }`}
                 >
-                  <Heart className="h-4 w-4" />
+                  <Heart className={`h-4 w-4 ${favoriteKeys.has(business.href ?? business.id) ? 'fill-current' : ''}`} />
                 </button>
               </div>
 

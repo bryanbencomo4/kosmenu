@@ -14,12 +14,14 @@ export type NearbyBusiness = {
   name: string;
   category: string;
   href?: string;
+  imageUrl?: string | null;
   rating: string;
   distance: string;
   eta: string;
   status: 'ABIERTO';
   artwork: FoodArtworkTheme;
   accent: string;
+  hasPreciseLocation?: boolean;
   zone: string;
   location: {
     lat: number;
@@ -37,6 +39,7 @@ export type PromotedBusiness = NearbyBusiness & {
 export type FeaturedBusiness = NearbyBusiness & {
   cuisine: string;
   tags: Array<'Delivery' | 'Retiro'>;
+  isPromoted?: boolean;
 };
 
 export type ConsumerCategory = {

@@ -3,6 +3,7 @@ import type { FoodArtworkTheme } from '../../data/consumerBusinesses';
 type FoodArtworkProps = {
   theme: FoodArtworkTheme;
   title: string;
+  imageUrl?: string | null;
   className?: string;
   variant?: 'default' | 'thumb' | 'promo' | 'showcase';
 };
@@ -84,10 +85,16 @@ const artworkStyles: Record<
 export function FoodArtwork({
   theme,
   title,
+  imageUrl,
   className = '',
   variant = 'default',
 }: FoodArtworkProps) {
   const style = artworkStyles[theme];
+  const resolvedImage = imageUrl?.trim() ? imageUrl.trim() : style.image;
+  const backgroundStyle = {
+    backgroundImage: `url("${resolvedImage}")`,
+    backgroundPosition: style.position,
+  };
 
   if (variant === 'thumb') {
     return (
@@ -96,7 +103,7 @@ export function FoodArtwork({
       >
         <div
           className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${style.image})`, backgroundPosition: style.position }}
+          style={backgroundStyle}
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.08)_0%,rgba(8,13,24,0.18)_45%,rgba(8,13,24,0.58)_100%)]" />
         <span className="sr-only">{title}</span>
@@ -111,7 +118,7 @@ export function FoodArtwork({
       >
         <div
           className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${style.image})`, backgroundPosition: style.position }}
+          style={backgroundStyle}
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.03)_0%,rgba(8,13,24,0.08)_36%,rgba(8,13,24,0.56)_100%)]" />
         <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,0.4)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.4)_1px,transparent_1px)] [background-size:28px_28px]" />
@@ -132,7 +139,7 @@ export function FoodArtwork({
       >
         <div
           className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${style.image})`, backgroundPosition: style.position }}
+          style={backgroundStyle}
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.02)_0%,rgba(8,13,24,0.12)_42%,rgba(8,13,24,0.46)_100%)]" />
         <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(255,255,255,0.35)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.35)_1px,transparent_1px)] [background-size:28px_28px]" />
@@ -147,7 +154,7 @@ export function FoodArtwork({
     >
       <div
         className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${style.image})`, backgroundPosition: style.position }}
+        style={backgroundStyle}
       />
       <div className="absolute inset-0" style={{ backgroundImage: style.gradient }} />
       <div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(rgba(255,255,255,0.55)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.55)_1px,transparent_1px)] [background-size:24px_24px]" />

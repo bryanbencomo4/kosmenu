@@ -23,6 +23,7 @@ type CommerceRow = {
   categoria: string | null;
   slug: string | null;
   direccion: string | null;
+  logo_url: string | null;
   latitud: number | string | null;
   longitud: number | string | null;
   permite_delivery: boolean | null;
@@ -62,11 +63,13 @@ type CommerceEntry = {
   emoji: string;
   categoryLabel: string;
   href: string;
+  imageUrl: string | null;
   zone: string;
   location: {
     lat: number;
     lng: number;
   };
+  hasPreciseLocation: boolean;
   isLocalToMap: boolean;
   distanceKm: number;
   rating: string;
@@ -79,16 +82,22 @@ export type PublicConsumerHomeData = {
   promotedBusinesses: PromotedBusiness[];
   nearbyBusinesses: NearbyBusiness[];
   discoveryPins: DiscoveryPin[];
+  mapCenter: {
+    lat: number;
+    lng: number;
+  };
+  hasRealNearbyData: boolean;
   totalBusinesses: number;
   totalPages: number;
 };
 
-const FEATURED_LIMIT = 10;
 const PROMOTED_LIMIT = 5;
 const NEARBY_LIMIT = 3;
 const CATEGORY_LIMIT = 8;
 const ITEMS_PER_PAGE = 10;
 const LOCAL_MAP_RADIUS_KM = 25;
+const REAL_MAP_CLUSTER_RADIUS_KM = 18;
+const MAX_DISCOVERY_PINS = 8;
 const MAP_CENTER = { lat: 10.4966, lng: -66.8535 };
 
 const THEME_PRESETS: Record<
@@ -117,6 +126,8 @@ function fallbackData(): PublicConsumerHomeData {
     promotedBusinesses: fallbackPromotedBusinesses,
     nearbyBusinesses: fallbackNearbyBusinesses,
     discoveryPins: fallbackDiscoveryPins,
+    mapCenter: MAP_CENTER,
+    hasRealNearbyData: false,
     totalBusinesses: directoryTotalBusinesses,
     totalPages: directoryTotalPages,
   };
@@ -154,6 +165,18 @@ function toNumber(value: number | string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function isValidCoordinate(lat: number, lng: number) {
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return false;
+  }
+
+  if (Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01) {
+    return false;
+  }
+
+  return true;
+}
+
 function toZone(address: string | null, fallback: string) {
   const zone = (address ?? '')
     .split(',')
@@ -180,13 +203,19 @@ function resolveLocation(commerce: CommerceRow, index: number) {
   const lat = toNumber(commerce.latitud);
   const lng = toNumber(commerce.longitud);
 
-  if (lat !== null && lng !== null) {
-    return { lat, lng };
+  if (lat !== null && lng !== null && isValidCoordinate(lat, lng)) {
+    return {
+      location: { lat, lng },
+      hasPreciseLocation: true,
+    };
   }
 
   return {
-    lat: MAP_CENTER.lat + index * 0.0035,
-    lng: MAP_CENTER.lng - index * 0.003,
+    location: {
+      lat: MAP_CENTER.lat + index * 0.0035,
+      lng: MAP_CENTER.lng - index * 0.003,
+    },
+    hasPreciseLocation: false,
   };
 }
 
@@ -249,6 +278,19 @@ function computeCuisine(entry: CommerceEntry) {
   return `Catálogo disponible de ${entry.categoryLabel.toLowerCase()}`;
 }
 
+function resolveImageUrl(commerce: CommerceRow, products: ProductRow[]) {
+  const productImage = products
+    .map((product) => product.imagen_url?.trim())
+    .find((imageUrl): imageUrl is string => Boolean(imageUrl));
+
+  if (productImage) {
+    return productImage;
+  }
+
+  const logoUrl = commerce.logo_url?.trim();
+  return logoUrl || null;
+}
+
 function menuHref(commerce: CommerceRow) {
   const slug = (commerce.slug ?? '').trim();
   return slug ? `/v/${slug}` : `/v/${commerce.id}`;
@@ -257,6 +299,81 @@ function menuHref(commerce: CommerceRow) {
 function sanitizeEmoji(icon: string | null | undefined, fallback: string) {
   const sanitized = (icon ?? '').trim();
   return sanitized ? Array.from(sanitized)[0] : fallback;
+}
+
+function formatDistance(distanceKm: number) {
+  return `${Math.max(0.2, Math.round(distanceKm * 10) / 10).toFixed(1)} km`;
+}
+
+function averageLocation(entries: Array<{ location: { lat: number; lng: number } }>) {
+  if (entries.length === 0) {
+    return MAP_CENTER;
+  }
+
+  const totals = entries.reduce(
+    (accumulator, entry) => ({
+      lat: accumulator.lat + entry.location.lat,
+      lng: accumulator.lng + entry.location.lng,
+    }),
+    { lat: 0, lng: 0 },
+  );
+
+  return {
+    lat: totals.lat / entries.length,
+    lng: totals.lng / entries.length,
+  };
+}
+
+function buildRealMapCluster(entries: CommerceEntry[]) {
+  const preciseEntries = entries.filter((entry) => entry.hasPreciseLocation);
+
+  if (preciseEntries.length === 0) {
+    return null;
+  }
+
+  let bestCenter = averageLocation([preciseEntries[0]]);
+  let bestScore = -Infinity;
+
+  for (const seedEntry of preciseEntries) {
+    const candidateCluster = preciseEntries
+      .filter((entry) => {
+        return (
+          haversineKm(seedEntry.location.lat, seedEntry.location.lng, entry.location.lat, entry.location.lng) <=
+          REAL_MAP_CLUSTER_RADIUS_KM
+        );
+      })
+      .slice(0, MAX_DISCOVERY_PINS);
+    const resolvedCluster = candidateCluster.length > 0 ? candidateCluster : [seedEntry];
+    const candidateCenter = averageLocation(resolvedCluster);
+    const candidateScore =
+      resolvedCluster.length * 100 -
+      resolvedCluster.reduce((total, entry) => {
+        return total + haversineKm(candidateCenter.lat, candidateCenter.lng, entry.location.lat, entry.location.lng);
+      }, 0);
+
+    if (candidateScore > bestScore) {
+      bestScore = candidateScore;
+      bestCenter = candidateCenter;
+    }
+  }
+
+  const entriesByCenterDistance = [...preciseEntries]
+    .sort((a, b) => {
+      const aDistance = haversineKm(bestCenter.lat, bestCenter.lng, a.location.lat, a.location.lng);
+      const bDistance = haversineKm(bestCenter.lat, bestCenter.lng, b.location.lat, b.location.lng);
+
+      if (aDistance !== bDistance) {
+        return aDistance - bDistance;
+      }
+
+      return compareByFreshness(a, b);
+    })
+    .slice(0, MAX_DISCOVERY_PINS);
+
+  return {
+    center: bestCenter,
+    entries: entriesByCenterDistance,
+  };
 }
 
 function compareByFreshness(a: CommerceEntry, b: CommerceEntry) {
@@ -271,7 +388,7 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
     const { data: commerces, error: commercesError } = await supabase
       .from('comercios')
       .select(
-        'id,nombre,categoria,slug,direccion,latitud,longitud,permite_delivery,recibe_pedidos_whatsapp,en_linea,color_principal,updated_at,created_at',
+        'id,nombre,categoria,slug,direccion,logo_url,latitud,longitud,permite_delivery,recibe_pedidos_whatsapp,en_linea,color_principal,updated_at,created_at',
       )
       .eq('en_linea', true)
       .order('updated_at', { ascending: false })
@@ -335,9 +452,9 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
           ...commerceProducts.slice(0, 4).flatMap((product) => [product.nombre, product.descripcion]),
         );
         const preset = THEME_PRESETS[theme];
-        const location = resolveLocation(commerce, index);
+        const { location, hasPreciseLocation } = resolveLocation(commerce, index);
         const rawDistanceKm = computeDistanceKm(location, index);
-        const isLocalToMap = rawDistanceKm <= LOCAL_MAP_RADIUS_KM;
+        const isLocalToMap = hasPreciseLocation && rawDistanceKm <= LOCAL_MAP_RADIUS_KM;
         const distanceKm = normalizeDisplayDistance(rawDistanceKm, index);
         const categoryLabel = computeCategoryLabel({ commerce, categories: commerceCategories, theme });
 
@@ -350,8 +467,10 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
           emoji: preset.emoji,
           categoryLabel,
           href: menuHref(commerce),
+          imageUrl: resolveImageUrl(commerce, commerceProducts),
           zone: toZone(commerce.direccion, (commerce.nombre ?? '').trim()),
           location,
+          hasPreciseLocation,
           isLocalToMap,
           distanceKm,
           rating: computeRating(commerceProducts.length, commerceCategories.length, index),
@@ -378,7 +497,7 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
       return compareByFreshness(a, b);
     });
 
-    const featuredBusinesses: FeaturedBusiness[] = rankedEntries.slice(0, FEATURED_LIMIT).map((entry) => ({
+    const featuredBusinesses: FeaturedBusiness[] = rankedEntries.map((entry, index) => ({
       id: `featured-${entry.commerce.id}`,
       name: entry.commerce.nombre?.trim() || 'Negocio sin nombre',
       category: entry.categoryLabel,
@@ -389,10 +508,13 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
       status: 'ABIERTO',
       artwork: entry.theme,
       accent: entry.accent,
+      imageUrl: entry.imageUrl,
+      hasPreciseLocation: entry.hasPreciseLocation,
       zone: entry.zone,
       location: entry.location,
       tags: entry.commerce.permite_delivery ? ['Delivery', 'Retiro'] : ['Retiro'],
       href: entry.href,
+      isPromoted: index < PROMOTED_LIMIT,
     }));
 
     const promotedBusinesses: PromotedBusiness[] = rankedEntries.slice(0, PROMOTED_LIMIT).map((entry, index) => ({
@@ -405,6 +527,8 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
       status: 'ABIERTO',
       artwork: entry.theme,
       accent: entry.accent,
+      imageUrl: entry.imageUrl,
+      hasPreciseLocation: entry.hasPreciseLocation,
       zone: entry.zone,
       location: entry.location,
       promoLabel: 'PROMO DEL DIA',
@@ -416,39 +540,44 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
       href: entry.href,
     }));
 
-    const localNearbyEntries = [...entries]
-      .filter((entry) => entry.isLocalToMap)
-      .sort((a, b) => a.distanceKm - b.distanceKm)
-      .slice(0, NEARBY_LIMIT);
+    const realMapCluster = buildRealMapCluster(rankedEntries);
+    const nearbyBusinesses: NearbyBusiness[] = realMapCluster
+      ? realMapCluster.entries.slice(0, NEARBY_LIMIT).map((entry, index) => {
+          const clusterDistanceKm = haversineKm(
+            realMapCluster.center.lat,
+            realMapCluster.center.lng,
+            entry.location.lat,
+            entry.location.lng,
+          );
 
-    const nearbyBusinesses: NearbyBusiness[] = (localNearbyEntries.length > 0
-      ? localNearbyEntries.map((entry) => ({
-          id: `nearby-${entry.commerce.id}`,
-          name: entry.commerce.nombre?.trim() || 'Negocio sin nombre',
-          category: entry.categoryLabel,
-          rating: entry.rating,
-          distance: `${entry.distanceKm.toFixed(1)} km`,
-          eta: `${Math.max(6, entry.etaMinutes - 2)} min`,
-          status: 'ABIERTO' as const,
-          artwork: entry.theme,
-          accent: entry.accent,
-          zone: entry.zone,
-          location: entry.location,
-          href: entry.href,
-        }))
-      : fallbackNearbyBusinesses)
-      .slice(0, NEARBY_LIMIT);
-
-    const discoveryPins: DiscoveryPin[] =
-      localNearbyEntries.length > 0
-        ? localNearbyEntries.map((entry) => ({
-            id: `pin-nearby-${entry.commerce.id}`,
+          return {
+            id: `nearby-${entry.commerce.id}`,
             name: entry.commerce.nombre?.trim() || 'Negocio sin nombre',
-            accent: entry.accent,
             category: entry.categoryLabel,
+            rating: entry.rating,
+            distance: formatDistance(clusterDistanceKm),
+            eta: `${Math.max(6, computeEta(clusterDistanceKm, index) - 2)} min`,
+            status: 'ABIERTO' as const,
+            artwork: entry.theme,
+            accent: entry.accent,
+            imageUrl: entry.imageUrl,
+            hasPreciseLocation: true,
+            zone: entry.zone,
             location: entry.location,
-          }))
-        : fallbackDiscoveryPins;
+            href: entry.href,
+          };
+        })
+      : fallbackNearbyBusinesses.slice(0, NEARBY_LIMIT);
+
+    const discoveryPins: DiscoveryPin[] = realMapCluster
+      ? realMapCluster.entries.map((entry) => ({
+          id: `pin-nearby-${entry.commerce.id}`,
+          name: entry.commerce.nombre?.trim() || 'Negocio sin nombre',
+          accent: entry.accent,
+          category: entry.categoryLabel,
+          location: entry.location,
+        }))
+      : fallbackDiscoveryPins;
 
     const categoryScores = new Map<
       string,
@@ -517,6 +646,8 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
       promotedBusinesses,
       nearbyBusinesses,
       discoveryPins,
+      mapCenter: realMapCluster?.center ?? MAP_CENTER,
+      hasRealNearbyData: Boolean(realMapCluster),
       totalBusinesses: rankedEntries.length,
       totalPages: Math.max(1, Math.ceil(rankedEntries.length / ITEMS_PER_PAGE)),
     };

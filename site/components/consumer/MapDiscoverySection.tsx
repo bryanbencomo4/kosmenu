@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, LoaderCircle, LocateFixed, Minus, Plus, Star } from 'lucide-react';
 
 import {
@@ -13,12 +13,18 @@ import { FoodArtwork } from './FoodArtwork';
 type MapDiscoverySectionProps = {
   nearbyBusinesses: NearbyBusiness[];
   discoveryPins: DiscoveryPin[];
+  initialMapCenter: { lat: number; lng: number };
+  hasRealNearbyData: boolean;
+  userLocation: { lat: number; lng: number } | null;
+  locationState: 'idle' | 'requesting' | 'ready' | 'denied' | 'unsupported' | 'error';
+  onRequestUserLocation: () => void;
 };
 
 type GoogleMapInstance = {
   setCenter: (location: { lat: number; lng: number }) => void;
   setZoom: (zoom: number) => void;
   getZoom: () => number | undefined;
+  fitBounds?: (bounds: GoogleMapBounds) => void;
   panTo?: (location: { lat: number; lng: number }) => void;
   addListener?: (eventName: string, handler: () => void) => GoogleMapListener | void;
 };
@@ -31,6 +37,10 @@ type GoogleMapListener = {
   remove: () => void;
 };
 
+type GoogleMapBounds = {
+  extend: (location: { lat: number; lng: number }) => void;
+};
+
 type GoogleMapSize = unknown;
 type GoogleMapPoint = unknown;
 
@@ -38,6 +48,7 @@ type GoogleMapsApi = {
   maps: {
     Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMapInstance;
     Marker: new (options: Record<string, unknown>) => GoogleMapMarker;
+    LatLngBounds: new () => GoogleMapBounds;
     Size: new (width: number, height: number) => GoogleMapSize;
     Point: new (x: number, y: number) => GoogleMapPoint;
   };
@@ -51,7 +62,10 @@ declare global {
 }
 
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
-const mapCenter = { lat: 10.4966, lng: -66.8535 };
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 const darkMapStyles: Array<Record<string, unknown>> = [
   {
@@ -177,13 +191,32 @@ function loadGoogleMapsApi() {
 }
 
 function MapPlaceholder({ pins }: { pins: DiscoveryPin[] }) {
-  const positions = [
-    'left-[14%] top-[32%]',
-    'left-[40%] top-[22%]',
-    'left-[58%] top-[54%]',
-    'right-[22%] top-[30%]',
-    'right-[10%] bottom-[20%]',
-  ];
+  const pinPositions = useMemo(() => {
+    if (pins.length === 0) {
+      return [];
+    }
+
+    const latitudes = pins.map((pin) => pin.location.lat);
+    const longitudes = pins.map((pin) => pin.location.lng);
+    const minLat = Math.min(...latitudes);
+    const maxLat = Math.max(...latitudes);
+    const minLng = Math.min(...longitudes);
+    const maxLng = Math.max(...longitudes);
+    const latSpan = Math.max(0.01, maxLat - minLat);
+    const lngSpan = Math.max(0.01, maxLng - minLng);
+
+    return pins.map((pin, index) => {
+      const left = 12 + ((pin.location.lng - minLng) / lngSpan) * 74;
+      const top = 16 + ((maxLat - pin.location.lat) / latSpan) * 62;
+      const offset = (index % 3) - 1;
+
+      return {
+        id: pin.id,
+        left: clamp(left + offset * 2.5, 8, 90),
+        top: clamp(top + offset * 2.5, 14, 82),
+      };
+    });
+  }, [pins]);
 
   return (
     <div className="absolute inset-0 overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,#07111f_0%,#091728_100%)]">
@@ -195,8 +228,15 @@ function MapPlaceholder({ pins }: { pins: DiscoveryPin[] }) {
       <div className="absolute left-[-8%] top-[-18%] h-48 w-48 rounded-full bg-violet-500/20 blur-3xl" />
       <div className="absolute bottom-[-12%] right-[-4%] h-44 w-44 rounded-full bg-cyan-400/14 blur-3xl" />
 
-      {pins.map((pin, index) => (
-        <div key={pin.id} className={`absolute ${positions[index] ?? positions[0]}`}>
+      {pins.map((pin, index) => {
+        const position = pinPositions[index] ?? { left: 50, top: 50 };
+
+        return (
+        <div
+          key={pin.id}
+          className="absolute -translate-x-1/2 -translate-y-1/2"
+          style={{ left: `${position.left}%`, top: `${position.top}%` }}
+        >
           <div className="relative flex flex-col items-center gap-2">
             <div className="absolute inset-x-2 top-7 h-6 rounded-full bg-black/45 blur-lg" />
             <div className="relative rounded-full border border-white/14 bg-[#07111f]/90 p-1.5">
@@ -212,18 +252,53 @@ function MapPlaceholder({ pins }: { pins: DiscoveryPin[] }) {
             </span>
           </div>
         </div>
-      ))}
+      );})}
     </div>
   );
 }
 
-export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDiscoverySectionProps) {
+export function MapDiscoverySection({
+  nearbyBusinesses,
+  discoveryPins,
+  initialMapCenter,
+  hasRealNearbyData,
+  userLocation,
+  locationState,
+  onRequestUserLocation,
+}: MapDiscoverySectionProps) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<GoogleMapInstance | null>(null);
   const markersRef = useRef<GoogleMapMarker[]>([]);
   const [mapMode, setMapMode] = useState<'loading' | 'google' | 'placeholder'>(
     googleMapsJsApiKey ? 'loading' : 'placeholder',
   );
+  const liveOpenCount = nearbyBusinesses.length;
+  const locationMessage =
+    locationState === 'ready'
+      ? 'Distancias calculadas desde tu ubicación actual.'
+      : locationState === 'requesting'
+        ? 'Buscando tu ubicación para reordenar los negocios cercanos.'
+        : locationState === 'denied'
+          ? hasRealNearbyData
+            ? 'No se concedió acceso a tu ubicación. Mostrando negocios con coordenadas reales publicadas.'
+            : 'No se concedió acceso a tu ubicación. Mostrando una referencia general.'
+          : locationState === 'unsupported'
+            ? hasRealNearbyData
+              ? 'Este navegador no soporta geolocalización. Mostrando negocios con coordenadas reales publicadas.'
+              : 'Este navegador no soporta geolocalización. Mostrando una referencia general.'
+            : locationState === 'error'
+              ? hasRealNearbyData
+                ? 'No pudimos obtener tu ubicación. Mostrando negocios con coordenadas reales publicadas.'
+                : 'No pudimos obtener tu ubicación. Inténtalo de nuevo.'
+              : hasRealNearbyData
+                ? 'Mostrando negocios con ubicación real publicada. Activa tu ubicación para ordenarlos cerca de ti.'
+                : 'Activa tu ubicación para ver negocios realmente cerca de ti.';
+  const locationButtonLabel =
+    locationState === 'requesting'
+      ? 'Ubicando...'
+      : userLocation
+        ? 'Actualizar ubicación'
+        : 'Usar mi ubicación';
 
   const adjustZoom = (delta: number) => {
     const map = mapInstanceRef.current;
@@ -243,17 +318,18 @@ export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDisc
 
   const recenterMap = () => {
     const map = mapInstanceRef.current;
+    const nextCenter = userLocation ?? initialMapCenter;
 
     if (!map) {
       return;
     }
 
     if (typeof map.panTo === 'function') {
-      map.panTo(mapCenter);
+      map.panTo(nextCenter);
       return;
     }
 
-    map.setCenter(mapCenter);
+    map.setCenter(nextCenter);
   };
 
   useEffect(() => {
@@ -277,8 +353,8 @@ export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDisc
       }
 
       const map = new google.maps.Map(mapRef.current, {
-        center: mapCenter,
-        zoom: 13.3,
+        center: userLocation ?? initialMapCenter,
+        zoom: userLocation ? 14.2 : 13.3,
         disableDefaultUI: true,
         zoomControl: false,
         gestureHandling: 'cooperative',
@@ -328,6 +404,27 @@ export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDisc
             },
           }),
       );
+
+      if (discoveryPins.length > 0 && typeof map.fitBounds === 'function') {
+        const bounds = new google.maps.LatLngBounds();
+
+        for (const pin of discoveryPins) {
+          bounds.extend(pin.location);
+        }
+
+        map.fitBounds(bounds);
+
+        window.setTimeout(() => {
+          if (cancelled) {
+            return;
+          }
+
+          const zoom = map.getZoom();
+          if (typeof zoom === 'number') {
+            map.setZoom(Math.min(zoom, userLocation ? 14.8 : 13.8));
+          }
+        }, 180);
+      }
     }
 
     attachMap();
@@ -347,7 +444,7 @@ export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDisc
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
     };
-  }, [discoveryPins]);
+  }, [discoveryPins, initialMapCenter, userLocation]);
 
   return (
     <section id="mapa" className="relative z-10 px-3 pb-4 pt-3 sm:px-6 lg:pt-3 lg:px-8">
@@ -357,12 +454,23 @@ export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDisc
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-[1rem] font-black text-white sm:text-base">Cerca de ti</p>
-                <p className="mt-1 text-[12px] leading-5 text-slate-400">Negocios abiertos con tiempos y distancia estimada.</p>
+                <p className="mt-1 text-[12px] leading-5 text-slate-400">{locationMessage}</p>
               </div>
-              <button type="button" className="inline-flex items-center gap-1 text-[13px] font-semibold text-violet-300 sm:text-sm">
-                Ver más negocios cercanos
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onRequestUserLocation}
+                  disabled={locationState === 'requesting'}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/24 bg-violet-500/10 px-3 py-2 text-[12px] font-semibold text-violet-100 transition-all duration-300 hover:border-violet-300/40 hover:bg-violet-500/16 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {locationState === 'requesting' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
+                  {locationButtonLabel}
+                </button>
+                <button type="button" className="inline-flex items-center gap-1 text-[13px] font-semibold text-violet-300 sm:text-sm">
+                  Ver más negocios cercanos
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
             <div className="hide-scrollbar mt-3 flex gap-2.5 overflow-x-auto pb-1 sm:mt-4 sm:grid sm:grid-cols-2 sm:gap-3 sm:overflow-visible sm:pb-0 lg:grid-cols-3">
               {nearbyBusinesses.map((business) => (
@@ -414,14 +522,29 @@ export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDisc
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-base font-black text-white">Cerca de ti</p>
-                <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">3 abiertos ahora</p>
+                <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">{liveOpenCount} abiertos ahora</p>
               </div>
-              <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold text-emerald-300">Live</span>
+              <button
+                type="button"
+                onClick={onRequestUserLocation}
+                disabled={locationState === 'requesting'}
+                className="inline-flex items-center gap-1 rounded-full border border-violet-400/25 bg-violet-500/10 px-2.5 py-1 text-[9px] font-bold text-violet-100 transition-all duration-300 hover:border-violet-300/40 hover:bg-violet-500/16 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {locationState === 'requesting' ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <LocateFixed className="h-3 w-3" />}
+                {userLocation ? 'Actualizada' : 'Ubicar'}
+              </button>
             </div>
+            <p className="mt-2 text-[11px] leading-5 text-slate-400">{locationMessage}</p>
             <div className="mt-3 space-y-2.5">
               {nearbyBusinesses.map((business) => (
                 <div key={business.id} className="grid grid-cols-[54px_minmax(0,1fr)_auto] items-center gap-3 rounded-[1rem] border border-white/8 bg-white/5 px-2.5 py-2.5">
-                  <FoodArtwork theme={business.artwork} title={business.name} variant="thumb" className="min-h-[54px]" />
+                  <FoodArtwork
+                    theme={business.artwork}
+                    title={business.name}
+                    imageUrl={business.imageUrl}
+                    variant="thumb"
+                    className="min-h-[54px]"
+                  />
                   <div className="min-w-0">
                     <p className="truncate text-[13px] font-semibold text-white">{business.name}</p>
                     <p className="mt-0.5 text-[11px] text-slate-400">{business.category}</p>
@@ -442,7 +565,7 @@ export function MapDiscoverySection({ nearbyBusinesses, discoveryPins }: MapDisc
           </div>
 
           <div className="absolute bottom-4 left-4 z-10 right-16 hidden rounded-full border border-white/10 bg-[#08111f]/88 px-4 py-2 text-[13px] font-medium text-slate-200 backdrop-blur lg:flex xl:hidden">
-            Mapa oscuro, pines por categoría y negocios cercanos abiertos ahora.
+            {locationMessage}
           </div>
         </div>
 
