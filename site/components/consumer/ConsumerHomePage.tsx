@@ -46,6 +46,10 @@ function formatDistance(distanceKm: number) {
   return `${Math.max(0.2, Math.round(distanceKm * 10) / 10).toFixed(1)} km`;
 }
 
+function formatDirectoryDistance(distanceKm: number) {
+  return Math.max(0.2, Math.round(distanceKm * 10) / 10).toFixed(1);
+}
+
 function formatEta(distanceKm: number) {
   return `${Math.max(6, Math.round(distanceKm * 11) + 6)} min`;
 }
@@ -120,12 +124,35 @@ export function ConsumerHomePage({
     () => new Set(promotedBusinesses.map((business) => business.href ?? business.id)),
     [promotedBusinesses],
   );
+  const directoryBusinesses = useMemo(() => {
+    if (!userLocation) {
+      return featuredBusinesses;
+    }
+
+    return featuredBusinesses.map((business) => {
+      if (business.hasPreciseLocation !== true) {
+        return {
+          ...business,
+          distanceValue: Number.POSITIVE_INFINITY,
+        };
+      }
+
+      const distanceKm = haversineKm(userLocation.lat, userLocation.lng, business.location.lat, business.location.lng);
+
+      return {
+        ...business,
+        distance: formatDirectoryDistance(distanceKm),
+        distanceValue: distanceKm,
+        eta: formatEta(distanceKm),
+      };
+    });
+  }, [featuredBusinesses, userLocation]);
   const locationAwareBusinesses = useMemo(() => {
     if (!userLocation) {
       return [];
     }
 
-    return featuredBusinesses
+    return directoryBusinesses
       .filter((business) => business.hasPreciseLocation !== false)
       .map((business) => ({
         business,
@@ -133,7 +160,7 @@ export function ConsumerHomePage({
       }))
       .filter(({ distanceKm }) => Number.isFinite(distanceKm))
       .sort((a, b) => a.distanceKm - b.distanceKm || a.business.name.localeCompare(b.business.name, 'es'));
-  }, [featuredBusinesses, userLocation]);
+  }, [directoryBusinesses, userLocation]);
   const resolvedNearbyBusinesses = useMemo<NearbyBusiness[]>(() => {
     if (locationAwareBusinesses.length === 0) {
       return nearbyBusinesses;
@@ -187,7 +214,7 @@ export function ConsumerHomePage({
   );
 
   const filteredFeaturedBusinesses = useMemo(() => {
-    return featuredBusinesses.filter((business) => {
+    return directoryBusinesses.filter((business) => {
       const matchesQuery =
         !normalizedQuery ||
         normalizeText(business.name, business.category, business.cuisine, business.zone, business.tags.join(' ')).includes(normalizedQuery);
@@ -200,7 +227,7 @@ export function ConsumerHomePage({
 
       return matchesQuery && matchesCategory && matchesOpenNow && matchesDelivery && matchesPickup && matchesPromotions;
     });
-  }, [activeFilters, featuredBusinesses, normalizedCategory, normalizedQuery, promotedKeySet]);
+  }, [activeFilters, directoryBusinesses, normalizedCategory, normalizedQuery, promotedKeySet]);
 
   const activeSummary = useMemo(() => {
     const summary: string[] = [];
@@ -363,9 +390,10 @@ export function ConsumerHomePage({
         <FeaturedBusinessesSection
           businesses={filteredFeaturedBusinesses}
           totalBusinesses={filteredFeaturedBusinesses.length}
-          allBusinessesTotal={featuredBusinesses.length}
+          allBusinessesTotal={directoryBusinesses.length}
           hasActiveFilters={hasActiveFilters}
           activeSummary={activeSummary}
+          hasUserLocation={Boolean(userLocation)}
           favoriteKeys={favoriteKeySet}
           onToggleFavorite={toggleFavorite}
           onClearFilters={clearAllFilters}

@@ -1,13 +1,11 @@
 import Link from 'next/link';
 import { BadgeCheck, CircleDollarSign, MessageCircle, QrCode, Rocket } from 'lucide-react';
 
+import { marketingWhatsappHref } from '../app/_lib/public-site-config';
+
 type PricingSectionProps = {
   whatsappHref: string;
 };
-
-const pricingWhatsappMessage =
-  'Hola, quiero crear mi menú digital con elmenuxfa.com. Me gustaría recibir información del plan profesional.';
-const pricingWhatsappHref = `https://wa.me/584148216433?text=${encodeURIComponent(pricingWhatsappMessage)}`;
 
 const includedFeatures = [
   'Menú digital personalizado',
@@ -25,7 +23,7 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
   const resolvedWhatsappHref =
     whatsappHref && whatsappHref !== '#' && whatsappHref !== '#cta' && whatsappHref !== 'javascript:void(0)'
       ? whatsappHref
-      : pricingWhatsappHref;
+      : marketingWhatsappHref;
 
   return (
     <section id="pricing" className="perf-section border-b border-white/8 bg-[#0a101c]">

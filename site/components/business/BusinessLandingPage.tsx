@@ -1,3 +1,4 @@
+import { marketingWhatsappHref } from '../../app/_lib/public-site-config';
 import { CTASection } from '../CTASection';
 import { DemoSection } from '../DemoSection';
 import { Features } from '../Features';
@@ -9,7 +10,7 @@ import { PricingSection } from '../PricingSection';
 import { Steps } from '../Steps';
 import { TargetSection } from '../TargetSection';
 
-const whatsappHref = '#cta';
+const whatsappHref = marketingWhatsappHref;
 const demoHref = '#demo';
 
 export function BusinessLandingPage() {

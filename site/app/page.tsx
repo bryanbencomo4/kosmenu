@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 
 import { getPublicConsumerHomeData } from './_lib/public-consumer-home';
+import { publicSiteUrl } from './_lib/public-site-config';
 import { ConsumerHomePage } from '../components/consumer/ConsumerHomePage';
 
-const canonicalUrl = 'https://www.elmenuxfa.com';
+const canonicalUrl = publicSiteUrl;
 
 export const revalidate = 60;
 

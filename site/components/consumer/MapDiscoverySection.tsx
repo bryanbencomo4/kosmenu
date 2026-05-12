@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight, LoaderCircle, LocateFixed, Minus, Plus, Star } from 'lucide-react';
+import { ChevronRight, LoaderCircle, LocateFixed, Minus, Plus } from 'lucide-react';
 
 import {
   type DiscoveryPin,
   type NearbyBusiness,
 } from '../../data/consumerBusinesses';
 import { NearbyBusinessCard } from './NearbyBusinessCard';
-import { FoodArtwork } from './FoodArtwork';
 
 type MapDiscoverySectionProps = {
   nearbyBusinesses: NearbyBusiness[];
@@ -257,6 +256,57 @@ function MapPlaceholder({ pins }: { pins: DiscoveryPin[] }) {
   );
 }
 
+type NearbyPanelProps = {
+  nearbyBusinesses: NearbyBusiness[];
+  liveOpenCount: number;
+  locationMessage: string;
+  locationButtonLabel: string;
+  locationState: 'idle' | 'requesting' | 'ready' | 'denied' | 'unsupported' | 'error';
+  onRequestUserLocation: () => void;
+};
+
+function NearbyPanel({
+  nearbyBusinesses,
+  liveOpenCount,
+  locationMessage,
+  locationButtonLabel,
+  locationState,
+  onRequestUserLocation,
+}: NearbyPanelProps) {
+  return (
+    <div className="rounded-[1rem] border border-white/10 bg-[#08111f]/94 p-3 backdrop-blur sm:rounded-[1.15rem] sm:p-4 xl:rounded-[1.2rem] xl:p-3.5 xl:shadow-[0_30px_60px_-30px_rgba(15,23,42,1)]">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between xl:items-start xl:justify-between">
+        <div>
+          <p className="text-[1rem] font-black text-white sm:text-base">Cerca de ti</p>
+          <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">{liveOpenCount} abiertos ahora</p>
+        </div>
+        <button
+          type="button"
+          onClick={onRequestUserLocation}
+          disabled={locationState === 'requesting'}
+          className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/24 bg-violet-500/10 px-3 py-2 text-[12px] font-semibold text-violet-100 transition-all duration-300 hover:border-violet-300/40 hover:bg-violet-500/16 disabled:cursor-not-allowed disabled:opacity-70 xl:px-2.5 xl:py-1 xl:text-[11px]"
+        >
+          {locationState === 'requesting' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
+          {locationButtonLabel}
+        </button>
+      </div>
+
+      <p className="mt-2 text-[12px] leading-5 text-slate-400 xl:text-[11px]">{locationMessage}</p>
+
+      <div className="hide-scrollbar mt-3 flex gap-2.5 overflow-x-auto pb-1 sm:mt-4 sm:grid sm:grid-cols-2 sm:gap-3 sm:overflow-visible sm:pb-0 xl:grid-cols-1 xl:gap-2.5">
+        {nearbyBusinesses.map((business) => (
+          <NearbyBusinessCard key={business.id} business={business} className="min-w-[272px] sm:min-w-0" />
+        ))}
+      </div>
+
+      <button type="button" className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-violet-300">
+        Ver más negocios cercanos
+        <ChevronRight className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
 export function MapDiscoverySection({
   nearbyBusinesses,
   discoveryPins,
@@ -448,36 +498,16 @@ export function MapDiscoverySection({
 
   return (
     <section id="mapa" className="relative z-10 px-3 pb-4 pt-3 sm:px-6 lg:pt-3 lg:px-8">
-      <div className="mx-auto max-w-[1440px] rounded-[1.25rem] border border-white/8 bg-[#07101d]/80 p-1.5 shadow-[0_35px_90px_-55px_rgba(15,23,42,1)] sm:rounded-[1.5rem] sm:p-2.5 lg:rounded-[1.6rem]">
-        <div className="mb-3 xl:hidden sm:mb-4">
-          <div className="rounded-[1rem] border border-white/10 bg-[#08111f]/94 p-3 backdrop-blur sm:rounded-[1.15rem] sm:p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-[1rem] font-black text-white sm:text-base">Cerca de ti</p>
-                <p className="mt-1 text-[12px] leading-5 text-slate-400">{locationMessage}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={onRequestUserLocation}
-                  disabled={locationState === 'requesting'}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/24 bg-violet-500/10 px-3 py-2 text-[12px] font-semibold text-violet-100 transition-all duration-300 hover:border-violet-300/40 hover:bg-violet-500/16 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {locationState === 'requesting' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
-                  {locationButtonLabel}
-                </button>
-                <button type="button" className="inline-flex items-center gap-1 text-[13px] font-semibold text-violet-300 sm:text-sm">
-                  Ver más negocios cercanos
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-            <div className="hide-scrollbar mt-3 flex gap-2.5 overflow-x-auto pb-1 sm:mt-4 sm:grid sm:grid-cols-2 sm:gap-3 sm:overflow-visible sm:pb-0 lg:grid-cols-3">
-              {nearbyBusinesses.map((business) => (
-                <NearbyBusinessCard key={business.id} business={business} className="min-w-[272px] sm:min-w-0" />
-              ))}
-            </div>
-          </div>
+      <div className="mx-auto grid max-w-[1440px] gap-3 rounded-[1.25rem] border border-white/8 bg-[#07101d]/80 p-1.5 shadow-[0_35px_90px_-55px_rgba(15,23,42,1)] sm:gap-4 sm:rounded-[1.5rem] sm:p-2.5 lg:rounded-[1.6rem] xl:grid-cols-[312px_minmax(0,1fr)] xl:items-stretch">
+        <div>
+          <NearbyPanel
+            nearbyBusinesses={nearbyBusinesses}
+            liveOpenCount={liveOpenCount}
+            locationMessage={locationMessage}
+            locationButtonLabel={locationButtonLabel}
+            locationState={locationState}
+            onRequestUserLocation={onRequestUserLocation}
+          />
         </div>
 
         <div className="relative min-h-[236px] overflow-hidden rounded-[1rem] border border-white/8 bg-[#08111f] min-[390px]:min-h-[248px] min-[430px]:min-h-[264px] sm:min-h-[320px] sm:rounded-[1.2rem] lg:min-h-[380px] xl:min-h-[400px] lg:rounded-[1.35rem]">
@@ -515,52 +545,6 @@ export function MapDiscoverySection({
             </button>
             <button type="button" aria-label="Centrar mapa" onClick={recenterMap} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
               <LocateFixed className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="absolute left-4 top-4 z-10 hidden w-[312px] rounded-[1.2rem] border border-white/10 bg-[#08111f]/94 p-3.5 shadow-[0_30px_60px_-30px_rgba(15,23,42,1)] backdrop-blur xl:block">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-base font-black text-white">Cerca de ti</p>
-                <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">{liveOpenCount} abiertos ahora</p>
-              </div>
-              <button
-                type="button"
-                onClick={onRequestUserLocation}
-                disabled={locationState === 'requesting'}
-                className="inline-flex items-center gap-1 rounded-full border border-violet-400/25 bg-violet-500/10 px-2.5 py-1 text-[9px] font-bold text-violet-100 transition-all duration-300 hover:border-violet-300/40 hover:bg-violet-500/16 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {locationState === 'requesting' ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <LocateFixed className="h-3 w-3" />}
-                {userLocation ? 'Actualizada' : 'Ubicar'}
-              </button>
-            </div>
-            <p className="mt-2 text-[11px] leading-5 text-slate-400">{locationMessage}</p>
-            <div className="mt-3 space-y-2.5">
-              {nearbyBusinesses.map((business) => (
-                <div key={business.id} className="grid grid-cols-[54px_minmax(0,1fr)_auto] items-center gap-3 rounded-[1rem] border border-white/8 bg-white/5 px-2.5 py-2.5">
-                  <FoodArtwork
-                    theme={business.artwork}
-                    title={business.name}
-                    imageUrl={business.imageUrl}
-                    variant="thumb"
-                    className="min-h-[54px]"
-                  />
-                  <div className="min-w-0">
-                    <p className="truncate text-[13px] font-semibold text-white">{business.name}</p>
-                    <p className="mt-0.5 text-[11px] text-slate-400">{business.category}</p>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-300">
-                      <span className="inline-flex items-center gap-1"><Star className="h-3 w-3 text-[#FACC15]" />{business.rating}</span>
-                      <span>• {business.distance}</span>
-                      <span>• {business.eta}</span>
-                    </div>
-                  </div>
-                  <span className="rounded-full border border-emerald-400/30 bg-emerald-500/12 px-2 py-1 text-[8px] font-black tracking-[0.14em] text-emerald-300">ABIERTO</span>
-                </div>
-              ))}
-            </div>
-            <button type="button" className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-violet-300">
-              Ver más negocios cercanos
-              <ChevronRight className="h-3.5 w-3.5" />
             </button>
           </div>
 

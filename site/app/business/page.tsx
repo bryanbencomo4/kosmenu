@@ -2,10 +2,11 @@ import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 
+import { businessSiteHost, businessSiteUrl } from '../_lib/public-site-config';
 import { BusinessLandingPage } from '../../components/business/BusinessLandingPage';
 
-const canonicalUrl = 'https://business.elmenuxfa.com';
-const BUSINESS_HOSTS = new Set(['business.elmenuxfa.com']);
+const canonicalUrl = businessSiteUrl;
+const BUSINESS_HOSTS = new Set([businessSiteHost]);
 const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 
 function requestHostname(host: string) {
@@ -48,7 +49,7 @@ export const metadata: Metadata = {
 export default async function BusinessPage() {
   const requestHeaders = await headers();
   const host =
-    requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host') ?? canonicalUrl;
+    requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host') ?? businessSiteHost;
   const hostname = requestHostname(host);
 
   if (

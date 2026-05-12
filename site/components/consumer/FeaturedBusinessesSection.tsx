@@ -13,6 +13,7 @@ type FeaturedBusinessesSectionProps = {
   allBusinessesTotal: number;
   hasActiveFilters: boolean;
   activeSummary: string[];
+  hasUserLocation: boolean;
   favoriteKeys: ReadonlySet<string>;
   onToggleFavorite: (businessKey: string) => void;
   onClearFilters: () => void;
@@ -54,6 +55,7 @@ export function FeaturedBusinessesSection({
   allBusinessesTotal,
   hasActiveFilters,
   activeSummary,
+  hasUserLocation,
   favoriteKeys,
   onToggleFavorite,
   onClearFilters,
@@ -70,7 +72,7 @@ export function FeaturedBusinessesSection({
         return nextBusinesses.sort((a, b) => Number.parseFloat(b.rating) - Number.parseFloat(a.rating) || a.name.localeCompare(b.name, 'es'));
       case 'distance':
         return nextBusinesses.sort(
-          (a, b) => Number.parseFloat(a.distance) - Number.parseFloat(b.distance) || a.name.localeCompare(b.name, 'es'),
+          (a, b) => (a.distanceValue ?? Number.parseFloat(a.distance)) - (b.distanceValue ?? Number.parseFloat(b.distance)) || a.name.localeCompare(b.name, 'es'),
         );
       case 'name':
         return nextBusinesses.sort((a, b) => a.name.localeCompare(b.name, 'es'));
@@ -92,6 +94,12 @@ export function FeaturedBusinessesSection({
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, resolvedTotalPages));
   }, [resolvedTotalPages]);
+
+  useEffect(() => {
+    if (hasUserLocation) {
+      setSortBy('distance');
+    }
+  }, [hasUserLocation]);
 
   const cycleSortOption = () => {
     setSortBy((currentSort) => {

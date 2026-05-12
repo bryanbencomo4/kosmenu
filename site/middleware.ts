@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+import { businessSiteHost, legalPagePaths, publicSiteHost } from './app/_lib/public-site-config';
+
 const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known', '/business'];
-const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml']);
-const CANONICAL_HOST = 'www.elmenuxfa.com';
+const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml', ...legalPagePaths]);
+const CANONICAL_HOST = publicSiteHost;
 const CANONICAL_REDIRECT_HOSTS = new Set(['elmenuxfa.com', 'kosmenu.vercel.app']);
-const BUSINESS_HOSTS = new Set(['business.elmenuxfa.com']);
+const BUSINESS_HOSTS = new Set([businessSiteHost]);
 const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 
 function applySecurityHeaders(response: NextResponse) {

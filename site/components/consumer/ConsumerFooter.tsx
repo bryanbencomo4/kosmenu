@@ -1,6 +1,29 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { ChevronDown, Facebook, Instagram, MessageCircleMore } from 'lucide-react';
+import { ChevronDown, Mail, MessageCircleMore, Store } from 'lucide-react';
+
+import {
+  businessSiteUrl,
+  marketingWhatsappHref,
+  privacyPagePath,
+  supportEmailHref,
+  termsPagePath,
+} from '../../app/_lib/public-site-config';
+import { ConsumerNewsletterForm } from './ConsumerNewsletterForm';
+
+const channelLinks = [
+  { label: 'WhatsApp', href: marketingWhatsappHref, icon: MessageCircleMore },
+  { label: 'Correo', href: supportEmailHref, icon: Mail },
+  { label: 'Para negocios', href: businessSiteUrl, icon: Store },
+] as const;
+
+function isExternalHref(href: string) {
+  return href.startsWith('http') || href.startsWith('mailto:');
+}
+
+function shouldOpenInNewTab(href: string) {
+  return href.startsWith('http');
+}
 
 const footerColumns = [
   {
@@ -31,10 +54,10 @@ const footerColumns = [
   {
     title: 'Ayuda',
     links: [
-      { label: 'Centro de ayuda', href: '#ayuda' },
-      { label: 'Contacto', href: 'mailto:hola@elmenuxfa.com' },
-      { label: 'Términos y condiciones', href: '#' },
-      { label: 'Política de privacidad', href: '#' },
+      { label: 'Centro de ayuda', href: marketingWhatsappHref },
+      { label: 'Contacto', href: supportEmailHref },
+      { label: 'Términos y condiciones', href: termsPagePath },
+      { label: 'Política de privacidad', href: privacyPagePath },
     ],
   },
 ] as const;
@@ -62,11 +85,23 @@ export function ConsumerFooter() {
             Tu guía local para encontrar menús, negocios y promociones cerca de ti.
           </p>
           <div className="mt-3 flex items-center gap-2 sm:mt-4">
-            {[Instagram, Facebook, MessageCircleMore].map((Icon, index) => (
-              <button key={index} type="button" aria-label="Red social" className="inline-flex h-8.5 w-8.5 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-200 sm:h-9 sm:w-9">
-                <Icon className="h-4 w-4" />
-              </button>
-            ))}
+            {channelLinks.map((channel) => {
+              const Icon = channel.icon;
+
+              return (
+                <a
+                  key={channel.label}
+                  href={channel.href}
+                  aria-label={channel.label}
+                  title={channel.label}
+                  target={shouldOpenInNewTab(channel.href) ? '_blank' : undefined}
+                  rel={shouldOpenInNewTab(channel.href) ? 'noopener noreferrer' : undefined}
+                  className="inline-flex h-8.5 w-8.5 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-200 transition-all duration-300 hover:border-violet-400/30 hover:text-white sm:h-9 sm:w-9"
+                >
+                  <Icon className="h-4 w-4" />
+                </a>
+              );
+            })}
           </div>
         </div>
 
@@ -80,12 +115,23 @@ export function ConsumerFooter() {
               <ul className="mt-3 space-y-2 border-t border-white/8 pt-3">
                 {column.links.map((link) => (
                   <li key={link.label}>
-                    <Link
-                      href={link.href}
-                      className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
-                    >
-                      {link.label}
-                    </Link>
+                    {isExternalHref(link.href) ? (
+                      <a
+                        href={link.href}
+                        target={shouldOpenInNewTab(link.href) ? '_blank' : undefined}
+                        rel={shouldOpenInNewTab(link.href) ? 'noopener noreferrer' : undefined}
+                        className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
+                      >
+                        {link.label}
+                      </a>
+                    ) : (
+                      <Link
+                        href={link.href}
+                        className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
+                      >
+                        {link.label}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -100,12 +146,23 @@ export function ConsumerFooter() {
               <ul className="mt-3 space-y-2">
                 {column.links.map((link) => (
                   <li key={link.label}>
-                    <Link
-                      href={link.href}
-                      className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
-                    >
-                      {link.label}
-                    </Link>
+                    {isExternalHref(link.href) ? (
+                      <a
+                        href={link.href}
+                        target={shouldOpenInNewTab(link.href) ? '_blank' : undefined}
+                        rel={shouldOpenInNewTab(link.href) ? 'noopener noreferrer' : undefined}
+                        className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
+                      >
+                        {link.label}
+                      </a>
+                    ) : (
+                      <Link
+                        href={link.href}
+                        className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
+                      >
+                        {link.label}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -115,25 +172,7 @@ export function ConsumerFooter() {
 
         <div id="newsletter" className="order-2 rounded-[1rem] border border-white/10 bg-[#07111f]/78 p-4 shadow-[0_30px_90px_-60px_rgba(124,58,237,0.85)] xl:order-3 xl:max-w-[360px] xl:justify-self-end">
           <p className="text-[13px] font-bold text-white">Recibe promociones exclusivas</p>
-
-          <div className="mt-3 flex flex-col gap-2">
-            <label className="block flex-1">
-              <span className="sr-only">Correo para recibir promociones</span>
-              <input
-                type="email"
-                placeholder="Ingresa tu correo electrónico"
-                className="h-11 w-full rounded-[0.85rem] border border-white/10 bg-[#050c18] px-4 text-sm text-white outline-none transition-all duration-300 placeholder:text-slate-500 focus:border-violet-400/45"
-              />
-            </label>
-            <button
-              type="button"
-              aria-label="Suscribirme al boletín de promociones"
-              className="inline-flex h-11 w-full items-center justify-center rounded-[0.85rem] bg-[#FACC15] px-5 text-sm font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
-            >
-              Suscribirme
-            </button>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-500">No spam. Puedes darte de baja cuando quieras.</p>
+          <ConsumerNewsletterForm />
         </div>
       </div>
     </footer>

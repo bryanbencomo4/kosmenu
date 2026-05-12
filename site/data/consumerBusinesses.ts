@@ -17,6 +17,7 @@ export type NearbyBusiness = {
   imageUrl?: string | null;
   rating: string;
   distance: string;
+  distanceValue?: number;
   eta: string;
   status: 'ABIERTO';
   artwork: FoodArtworkTheme;

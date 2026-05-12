@@ -6,7 +6,9 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowUpRight, Heart, MapPin, Menu, Search, Store, TicketPercent, User2, X } from 'lucide-react';
 
-const businessCtaHref = 'https://business.elmenuxfa.com';
+import { businessSiteUrl } from '../../app/_lib/public-site-config';
+
+const businessCtaHref = businessSiteUrl;
 
 const navLinks: Array<{
   label: string;
