@@ -1,6 +1,10 @@
+"use client";
+
+import { useState } from 'react';
+
 import Image from 'next/image';
 import Link from 'next/link';
-import { Heart, MapPin, Search, TicketPercent, User2 } from 'lucide-react';
+import { Heart, MapPin, Menu, Search, TicketPercent, User2, X } from 'lucide-react';
 
 const navLinks: Array<{
   label: string;
@@ -16,6 +20,8 @@ const navLinks: Array<{
 ];
 
 export function ConsumerNavbar() {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
   return (
     <header className="sticky top-0 z-50 px-3 pt-3 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1440px] overflow-hidden rounded-t-[1.5rem] border border-white/8 bg-[#050814]/92 shadow-[0_30px_90px_-60px_rgba(76,29,149,0.75)] backdrop-blur-xl sm:rounded-t-[1.65rem] lg:rounded-t-[1.85rem]">
@@ -31,7 +37,7 @@ export function ConsumerNavbar() {
                 className="h-7 w-7 scale-[1.18] object-contain sm:h-9 sm:w-9"
               />
             </span>
-            <span className="truncate font-[var(--font-display)] text-[0.95rem] font-extrabold tracking-[-0.04em] text-white min-[430px]:text-[1rem] sm:text-[1.45rem] lg:text-[1.75rem]">
+            <span className="truncate font-[var(--font-display)] text-[0.88rem] font-extrabold tracking-[-0.04em] text-white min-[390px]:text-[0.94rem] min-[430px]:text-[1rem] sm:text-[1.45rem] lg:text-[1.75rem]">
               elmenuxfa.com
             </span>
           </Link>
@@ -58,44 +64,86 @@ export function ConsumerNavbar() {
             })}
           </nav>
 
-          <button
-            type="button"
-            aria-label="Iniciar sesión próximamente"
-            title="Próximamente"
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center gap-2 rounded-[1rem] border border-violet-400/25 bg-[linear-gradient(180deg,rgba(124,58,237,0.16),rgba(124,58,237,0.06))] px-0 text-sm font-semibold text-violet-100 transition-all duration-300 hover:border-violet-300/45 hover:bg-violet-500/12 min-[480px]:h-11 min-[480px]:w-auto min-[480px]:px-4 sm:h-14 sm:px-7 sm:text-[1rem]"
-          >
-            <Image
-              src="/branding/isotipo.png"
-              alt=""
-              width={1}
-              height={1}
-              className="hidden"
-            />
-            <User2 className="h-5 w-5 text-violet-300" />
-            <span className="hidden min-[480px]:inline">Iniciar sesión</span>
-          </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              aria-label="Iniciar sesión próximamente"
+              title="Próximamente"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[1rem] border border-violet-400/25 bg-[linear-gradient(180deg,rgba(124,58,237,0.16),rgba(124,58,237,0.06))] px-3 text-[12px] font-semibold text-violet-100 transition-all duration-300 hover:border-violet-300/45 hover:bg-violet-500/12 min-[390px]:px-3.5 min-[430px]:px-4 sm:h-14 sm:px-7 sm:text-[1rem]"
+            >
+              <Image
+                src="/branding/isotipo.png"
+                alt=""
+                width={1}
+                height={1}
+                className="hidden"
+              />
+              <User2 className="h-4.5 w-4.5 text-violet-300 sm:h-5 sm:w-5" />
+              <span>Iniciar sesión</span>
+            </button>
+
+            <button
+              type="button"
+              aria-label={isMobileMenuOpen ? 'Cerrar menú principal' : 'Abrir menú principal'}
+              onClick={() => setIsMobileMenuOpen((open) => !open)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-[1rem] border border-white/10 bg-white/5 text-slate-100 transition-all duration-300 hover:border-violet-400/30 hover:bg-white/10 lg:hidden"
+            >
+              {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+          </div>
         </div>
 
-        <nav className="grid grid-cols-4 gap-1.5 px-2.5 py-2.5 sm:px-6 lg:hidden">
-          {navLinks.map((item) => {
-            const Icon = item.icon;
+        <div className="border-b border-white/8 px-3 py-2 sm:px-6 lg:hidden">
+          <div className="hide-scrollbar flex gap-2 overflow-x-auto pb-1">
+            {navLinks.map((item) => {
+              const Icon = item.icon;
 
-            return (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={`inline-flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-[1rem] border px-2 py-2.5 text-center text-[11px] font-medium leading-none transition-all duration-300 sm:text-[12px] ${
-                  item.active
-                    ? 'border-violet-400/35 bg-violet-500/12 text-white'
-                    : 'border-white/10 bg-white/5 text-slate-200'
-                }`}
-              >
-                <Icon className={`h-4.5 w-4.5 ${item.active ? 'text-violet-300' : 'text-slate-400'}`} />
-                <span className="truncate">{item.shortLabel ?? item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-full border px-3 text-[11px] font-semibold transition-all duration-300 ${
+                    item.active
+                      ? 'border-violet-400/35 bg-violet-500/12 text-white'
+                      : 'border-white/10 bg-white/5 text-slate-200'
+                  }`}
+                >
+                  <Icon className={`h-4 w-4 ${item.active ? 'text-violet-300' : 'text-slate-400'}`} />
+                  <span>{item.shortLabel ?? item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+
+        {isMobileMenuOpen ? (
+          <div className="border-b border-white/8 px-3 py-3 sm:px-6 lg:hidden">
+            <nav className="grid gap-2">
+              {navLinks.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`inline-flex min-w-0 items-center justify-between gap-3 rounded-[1rem] border px-3.5 py-3 text-left text-[13px] font-semibold transition-all duration-300 ${
+                      item.active
+                        ? 'border-violet-400/35 bg-violet-500/12 text-white'
+                        : 'border-white/10 bg-white/5 text-slate-200'
+                    }`}
+                  >
+                    <span className="inline-flex min-w-0 items-center gap-3">
+                      <Icon className={`h-4.5 w-4.5 shrink-0 ${item.active ? 'text-violet-300' : 'text-slate-400'}`} />
+                      <span className="truncate">{item.label}</span>
+                    </span>
+                    <span className="text-[11px] text-slate-400">Ir</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+        ) : null}
       </div>
     </header>
   );

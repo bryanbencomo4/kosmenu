@@ -348,7 +348,27 @@ export function MapDiscoverySection() {
   return (
     <section id="mapa" className="relative z-10 px-3 pb-4 pt-3 sm:px-6 lg:pt-3 lg:px-8">
       <div className="mx-auto max-w-[1440px] rounded-[1.25rem] border border-white/8 bg-[#07101d]/80 p-1.5 shadow-[0_35px_90px_-55px_rgba(15,23,42,1)] sm:rounded-[1.5rem] sm:p-2.5 lg:rounded-[1.6rem]">
-        <div className="relative min-h-[320px] overflow-hidden rounded-[1rem] border border-white/8 bg-[#08111f] min-[430px]:min-h-[340px] sm:min-h-[360px] sm:rounded-[1.2rem] lg:min-h-[380px] xl:min-h-[400px] lg:rounded-[1.35rem]">
+        <div className="mb-3 xl:hidden sm:mb-4">
+          <div className="rounded-[1rem] border border-white/10 bg-[#08111f]/94 p-3 backdrop-blur sm:rounded-[1.15rem] sm:p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[1rem] font-black text-white sm:text-base">Cerca de ti</p>
+                <p className="mt-1 text-[12px] leading-5 text-slate-400">Negocios abiertos con tiempos y distancia estimada.</p>
+              </div>
+              <button type="button" className="inline-flex items-center gap-1 text-[13px] font-semibold text-violet-300 sm:text-sm">
+                Ver más negocios cercanos
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="hide-scrollbar mt-3 flex gap-2.5 overflow-x-auto pb-1 sm:mt-4 sm:grid sm:grid-cols-2 sm:gap-3 sm:overflow-visible sm:pb-0 lg:grid-cols-3">
+              {nearbyBusinesses.map((business) => (
+                <NearbyBusinessCard key={business.id} business={business} className="min-w-[272px] sm:min-w-0" />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="relative min-h-[236px] overflow-hidden rounded-[1rem] border border-white/8 bg-[#08111f] min-[390px]:min-h-[248px] min-[430px]:min-h-[264px] sm:min-h-[320px] sm:rounded-[1.2rem] lg:min-h-[380px] xl:min-h-[400px] lg:rounded-[1.35rem]">
           <div ref={mapRef} className={`absolute inset-0 ${mapMode === 'google' ? 'opacity-100' : 'opacity-0'}`} />
 
           {mapMode !== 'google' ? <MapPlaceholder pins={discoveryPins} /> : null}
@@ -360,9 +380,9 @@ export function MapDiscoverySection() {
             </div>
           ) : null}
 
-          <div className="absolute inset-x-0 top-0 h-16 bg-[linear-gradient(180deg,rgba(7,17,31,0.95)_0%,rgba(7,17,31,0)_100%)] sm:h-20" />
+          <div className="absolute inset-x-0 top-0 h-12 bg-[linear-gradient(180deg,rgba(7,17,31,0.95)_0%,rgba(7,17,31,0)_100%)] sm:h-20" />
 
-          <div className="absolute bottom-3 right-3 z-10 flex items-center gap-2 sm:hidden">
+          <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 sm:hidden">
             <button type="button" aria-label="Acercar mapa" onClick={() => adjustZoom(1)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-[#0a1120]/90 text-white backdrop-blur transition-colors hover:bg-[#11192b]">
               <Plus className="h-4 w-4" />
             </button>
@@ -422,25 +442,6 @@ export function MapDiscoverySection() {
           </div>
         </div>
 
-        <div className="mt-3 xl:hidden sm:mt-4">
-          <div className="rounded-[1.05rem] border border-white/10 bg-[#08111f]/94 p-3 backdrop-blur sm:rounded-[1.15rem] sm:p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-base font-black text-white">Cerca de ti</p>
-                <p className="mt-1 text-[12px] text-slate-400">Negocios abiertos con tiempos y distancia estimada.</p>
-              </div>
-              <button type="button" className="inline-flex items-center gap-1 text-[13px] font-semibold text-violet-300 sm:text-sm">
-                Ver más
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="mt-3.5 grid gap-2.5 sm:mt-4 sm:grid-cols-2 lg:grid-cols-3">
-              {nearbyBusinesses.map((business) => (
-                <NearbyBusinessCard key={business.id} business={business} />
-              ))}
-            </div>
-          </div>
-        </div>
       </div>
     </section>
   );

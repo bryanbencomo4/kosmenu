@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { Facebook, Instagram, MessageCircleMore } from 'lucide-react';
+import { ChevronDown, Facebook, Instagram, MessageCircleMore } from 'lucide-react';
 
 const footerColumns = [
   {
@@ -41,7 +41,7 @@ const footerColumns = [
 
 export function ConsumerFooter() {
   return (
-    <footer id="ayuda" className="border-t border-white/10 bg-[#050912] px-3 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <footer id="ayuda" className="border-t border-white/10 bg-[#050912] px-3 py-5 sm:px-6 lg:px-8 lg:py-8">
       <div className="mx-auto grid max-w-[1440px] gap-6 sm:gap-8 lg:gap-10 xl:grid-cols-[1.1fr_2.6fr_1.4fr] xl:items-start">
         <div className="order-1">
           <div className="flex items-center gap-3">
@@ -58,19 +58,42 @@ export function ConsumerFooter() {
               elmenuxfa.com
             </span>
           </div>
-          <p className="mt-4 max-w-sm text-sm leading-6 text-slate-300">
-            Tu guía local para encontrar los mejores negocios, menús y promociones cerca de ti.
+          <p className="mt-3 max-w-sm text-[13px] leading-6 text-slate-300 sm:mt-4 sm:text-sm">
+            Tu guía local para encontrar menús, negocios y promociones cerca de ti.
           </p>
-          <div className="mt-4 flex items-center gap-2">
+          <div className="mt-3 flex items-center gap-2 sm:mt-4">
             {[Instagram, Facebook, MessageCircleMore].map((Icon, index) => (
-              <button key={index} type="button" aria-label="Red social" className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-200">
+              <button key={index} type="button" aria-label="Red social" className="inline-flex h-8.5 w-8.5 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-200 sm:h-9 sm:w-9">
                 <Icon className="h-4 w-4" />
               </button>
             ))}
           </div>
         </div>
 
-        <div className="order-3 grid gap-x-10 gap-y-6 sm:grid-cols-2 sm:gap-y-8 lg:grid-cols-4 xl:order-2 xl:gap-x-14 xl:gap-y-8">
+        <div className="order-3 space-y-2 lg:hidden">
+          {footerColumns.map((column) => (
+            <details key={column.title} className="group rounded-[0.95rem] border border-white/10 bg-[#07111f]/58 px-3.5 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-black uppercase tracking-[0.16em] text-white">
+                <span>{column.title}</span>
+                <ChevronDown className="h-4 w-4 text-slate-400 transition-transform duration-300 group-open:rotate-180" />
+              </summary>
+              <ul className="mt-3 space-y-2 border-t border-white/8 pt-3">
+                {column.links.map((link) => (
+                  <li key={link.label}>
+                    <Link
+                      href={link.href}
+                      className="text-sm text-slate-400 transition-all duration-300 hover:text-white"
+                    >
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ))}
+        </div>
+
+        <div className="order-3 hidden gap-x-10 gap-y-6 sm:grid-cols-2 sm:gap-y-8 lg:grid lg:grid-cols-4 xl:order-2 xl:gap-x-14 xl:gap-y-8">
           {footerColumns.map((column) => (
             <div key={column.title} className="min-w-0">
               <h3 className="text-sm font-black uppercase tracking-[0.18em] text-white">{column.title}</h3>
@@ -93,7 +116,7 @@ export function ConsumerFooter() {
         <div id="newsletter" className="order-2 rounded-[1rem] border border-white/10 bg-[#07111f]/78 p-4 shadow-[0_30px_90px_-60px_rgba(124,58,237,0.85)] xl:order-3 xl:max-w-[360px] xl:justify-self-end">
           <p className="text-[13px] font-bold text-white">Recibe promociones exclusivas</p>
 
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-3 flex flex-col gap-2">
             <label className="block flex-1">
               <span className="sr-only">Correo para recibir promociones</span>
               <input
@@ -105,7 +128,7 @@ export function ConsumerFooter() {
             <button
               type="button"
               aria-label="Suscribirme al boletín de promociones"
-              className="inline-flex h-11 w-full items-center justify-center rounded-[0.85rem] bg-[#FACC15] px-5 text-sm font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047] sm:w-auto"
+              className="inline-flex h-11 w-full items-center justify-center rounded-[0.85rem] bg-[#FACC15] px-5 text-sm font-black text-[#0B1120] transition-all duration-300 hover:bg-[#fde047]"
             >
               Suscribirme
             </button>
