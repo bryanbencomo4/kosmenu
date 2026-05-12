@@ -19,7 +19,7 @@ export function FeaturedBusinessesSection({ businesses }: FeaturedBusinessesSect
           </button>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 xl:gap-5">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 min-[1320px]:grid-cols-4 xl:gap-5">
           {businesses.map((business) => (
             <article
               key={business.id}

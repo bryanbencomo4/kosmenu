@@ -301,6 +301,24 @@ body {
   }
 }
 
+@keyframes zeroGravity {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  22% {
+    transform: translate3d(10px, -7px, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(-7px, -14px, 0) scale(0.96);
+  }
+  76% {
+    transform: translate3d(-11px, 5px, 0) scale(1.03);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
 .animate-fade-up {
   opacity: 0;
   animation: fadeUp 900ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
@@ -327,8 +345,15 @@ body {
   pointer-events: none;
 }
 
+.animate-zero-gravity {
+  animation: zeroGravity 9.6s ease-in-out infinite;
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
 .home-performance-tuned .animate-glow-pulse,
-.home-performance-tuned .animate-shine {
+.home-performance-tuned .animate-shine,
+.home-performance-tuned .animate-zero-gravity {
   animation: none !important;
 }
 
@@ -383,6 +408,7 @@ body {
   .animate-float-slow,
   .animate-glow-pulse,
   .animate-shine,
+  .animate-zero-gravity,
   .animation-delay-100,
   .animation-delay-200,
   .animation-delay-300,

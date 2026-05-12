@@ -21,7 +21,7 @@ export function HeroSearchSection() {
   return (
     <section id="explorar" className="relative -mt-px px-3 pb-0 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1440px] overflow-hidden rounded-b-[1.5rem] border border-t-0 border-white/8 bg-[linear-gradient(180deg,#040814_0%,#07101b_58%,#040814_100%)] shadow-[0_45px_120px_-70px_rgba(76,29,149,0.95)] sm:rounded-b-[1.65rem] lg:rounded-b-[1.85rem]">
-        <div className="relative overflow-hidden px-4 pb-7 pt-6 sm:px-8 sm:pb-10 sm:pt-10 lg:px-14 lg:pb-12 lg:pt-12">
+        <div className="relative overflow-hidden px-4 pb-6 pt-5 sm:px-8 sm:pb-9 sm:pt-9 lg:px-14 lg:pb-10 lg:pt-10">
           <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.72)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.72)_1px,transparent_1px)] [background-size:64px_64px]" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_34%,rgba(124,58,237,0.28),transparent_22%),radial-gradient(circle_at_88%_30%,rgba(34,211,238,0.14),transparent_20%),radial-gradient(circle_at_50%_16%,rgba(124,58,237,0.1),transparent_26%)]" />
 
@@ -35,10 +35,22 @@ export function HeroSearchSection() {
           <div className="pointer-events-none absolute right-[12%] top-[34%] hidden h-px w-[13rem] -rotate-[32deg] bg-[linear-gradient(90deg,rgba(59,130,246,0),rgba(59,130,246,0.22),rgba(124,58,237,0.02))] lg:block" />
           <div className="pointer-events-none absolute right-[10%] top-[56%] hidden h-px w-[12rem] rotate-[22deg] bg-[linear-gradient(90deg,rgba(124,58,237,0),rgba(124,58,237,0.28),rgba(59,130,246,0.08))] lg:block" />
 
-          <div className="pointer-events-none absolute left-[11%] top-[56%] hidden h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_26px_rgba(56,189,248,0.95)] lg:block" />
-          <div className="pointer-events-none absolute left-[15%] top-[34%] hidden h-2 w-2 rounded-full bg-violet-400 shadow-[0_0_22px_rgba(167,139,250,0.95)] lg:block" />
-          <div className="pointer-events-none absolute right-[11%] top-[63%] hidden h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_26px_rgba(56,189,248,0.95)] lg:block" />
-          <div className="pointer-events-none absolute right-[14%] top-[44%] hidden h-2 w-2 rounded-full bg-violet-400 shadow-[0_0_22px_rgba(167,139,250,0.95)] lg:block" />
+          <div
+            className="animate-zero-gravity pointer-events-none absolute left-[11%] top-[56%] hidden h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_26px_rgba(56,189,248,0.95)] lg:block"
+            style={{ animationDelay: '-0.8s', animationDuration: '8.8s' }}
+          />
+          <div
+            className="animate-zero-gravity pointer-events-none absolute left-[15%] top-[34%] hidden h-2 w-2 rounded-full bg-violet-400 shadow-[0_0_22px_rgba(167,139,250,0.95)] lg:block"
+            style={{ animationDelay: '-2.4s', animationDuration: '10.2s' }}
+          />
+          <div
+            className="animate-zero-gravity pointer-events-none absolute right-[11%] top-[63%] hidden h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_26px_rgba(56,189,248,0.95)] lg:block"
+            style={{ animationDelay: '-1.7s', animationDuration: '9.4s' }}
+          />
+          <div
+            className="animate-zero-gravity pointer-events-none absolute right-[14%] top-[44%] hidden h-2 w-2 rounded-full bg-violet-400 shadow-[0_0_22px_rgba(167,139,250,0.95)] lg:block"
+            style={{ animationDelay: '-3.1s', animationDuration: '11.1s' }}
+          />
 
           <div className="pointer-events-none absolute right-[11%] top-[34%] hidden lg:block">
             <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-violet-400/16 bg-violet-500/6">

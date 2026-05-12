@@ -49,12 +49,12 @@ export function PromotedBusinessesSlider({ businesses }: PromotedBusinessesSlide
 
         <div
           ref={sliderRef}
-          className="hide-scrollbar flex gap-3 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory] sm:gap-4"
+          className="hide-scrollbar flex gap-3 overflow-x-auto pb-2 [scroll-snap-type:x_mandatory] sm:gap-4 lg:gap-3"
         >
           {businesses.map((business) => (
             <article
               key={business.id}
-              className="min-w-[88vw] max-w-[88vw] flex-1 snap-start rounded-[1.15rem] border border-white/10 bg-[#07111f]/80 p-3 shadow-[0_28px_80px_-50px_rgba(124,58,237,0.85)] backdrop-blur-xl min-[430px]:min-w-[82vw] min-[430px]:max-w-[82vw] sm:min-w-[290px] sm:max-w-[300px] sm:rounded-[1.25rem] sm:p-3.5 lg:min-w-[308px] lg:max-w-[320px]"
+              className="min-w-[88vw] max-w-[88vw] flex-1 snap-start rounded-[1.15rem] border border-white/10 bg-[#07111f]/80 p-3 shadow-[0_28px_80px_-50px_rgba(124,58,237,0.85)] backdrop-blur-xl min-[430px]:min-w-[82vw] min-[430px]:max-w-[82vw] sm:min-w-[290px] sm:max-w-[300px] sm:rounded-[1.25rem] sm:p-3.5 lg:min-w-[272px] lg:max-w-[272px]"
             >
               <div className="relative">
                 <FoodArtwork theme={business.artwork} title={business.name} variant="promo" className="min-h-[168px] min-[430px]:min-h-[178px] sm:min-h-[188px] lg:min-h-[196px]" />

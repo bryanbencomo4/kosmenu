@@ -89,7 +89,7 @@ export function ConsumerFooter() {
           ))}
         </div>
 
-        <div id="newsletter" className="order-2 rounded-[1rem] border border-white/10 bg-[#07111f]/78 p-4 shadow-[0_30px_90px_-60px_rgba(124,58,237,0.85)] xl:order-3">
+        <div id="newsletter" className="order-2 rounded-[1rem] border border-white/10 bg-[#07111f]/78 p-4 shadow-[0_30px_90px_-60px_rgba(124,58,237,0.85)] xl:order-3 xl:max-w-[360px] xl:justify-self-end">
           <p className="text-[13px] font-bold text-white">Recibe promociones exclusivas</p>
 
           <div className="mt-3 flex flex-col gap-2 sm:flex-row">
