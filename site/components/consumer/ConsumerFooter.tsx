@@ -9,6 +9,7 @@ const footerColumns = [
       { label: 'Todos los negocios', href: '#explorar' },
       { label: 'Categorías', href: '#categorias' },
       { label: 'Negocios nuevos', href: '#favoritos' },
+      { label: 'Abiertos ahora', href: '#explorar' },
     ],
   },
   {

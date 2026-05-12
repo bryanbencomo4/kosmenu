@@ -412,7 +412,7 @@ export function MapDiscoverySection() {
               ))}
             </div>
             <button type="button" className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-violet-300">
-              Ver 2 negocios más
+              Ver más negocios cercanos
               <ChevronRight className="h-3.5 w-3.5" />
             </button>
           </div>

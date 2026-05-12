@@ -20,8 +20,8 @@ export function ConsumerHomePage() {
 
         <ConsumerNavbar />
         <HeroSearchSection />
-        <MapDiscoverySection />
         <PromotedBusinessesSlider businesses={promotedBusinesses} />
+        <MapDiscoverySection />
         <CategoryChips items={categories} />
         <FeaturedBusinessesSection businesses={featuredBusinesses} />
         <UserBenefitsSection />

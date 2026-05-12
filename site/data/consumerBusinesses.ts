@@ -28,6 +28,9 @@ export type NearbyBusiness = {
 
 export type PromotedBusiness = NearbyBusiness & {
   promoLabel: string;
+  spotlightLabel?: string;
+  promoTitle?: string;
+  promoWindow?: string;
 };
 
 export type FeaturedBusiness = NearbyBusiness & {
@@ -56,6 +59,9 @@ export type DiscoveryPin = {
 // TODO: reemplazar estos arrays mock por consultas a Supabase para negocios activos y publicos.
 // TODO: conectar promociones del dia, categorias y favoritos al modelo real de negocio.
 // TODO: sustituir las coordenadas fijas por datos geoespaciales y una busqueda real por zona.
+
+export const directoryTotalBusinesses = 128;
+export const directoryTotalPages = 13;
 
 export const nearbyBusinesses: NearbyBusiness[] = [
   {
@@ -113,6 +119,9 @@ export const promotedBusinesses: PromotedBusiness[] = [
     zone: 'Chacao',
     location: { lat: 10.4974, lng: -66.8618 },
     promoLabel: 'PROMO DEL DIA',
+    spotlightLabel: 'DESTACADO',
+    promoTitle: '2x1 en Smash Burgers',
+    promoWindow: 'Hoy todo el día',
   },
   {
     id: 'promo-pizzeria-napoli',
@@ -200,6 +209,66 @@ export const featuredBusinesses: FeaturedBusiness[] = [
     tags: ['Delivery', 'Retiro'],
   },
   {
+    id: 'featured-pizzeria-napoli',
+    name: 'Pizzería Napoli',
+    category: 'Pizza artesanal',
+    cuisine: 'Pizzas y focaccias',
+    rating: '4.7',
+    distance: '0.4',
+    eta: '22 min',
+    status: 'ABIERTO',
+    artwork: 'pizza',
+    accent: '#f97316',
+    zone: 'Sebucán',
+    location: { lat: 10.5058, lng: -66.8554 },
+    tags: ['Delivery', 'Retiro'],
+  },
+  {
+    id: 'featured-sushi-osaka',
+    name: 'Sushi Osaka',
+    category: 'Sushi artesanal',
+    cuisine: 'Rolls y nigiris premium',
+    rating: '4.8',
+    distance: '0.4',
+    eta: '20 min',
+    status: 'ABIERTO',
+    artwork: 'sushi',
+    accent: '#38bdf8',
+    zone: 'Altamira',
+    location: { lat: 10.5008, lng: -66.8464 },
+    tags: ['Delivery', 'Retiro'],
+  },
+  {
+    id: 'featured-dulce-tentacion',
+    name: 'Dulce Tentación',
+    category: 'Postres',
+    cuisine: 'Postres, tortas y café',
+    rating: '4.6',
+    distance: '1.4',
+    eta: '14 min',
+    status: 'ABIERTO',
+    artwork: 'dessert',
+    accent: '#f472b6',
+    zone: 'Campo Alegre',
+    location: { lat: 10.4949, lng: -66.8501 },
+    tags: ['Delivery', 'Retiro'],
+  },
+  {
+    id: 'featured-parrilla-express',
+    name: 'La Parrilla Express',
+    category: 'Parrilla',
+    cuisine: 'Parrilla, bowls y combos',
+    rating: '4.7',
+    distance: '1.8',
+    eta: '17 min',
+    status: 'ABIERTO',
+    artwork: 'grill',
+    accent: '#fb923c',
+    zone: 'La Castellana',
+    location: { lat: 10.4924, lng: -66.8575 },
+    tags: ['Delivery', 'Retiro'],
+  },
+  {
     id: 'featured-green-bowl',
     name: 'Green Bowl',
     category: 'Healthy bowls',
@@ -272,36 +341,6 @@ export const featuredBusinesses: FeaturedBusiness[] = [
     accent: '#fb923c',
     zone: 'Altamira Sur',
     location: { lat: 10.4908, lng: -66.8516 },
-    tags: ['Delivery', 'Retiro'],
-  },
-  {
-    id: 'featured-dulce-tentacion',
-    name: 'Dulce Tentación',
-    category: 'Postres',
-    cuisine: 'Postres, tortas y café',
-    rating: '4.6',
-    distance: '1.4',
-    eta: '14 min',
-    status: 'ABIERTO',
-    artwork: 'dessert',
-    accent: '#f472b6',
-    zone: 'Campo Alegre',
-    location: { lat: 10.4949, lng: -66.8501 },
-    tags: ['Delivery', 'Retiro'],
-  },
-  {
-    id: 'featured-parrilla-express',
-    name: 'La Parrilla Express',
-    category: 'Parrilla',
-    cuisine: 'Parrilla, bowls y combos',
-    rating: '4.7',
-    distance: '1.8',
-    eta: '17 min',
-    status: 'ABIERTO',
-    artwork: 'grill',
-    accent: '#fb923c',
-    zone: 'La Castellana',
-    location: { lat: 10.4924, lng: -66.8575 },
     tags: ['Delivery', 'Retiro'],
   },
 ];

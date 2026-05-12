@@ -4,7 +4,7 @@ type FoodArtworkProps = {
   theme: FoodArtworkTheme;
   title: string;
   className?: string;
-  variant?: 'default' | 'thumb' | 'promo';
+  variant?: 'default' | 'thumb' | 'promo' | 'showcase';
 };
 
 const artworkStyles: Record<
@@ -121,6 +121,22 @@ export function FoodArtwork({
             {title}
           </p>
         </div>
+      </div>
+    );
+  }
+
+  if (variant === 'showcase') {
+    return (
+      <div
+        className={`relative isolate overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#0b1220] ${className}`}
+      >
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${style.image})`, backgroundPosition: style.position }}
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.02)_0%,rgba(8,13,24,0.12)_42%,rgba(8,13,24,0.46)_100%)]" />
+        <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(255,255,255,0.35)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.35)_1px,transparent_1px)] [background-size:28px_28px]" />
+        <span className="sr-only">{title}</span>
       </div>
     );
   }

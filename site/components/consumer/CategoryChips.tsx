@@ -13,7 +13,7 @@ export function CategoryChips({ items }: CategoryChipsProps) {
             Categorías populares
           </h2>
           <button type="button" className="text-xs font-semibold text-violet-300 sm:text-sm">
-            Ver todos &gt;
+            Ver todas &gt;&gt;
           </button>
         </div>
 
