@@ -12,6 +12,10 @@ const errorMessages: Record<string, string> = {
   invalid_credentials: 'Credenciales invalidas o usuario sin acceso habilitado.',
 };
 
+const successMessages: Record<string, string> = {
+  password_reset_success: 'Clave actualizada. Ya puedes iniciar sesion con tu nueva contraseña.',
+};
+
 function firstValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -33,8 +37,10 @@ export default async function AdminLoginPage({
 
   const params = await searchParams;
   const errorCode = firstValue(params.error) ?? '';
+  const messageCode = firstValue(params.message) ?? '';
   const nextParam = sanitizeAdminNextPath(firstValue(params.next) ?? ADMIN_HOME_PATH);
   const errorMessage = errorMessages[errorCode] ?? null;
+  const successMessage = successMessages[messageCode] ?? null;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#7c3aed_0%,rgba(124,58,237,0.18)_22%,transparent_42%),radial-gradient(circle_at_bottom_right,#1d4ed8_0%,rgba(29,78,216,0.16)_16%,transparent_38%),linear-gradient(180deg,#0f1025_0%,#151337_50%,#1b1646_100%)] px-4 py-10 text-white sm:px-6 lg:px-8">
@@ -111,6 +117,12 @@ export default async function AdminLoginPage({
             {errorMessage ? (
               <div className="rounded-[1rem] border border-rose-300/30 bg-rose-500/12 px-4 py-3 text-sm text-rose-100">
                 {errorMessage}
+              </div>
+            ) : null}
+
+            {successMessage ? (
+              <div className="rounded-[1rem] border border-emerald-300/30 bg-emerald-500/12 px-4 py-3 text-sm text-emerald-100">
+                {successMessage}
               </div>
             ) : null}
 

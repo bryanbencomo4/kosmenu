@@ -25,6 +25,7 @@ const LOCAL_DEVELOPMENT_ALIAS_HOSTS = new Set<string>([
 ]);
 const ADMIN_INTERNAL_PREFIX = '/admin';
 const ADMIN_LOGIN_PATH = '/admin/login';
+const ADMIN_RESET_PASSWORD_PATH = '/admin/reset-password';
 const ADMIN_UNAUTHORIZED_PATH = '/admin/unauthorized';
 const ADMIN_SESSION_COOKIE = 'elmenuxfa_admin_access_token';
 const ADMIN_HOST_HEADER = 'x-admin-host';
@@ -89,7 +90,7 @@ function isInternalAdminPath(pathname: string) {
 }
 
 function isAdminAliasPath(pathname: string) {
-  return pathname === '/login' || pathname === '/unauthorized';
+  return pathname === '/login' || pathname === '/reset-password' || pathname === '/unauthorized';
 }
 
 function isAssetRequest(pathname: string) {
@@ -103,6 +104,10 @@ function resolveAdminInternalPath(pathname: string) {
 
   if (pathname === '/login') {
     return ADMIN_LOGIN_PATH;
+  }
+
+  if (pathname === '/reset-password') {
+    return ADMIN_RESET_PASSWORD_PATH;
   }
 
   if (pathname === '/unauthorized') {
@@ -178,7 +183,9 @@ export function middleware(request: NextRequest) {
     const requestHeaders = new Headers(request.headers);
     const hasAdminSession = Boolean(request.cookies.get(ADMIN_SESSION_COOKIE)?.value?.trim());
     const isAdminPublicPath =
-      internalAdminPath === ADMIN_LOGIN_PATH || internalAdminPath === ADMIN_UNAUTHORIZED_PATH;
+      internalAdminPath === ADMIN_LOGIN_PATH ||
+      internalAdminPath === ADMIN_RESET_PASSWORD_PATH ||
+      internalAdminPath === ADMIN_UNAUTHORIZED_PATH;
     const isAdminApiPath = internalAdminPath.startsWith('/admin/api/');
 
     requestHeaders.set(ADMIN_HOST_HEADER, '1');

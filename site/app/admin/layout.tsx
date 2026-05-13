@@ -9,6 +9,7 @@ import {
   ADMIN_HOME_PATH,
   ADMIN_INTERNAL_PATH_HEADER,
   ADMIN_LOGIN_PATH,
+  ADMIN_RESET_PASSWORD_PATH,
   ADMIN_UNAUTHORIZED_PATH,
 } from './_lib/admin-routes';
 
@@ -29,7 +30,11 @@ export const metadata: Metadata = {
 };
 
 function isPublicAdminSurface(pathname: string) {
-  return pathname === ADMIN_LOGIN_PATH || pathname === ADMIN_UNAUTHORIZED_PATH;
+  return (
+    pathname === ADMIN_LOGIN_PATH ||
+    pathname === ADMIN_RESET_PASSWORD_PATH ||
+    pathname === ADMIN_UNAUTHORIZED_PATH
+  );
 }
 
 export default async function AdminLayout({

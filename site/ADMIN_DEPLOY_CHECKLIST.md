@@ -47,10 +47,14 @@ where email = lower('bryanppg@gmail.com');
 
 1. Apply `20260513170000_admin_rbac_audit.sql`.
 2. Apply `20260513193000_admin_users_least_privilege.sql`.
-3. In Supabase Auth, create `bryanppg@gmail.com` if it does not already exist.
-4. Confirm the user is verified or otherwise allowed to sign in.
-5. Run the SQL above.
-6. Verify the row exists in `public.admin_users` with `role = 'super_admin'`, `is_active = true`, and a non-null `auth_user_id`.
+3. In Supabase Auth > URL Configuration > Redirect URLs, add:
+  - `https://admin.elmenuxfa.com/admin/reset-password`
+  - `https://admin.elmenuxfa.com/reset-password`
+4. Do not use `https://elmenuxfa.com` as the recovery redirect for admin password reset emails.
+5. In Supabase Auth, create `bryanppg@gmail.com` if it does not already exist.
+6. Confirm the user is verified or otherwise allowed to sign in.
+7. Run the SQL above.
+8. Verify the row exists in `public.admin_users` with `role = 'super_admin'`, `is_active = true`, and a non-null `auth_user_id`.
 
 ## D. Vercel Steps
 
@@ -70,6 +74,7 @@ where email = lower('bryanppg@gmail.com');
 5. Enable WAF managed rules.
 6. Configure rate limits:
    - `/login` and `/admin/login`: 10 requests per minute per IP.
+  - `/reset-password` and `/admin/reset-password`: 10 requests per minute per IP.
    - `/admin/api/*`: 60 requests per minute per IP.
 7. Apply `Managed Challenge` or a temporary block when limits are exceeded.
 
@@ -77,13 +82,22 @@ where email = lower('bryanppg@gmail.com');
 
 1. `admin.elmenuxfa.com/` redirects to login when there is no session.
 2. `admin.elmenuxfa.com/login` renders the login page.
-3. A user authenticated in Supabase but not allowed in `admin_users` lands on `/admin/unauthorized`.
-4. `bryanppg@gmail.com` as `super_admin` reaches the admin dashboard.
-5. `admin.elmenuxfa.com/admin/api/me` returns admin data with a valid session.
-6. `elmenuxfa.com` still works.
-7. `www.elmenuxfa.com` still works.
-8. `business.elmenuxfa.com` still works.
-9. Admin traffic does not fall into `/v/...`.
+3. `admin.elmenuxfa.com/admin/reset-password` renders the recovery form.
+4. `admin.elmenuxfa.com/reset-password` rewrites to the same recovery form.
+5. Password recovery emails for admin use `admin.elmenuxfa.com/admin/reset-password` as the redirect target.
+6. A user authenticated in Supabase but not allowed in `admin_users` lands on `/admin/unauthorized`.
+7. `bryanppg@gmail.com` as `super_admin` reaches the admin dashboard.
+8. `admin.elmenuxfa.com/admin/api/me` returns admin data with a valid session.
+9. `elmenuxfa.com` still works.
+10. `www.elmenuxfa.com` still works.
+11. `business.elmenuxfa.com` still works.
+12. Admin traffic does not fall into `/v/...`.
+
+## Password Recovery Notes
+
+- The admin recovery screen is `https://admin.elmenuxfa.com/admin/reset-password`.
+- `https://admin.elmenuxfa.com/reset-password` is supported as an alias that lands on the same screen.
+- The recovery link for admin accounts must never point to `https://elmenuxfa.com`, because that host serves the public portal and cannot complete the admin password reset flow.
 
 ## Security Notes
 
