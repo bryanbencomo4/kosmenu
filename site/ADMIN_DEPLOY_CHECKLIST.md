@@ -120,6 +120,12 @@ where email = lower('bryanppg@gmail.com');
 - `https://admin.elmenuxfa.com/reset-password` is supported as an alias that lands on the same screen.
 - The recovery link for admin accounts must never point to `https://elmenuxfa.com`, because that host serves the public portal and cannot complete the admin password reset flow.
 
+## Recovery Fallback Publico
+
+- Si por error Supabase o un correo viejo redirige a `elmenuxfa.com` o `www.elmenuxfa.com` con `#access_token`, `#refresh_token` y `type=recovery`, el portal público redirige client-side a `https://admin.elmenuxfa.com/admin/reset-password` preservando el hash.
+- Esto es necesario porque el fragmento `#...` no llega al middleware ni al servidor; solo se puede inspeccionar desde cliente.
+- No pegar enlaces de recovery en chats, tickets ni documentación operativa.
+
 ## Security Notes
 
 - The current logout flow clears the local admin cookie and attempts a Supabase server-side sign-out using the current JWT.

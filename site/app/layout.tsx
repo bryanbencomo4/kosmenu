@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { Montserrat, Roboto } from 'next/font/google';
 
 import { publicSiteUrl } from './_lib/public-site-config';
+import { SupabaseRecoveryRedirectGuard } from './_components/SupabaseRecoveryRedirectGuard';
 import { CookieConsentBanner } from '../components/CookieConsentBanner';
 
 const displayFont = Montserrat({
@@ -36,6 +37,7 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className={`${displayFont.variable} ${bodyFont.variable}`}>
+        <SupabaseRecoveryRedirectGuard />
         {children}
         <CookieConsentBanner />
       </body>

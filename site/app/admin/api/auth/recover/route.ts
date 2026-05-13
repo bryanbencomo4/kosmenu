@@ -10,6 +10,7 @@ import { getAdminSupabaseClient } from '../../../_lib/admin-supabase';
 const GENERIC_RESPONSE_MESSAGE = 'Si el correo está habilitado, recibirás un enlace.';
 const BASIC_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PASSWORD_RESET_SUCCESS_WINDOW_MS = 5 * 60 * 1000;
+const PASSWORD_RECOVERY_REQUEST_WINDOW_MS = 60 * 60 * 1000;
 
 type RecoverRequestBody = {
   email?: string;
@@ -123,6 +124,24 @@ async function hasRecentPasswordResetSuccess(actorUserId: string, actorEmail: st
   return Boolean(data && data.length > 0);
 }
 
+async function hasRecentPasswordRecoveryRequest(actorEmail: string) {
+  const cutoff = new Date(Date.now() - PASSWORD_RECOVERY_REQUEST_WINDOW_MS).toISOString();
+  const supabase = getAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from('admin_audit_logs')
+    .select('id')
+    .eq('action', 'admin.password_recovery_requested')
+    .eq('actor_email', actorEmail)
+    .gte('created_at', cutoff)
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(data && data.length > 0);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json().catch(() => ({}))) as RecoverRequestBody;
@@ -159,29 +178,22 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const authorization = request.headers.get('authorization') ?? '';
-    const accessToken = authorization.replace(/^Bearer\s+/i, '').trim();
+    const body = (await request.json().catch(() => ({}))) as RecoverRequestBody;
+    const normalizedEmail = normalizeEmail(body.email);
 
-    if (!accessToken) {
-      return NextResponse.json({ ok: true });
-    }
-
-    const recoveryAuthClient = createRecoveryAuthClient();
-    const { data, error } = await recoveryAuthClient.auth.getUser(accessToken);
-
-    if (error || !data.user?.email) {
-      return NextResponse.json({ ok: true });
-    }
-
-    const normalizedEmail = normalizeEmail(data.user.email);
-
-    if (!normalizedEmail) {
+    if (!isValidEmail(normalizedEmail)) {
       return NextResponse.json({ ok: true });
     }
 
     const activeAdmin = await findActiveAdminByEmail(normalizedEmail);
 
     if (!activeAdmin || !activeAdmin.auth_user_id) {
+      return NextResponse.json({ ok: true });
+    }
+
+    const hasRecentRequest = await hasRecentPasswordRecoveryRequest(normalizedEmail);
+
+    if (!hasRecentRequest) {
       return NextResponse.json({ ok: true });
     }
 

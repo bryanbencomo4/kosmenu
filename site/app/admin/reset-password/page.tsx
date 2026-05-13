@@ -8,7 +8,6 @@ import { useEffect, useState, useTransition } from 'react';
 import { ADMIN_LOGIN_PATH, ADMIN_RESET_PASSWORD_PATH } from '../_lib/admin-routes';
 
 const PASSWORD_MIN_LENGTH = 8;
-const RECOVERY_STORAGE_KEY = 'elmenuxfa_admin_recovery';
 const RECOVERY_INVALID_MESSAGE =
   'No se pudo validar el enlace de recuperacion. Solicita uno nuevo desde admin.elmenuxfa.com.';
 const RECOVERY_UPDATE_ERROR_MESSAGE =
@@ -31,10 +30,9 @@ function getRecoveryClient() {
 
   recoveryClient = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
-      persistSession: true,
+      persistSession: false,
       autoRefreshToken: false,
-      detectSessionInUrl: true,
-      storageKey: RECOVERY_STORAGE_KEY,
+      detectSessionInUrl: false,
     },
   });
 
@@ -60,6 +58,25 @@ async function resolveRecoverySession(client: SupabaseClient): Promise<Session |
   const code = currentUrl.searchParams.get('code');
   const tokenHash = currentUrl.searchParams.get('token_hash');
   const type = currentUrl.searchParams.get('type');
+  const hashParams = new URLSearchParams(currentUrl.hash.replace(/^#/, ''));
+  const hashType = hashParams.get('type');
+  const accessToken = hashParams.get('access_token');
+  const refreshToken = hashParams.get('refresh_token');
+
+  if (hashType === 'recovery' && accessToken && refreshToken) {
+    const { data, error } = await client.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    clearRecoveryUrl();
+
+    if (error) {
+      throw error;
+    }
+
+    return data.session ?? null;
+  }
 
   if (type === 'recovery' && tokenHash) {
     const { data, error } = await client.auth.verifyOtp({
@@ -100,20 +117,29 @@ async function resolveRecoverySession(client: SupabaseClient): Promise<Session |
 type RecoveryStatus = 'checking' | 'ready' | 'invalid';
 
 async function recordPasswordResetSuccess(client: SupabaseClient) {
-  const { data } = await client.auth.getSession();
-  const accessToken = data.session?.access_token;
+  const { data, error } = await client.auth.getUser();
+  const email = data.user?.email?.trim().toLowerCase();
 
-  if (!accessToken) {
+  if (error || !email) {
     return;
   }
 
   await fetch('/admin/api/auth/recover', {
     method: 'PATCH',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ email }),
     cache: 'no-store',
   });
+}
+
+function clearRecoverySession(client: SupabaseClient) {
+  return client.auth.signOut();
+}
+
+function clearInvalidRecoveryState(client: SupabaseClient) {
+  return clearRecoverySession(client).catch(() => undefined);
 }
 
 export default function AdminResetPasswordPage() {
@@ -147,6 +173,7 @@ export default function AdminResetPasswordPage() {
         }
 
         if (!session) {
+          await clearInvalidRecoveryState(client);
           setStatus('invalid');
           setFormError(RECOVERY_INVALID_MESSAGE);
           return;
@@ -159,6 +186,7 @@ export default function AdminResetPasswordPage() {
           return;
         }
 
+        await clearInvalidRecoveryState(client);
         setStatus('invalid');
         setFormError(RECOVERY_INVALID_MESSAGE);
       }
@@ -212,7 +240,7 @@ export default function AdminResetPasswordPage() {
         }
 
         await recordPasswordResetSuccess(client).catch(() => undefined);
-        await client.auth.signOut();
+        await clearRecoverySession(client);
         router.replace(`${ADMIN_LOGIN_PATH}?message=password_reset_success`);
       })();
     });
