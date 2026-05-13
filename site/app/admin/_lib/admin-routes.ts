@@ -2,6 +2,7 @@ import type { AdminPermission } from './admin-permissions';
 
 export const ADMIN_PATH_PREFIX = '/admin';
 export const ADMIN_HOME_PATH = '/admin';
+export const ADMIN_FORGOT_PASSWORD_PATH = '/admin/forgot-password';
 export const ADMIN_LOGIN_PATH = '/admin/login';
 export const ADMIN_RESET_PASSWORD_PATH = '/admin/reset-password';
 export const ADMIN_UNAUTHORIZED_PATH = '/admin/unauthorized';

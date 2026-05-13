@@ -99,6 +99,23 @@ async function resolveRecoverySession(client: SupabaseClient): Promise<Session |
 
 type RecoveryStatus = 'checking' | 'ready' | 'invalid';
 
+async function recordPasswordResetSuccess(client: SupabaseClient) {
+  const { data } = await client.auth.getSession();
+  const accessToken = data.session?.access_token;
+
+  if (!accessToken) {
+    return;
+  }
+
+  await fetch('/admin/api/auth/recover', {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: 'no-store',
+  });
+}
+
 export default function AdminResetPasswordPage() {
   const router = useRouter();
   const [status, setStatus] = useState<RecoveryStatus>('checking');
@@ -194,6 +211,7 @@ export default function AdminResetPasswordPage() {
           return;
         }
 
+        await recordPasswordResetSuccess(client).catch(() => undefined);
         await client.auth.signOut();
         router.replace(`${ADMIN_LOGIN_PATH}?message=password_reset_success`);
       })();

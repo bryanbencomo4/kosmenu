@@ -3,7 +3,12 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { getCurrentAdmin, loginAdminAction } from '../_lib/admin-auth';
-import { ADMIN_HOME_PATH, ADMIN_LOGIN_PATH, sanitizeAdminNextPath } from '../_lib/admin-routes';
+import {
+  ADMIN_FORGOT_PASSWORD_PATH,
+  ADMIN_HOME_PATH,
+  ADMIN_LOGIN_PATH,
+  sanitizeAdminNextPath,
+} from '../_lib/admin-routes';
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -132,6 +137,15 @@ export default async function AdminLoginPage({
             >
               Entrar al panel
             </button>
+
+            <div className="text-right">
+              <Link
+                href={ADMIN_FORGOT_PASSWORD_PATH}
+                className="text-sm font-semibold text-violet-100 underline decoration-violet-200/30 underline-offset-4"
+              >
+                ¿Olvidaste tu contraseña?
+              </Link>
+            </div>
           </form>
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm text-violet-100/72">

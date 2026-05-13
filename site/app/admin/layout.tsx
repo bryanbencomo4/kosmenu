@@ -6,6 +6,7 @@ import { adminSiteUrl, publicSiteUrl } from '../_lib/public-site-config';
 import { AdminShell } from './_components/AdminShell';
 import { isAdminHost, requireAdmin } from './_lib/admin-auth';
 import {
+  ADMIN_FORGOT_PASSWORD_PATH,
   ADMIN_HOME_PATH,
   ADMIN_INTERNAL_PATH_HEADER,
   ADMIN_LOGIN_PATH,
@@ -31,6 +32,7 @@ export const metadata: Metadata = {
 
 function isPublicAdminSurface(pathname: string) {
   return (
+    pathname === ADMIN_FORGOT_PASSWORD_PATH ||
     pathname === ADMIN_LOGIN_PATH ||
     pathname === ADMIN_RESET_PASSWORD_PATH ||
     pathname === ADMIN_UNAUTHORIZED_PATH

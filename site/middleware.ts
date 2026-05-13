@@ -24,12 +24,14 @@ const LOCAL_DEVELOPMENT_ALIAS_HOSTS = new Set<string>([
   ...developmentAdminHosts,
 ]);
 const ADMIN_INTERNAL_PREFIX = '/admin';
+const ADMIN_FORGOT_PASSWORD_PATH = '/admin/forgot-password';
 const ADMIN_LOGIN_PATH = '/admin/login';
 const ADMIN_RESET_PASSWORD_PATH = '/admin/reset-password';
 const ADMIN_UNAUTHORIZED_PATH = '/admin/unauthorized';
 const ADMIN_SESSION_COOKIE = 'elmenuxfa_admin_access_token';
 const ADMIN_HOST_HEADER = 'x-admin-host';
 const ADMIN_INTERNAL_PATH_HEADER = 'x-admin-internal-path';
+const PUBLIC_ADMIN_API_PATHS = new Set(['/admin/api/auth/recover']);
 
 function applySecurityHeaders(response: NextResponse) {
   if (process.env.NODE_ENV === 'production') {
@@ -90,7 +92,12 @@ function isInternalAdminPath(pathname: string) {
 }
 
 function isAdminAliasPath(pathname: string) {
-  return pathname === '/login' || pathname === '/reset-password' || pathname === '/unauthorized';
+  return (
+    pathname === '/forgot-password' ||
+    pathname === '/login' ||
+    pathname === '/reset-password' ||
+    pathname === '/unauthorized'
+  );
 }
 
 function isAssetRequest(pathname: string) {
@@ -100,6 +107,10 @@ function isAssetRequest(pathname: string) {
 function resolveAdminInternalPath(pathname: string) {
   if (pathname === '/') {
     return ADMIN_INTERNAL_PREFIX;
+  }
+
+  if (pathname === '/forgot-password') {
+    return ADMIN_FORGOT_PASSWORD_PATH;
   }
 
   if (pathname === '/login') {
@@ -182,7 +193,9 @@ export function middleware(request: NextRequest) {
     const internalAdminPath = isAdminHost ? resolveAdminInternalPath(pathname) : pathname;
     const requestHeaders = new Headers(request.headers);
     const hasAdminSession = Boolean(request.cookies.get(ADMIN_SESSION_COOKIE)?.value?.trim());
+    const isAdminPublicApiPath = PUBLIC_ADMIN_API_PATHS.has(internalAdminPath);
     const isAdminPublicPath =
+      internalAdminPath === ADMIN_FORGOT_PASSWORD_PATH ||
       internalAdminPath === ADMIN_LOGIN_PATH ||
       internalAdminPath === ADMIN_RESET_PASSWORD_PATH ||
       internalAdminPath === ADMIN_UNAUTHORIZED_PATH;
@@ -195,7 +208,7 @@ export function middleware(request: NextRequest) {
       return applySecurityHeaders(NextResponse.next({ request: { headers: requestHeaders } }));
     }
 
-    if (!hasAdminSession && !isAdminPublicPath) {
+    if (!hasAdminSession && !isAdminPublicPath && !isAdminPublicApiPath) {
       if (isAdminApiPath) {
         return applySecurityHeaders(
           NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
