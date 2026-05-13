@@ -1,9 +1,13 @@
 const DEFAULT_PUBLIC_SITE_URL = 'https://www.elmenuxfa.com';
 const DEFAULT_BUSINESS_SITE_URL = 'https://business.elmenuxfa.com';
+const DEFAULT_ADMIN_SITE_URL = 'https://admin.elmenuxfa.com';
 const DEFAULT_SUPPORT_EMAIL = 'hola@elmenuxfa.com';
 const DEFAULT_MARKETING_WHATSAPP_DIGITS = '584148216433';
 const DEFAULT_MARKETING_WHATSAPP_MESSAGE =
   'Hola, quiero crear mi menú digital con elmenuxfa.com. Me gustaría recibir información del plan profesional.';
+const DEVELOPMENT_PUBLIC_HOSTS = ['www.localhost', 'elmenuxfa.local', 'www.elmenuxfa.local'] as const;
+const DEVELOPMENT_BUSINESS_HOSTS = ['business.localhost', 'business.elmenuxfa.local'] as const;
+const DEVELOPMENT_ADMIN_HOSTS = ['admin.localhost', 'admin.elmenuxfa.local'] as const;
 
 function resolveSiteUrl(rawValue: string | undefined, fallback: string) {
   const candidate = rawValue?.trim();
@@ -41,8 +45,23 @@ export const businessSiteUrl = resolveSiteUrl(
   DEFAULT_BUSINESS_SITE_URL,
 );
 
+export const adminSiteUrl = resolveSiteUrl(
+  process.env.ADMIN_SITE_URL ?? process.env.NEXT_PUBLIC_ADMIN_SITE_URL,
+  DEFAULT_ADMIN_SITE_URL,
+);
+
 export const publicSiteHost = new URL(publicSiteUrl).hostname;
 export const businessSiteHost = new URL(businessSiteUrl).hostname;
+export const adminSiteHost = new URL(adminSiteUrl).hostname;
+
+export const developmentPublicHosts =
+  process.env.NODE_ENV === 'production' ? [] : [...DEVELOPMENT_PUBLIC_HOSTS];
+
+export const developmentBusinessHosts =
+  process.env.NODE_ENV === 'production' ? [] : [...DEVELOPMENT_BUSINESS_HOSTS];
+
+export const developmentAdminHosts =
+  process.env.NODE_ENV === 'production' ? [] : [...DEVELOPMENT_ADMIN_HOSTS];
 
 export const supportEmail = resolveText(
   process.env.NEXT_PUBLIC_SUPPORT_EMAIL ?? process.env.NEXT_PUBLIC_MARKETING_EMAIL,

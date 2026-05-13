@@ -2,11 +2,15 @@ import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 
-import { businessSiteHost, businessSiteUrl } from '../_lib/public-site-config';
+import {
+  businessSiteHost,
+  businessSiteUrl,
+  developmentBusinessHosts,
+} from '../_lib/public-site-config';
 import { BusinessLandingPage } from '../../components/business/BusinessLandingPage';
 
 const canonicalUrl = businessSiteUrl;
-const BUSINESS_HOSTS = new Set([businessSiteHost]);
+const BUSINESS_HOSTS = new Set([businessSiteHost, ...developmentBusinessHosts]);
 const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 
 function requestHostname(host: string) {

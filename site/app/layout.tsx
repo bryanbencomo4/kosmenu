@@ -2,9 +2,8 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { Montserrat, Roboto } from 'next/font/google';
 
+import { publicSiteUrl } from './_lib/public-site-config';
 import { CookieConsentBanner } from '../components/CookieConsentBanner';
-
-const publicSiteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com';
 
 const displayFont = Montserrat({
   subsets: ['latin'],

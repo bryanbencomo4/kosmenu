@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { Check, Cookie } from 'lucide-react';
 
-import { privacyPagePath } from '../app/_lib/public-site-config';
+import { adminSiteHost, privacyPagePath } from '../app/_lib/public-site-config';
 
 type ConsentDecision = 'accepted' | 'rejected';
 
@@ -59,12 +60,17 @@ function persistDecision(decision: ConsentDecision) {
 
 export function CookieConsentBanner() {
   const [isVisible, setIsVisible] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     setIsVisible(readStoredDecision() === null);
   }, []);
 
-  if (!isVisible) {
+  const isAdminSurface =
+    pathname.startsWith('/admin') ||
+    (typeof window !== 'undefined' && window.location.hostname.toLowerCase() === adminSiteHost);
+
+  if (isAdminSurface || !isVisible) {
     return null;
   }
 
