@@ -2,6 +2,8 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { Montserrat, Roboto } from 'next/font/google';
 
+import { CookieConsentBanner } from '../components/CookieConsentBanner';
+
 const publicSiteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com';
 
 const displayFont = Montserrat({
@@ -36,6 +38,7 @@ export default function RootLayout({
     <html lang="es">
       <body className={`${displayFont.variable} ${bodyFont.variable}`}>
         {children}
+        <CookieConsentBanner />
       </body>
     </html>
   );

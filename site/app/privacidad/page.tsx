@@ -1,4 +1,6 @@
+import Link from 'next/link';
 import type { Metadata } from 'next';
+import { ArrowLeft } from 'lucide-react';
 
 import { privacyPagePath, publicSiteUrl, supportEmail, supportEmailHref } from '../_lib/public-site-config';
 
@@ -19,6 +21,17 @@ export default function PrivacyPage() {
   return (
     <main className="min-h-screen bg-[#040814] px-4 py-8 text-white sm:px-6 lg:px-8 lg:py-12">
       <div className="mx-auto max-w-4xl">
+        <div className="mb-4 flex items-center justify-between sm:mb-6">
+          <Link
+            href="/"
+            aria-label="Cerrar política de privacidad y volver al inicio"
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition-all duration-200 hover:border-violet-300/24 hover:bg-violet-500/10 hover:text-white"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Cerrar
+          </Link>
+        </div>
+
         <section className="rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(11,17,32,0.96),rgba(8,14,27,0.92))] px-5 py-8 shadow-[0_40px_120px_-60px_rgba(15,23,42,1)] sm:px-8 sm:py-10">
           <span className="inline-flex rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-violet-200">
             Privacidad
@@ -70,6 +83,13 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-bold text-white">5. Cambios a esta política</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
               Podemos actualizar esta política cuando cambien las funcionalidades, los proveedores o la normativa aplicable. Publicaremos aquí la versión vigente junto con su fecha de actualización.
+            </p>
+          </section>
+
+          <section id="cookies" className={`${cardClassName} scroll-mt-28`}>
+            <h2 className="text-xl font-bold text-white">6. Cookies y preferencias</h2>
+            <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
+              El banner del portal te permite aceptar todas las cookies, rechazarlas o cerrarlo sin aceptar. Cuando eliges una opción, guardamos únicamente esa preferencia para no interrumpirte en cada visita. Si deseas cambiarla más adelante, puedes borrar las cookies del navegador y volver a cargar el sitio.
             </p>
           </section>
         </div>
