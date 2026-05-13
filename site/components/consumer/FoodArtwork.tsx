@@ -102,7 +102,7 @@ export function FoodArtwork({
         className={`relative isolate overflow-hidden rounded-[1rem] border border-white/10 bg-[#0b1220] ${className}`}
       >
         <div
-          className="absolute inset-0 bg-cover bg-center"
+            className="absolute inset-0 bg-cover bg-center transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-[1.06] group-focus-within:scale-[1.06] motion-reduce:transform-none motion-reduce:transition-none"
           style={backgroundStyle}
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.08)_0%,rgba(8,13,24,0.18)_45%,rgba(8,13,24,0.58)_100%)]" />
@@ -117,7 +117,7 @@ export function FoodArtwork({
         className={`relative isolate overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#0b1220] ${className}`}
       >
         <div
-          className="absolute inset-0 bg-cover bg-center"
+            className="absolute inset-0 bg-cover bg-center transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-[1.06] group-focus-within:scale-[1.06] motion-reduce:transform-none motion-reduce:transition-none"
           style={backgroundStyle}
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.03)_0%,rgba(8,13,24,0.08)_36%,rgba(8,13,24,0.56)_100%)]" />
@@ -138,7 +138,7 @@ export function FoodArtwork({
         className={`relative isolate overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#0b1220] ${className}`}
       >
         <div
-          className="absolute inset-0 bg-cover bg-center"
+            className="absolute inset-0 bg-cover bg-center transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-[1.06] group-focus-within:scale-[1.06] motion-reduce:transform-none motion-reduce:transition-none"
           style={backgroundStyle}
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,13,24,0.02)_0%,rgba(8,13,24,0.12)_42%,rgba(8,13,24,0.46)_100%)]" />
@@ -153,7 +153,7 @@ export function FoodArtwork({
       className={`relative isolate overflow-hidden rounded-[1.25rem] border border-white/10 bg-[#0b1220] ${className}`}
     >
       <div
-        className="absolute inset-0 bg-cover bg-center"
+        className="absolute inset-0 bg-cover bg-center transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-[1.06] group-focus-within:scale-[1.06] motion-reduce:transform-none motion-reduce:transition-none"
         style={backgroundStyle}
       />
       <div className="absolute inset-0" style={{ backgroundImage: style.gradient }} />
