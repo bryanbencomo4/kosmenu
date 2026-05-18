@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 
 import {
   adminSiteHost,
+  appSiteUrl,
   businessSiteHost,
   developmentAdminHosts,
   developmentBusinessHosts,
@@ -149,6 +150,22 @@ function isExcludedPath(pathname: string) {
   );
 }
 
+function isPublicAuthCodeCallback(request: NextRequest, hostname: string) {
+  if (hostname !== publicSiteHost) {
+    return false;
+  }
+
+  return request.nextUrl.searchParams.has('code');
+}
+
+function buildAppAuthCallbackRedirect(request: NextRequest) {
+  const redirectUrl = cloneRedirectUrl(request);
+  const appUrl = new URL(appSiteUrl);
+  redirectUrl.protocol = appUrl.protocol;
+  redirectUrl.host = appUrl.host;
+  return redirectUrl;
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const host = requestHost(request);
@@ -180,6 +197,12 @@ export function middleware(request: NextRequest) {
     const redirectUrl = cloneRedirectUrl(request);
     redirectUrl.protocol = 'https';
     return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308));
+  }
+
+  if (isPublicAuthCodeCallback(request, hostname)) {
+    return applySecurityHeaders(
+      NextResponse.redirect(buildAppAuthCallbackRedirect(request), 307),
+    );
   }
 
   if (!isAdminHost && !isLocalAdminPath && (isInternalAdminPath(pathname) || isAdminAliasPath(pathname))) {
