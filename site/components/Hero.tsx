@@ -14,7 +14,7 @@ import {
 
 type HeroProps = {
   whatsappHref: string;
-  demoHref: string;
+  appHref: string;
 };
 
 const heroHighlights = [
@@ -67,7 +67,7 @@ const orbitParticles = [
   'left-[44%] bottom-[18%] h-1 w-1 opacity-50',
 ] as const;
 
-export function Hero({ whatsappHref, demoHref }: HeroProps) {
+export function Hero({ whatsappHref, appHref }: HeroProps) {
   return (
     <section id="inicio" className="hero-shell relative isolate overflow-hidden px-0">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
@@ -141,10 +141,10 @@ export function Hero({ whatsappHref, demoHref }: HeroProps) {
               <Rocket className="h-4 w-4" />
             </Link>
             <Link
-              href={demoHref}
+              href={appHref}
               className="animate-fade-up animation-delay-500 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/12 bg-[#11182a]/55 px-8 py-4 text-base font-medium text-white/84 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-300/20 hover:bg-white/6 hover:text-white will-change-transform will-change-opacity sm:w-auto"
             >
-              Ver demo real
+              Iniciar sesion o registrarte
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>

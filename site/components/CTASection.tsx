@@ -3,10 +3,10 @@ import { ArrowRight, MessageCircle, Rocket } from 'lucide-react';
 
 type CTASectionProps = {
   whatsappHref: string;
-  demoHref: string;
+  appHref: string;
 };
 
-export function CTASection({ whatsappHref, demoHref }: CTASectionProps) {
+export function CTASection({ whatsappHref, appHref }: CTASectionProps) {
   return (
     <section id="cta" className="perf-section mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:py-18">
       <div className="overflow-hidden rounded-[1.8rem] border border-violet-400/20 bg-[linear-gradient(90deg,#7c3aed_0%,#5120a9_38%,#161022_100%)] shadow-[0_35px_120px_-45px_rgba(124,58,237,0.95)] sm:rounded-[2rem]">
@@ -34,10 +34,10 @@ export function CTASection({ whatsappHref, demoHref }: CTASectionProps) {
               <MessageCircle className="h-4 w-4" />
             </Link>
             <Link
-              href={demoHref}
+              href={appHref}
               className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/20 bg-transparent px-6 py-4 text-sm font-semibold text-white transition-all duration-300 hover:scale-105 hover:border-white/35 hover:bg-white/8"
             >
-              Ver menú de ejemplo
+              Iniciar sesion o registrarte
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>

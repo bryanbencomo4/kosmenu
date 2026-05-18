@@ -1,6 +1,7 @@
 const DEFAULT_PUBLIC_SITE_URL = 'https://www.elmenuxfa.com';
 const DEFAULT_BUSINESS_SITE_URL = 'https://business.elmenuxfa.com';
 const DEFAULT_ADMIN_SITE_URL = 'https://admin.elmenuxfa.com';
+const DEFAULT_APP_SITE_URL = 'https://app.elmenuxfa.com';
 const DEFAULT_SUPPORT_EMAIL = 'hola@elmenuxfa.com';
 const DEFAULT_MARKETING_WHATSAPP_DIGITS = '584148216433';
 const DEFAULT_MARKETING_WHATSAPP_MESSAGE =
@@ -48,6 +49,11 @@ export const businessSiteUrl = resolveSiteUrl(
 export const adminSiteUrl = resolveSiteUrl(
   process.env.ADMIN_SITE_URL ?? process.env.NEXT_PUBLIC_ADMIN_SITE_URL,
   DEFAULT_ADMIN_SITE_URL,
+);
+
+export const appSiteUrl = resolveSiteUrl(
+  process.env.NEXT_PUBLIC_APP_SITE_URL,
+  DEFAULT_APP_SITE_URL,
 );
 
 export const publicSiteHost = new URL(publicSiteUrl).hostname;

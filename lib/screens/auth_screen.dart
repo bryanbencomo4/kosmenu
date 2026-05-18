@@ -149,8 +149,6 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   static const String _mobileOAuthRedirect = 'com.kosmenu.app://login-callback';
   static const String _fullLogoAsset = 'assets/branding/full_logo.png';
-  static const String _registerEmailRedirect =
-      '${AppLinks.productionUrl}/?source=email-confirmation';
   static const String _termsUrl = '${AppLinks.productionUrl}/terminos';
   static const String _privacyUrl = '${AppLinks.productionUrl}/privacidad';
 
@@ -172,6 +170,14 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _acceptedPrivacy = false;
 
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  String get _registerEmailRedirect {
+    if (kIsWeb) {
+      return Uri.base.origin;
+    }
+
+    return '${AppLinks.productionUrl}/?source=email-confirmation';
+  }
 
   @override
   void dispose() {

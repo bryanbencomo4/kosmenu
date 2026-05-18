@@ -1,4 +1,4 @@
-import { marketingWhatsappHref } from '../../app/_lib/public-site-config';
+import { appSiteUrl, marketingWhatsappHref } from '../../app/_lib/public-site-config';
 import { CTASection } from '../CTASection';
 import { DemoSection } from '../DemoSection';
 import { Features } from '../Features';
@@ -11,7 +11,7 @@ import { Steps } from '../Steps';
 import { TargetSection } from '../TargetSection';
 
 const whatsappHref = marketingWhatsappHref;
-const demoHref = '#demo';
+const appHref = appSiteUrl;
 
 export function BusinessLandingPage() {
   return (
@@ -21,11 +21,11 @@ export function BusinessLandingPage() {
         <div className="absolute inset-0 -z-10 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.6)_1px,transparent_1px)] [background-size:72px_72px]" />
         <div className="absolute inset-x-0 top-0 -z-10 h-[28rem] bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.35),_transparent_55%)] blur-3xl" />
 
-        <Navbar whatsappHref={whatsappHref} />
+        <Navbar whatsappHref={whatsappHref} appHref={appHref} />
 
         <HeroFeaturesReveal
           features={<Features />}
-          hero={<Hero whatsappHref={whatsappHref} demoHref={demoHref} />}
+          hero={<Hero whatsappHref={whatsappHref} appHref={appHref} />}
         />
 
         <div className="hero-features-next">
@@ -33,7 +33,7 @@ export function BusinessLandingPage() {
           <PricingSection whatsappHref={whatsappHref} />
           <DemoSection />
           <TargetSection />
-          <CTASection whatsappHref={whatsappHref} demoHref={demoHref} />
+          <CTASection whatsappHref={whatsappHref} appHref={appHref} />
           <Footer />
         </div>
       </div>
