@@ -99,6 +99,8 @@ const LOCAL_MAP_RADIUS_KM = 25;
 const REAL_MAP_CLUSTER_RADIUS_KM = 18;
 const MAX_DISCOVERY_PINS = 8;
 const MAP_CENTER = { lat: 10.4966, lng: -66.8535 };
+const useMockFallbackData =
+  process.env.NODE_ENV !== 'production' && process.env.VERCEL_ENV !== 'production';
 
 const THEME_PRESETS: Record<
   FoodArtworkTheme,
@@ -119,7 +121,25 @@ const THEME_PRESETS: Record<
   noodles: { accent: '#22d3ee', emoji: '🥡', label: 'Asiática' },
 };
 
+function emptyData(): PublicConsumerHomeData {
+  return {
+    categories: [],
+    featuredBusinesses: [],
+    promotedBusinesses: [],
+    nearbyBusinesses: [],
+    discoveryPins: [],
+    mapCenter: MAP_CENTER,
+    hasRealNearbyData: false,
+    totalBusinesses: 0,
+    totalPages: 1,
+  };
+}
+
 function fallbackData(): PublicConsumerHomeData {
+  if (!useMockFallbackData) {
+    return emptyData();
+  }
+
   return {
     categories: fallbackCategories,
     featuredBusinesses: fallbackFeaturedBusinesses,
