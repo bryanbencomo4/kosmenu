@@ -1,12 +1,11 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import Image from 'next/image';
 import { redirect } from 'next/navigation';
 
+import { AdminLoginForm } from './AdminLoginForm';
 import { getCurrentAdmin, loginAdminAction } from '../_lib/admin-auth';
 import {
-  ADMIN_FORGOT_PASSWORD_PATH,
   ADMIN_HOME_PATH,
-  ADMIN_LOGIN_PATH,
   sanitizeAdminNextPath,
 } from '../_lib/admin-routes';
 
@@ -48,111 +47,53 @@ export default async function AdminLoginPage({
   const successMessage = successMessages[messageCode] ?? null;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#7c3aed_0%,rgba(124,58,237,0.18)_22%,transparent_42%),radial-gradient(circle_at_bottom_right,#1d4ed8_0%,rgba(29,78,216,0.16)_16%,transparent_38%),linear-gradient(180deg,#0f1025_0%,#151337_50%,#1b1646_100%)] px-4 py-10 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(420px,520px)]">
-        <section className="space-y-6">
-          <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-violet-100">
-            Admin Maestro
-          </span>
-          <div className="space-y-3">
-            <h1 className="max-w-2xl font-[var(--font-display)] text-4xl font-black tracking-[-0.05em] text-white sm:text-5xl">
-              Acceso seguro para operaciones, soporte y growth.
-            </h1>
-            <p className="max-w-xl text-sm leading-7 text-violet-100/80 sm:text-base">
-              Esta fase habilita el panel base de admin.elmenuxfa.com con corte por hostname, RBAC minimo,
-              auditoria y permisos validados solo en servidor.
-            </p>
-          </div>
+    <div className="relative min-h-screen overflow-hidden bg-[#090612] text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-10rem] top-[-9rem] h-[28rem] w-[28rem] rounded-full bg-[#7c3aed]/45 blur-[130px]" />
+        <div className="absolute bottom-[-12rem] right-[-8rem] h-[30rem] w-[30rem] rounded-full bg-[#3949ff]/42 blur-[140px]" />
+        <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(189,172,255,0.16)_1px,transparent_1px),linear-gradient(90deg,rgba(189,172,255,0.16)_1px,transparent_1px)] [background-size:56px_56px] [mask-image:radial-gradient(circle_at_center,black,transparent_85%)]" />
+        <div className="absolute left-[-6rem] top-[10rem] h-[18rem] w-[18rem] rounded-full border border-[#6b4fd0]/20" />
+        <div className="absolute bottom-[-7rem] right-[-3rem] h-[20rem] w-[20rem] rounded-full border border-[#6b4fd0]/20" />
+        <div className="absolute left-[9%] top-[72%] h-2.5 w-2.5 rounded-full bg-[#c4a1ff] shadow-[0_0_18px_6px_rgba(196,161,255,0.4)]" />
+        <div className="absolute right-[15%] top-[18%] h-2.5 w-2.5 rounded-full bg-[#c4a1ff] shadow-[0_0_18px_6px_rgba(196,161,255,0.4)]" />
+      </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-[1.35rem] border border-white/10 bg-white/8 px-4 py-4 backdrop-blur-sm">
-              <p className="text-[11px] font-black uppercase tracking-[0.14em] text-violet-100/72">Seguridad</p>
-              <p className="mt-2 text-sm font-semibold text-white">Cookie httpOnly</p>
-              <p className="mt-2 text-xs leading-6 text-violet-100/72">Sin exponer service role al navegador.</p>
-            </div>
-            <div className="rounded-[1.35rem] border border-white/10 bg-white/8 px-4 py-4 backdrop-blur-sm">
-              <p className="text-[11px] font-black uppercase tracking-[0.14em] text-violet-100/72">RBAC</p>
-              <p className="mt-2 text-sm font-semibold text-white">Permisos server-side</p>
-              <p className="mt-2 text-xs leading-6 text-violet-100/72">Validacion por rol antes de cada lectura critica.</p>
-            </div>
-            <div className="rounded-[1.35rem] border border-white/10 bg-white/8 px-4 py-4 backdrop-blur-sm">
-              <p className="text-[11px] font-black uppercase tracking-[0.14em] text-violet-100/72">Auditoria</p>
-              <p className="mt-2 text-sm font-semibold text-white">Trazabilidad inicial</p>
-              <p className="mt-2 text-xs leading-6 text-violet-100/72">Eventos de login, denegacion y lectura de perfil.</p>
-            </div>
-          </div>
-        </section>
+      <div className="relative flex min-h-screen items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
+        <section className="relative w-full max-w-[31rem] overflow-hidden rounded-[2rem] border border-[#8661f3]/55 bg-[linear-gradient(180deg,rgba(25,20,52,0.92)_0%,rgba(15,12,35,0.96)_100%)] shadow-[0_0_0_1px_rgba(212,190,255,0.05),0_40px_120px_-46px_rgba(2,3,15,0.95),0_0_80px_rgba(124,58,237,0.2)] backdrop-blur-xl">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(173,120,255,0.12),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(87,98,255,0.1),transparent_32%)]" />
 
-        <section className="rounded-[2rem] border border-white/12 bg-white/[0.08] p-6 shadow-[0_40px_100px_-50px_rgba(5,8,22,0.88)] backdrop-blur-xl sm:p-8">
-          <div className="space-y-2">
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-violet-100/72">Ingreso restringido</p>
-            <h2 className="font-[var(--font-display)] text-2xl font-black tracking-[-0.04em] text-white">
-              Inicia sesion con tu cuenta habilitada
-            </h2>
-            <p className="text-sm leading-7 text-violet-100/75">
-              Solo usuarios existentes y activos en <span className="font-semibold text-white">admin_users</span> pueden acceder.
-            </p>
-          </div>
-
-          <form action={loginAdminAction} className="mt-6 space-y-4">
-            <input type="hidden" name="next" value={nextParam} />
-
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-violet-50">Correo</span>
-              <input
-                name="email"
-                type="email"
-                autoComplete="email"
-                placeholder="operaciones@elmenuxfa.com"
-                className="h-12 w-full rounded-[1rem] border border-white/12 bg-[#12142c]/90 px-4 text-sm text-white outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-300/30"
-              />
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-violet-50">Clave</span>
-              <input
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                placeholder="Ingresa tu clave"
-                className="h-12 w-full rounded-[1rem] border border-white/12 bg-[#12142c]/90 px-4 text-sm text-white outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-300/30"
-              />
-            </label>
-
-            {errorMessage ? (
-              <div className="rounded-[1rem] border border-rose-300/30 bg-rose-500/12 px-4 py-3 text-sm text-rose-100">
-                {errorMessage}
+          <div className="relative px-7 py-9 sm:px-12 sm:py-11">
+            <div className="flex justify-center">
+              <div className="flex items-center gap-4 rounded-[1.5rem] px-2 py-1">
+                <div className="flex h-14 w-14 items-center justify-center rounded-[1.1rem] border border-[#9f7dff]/65 bg-[linear-gradient(180deg,rgba(180,116,255,0.22)_0%,rgba(180,116,255,0.08)_100%)] shadow-[0_0_30px_rgba(163,118,255,0.2)]">
+                  <Image
+                    src="/branding/isotipo.png"
+                    alt="elmenuxfa.com"
+                    width={36}
+                    height={36}
+                    className="h-9 w-9 rounded-lg object-contain"
+                    priority
+                  />
+                </div>
+                <p className="font-[var(--font-display)] text-[1.9rem] font-black tracking-[-0.04em] text-white sm:text-[2.1rem]">
+                  elmenuxfa.com
+                </p>
               </div>
-            ) : null}
-
-            {successMessage ? (
-              <div className="rounded-[1rem] border border-emerald-300/30 bg-emerald-500/12 px-4 py-3 text-sm text-emerald-100">
-                {successMessage}
-              </div>
-            ) : null}
-
-            <button
-              type="submit"
-              className="inline-flex h-12 w-full items-center justify-center rounded-[1rem] bg-[#c084fc] px-5 text-sm font-black text-[#120b28] transition hover:bg-[#d8b4fe] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#16183a]"
-            >
-              Entrar al panel
-            </button>
-
-            <div className="text-right">
-              <Link
-                href={ADMIN_FORGOT_PASSWORD_PATH}
-                className="text-sm font-semibold text-violet-100 underline decoration-violet-200/30 underline-offset-4"
-              >
-                ¿Olvidaste tu contraseña?
-              </Link>
             </div>
-          </form>
 
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm text-violet-100/72">
-            <p>Hostname interno: {ADMIN_LOGIN_PATH}</p>
-            <Link href="/" className="font-semibold text-white underline decoration-violet-200/30 underline-offset-4">
-              Volver al dashboard raiz
-            </Link>
+            <div className="mt-10 text-center">
+              <h1 className="font-[var(--font-display)] text-4xl font-black tracking-[-0.05em] text-white sm:text-[2.85rem]">
+                Iniciar sesión
+              </h1>
+              <p className="mt-3 text-lg text-[#b6afd2]">Accede al panel administrativo</p>
+            </div>
+
+            <AdminLoginForm
+              loginAction={loginAdminAction}
+              nextParam={nextParam}
+              errorMessage={errorMessage}
+              successMessage={successMessage}
+            />
           </div>
         </section>
       </div>
