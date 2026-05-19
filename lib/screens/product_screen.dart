@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -325,15 +324,34 @@ class _ProductListScreenState extends State<ProductListScreen> {
     setState(() => _updatingImageProductIds.add(product.id));
 
     try {
+      final sourceName = photo.name.trim().isNotEmpty ? photo.name : photo.path;
+      final extensionMatch = RegExp(r'\.([a-zA-Z0-9]+)$').firstMatch(sourceName);
+      final extension = (extensionMatch?.group(1) ?? 'jpg').toLowerCase();
+      final normalizedExtension = switch (extension) {
+        'png' => 'png',
+        'webp' => 'webp',
+        'gif' => 'gif',
+        _ => 'jpg',
+      };
+      final contentType = switch (normalizedExtension) {
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+        'gif' => 'image/gif',
+        _ => 'image/jpeg',
+      };
       final fileName =
-          '$comercioId/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
+          '$comercioId/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.$normalizedExtension';
+      final bytes = await photo.readAsBytes();
 
       await Supabase.instance.client.storage
           .from(_bucketName)
-          .upload(
+          .uploadBinary(
             fileName,
-            File(photo.path),
-            fileOptions: const FileOptions(upsert: true),
+            bytes,
+            fileOptions: FileOptions(
+              upsert: true,
+              contentType: contentType,
+            ),
           );
 
       final publicUrl = Supabase.instance.client.storage

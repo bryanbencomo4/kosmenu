@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
+import 'package:kosmenu_app/screens/mobile_camera_capture_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
 import 'package:kosmenu_app/screens/public_menu_view.dart';
@@ -209,6 +210,16 @@ class _KosmenuAppState extends State<KosmenuApp> {
       return MaterialPageRoute(
         settings: settings,
         builder: (_) => const _BrandedEntryScreen(),
+      );
+    }
+
+    if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'capture') {
+      final encodedPayload = uri.pathSegments[1];
+      return MaterialPageRoute(
+        settings: settings,
+        builder: (_) => MobileCameraCaptureScreen(
+          encodedPayload: encodedPayload,
+        ),
       );
     }
 

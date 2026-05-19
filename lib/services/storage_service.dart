@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -14,27 +15,41 @@ class StorageService {
 
   static const String _bucketName = 'menu-scans';
 
-  Future<StorageUploadResult> uploadMenuAsset({
-    required File file,
+  Future<StorageUploadResult> uploadMenuAssetBytes({
+    required Uint8List bytes,
     required String comercioId,
     required String contentType,
     String? fileName,
   }) async {
     final timestamp = DateTime.now().microsecondsSinceEpoch;
-    final normalizedName = _normalizedFileName(fileName ?? file.path);
+    final normalizedName = _normalizedFileName(fileName ?? 'menu_asset.bin');
     final path = '$comercioId/${timestamp}_$normalizedName';
 
     final storage = Supabase.instance.client.storage.from(_bucketName);
 
-    await storage.upload(
+    await storage.uploadBinary(
       path,
-      file,
+      bytes,
       fileOptions: FileOptions(contentType: contentType, upsert: false),
     );
 
     final publicUrl = storage.getPublicUrl(path);
 
     return StorageUploadResult(path: path, publicUrl: publicUrl);
+  }
+
+  Future<StorageUploadResult> uploadMenuAsset({
+    required File file,
+    required String comercioId,
+    required String contentType,
+    String? fileName,
+  }) async {
+    return uploadMenuAssetBytes(
+      bytes: await file.readAsBytes(),
+      comercioId: comercioId,
+      contentType: contentType,
+      fileName: fileName ?? file.path,
+    );
   }
 
   Future<StorageUploadResult> uploadMenuScan({

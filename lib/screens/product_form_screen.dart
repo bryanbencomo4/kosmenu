@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -701,6 +702,27 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return null;
   }
 
+  String _imageExtensionForUpload(XFile file) {
+    final sourceName = file.name.trim().isNotEmpty ? file.name : file.path;
+    final match = RegExp(r'\.([a-zA-Z0-9]+)$').firstMatch(sourceName);
+    final ext = (match?.group(1) ?? 'jpg').toLowerCase();
+    return switch (ext) {
+      'png' => 'png',
+      'webp' => 'webp',
+      'gif' => 'gif',
+      _ => 'jpg',
+    };
+  }
+
+  String _contentTypeForExtension(String extension) {
+    return switch (extension) {
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      'gif' => 'image/gif',
+      _ => 'image/jpeg',
+    };
+  }
+
   double _parsePrice() {
     return double.parse(_priceController.text.trim().replaceAll(',', '.'));
   }
@@ -709,28 +731,41 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() => _isUploadingImage = true);
 
     try {
-      final tempDir = await getTemporaryDirectory();
-      final compressedPath =
-          '${tempDir.path}/product_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final extension = _imageExtensionForUpload(sourceImage);
+      final contentType =
+          sourceImage.mimeType ?? _contentTypeForExtension(extension);
+      late final Uint8List uploadBytes;
 
-      final compressedFile = await FlutterImageCompress.compressAndGetFile(
-        sourceImage.path,
-        compressedPath,
-        quality: 72,
-        minWidth: 1280,
-      );
+      if (kIsWeb) {
+        uploadBytes = await sourceImage.readAsBytes();
+      } else {
+        final tempDir = await getTemporaryDirectory();
+        final compressedPath =
+            '${tempDir.path}/product_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-      final fileToUploadPath = compressedFile?.path ?? sourceImage.path;
+        final compressedFile = await FlutterImageCompress.compressAndGetFile(
+          sourceImage.path,
+          compressedPath,
+          quality: 72,
+          minWidth: 1280,
+        );
+
+        final fileToUploadPath = compressedFile?.path ?? sourceImage.path;
+        uploadBytes = await File(fileToUploadPath).readAsBytes();
+      }
 
       final fileName =
-          '${SupabaseConfig.currentComercioId}/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
+          '${SupabaseConfig.currentComercioId}/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.$extension';
 
       await Supabase.instance.client.storage
           .from(_bucketName)
-          .upload(
+          .uploadBinary(
             fileName,
-            File(fileToUploadPath),
-            fileOptions: const FileOptions(upsert: true),
+            uploadBytes,
+            fileOptions: FileOptions(
+              upsert: true,
+              contentType: contentType,
+            ),
           );
 
       return Supabase.instance.client.storage
@@ -921,7 +956,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 final maxWidth = isWide ? 980.0 : 660.0;
 
                 final imagePanel = _ImagePanel(
-                  localImagePath: _pickedImage?.path,
+                  localImageFile: _pickedImage,
                   remoteImageUrl: _remoteImageUrl,
                   fallbackImageUrl: _fallbackImageUrl,
                   heroTag: widget.product != null
@@ -1037,7 +1072,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
 class _ImagePanel extends StatelessWidget {
   const _ImagePanel({
-    required this.localImagePath,
+    required this.localImageFile,
     required this.remoteImageUrl,
     required this.fallbackImageUrl,
     required this.heroTag,
@@ -1051,7 +1086,7 @@ class _ImagePanel extends StatelessWidget {
     required this.onGenerateDescriptionAction,
   });
 
-  final String? localImagePath;
+  final XFile? localImageFile;
   final String? remoteImageUrl;
   final String fallbackImageUrl;
   final String? heroTag;
@@ -1072,7 +1107,7 @@ class _ImagePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final hasLocalImage = localImagePath != null;
+    final hasLocalImage = localImageFile != null;
     final hasRemoteImage =
         remoteImageUrl != null && remoteImageUrl!.trim().isNotEmpty;
     final hasFallbackImage = fallbackImageUrl.trim().isNotEmpty;
@@ -1120,11 +1155,27 @@ class _ImagePanel extends StatelessWidget {
                   _wrapHero(
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.file(
-                        File(localImagePath!),
-                        fit: BoxFit.cover,
-                        height: 230,
-                        width: double.infinity,
+                      child: FutureBuilder<Uint8List>(
+                        future: localImageFile!.readAsBytes(),
+                        builder: (context, snapshot) {
+                          if (snapshot.hasData) {
+                            return Image.memory(
+                              snapshot.data!,
+                              fit: BoxFit.cover,
+                              height: 230,
+                              width: double.infinity,
+                              gaplessPlayback: true,
+                            );
+                          }
+
+                          return Container(
+                            height: 230,
+                            width: double.infinity,
+                            color: colorScheme.surfaceContainerHighest,
+                            alignment: Alignment.center,
+                            child: const CircularProgressIndicator(),
+                          );
+                        },
                       ),
                     ),
                   )

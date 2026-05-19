@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -470,8 +468,8 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
           ),
         );
 
-        final upload = await _storageService.uploadMenuAsset(
-          file: File(asset.path),
+        final upload = await _storageService.uploadMenuAssetBytes(
+          bytes: await asset.file.readAsBytes(),
           comercioId: comercioId,
           contentType: asset.mimeType,
           fileName: asset.displayName,
@@ -756,7 +754,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     }
     return <_MenuImportAsset>[
       _MenuImportAsset(
-        path: image.path,
+        file: image,
         displayName: _fileNameFromPath(image.path),
         mimeType: _inferMimeType(image.path),
       ),
@@ -767,6 +765,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     try {
       final result = await FilePicker.platform.pickFiles(
         allowMultiple: true,
+        withData: true,
         type: FileType.custom,
         allowedExtensions: const <String>[
           'jpg',
@@ -784,16 +783,31 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       }
 
       final imported = result.files
-          .where((file) => (file.path ?? '').trim().isNotEmpty)
-          .map(
-            (file) => _MenuImportAsset(
-              path: file.path!.trim(),
+          .map((file) {
+            final trimmedPath = (file.path ?? '').trim();
+            final mimeType = _inferMimeType(file.name);
+            final xfile = trimmedPath.isNotEmpty
+                ? XFile(trimmedPath, name: file.name, mimeType: mimeType)
+                : file.bytes == null
+                ? null
+                : XFile.fromData(
+                    file.bytes!,
+                    name: file.name,
+                    mimeType: mimeType,
+                  );
+            if (xfile == null) {
+              return null;
+            }
+
+            return _MenuImportAsset(
+              file: xfile,
               displayName: file.name.trim().isEmpty
-                  ? _fileNameFromPath(file.path!)
+                  ? _fileNameFromPath(trimmedPath)
                   : file.name.trim(),
-              mimeType: _inferMimeType(file.name),
-            ),
-          )
+              mimeType: mimeType,
+            );
+          })
+          .whereType<_MenuImportAsset>()
           .toList();
 
       if (imported.isEmpty && mounted) {
@@ -908,7 +922,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       return images
           .map(
             (image) => _MenuImportAsset(
-              path: image.path,
+              file: image,
               displayName: _fileNameFromPath(image.path),
               mimeType: _inferMimeType(image.path),
             ),
@@ -1043,7 +1057,9 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                       itemBuilder: (context, index) {
                         final asset = working[index];
                         return Container(
-                          key: ValueKey(asset.path),
+                          key: ValueKey(
+                            '${asset.displayName}_${asset.path}_${asset.mimeType}',
+                          ),
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
@@ -1056,11 +1072,33 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                               if (asset.isImage)
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
-                                  child: Image.file(
-                                    File(asset.path),
-                                    width: 62,
-                                    height: 62,
-                                    fit: BoxFit.cover,
+                                  child: FutureBuilder<Uint8List>(
+                                    future: asset.file.readAsBytes(),
+                                    builder: (context, snapshot) {
+                                      if (snapshot.hasData) {
+                                        return Image.memory(
+                                          snapshot.data!,
+                                          width: 62,
+                                          height: 62,
+                                          fit: BoxFit.cover,
+                                          gaplessPlayback: true,
+                                        );
+                                      }
+
+                                      return Container(
+                                        width: 62,
+                                        height: 62,
+                                        color: AppColors.surfaceMuted,
+                                        alignment: Alignment.center,
+                                        child: const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 )
                               else
@@ -2013,15 +2051,17 @@ class _ImportSourceTile extends StatelessWidget {
 }
 
 class _MenuImportAsset {
-  const _MenuImportAsset({
-    required this.path,
+  _MenuImportAsset({
+    required this.file,
     required this.displayName,
     required this.mimeType,
   });
 
-  final String path;
+  final XFile file;
   final String displayName;
   final String mimeType;
+
+  String get path => file.path;
 
   bool get isImage => mimeType.startsWith('image/');
 

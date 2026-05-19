@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -20,6 +21,7 @@ import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
+import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -274,6 +276,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final TextEditingController _locationNoteController = TextEditingController();
   final BrandingAiService _brandingAiService = const BrandingAiService();
   final AiImageService _aiImageService = const AiImageService();
+  final WebCameraHandoffService _webCameraHandoffService =
+      const WebCameraHandoffService();
 
   _SetupStep _step = _SetupStep.identity;
   String _selectedCategory = 'Restaurante';
@@ -1869,7 +1873,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             return;
           }
 
-          if (!await File(currentPath).exists()) {
+          if (!kIsWeb && !await File(currentPath).exists()) {
             if (!mounted) {
               return;
             }
@@ -1889,16 +1893,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             return;
           }
 
-          setState(() {
-            _selectedLogo = XFile(persistedPath);
-            _selectedLogoUrl = '';
-            _lastPaletteLogoPath = '';
-            _lastFontLogoPath = '';
-            _paletteManuallyEdited = false;
-            _fontManuallyEdited = false;
-          });
-          await _refreshSmartStyleSuggestions();
-          await _saveDraft();
+          await _applySelectedLogoFile(XFile(persistedPath));
           return;
         }
 
@@ -1906,13 +1901,33 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             ? ImageSource.camera
             : ImageSource.gallery;
 
-        final picked = await ImagePicker().pickImage(
-          source: source,
-          imageQuality: 92,
-          maxWidth: 2200,
-          maxHeight: 2200,
-        );
+        final picked = source == ImageSource.camera &&
+                WebCameraHandoffService.isDesktopWebCameraBridgeRequired
+            ? await _webCameraHandoffService.pickImage(
+                context,
+                bucketName: 'logos-comercios',
+                objectPathPrefix:
+                    '${Supabase.instance.client.auth.currentUser?.id ?? 'anon'}/camera_handoff/logo',
+                waitingTitle: 'Toma la foto del logo desde tu celular',
+                waitingSubtitle:
+                    'Escanea el código con tu teléfono y conectaremos la imagen con este panel en cuanto la subas.',
+                imageQuality: 92,
+                maxWidth: 2200,
+                maxHeight: 2200,
+              )
+            : await ImagePicker().pickImage(
+                source: source,
+                imageQuality: 92,
+                maxWidth: 2200,
+                maxHeight: 2200,
+              );
         if (!mounted || picked == null) {
+          return;
+        }
+
+        if (source == ImageSource.camera &&
+            WebCameraHandoffService.isDesktopWebCameraBridgeRequired) {
+          await _applySelectedLogoFile(picked);
           return;
         }
 
@@ -1929,16 +1944,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           return;
         }
 
-        setState(() {
-          _selectedLogo = XFile(persistedPath);
-          _selectedLogoUrl = '';
-          _lastPaletteLogoPath = '';
-          _lastFontLogoPath = '';
-          _paletteManuallyEdited = false;
-          _fontManuallyEdited = false;
-        });
-        await _refreshSmartStyleSuggestions();
-        await _saveDraft();
+        await _applySelectedLogoFile(XFile(persistedPath));
         return;
       }
     } on PlatformException catch (error) {
@@ -2086,9 +2092,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   Future<String?> _openManualLogoEditor(String sourcePath) async {
     try {
-      final sourceFile = File(sourcePath);
-      if (!await sourceFile.exists()) {
-        return null;
+      if (!kIsWeb) {
+        final sourceFile = File(sourcePath);
+        if (!await sourceFile.exists()) {
+          return null;
+        }
       }
 
       final cropped = await ImageCropper().cropImage(
@@ -2122,6 +2130,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<String> _persistLogoToLocalStorage(String sourcePath) async {
+    if (kIsWeb) {
+      return sourcePath;
+    }
+
     final docDir = await getApplicationDocumentsDirectory();
     final targetDir = Directory(
       '${docDir.path}${Platform.pathSeparator}setup_logos',
@@ -2134,6 +2146,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         '${targetDir.path}${Platform.pathSeparator}logo_${DateTime.now().millisecondsSinceEpoch}.jpg';
     final copied = await File(sourcePath).copy(targetPath);
     return copied.path;
+  }
+
+  String _logoIdentity(XFile logoFile) {
+    final path = logoFile.path.trim();
+    if (path.isNotEmpty) {
+      return path;
+    }
+    final name = logoFile.name.trim();
+    return name.isEmpty ? 'logo-memory' : name;
+  }
+
+  Future<void> _applySelectedLogoFile(XFile logoFile) async {
+    setState(() {
+      _selectedLogo = logoFile;
+      _selectedLogoUrl = '';
+      _lastPaletteLogoPath = '';
+      _lastFontLogoPath = '';
+      _paletteManuallyEdited = false;
+      _fontManuallyEdited = false;
+    });
+    await _refreshSmartStyleSuggestions();
+    await _saveDraft();
   }
 
   bool _shouldGeneratePaletteForLogo(String logoPath) {
@@ -2167,12 +2201,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    final logoPath = _selectedLogo!.path;
+    final logo = _selectedLogo!;
+    final logoPath = _logoIdentity(logo);
     if (!force && !_shouldGeneratePaletteForLogo(logoPath)) {
       return;
     }
 
-    final localAnalysis = await _analyzeLogoPalette(logoPath);
+    final localAnalysis = await _analyzeLogoPalette(logo);
     if (!mounted) {
       return;
     }
@@ -2219,7 +2254,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     });
 
-    final geminiAnalysis = await _analyzeLogoPaletteWithGemini(logoPath);
+    final geminiAnalysis = await _analyzeLogoPaletteWithGemini(logo);
     if (!mounted) {
       return;
     }
@@ -2283,7 +2318,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<_LogoPaletteAnalysis?> _analyzeLogoPaletteWithGemini(
-    String localLogoPath,
+    XFile logoFile,
   ) async {
     try {
       final comercioId = await _ensureComercioIdForGemini();
@@ -2291,7 +2326,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         return null;
       }
 
-      final imageUrl = await _uploadLogoForPaletteAnalysis(localLogoPath);
+      final imageUrl = await _uploadLogoForPaletteAnalysis(logoFile);
       if (imageUrl == null || imageUrl.trim().isEmpty) {
         return null;
       }
@@ -2388,23 +2423,21 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
-  Future<String?> _uploadLogoForPaletteAnalysis(String localPath) async {
+  Future<String?> _uploadLogoForPaletteAnalysis(XFile logoFile) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
       return null;
     }
 
-    final file = File(localPath);
-    if (!await file.exists()) {
-      return null;
-    }
-
-    final bytes = await file.readAsBytes();
+    final bytes = await logoFile.readAsBytes();
     if (bytes.isEmpty) {
       return null;
     }
 
-    final extMatch = RegExp(r'\.([a-zA-Z0-9]+)$').firstMatch(localPath);
+    final sourceName = logoFile.name.trim().isNotEmpty
+        ? logoFile.name.trim()
+        : logoFile.path;
+    final extMatch = RegExp(r'\.([a-zA-Z0-9]+)$').firstMatch(sourceName);
     final ext = (extMatch?.group(1) ?? 'jpg').toLowerCase();
     final contentType = switch (ext) {
       'png' => 'image/png',
@@ -2446,14 +2479,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _selectedPaletteId = 'elmenuxfa';
   }
 
-  Future<_LogoPaletteAnalysis?> _analyzeLogoPalette(String path) async {
+  Future<_LogoPaletteAnalysis?> _analyzeLogoPalette(XFile logoFile) async {
     try {
-      final file = File(path);
-      if (!await file.exists()) {
-        return null;
-      }
-
-      final bytes = await file.readAsBytes();
+      final bytes = await logoFile.readAsBytes();
       final decoded = img.decodeImage(bytes);
       if (decoded == null) {
         return null;
@@ -7516,14 +7544,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final compact = constraints.maxWidth < 420;
-              return Column(
+              final useDesktopContentWidth = constraints.maxWidth >= 960;
+              final desktopContentWidth = (constraints.maxWidth - 40)
+                  .clamp(0.0, 860.0)
+                  .toDouble();
+              final content = Column(
                 children: [
-                  LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 4,
-                    backgroundColor: const Color(0xFF281D49),
-                    valueColor: AlwaysStoppedAnimation<Color>(_palette.primary),
-                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
                     child: _StepPills(step: _step, steps: _activeSteps),
@@ -7617,6 +7643,27 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                         ),
                       ],
                     ),
+                  ),
+                ],
+              );
+
+              return Column(
+                children: [
+                  LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 4,
+                    backgroundColor: const Color(0xFF281D49),
+                    valueColor: AlwaysStoppedAnimation<Color>(_palette.primary),
+                  ),
+                  Expanded(
+                    child: useDesktopContentWidth
+                        ? Center(
+                            child: SizedBox(
+                              width: desktopContentWidth,
+                              child: content,
+                            ),
+                          )
+                        : content,
                   ),
                 ],
               );
