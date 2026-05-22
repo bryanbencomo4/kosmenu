@@ -460,6 +460,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         if ((_editingComercioId ?? '').trim().isEmpty) {
           await _hydrateEditingComercioId(user.id);
         }
+        await _hydrateLogoUrlFromComercio(user.id);
         _showDraftRecoveredHint = true;
         _scheduleDraftRecoveredHintHide();
         return;
@@ -1370,7 +1371,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _lastPaletteLogoPath = (map['lastPaletteLogoPath'] as String? ?? '')
           .trim();
       _lastFontLogoPath = (map['lastFontLogoPath'] as String? ?? '').trim();
-      _selectedLogoUrl = (map['logoUrl'] as String? ?? '').trim();
+      final draftLogoUrl = (map['logoUrl'] as String? ?? '').trim();
+      if (draftLogoUrl.isNotEmpty) {
+        _selectedLogoUrl = draftLogoUrl;
+      }
       _paletteManuallyEdited = map['paletteManuallyEdited'] as bool? ?? false;
       _fontManuallyEdited = map['fontManuallyEdited'] as bool? ?? false;
 
@@ -1441,13 +1445,24 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _loadActiveCurrencyIntoController();
 
       final logoPath = (map['logoPath'] as String? ?? '').trim();
-      if (logoPath.isNotEmpty && await File(logoPath).exists()) {
-        _selectedLogo = XFile(logoPath);
-        if (_lastPaletteLogoPath.isEmpty && primary != null) {
-          _lastPaletteLogoPath = logoPath;
+      if (logoPath.startsWith('http://') || logoPath.startsWith('https://')) {
+        if (_selectedLogoUrl.isEmpty) {
+          _selectedLogoUrl = logoPath;
         }
-        if (_lastFontLogoPath.isEmpty && headingFont.isNotEmpty) {
-          _lastFontLogoPath = logoPath;
+      } else if (!kIsWeb && logoPath.isNotEmpty) {
+        try {
+          final file = File(logoPath);
+          if (await file.exists()) {
+            _selectedLogo = XFile(logoPath);
+            if (_lastPaletteLogoPath.isEmpty && primary != null) {
+              _lastPaletteLogoPath = logoPath;
+            }
+            if (_lastFontLogoPath.isEmpty && headingFont.isNotEmpty) {
+              _lastFontLogoPath = logoPath;
+            }
+          }
+        } catch (_) {
+          // Ignore stale local paths from older drafts.
         }
       }
 
@@ -2109,15 +2124,64 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return name.isEmpty ? 'logo-memory' : name;
   }
 
+  Future<void> _hydrateLogoUrlFromComercio(String userId) async {
+    if (_selectedLogo != null || _selectedLogoUrl.trim().isNotEmpty) {
+      return;
+    }
+
+    try {
+      final client = Supabase.instance.client;
+      final comercioId = (_editingComercioId ?? '').trim();
+      final Map<String, dynamic>? row;
+
+      if (comercioId.isNotEmpty) {
+        row = await client
+            .from('comercios')
+            .select('logo_url')
+            .eq('id', comercioId)
+            .limit(1)
+            .maybeSingle();
+      } else {
+        row = await client
+            .from('comercios')
+            .select('logo_url')
+            .eq('owner_id', userId)
+            .limit(1)
+            .maybeSingle();
+      }
+
+      final logoUrl = row?['logo_url']?.toString().trim() ?? '';
+      if (logoUrl.isEmpty || !mounted) {
+        return;
+      }
+
+      setState(() => _selectedLogoUrl = logoUrl);
+    } catch (_) {
+      // Keep setup usable even if logo hydration fails.
+    }
+  }
+
   Future<void> _applySelectedLogoFile(XFile logoFile) async {
     setState(() {
       _selectedLogo = logoFile;
-      _selectedLogoUrl = '';
       _lastPaletteLogoPath = '';
       _lastFontLogoPath = '';
       _paletteManuallyEdited = false;
       _fontManuallyEdited = false;
     });
+
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      try {
+        final uploadedUrl = await _uploadLogoToStorage(user, logoFile);
+        if (uploadedUrl != null && uploadedUrl.trim().isNotEmpty && mounted) {
+          setState(() => _selectedLogoUrl = uploadedUrl.trim());
+        }
+      } catch (error) {
+        debugPrint('Logo upload preview error: $error');
+      }
+    }
+
     await _refreshSmartStyleSuggestions();
     await _saveDraft();
   }
@@ -7389,13 +7453,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
-  Future<String?> _uploadLogoIfNeeded(User user) async {
-    final logo = _selectedLogo;
-    if (logo == null) {
-      final currentLogoUrl = _selectedLogoUrl.trim();
-      return currentLogoUrl.isEmpty ? null : currentLogoUrl;
-    }
-
+  Future<String?> _uploadLogoToStorage(User user, XFile logo) async {
     final bytes = await logo.readAsBytes();
     final extMatch = RegExp(r'\.([a-zA-Z0-9]+)$').firstMatch(logo.name);
     final ext = extMatch?.group(1)?.toLowerCase() ?? 'jpg';
@@ -7420,6 +7478,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return Supabase.instance.client.storage
         .from('logos-comercios')
         .getPublicUrl(path);
+  }
+
+  Future<String?> _uploadLogoIfNeeded(User user) async {
+    final logo = _selectedLogo;
+    if (logo == null) {
+      final currentLogoUrl = _selectedLogoUrl.trim();
+      return currentLogoUrl.isEmpty ? null : currentLogoUrl;
+    }
+
+    return _uploadLogoToStorage(user, logo);
   }
 
   String _buildLogoPath(String userId, String businessName, String extension) {
