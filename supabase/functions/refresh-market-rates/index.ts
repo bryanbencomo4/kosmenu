@@ -63,6 +63,7 @@ const BCV_URL = 'https://www.bcv.org.ve/estadisticas/tipo-cambio-de-referencia-s
 const BCV_TEXT_MIRROR_URL = 'https://r.jina.ai/http://www.bcv.org.ve/estadisticas/tipo-cambio-de-referencia-smc';
 const BINANCE_P2P_URL = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
 const GOOGLE_FINANCE_MIRROR_URL = 'https://r.jina.ai/http://www.google.com/finance/quote/';
+const OPEN_ER_API_URL = 'https://open.er-api.com/v6/latest/USD';
 const YAHOO_CHART_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 const YAHOO_SYMBOL_BY_PAIR: Record<string, string> = {
   'USD-COP': 'USDCOP=X',
@@ -589,8 +590,13 @@ async function fetchGoogleAnchorRates(
     },
   ];
 
+  const openErSnapshot = await fetchOpenErApiAnchorRates();
+
   for (const item of queries) {
-    const result = await fetchGoogleFinanceRate(item.pair);
+    const result = await fetchGoogleFinanceRate(item.pair, {
+      openErRate: openErSnapshot.rates[item.key] ?? 0,
+      openErMeta: openErSnapshot,
+    });
     const queryPayload: Record<string, unknown> = {
       key: item.key,
       pair: item.pair,
@@ -602,10 +608,10 @@ async function fetchGoogleAnchorRates(
       response_time_ms: result.responseTimeMs,
       source_url: result.sourceUrl,
       reference_url: result.referenceUrl,
-      parser: result.resolvedVia === 'yahoo_chart'
+      parser: result.resolvedVia === 'open_er_api'
+        ? 'open_er_api_v1'
+        : result.resolvedVia === 'yahoo_chart'
         ? 'yahoo_chart_v1'
-        : result.resolvedVia === 'jina_mirror'
-        ? item.parser
         : result.resolvedVia === 'json_fallback'
         ? 'google_json_fallback'
         : item.parser,
@@ -697,8 +703,103 @@ async function fetchGoogleAnchorRates(
   };
 }
 
+type OpenErApiSnapshot = {
+  ok: boolean;
+  rates: GoogleAnchorRates;
+  responseStatus: number | null;
+  responseTimeMs: number;
+  sourceUrl: string;
+  snippet: string;
+  errorMessage: string | null;
+};
+
+async function fetchOpenErApiAnchorRates(): Promise<OpenErApiSnapshot> {
+  const sourceUrl = OPEN_ER_API_URL;
+  const startedAt = Date.now();
+  const emptyRates = defaultGoogleAnchorRates();
+
+  try {
+    const response = await fetch(sourceUrl, {
+      headers: {
+        accept: 'application/json, text/plain, */*',
+        'user-agent': 'kosmenu-app/1.0 refresh-market-rates',
+      },
+    });
+    const text = await response.text();
+    const responseTimeMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        rates: emptyRates,
+        responseStatus: response.status,
+        responseTimeMs,
+        sourceUrl,
+        snippet: text.slice(0, 600),
+        errorMessage: `open.er-api failed with status ${response.status}.`,
+      };
+    }
+
+    const json = JSON.parse(text) as unknown;
+    const rates = extractOpenErApiAnchorRates(json);
+    const hasAllRates = (Object.keys(rates) as GoogleAnchorKey[]).every((key) => rates[key] > 0);
+
+    return {
+      ok: hasAllRates,
+      rates,
+      responseStatus: response.status,
+      responseTimeMs,
+      sourceUrl,
+      snippet: text.slice(0, 600),
+      errorMessage: hasAllRates ? null : 'open.er-api returned incomplete USD anchor rates.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      rates: emptyRates,
+      responseStatus: null,
+      responseTimeMs: Date.now() - startedAt,
+      sourceUrl,
+      snippet: '',
+      errorMessage: error instanceof Error ? error.message : 'open.er-api request failed.',
+    };
+  }
+}
+
+function extractOpenErApiAnchorRates(value: unknown): GoogleAnchorRates {
+  const rates = defaultGoogleAnchorRates();
+  if (!isRecord(value) || normalizeString(value.result) !== 'success') {
+    return rates;
+  }
+
+  const rawRates = isRecord(value.rates) ? value.rates : null;
+  if (!rawRates) {
+    return rates;
+  }
+
+  const usdCop = normalizePositiveNumber(rawRates.COP);
+  const usdEur = normalizePositiveNumber(rawRates.EUR);
+  const vesPerUsd = normalizePositiveNumber(rawRates.VES);
+
+  if (usdCop > 0) {
+    rates['USD/COP'] = usdCop;
+  }
+  if (usdEur > 0) {
+    rates['USD/EUR'] = usdEur;
+  }
+  if (vesPerUsd > 0) {
+    rates['VES/USD'] = 1 / vesPerUsd;
+  }
+
+  return rates;
+}
+
 async function fetchGoogleFinanceRate(
   pair: string,
+  options: {
+    openErRate: number;
+    openErMeta: OpenErApiSnapshot;
+  },
 ): Promise<{
   ok: boolean;
   rate: number;
@@ -708,10 +809,24 @@ async function fetchGoogleFinanceRate(
   referenceUrl: string;
   snippet: string;
   errorMessage: string | null;
-  resolvedVia: 'yahoo_chart' | 'jina_mirror' | 'json_fallback' | 'none';
+  resolvedVia: 'open_er_api' | 'yahoo_chart' | 'json_fallback' | 'none';
 }> {
   const referenceUrl = googleFinanceReferenceUrl(pair);
   const startedAt = Date.now();
+
+  if (options.openErRate > 0) {
+    return {
+      ok: true,
+      rate: options.openErRate,
+      responseStatus: options.openErMeta.responseStatus,
+      responseTimeMs: options.openErMeta.responseTimeMs,
+      sourceUrl: options.openErMeta.sourceUrl,
+      referenceUrl,
+      snippet: options.openErMeta.snippet,
+      errorMessage: null,
+      resolvedVia: 'open_er_api',
+    };
+  }
 
   const yahooResult = await fetchYahooFinanceChartRate(pair);
   if (yahooResult.rate > 0) {
@@ -728,111 +843,35 @@ async function fetchGoogleFinanceRate(
     };
   }
 
-  const sourceUrl = `${GOOGLE_FINANCE_MIRROR_URL}${encodeURIComponent(pair)}`;
-
-  try {
-    const response = await fetch(sourceUrl, {
-      headers: {
-        'user-agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
-        'accept-language': 'en-US,en;q=0.9,es-419;q=0.8,es;q=0.7',
-        'cache-control': 'no-cache',
-        pragma: 'no-cache',
-        referer: referenceUrl,
-      },
-    });
-
-    const text = await response.text();
-    if (!response.ok) {
-      const jsonFallback = await fetchGoogleJsonFallbackRate(pair, referenceUrl);
-      if (jsonFallback.rate > 0) {
-        return {
-          ok: true,
-          rate: jsonFallback.rate,
-          responseStatus: response.status,
-          responseTimeMs: Date.now() - startedAt,
-          sourceUrl: jsonFallback.sourceUrl,
-          referenceUrl,
-          snippet: jsonFallback.snippet,
-          errorMessage: null,
-          resolvedVia: 'json_fallback',
-        };
-      }
-
-      return {
-        ok: false,
-        rate: 0,
-        responseStatus: response.status,
-        responseTimeMs: Date.now() - startedAt,
-        sourceUrl,
-        referenceUrl,
-        snippet: text.slice(0, 1200),
-        errorMessage: `Google mirrored query failed with status ${response.status}.`,
-        resolvedVia: 'none',
-      };
-    }
-
-    const normalized = normalizeGoogleFinanceDocument(text);
-    const rate = parseGoogleFinanceQuoteRate(normalized, pair);
-    if (rate <= 0) {
-      const jsonFallback = await fetchGoogleJsonFallbackRate(pair, referenceUrl);
-      if (jsonFallback.rate > 0) {
-        return {
-          ok: true,
-          rate: jsonFallback.rate,
-          responseStatus: response.status,
-          responseTimeMs: Date.now() - startedAt,
-          sourceUrl: jsonFallback.sourceUrl,
-          referenceUrl,
-          snippet: jsonFallback.snippet || normalized.slice(0, 1200),
-          errorMessage: null,
-          resolvedVia: 'json_fallback',
-        };
-      }
-    }
-
+  const jsonFallback = await fetchGoogleJsonFallbackRate(pair, referenceUrl);
+  if (jsonFallback.rate > 0) {
     return {
-      ok: rate > 0,
-      rate,
-      responseStatus: response.status,
+      ok: true,
+      rate: jsonFallback.rate,
+      responseStatus: yahooResult.responseStatus,
       responseTimeMs: Date.now() - startedAt,
-      sourceUrl,
+      sourceUrl: jsonFallback.sourceUrl,
       referenceUrl,
-      snippet: normalized.slice(0, 1200),
-      errorMessage: rate > 0 ? null : 'Could not parse Google Finance mirrored quote.',
-      resolvedVia: rate > 0 ? 'jina_mirror' : 'none',
-    };
-  } catch (error) {
-    const jsonFallback = await fetchGoogleJsonFallbackRate(pair, referenceUrl);
-    if (jsonFallback.rate > 0) {
-      return {
-        ok: true,
-        rate: jsonFallback.rate,
-        responseStatus: null,
-        responseTimeMs: Date.now() - startedAt,
-        sourceUrl: jsonFallback.sourceUrl,
-        referenceUrl,
-        snippet: jsonFallback.snippet,
-        errorMessage: null,
-        resolvedVia: 'json_fallback',
-      };
-    }
-
-    return {
-      ok: false,
-      rate: 0,
-      responseStatus: null,
-      responseTimeMs: Date.now() - startedAt,
-      sourceUrl,
-      referenceUrl,
-      snippet: yahooResult.snippet,
-      errorMessage: error instanceof Error
-        ? error.message
-        : 'Unknown Google Finance mirrored query error.',
-      resolvedVia: 'none',
+      snippet: jsonFallback.snippet,
+      errorMessage: null,
+      resolvedVia: 'json_fallback',
     };
   }
+
+  return {
+    ok: false,
+    rate: 0,
+    responseStatus: yahooResult.responseStatus ?? options.openErMeta.responseStatus,
+    responseTimeMs: Date.now() - startedAt,
+    sourceUrl: yahooResult.sourceUrl || options.openErMeta.sourceUrl,
+    referenceUrl,
+    snippet: yahooResult.snippet || options.openErMeta.snippet,
+    errorMessage: yahooResult.snippet
+      ? 'Could not resolve Google anchor rate from open.er-api, Yahoo or JSON fallback.'
+      : options.openErMeta.errorMessage ??
+        'Could not resolve Google anchor rate from open.er-api, Yahoo or JSON fallback.',
+    resolvedVia: 'none',
+  };
 }
 
 async function fetchYahooFinanceChartRate(
