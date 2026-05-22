@@ -29,7 +29,12 @@ $vercelConfig = @'
 
 Push-Location $repoRoot
 try {
-  flutter build web --release
+  $flutter = Join-Path $repoRoot '.fvm\versions\stable\bin\flutter.bat'
+  if (-not (Test-Path $flutter)) {
+    $flutter = 'flutter'
+  }
+
+  & $flutter build web --release
   Set-Content -Path $vercelConfigPath -Value $vercelConfig -Encoding ascii
 
   Push-Location $buildOutput

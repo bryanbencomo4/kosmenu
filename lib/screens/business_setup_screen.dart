@@ -7870,7 +7870,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         const SizedBox(height: 8),
         _BrandMiniPreview(
           palette: _paletteSuggestion,
-          logoPath: _selectedLogo?.path,
+          selectedLogo: _selectedLogo,
           logoUrl: _selectedLogoUrl,
           businessName: _nameController.text.trim().isEmpty
               ? 'Tu menu'
@@ -10305,7 +10305,7 @@ class _SmartPaletteCard extends StatelessWidget {
 class _BrandMiniPreview extends StatelessWidget {
   const _BrandMiniPreview({
     required this.palette,
-    required this.logoPath,
+    required this.selectedLogo,
     required this.logoUrl,
     required this.businessName,
     required this.layoutName,
@@ -10313,7 +10313,7 @@ class _BrandMiniPreview extends StatelessWidget {
   });
 
   final _PaletteOption palette;
-  final String? logoPath;
+  final XFile? selectedLogo;
   final String logoUrl;
   final String businessName;
   final String layoutName;
@@ -10370,7 +10370,7 @@ class _BrandMiniPreview extends StatelessWidget {
                 Row(
                   children: [
                     _BrandPreviewLogo(
-                      logoPath: logoPath,
+                      selectedLogo: selectedLogo,
                       logoUrl: logoUrl,
                       palette: palette,
                     ),
@@ -10399,7 +10399,11 @@ class _BrandMiniPreview extends StatelessWidget {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    _PreviewPill(label: layoutName, color: palette.primary),
+                    _PreviewPill(
+                      label: layoutName,
+                      color: palette.primary,
+                      textColor: palette.text,
+                    ),
                   ],
                 ),
               ],
@@ -10427,10 +10431,15 @@ class _BrandMiniPreview extends StatelessWidget {
 }
 
 class _PreviewPill extends StatelessWidget {
-  const _PreviewPill({required this.label, required this.color});
+  const _PreviewPill({
+    required this.label,
+    required this.color,
+    required this.textColor,
+  });
 
   final String label;
   final Color color;
+  final Color textColor;
 
   @override
   Widget build(BuildContext context) {
@@ -10444,7 +10453,7 @@ class _PreviewPill extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(
-          color: Colors.white,
+          color: textColor,
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
@@ -10455,30 +10464,36 @@ class _PreviewPill extends StatelessWidget {
 
 class _BrandPreviewLogo extends StatelessWidget {
   const _BrandPreviewLogo({
-    required this.logoPath,
+    required this.selectedLogo,
     required this.logoUrl,
     required this.palette,
   });
 
-  final String? logoPath;
+  final XFile? selectedLogo;
   final String logoUrl;
   final _PaletteOption palette;
 
   @override
   Widget build(BuildContext context) {
-    final path = (logoPath ?? '').trim();
-    final hasLogo = path.isNotEmpty && File(path).existsSync();
+    if (selectedLogo != null) {
+      return FutureBuilder<Uint8List>(
+        future: selectedLogo!.readAsBytes(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return _logoPlaceholder();
+          }
 
-    if (hasLogo) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Image.file(
-          File(path),
-          width: 36,
-          height: 36,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) => _logoFallback(),
-        ),
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.memory(
+              snapshot.data!,
+              width: 36,
+              height: 36,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => _logoFallback(),
+            ),
+          );
+        },
       );
     }
 
@@ -10497,6 +10512,25 @@ class _BrandPreviewLogo extends StatelessWidget {
     }
 
     return _logoFallback();
+  }
+
+  Widget _logoPlaceholder() {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: palette.surface.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: palette.accent.withValues(alpha: 0.35)),
+      ),
+      child: const Center(
+        child: SizedBox(
+          width: 14,
+          height: 14,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+    );
   }
 
   Widget _logoFallback() {
