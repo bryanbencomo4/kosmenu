@@ -63,6 +63,12 @@ const BCV_URL = 'https://www.bcv.org.ve/estadisticas/tipo-cambio-de-referencia-s
 const BCV_TEXT_MIRROR_URL = 'https://r.jina.ai/http://www.bcv.org.ve/estadisticas/tipo-cambio-de-referencia-smc';
 const BINANCE_P2P_URL = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
 const GOOGLE_FINANCE_MIRROR_URL = 'https://r.jina.ai/http://www.google.com/finance/quote/';
+const YAHOO_CHART_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const YAHOO_SYMBOL_BY_PAIR: Record<string, string> = {
+  'USD-COP': 'USDCOP=X',
+  'USD-EUR': 'USDEUR=X',
+  'VES-USD': 'VESUSD=X',
+};
 const DEFAULT_MAX_DELTA_PERCENT = 35;
 const DEFAULT_MAX_SPREAD_PERCENT = 50;
 
@@ -596,7 +602,14 @@ async function fetchGoogleAnchorRates(
       response_time_ms: result.responseTimeMs,
       source_url: result.sourceUrl,
       reference_url: result.referenceUrl,
-      parser: item.parser,
+      parser: result.resolvedVia === 'yahoo_chart'
+        ? 'yahoo_chart_v1'
+        : result.resolvedVia === 'jina_mirror'
+        ? item.parser
+        : result.resolvedVia === 'json_fallback'
+        ? 'google_json_fallback'
+        : item.parser,
+      resolved_via: result.resolvedVia,
       snippet: result.snippet,
       error_message: result.errorMessage,
       is_fallback: false,
@@ -695,10 +708,27 @@ async function fetchGoogleFinanceRate(
   referenceUrl: string;
   snippet: string;
   errorMessage: string | null;
+  resolvedVia: 'yahoo_chart' | 'jina_mirror' | 'json_fallback' | 'none';
 }> {
-  const sourceUrl = `${GOOGLE_FINANCE_MIRROR_URL}${encodeURIComponent(pair)}`;
   const referenceUrl = googleFinanceReferenceUrl(pair);
   const startedAt = Date.now();
+
+  const yahooResult = await fetchYahooFinanceChartRate(pair);
+  if (yahooResult.rate > 0) {
+    return {
+      ok: true,
+      rate: yahooResult.rate,
+      responseStatus: yahooResult.responseStatus,
+      responseTimeMs: Date.now() - startedAt,
+      sourceUrl: yahooResult.sourceUrl,
+      referenceUrl,
+      snippet: yahooResult.snippet,
+      errorMessage: null,
+      resolvedVia: 'yahoo_chart',
+    };
+  }
+
+  const sourceUrl = `${GOOGLE_FINANCE_MIRROR_URL}${encodeURIComponent(pair)}`;
 
   try {
     const response = await fetch(sourceUrl, {
@@ -726,6 +756,7 @@ async function fetchGoogleFinanceRate(
           referenceUrl,
           snippet: jsonFallback.snippet,
           errorMessage: null,
+          resolvedVia: 'json_fallback',
         };
       }
 
@@ -738,6 +769,7 @@ async function fetchGoogleFinanceRate(
         referenceUrl,
         snippet: text.slice(0, 1200),
         errorMessage: `Google mirrored query failed with status ${response.status}.`,
+        resolvedVia: 'none',
       };
     }
 
@@ -755,6 +787,7 @@ async function fetchGoogleFinanceRate(
           referenceUrl,
           snippet: jsonFallback.snippet || normalized.slice(0, 1200),
           errorMessage: null,
+          resolvedVia: 'json_fallback',
         };
       }
     }
@@ -768,8 +801,24 @@ async function fetchGoogleFinanceRate(
       referenceUrl,
       snippet: normalized.slice(0, 1200),
       errorMessage: rate > 0 ? null : 'Could not parse Google Finance mirrored quote.',
+      resolvedVia: rate > 0 ? 'jina_mirror' : 'none',
     };
   } catch (error) {
+    const jsonFallback = await fetchGoogleJsonFallbackRate(pair, referenceUrl);
+    if (jsonFallback.rate > 0) {
+      return {
+        ok: true,
+        rate: jsonFallback.rate,
+        responseStatus: null,
+        responseTimeMs: Date.now() - startedAt,
+        sourceUrl: jsonFallback.sourceUrl,
+        referenceUrl,
+        snippet: jsonFallback.snippet,
+        errorMessage: null,
+        resolvedVia: 'json_fallback',
+      };
+    }
+
     return {
       ok: false,
       rate: 0,
@@ -777,10 +826,96 @@ async function fetchGoogleFinanceRate(
       responseTimeMs: Date.now() - startedAt,
       sourceUrl,
       referenceUrl,
-      snippet: '',
-      errorMessage: error instanceof Error ? error.message : 'Unknown Google Finance mirrored query error.',
+      snippet: yahooResult.snippet,
+      errorMessage: error instanceof Error
+        ? error.message
+        : 'Unknown Google Finance mirrored query error.',
+      resolvedVia: 'none',
     };
   }
+}
+
+async function fetchYahooFinanceChartRate(
+  pair: string,
+): Promise<{
+  rate: number;
+  responseStatus: number | null;
+  sourceUrl: string;
+  snippet: string;
+}> {
+  const symbol = YAHOO_SYMBOL_BY_PAIR[pair];
+  if (!symbol) {
+    return { rate: 0, responseStatus: null, sourceUrl: '', snippet: '' };
+  }
+
+  const sourceUrl = `${YAHOO_CHART_URL}${encodeURIComponent(symbol)}?interval=1d&range=1d`;
+
+  try {
+    const response = await fetch(sourceUrl, {
+      headers: {
+        accept: 'application/json, text/plain, */*',
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+      },
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return {
+        rate: 0,
+        responseStatus: response.status,
+        sourceUrl,
+        snippet: text.slice(0, 600),
+      };
+    }
+
+    const json = JSON.parse(text) as unknown;
+    const rate = extractYahooChartRate(json);
+    return {
+      rate,
+      responseStatus: response.status,
+      sourceUrl,
+      snippet: text.slice(0, 600),
+    };
+  } catch (error) {
+    return {
+      rate: 0,
+      responseStatus: null,
+      sourceUrl,
+      snippet: error instanceof Error ? error.message : 'Yahoo chart fetch failed.',
+    };
+  }
+}
+
+function extractYahooChartRate(value: unknown): number {
+  if (!isRecord(value)) {
+    return 0;
+  }
+
+  const chart = isRecord(value.chart) ? value.chart : null;
+  const results = chart && Array.isArray(chart.result) ? chart.result : [];
+  const first = results.find((entry) => isRecord(entry));
+  if (!first) {
+    return 0;
+  }
+
+  const meta = isRecord(first.meta) ? first.meta : null;
+  const regularMarketPrice = normalizePositiveNumber(meta?.regularMarketPrice);
+  if (regularMarketPrice > 0) {
+    return regularMarketPrice;
+  }
+
+  const indicators = isRecord(first.indicators) ? first.indicators : null;
+  const quotes = indicators && Array.isArray(indicators.quote) ? indicators.quote : [];
+  const quote = quotes.find((entry) => isRecord(entry));
+  const closes = quote && Array.isArray(quote.close) ? quote.close : [];
+  for (let index = closes.length - 1; index >= 0; index -= 1) {
+    const close = normalizePositiveNumber(closes[index]);
+    if (close > 0) {
+      return close;
+    }
+  }
+
+  return 0;
 }
 
 function googleFinanceReferenceUrl(pair: string): string {

@@ -1,9 +1,10 @@
 # refresh-market-rates
 
-Edge Function para actualizar automaticamente `public.global_market_rates` con dos fuentes:
+Edge Function para actualizar automaticamente `public.global_market_rates` con tres fuentes:
 
 - `bcv`: scraping controlado del BCV (`VES por 1 USD`)
 - `p2p_binance`: recoleccion de anuncios `USDT/VES` de Binance P2P y calculo por mediana
+- `google`: anclas `USD/COP`, `USD/EUR` y `VES/USD` via Yahoo Finance chart API, con respaldo jina/JSON
 
 ## Que hace
 
