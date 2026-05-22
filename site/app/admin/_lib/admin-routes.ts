@@ -21,6 +21,7 @@ export type AdminNavIcon =
   | 'delivery'
   | 'customers'
   | 'analytics'
+  | 'sectors'
   | 'settings'
   | 'security';
 
@@ -91,6 +92,12 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
     href: '/admin#analytics',
     icon: 'analytics',
     permission: 'analytics.read',
+  },
+  {
+    label: 'Sectores',
+    href: '/admin/sectores',
+    icon: 'sectors',
+    permission: 'settings.read',
   },
   {
     label: 'Configuracion',

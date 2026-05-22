@@ -6,6 +6,7 @@ import {
   Building2,
   FileText,
   LayoutDashboard,
+  Layers3,
   LineChart,
   Megaphone,
   Settings2,
@@ -32,6 +33,7 @@ const iconMap: Record<AdminNavIcon, typeof LayoutDashboard> = {
   delivery: Truck,
   customers: Users2,
   analytics: LineChart,
+  sectors: Layers3,
   settings: Settings2,
   security: ShieldCheck,
 };

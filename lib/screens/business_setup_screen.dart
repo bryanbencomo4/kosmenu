@@ -21,6 +21,7 @@ import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
+import 'package:kosmenu_app/services/business_sectors_service.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:geolocator/geolocator.dart';
@@ -123,79 +124,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'Analiza exclusivamente el logo y propon una paleta fiel a sus tonos dominantes. '
       'Evita reinterpretaciones fuertes y conserva los colores reales de la marca.';
 
-  static const List<String> _sectors = <String>[
-    'Abastos y minimarket',
-    'Abogado',
-    'Academia de idiomas',
-    'Agencia de marketing',
-    'Agencia de viajes',
-    'Agricola',
-    'Arquitectura',
-    'Arte y diseno',
-    'Asesoria contable',
-    'Autolavado',
-    'Automotriz',
-    'Bar',
-    'Barberia',
-    'Belleza',
-    'Bienes raices',
-    'Boutique',
-    'Cafe',
-    'Carniceria',
-    'Centro educativo',
-    'Cerrajeria',
-    'Clinica',
-    'Cocteleria',
-    'Comida rapida',
-    'Consultoria',
-    'Construccion',
-    'Cuidado personal',
-    'Delivery y logistica',
-    'Deportes',
-    'Discoteca',
-    'Diseno grafico',
-    'E-commerce',
-    'Electricidad',
-    'Eventos',
-    'Farmacia',
-    'Ferreteria',
-    'Finanzas',
-    'Floristeria',
-    'Fotografia',
-    'Gimnasio',
-    'Heladeria',
-    'Hospedaje',
-    'Imprenta',
-    'Informatica y tecnologia',
-    'Joyeria',
-    'Laboratorio',
-    'Lavanderia',
-    'Licoreria',
-    'Libreria',
-    'Mecanica',
-    'Medicina',
-    'Moda',
-    'Muebles y decoracion',
-    'Panaderia',
-    'Papeleria',
-    'Peluqueria',
-    'Pizzeria',
-    'Pollera',
-    'Reparaciones',
-    'Reposteria',
-    'Restaurante',
-    'Salud',
-    'Servicios legales',
-    'Spa',
-    'Supermercado',
-    'Taller de motos',
-    'Tienda de mascotas',
-    'Tienda de ropa',
-    'Veterinaria',
-    'Videojuegos',
-    'Otros',
-  ];
-
   static const List<String> _currencies = <String>['USD', 'VES', 'COP', 'EUR'];
 
   static const List<String> _paymentMethods = <String>[
@@ -276,8 +204,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final TextEditingController _locationNoteController = TextEditingController();
   final BrandingAiService _brandingAiService = const BrandingAiService();
   final AiImageService _aiImageService = const AiImageService();
+  final BusinessSectorsService _businessSectorsService =
+      const BusinessSectorsService();
   final WebCameraHandoffService _webCameraHandoffService =
       const WebCameraHandoffService();
+  List<String> _availableSectorNames = List<String>.from(
+    BusinessSectorsService.fallbackSectorNames,
+  );
 
   _SetupStep _step = _SetupStep.identity;
   String _selectedCategory = 'Restaurante';
@@ -414,12 +347,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool get _showStepBackButton => _currentStepFlowIndex > 0;
 
   List<String> get _sortedSectors {
-    final values = <String>{..._sectors}.toList()
+    final values = <String>{
+      ..._availableSectorNames,
+      if (_selectedCategory.trim().isNotEmpty) _selectedCategory.trim(),
+    }.toList()
       ..sort((a, b) => a.compareTo(b));
     if (!values.contains('Otros')) {
       values.add('Otros');
     }
     return values;
+  }
+
+  Future<void> _loadBusinessSectors() async {
+    final sectorNames = await _businessSectorsService.fetchActiveSectorNames();
+    if (!mounted || sectorNames.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _availableSectorNames = sectorNames;
+      if (!_availableSectorNames.contains(_selectedCategory) &&
+          _availableSectorNames.contains('Restaurante')) {
+        _selectedCategory = 'Restaurante';
+      }
+    });
   }
 
   @override
@@ -434,6 +385,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       const Duration(seconds: 30),
       (_) => _refreshLiveRateState(),
     );
+    unawaited(_loadBusinessSectors());
     _loadInitialData();
     _autosaveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_loadingExisting && _draftPersistenceEnabled) {
@@ -638,7 +590,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         .trim();
 
     final category = (raw?['categoria']?.toString().trim() ?? '');
-    if (_sectors.contains(category)) {
+    if (category.isNotEmpty) {
       _selectedCategory = category;
     }
 
@@ -1202,7 +1154,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           _slugController.text.trim().isNotEmpty;
 
       final category = (map['category'] as String? ?? '').trim();
-      if (_sectors.contains(category)) {
+      if (category.isNotEmpty) {
         _selectedCategory = category;
       }
 
