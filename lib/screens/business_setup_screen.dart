@@ -272,6 +272,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedFooter = 'Simple';
   bool _allowDelivery = false;
   bool _receiveOrdersOnWhatsapp = true;
+  bool _isVirtualBusiness = false;
+  bool _showOnPublicDirectory = true;
   String _selectedPhoneCountryIso = 'VE';
   bool _menuScanCompleted = false;
   String _menuAiSetupMode = '';
@@ -604,16 +606,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _selectedPhoneCountryIso = parsedPhone.countryIso;
     _whatsappController.text = parsedPhone.nationalNumber;
     final seedAddress = (raw?['direccion']?.toString() ?? '').trim();
-    _addressController.text = _extractAddressLine(seedAddress);
-    _locationNoteController.text = _extractAddressNote(seedAddress);
-    _businessLatitude = _toDoubleOrNull(
-      raw?['latitud'] ?? raw?['direccion_lat'] ?? raw?['latitude'],
-    );
-    _businessLongitude = _toDoubleOrNull(
-      raw?['longitud'] ?? raw?['direccion_lng'] ?? raw?['longitude'],
-    );
+    _isVirtualBusiness = raw?['negocio_virtual'] == true;
+    if (_isVirtualBusiness) {
+      _addressController.clear();
+      _locationNoteController.clear();
+      _businessLatitude = null;
+      _businessLongitude = null;
+    } else {
+      _addressController.text = _extractAddressLine(seedAddress);
+      _locationNoteController.text = _extractAddressNote(seedAddress);
+      _businessLatitude = _toDoubleOrNull(
+        raw?['latitud'] ?? raw?['direccion_lat'] ?? raw?['latitude'],
+      );
+      _businessLongitude = _toDoubleOrNull(
+        raw?['longitud'] ?? raw?['direccion_lng'] ?? raw?['longitude'],
+      );
+    }
     _allowDelivery = raw?['permite_delivery'] == true;
     _receiveOrdersOnWhatsapp = raw?['recibe_pedidos_whatsapp'] == true;
+    _showOnPublicDirectory = raw?['mostrar_en_directorio_publico'] is bool
+        ? raw!['mostrar_en_directorio_publico'] as bool
+        : true;
+    if (_isVirtualBusiness) {
+      _allowDelivery = false;
+    }
 
     final layout = (raw?['menu_layout']?.toString().trim() ?? '');
     if (_layouts.any((item) => item.id == layout)) {
@@ -1354,6 +1370,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _allowDelivery = map['allowDelivery'] as bool? ?? false;
       _receiveOrdersOnWhatsapp =
           map['receiveOrdersOnWhatsapp'] as bool? ?? true;
+      _isVirtualBusiness = map['isVirtualBusiness'] as bool? ?? false;
+      _showOnPublicDirectory = map['showOnPublicDirectory'] as bool? ?? true;
+      if (_isVirtualBusiness) {
+        _allowDelivery = false;
+      }
       _menuScanCompleted = map['menuScanCompleted'] as bool? ?? false;
       _menuAiSetupMode = (map['menuAiSetupMode'] as String? ?? '').trim();
       _manualMenuSetupSelected =
@@ -1526,6 +1547,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'businessLongitude': _businessLongitude,
       'allowDelivery': _allowDelivery,
       'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
+      'isVirtualBusiness': _isVirtualBusiness,
+      'showOnPublicDirectory': _showOnPublicDirectory,
       'menuScanCompleted': _menuScanCompleted,
       'menuAiSetupMode': _menuAiSetupMode,
       'manualMenuSetupSelected': _manualMenuSetupSelected,
@@ -1641,6 +1664,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   String _composeAddressWithNote() {
+    if (_isVirtualBusiness) {
+      return '';
+    }
     final address = _addressController.text.trim();
     final note = _locationNoteController.text.trim();
     if (address.isEmpty) {
@@ -2972,7 +2998,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     }
 
-    if (_allowDelivery &&
+    if (!_isVirtualBusiness &&
+        _allowDelivery &&
         (_businessLatitude == null || _businessLongitude == null)) {
       return 'Selecciona la ubicacion exacta del negocio en el mapa.';
     }
@@ -7221,10 +7248,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (_whatsappE164.isNotEmpty) 'whatsapp': _whatsappE164,
       if (_composeAddressWithNote().isNotEmpty)
         'direccion': _composeAddressWithNote(),
-      if (_businessLatitude != null) 'latitud': _businessLatitude,
-      if (_businessLongitude != null) 'longitud': _businessLongitude,
-      'permite_delivery': _allowDelivery,
+      if (_isVirtualBusiness) ...<String, dynamic>{
+        'latitud': null,
+        'longitud': null,
+      } else ...<String, dynamic>{
+        if (_businessLatitude != null) 'latitud': _businessLatitude,
+        if (_businessLongitude != null) 'longitud': _businessLongitude,
+      },
+      'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
       'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
+      'negocio_virtual': _isVirtualBusiness,
+      'mostrar_en_directorio_publico': _showOnPublicDirectory,
       'logo_url': (logoUrl != null && logoUrl.trim().isNotEmpty)
           ? logoUrl.trim()
           : null,
@@ -7271,6 +7305,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'longitud',
       'permite_delivery',
       'recibe_pedidos_whatsapp',
+      'negocio_virtual',
+      'mostrar_en_directorio_publico',
       'slug',
       'logo_url',
       'moneda',
@@ -9125,10 +9161,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             unawaited(_saveDraft());
           },
           onChanged: (phone) {
-            _selectedPhoneCountryIso = phone.countryISOCode;
-            if (_whatsappE164.isEmpty && _receiveOrdersOnWhatsapp) {
-              setState(() => _receiveOrdersOnWhatsapp = false);
-            }
+            setState(() {
+              _selectedPhoneCountryIso = phone.countryISOCode;
+              if (_whatsappE164.isEmpty && _receiveOrdersOnWhatsapp) {
+                _receiveOrdersOnWhatsapp = false;
+              }
+            });
             unawaited(_saveDraft());
           },
           validator: (phone) {
@@ -9139,101 +9177,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             return null;
           },
         ),
-        const SizedBox(height: 10),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF120E25),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF3B2F63)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Ubicacion del negocio',
-                style: TextStyle(
-                  color: _setupTextHigh,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Direccion',
-                style: TextStyle(
-                  color: _setupTextLow,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                _addressController.text.trim().isEmpty
-                    ? 'Sin direccion seleccionada. Abre el mapa y arrastra hasta el punto exacto del negocio.'
-                    : _addressController.text.trim(),
-                style: const TextStyle(color: _setupTextMedium, fontSize: 12),
-              ),
-              if (_businessLatitude != null && _businessLongitude != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Coordenadas: ${_businessLatitude!.toStringAsFixed(6)}, ${_businessLongitude!.toStringAsFixed(6)}',
-                  style: const TextStyle(color: _setupTextLow, fontSize: 11),
-                ),
-              ],
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _openAddressPlacePicker,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _setupTextHigh,
-                    side: const BorderSide(color: Color(0xFF6B5A9A)),
-                  ),
-                  icon: const Icon(Icons.place_rounded, size: 18),
-                  label: Text(
-                    _addressController.text.trim().isEmpty
-                        ? 'Elegir punto en el mapa'
-                        : 'Cambiar punto en el mapa',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _locationNoteController,
-                onChanged: (_) => unawaited(_saveDraft()),
-                style: const TextStyle(color: _setupTextHigh),
-                maxLines: 2,
-                decoration: InputDecoration(
-                  labelText: 'Referencia (opcional)',
-                  hintText: 'Ej. Frente a la plaza, local esquina, piso 2',
-                  labelStyle: const TextStyle(color: _setupTextLow),
-                  hintStyle: const TextStyle(color: _setupTextLow),
-                  filled: true,
-                  fillColor: const Color(0xFF120E25),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF3B2F63)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF3B2F63)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: _palette.primary, width: 1.2),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
         const SizedBox(height: 8),
         SwitchListTile.adaptive(
-          value: _allowDelivery,
+          value: _isVirtualBusiness,
           onChanged: (value) {
-            setState(() => _allowDelivery = value);
+            setState(() {
+              _isVirtualBusiness = value;
+              if (value) {
+                _allowDelivery = false;
+              }
+            });
             unawaited(_saveDraft());
           },
           activeThumbColor: _palette.primary,
@@ -9241,10 +9194,138 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           inactiveThumbColor: const Color(0xFFE7E0F9),
           inactiveTrackColor: const Color(0xFF3A305A),
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: const Text('Permitir delivery'),
+          title: const Text('Negocio virtual'),
           subtitle: const Text(
-            'Activa entregas a domicilio para tus clientes.',
+            'Sin ubicacion fisica publica. Ideal para ventas solo por WhatsApp o redes.',
             style: TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+        ),
+        if (!_isVirtualBusiness) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF120E25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF3B2F63)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Ubicacion del negocio',
+                  style: TextStyle(
+                    color: _setupTextHigh,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Direccion',
+                  style: TextStyle(
+                    color: _setupTextLow,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _addressController.text.trim().isEmpty
+                      ? 'Sin direccion seleccionada. Abre el mapa y arrastra hasta el punto exacto del negocio.'
+                      : _addressController.text.trim(),
+                  style: const TextStyle(
+                    color: _setupTextMedium,
+                    fontSize: 12,
+                  ),
+                ),
+                if (_businessLatitude != null &&
+                    _businessLongitude != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Coordenadas: ${_businessLatitude!.toStringAsFixed(6)}, ${_businessLongitude!.toStringAsFixed(6)}',
+                    style: const TextStyle(color: _setupTextLow, fontSize: 11),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _openAddressPlacePicker,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _setupTextHigh,
+                      side: const BorderSide(color: Color(0xFF6B5A9A)),
+                    ),
+                    icon: const Icon(Icons.place_rounded, size: 18),
+                    label: Text(
+                      _addressController.text.trim().isEmpty
+                          ? 'Elegir punto en el mapa'
+                          : 'Cambiar punto en el mapa',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _locationNoteController,
+                  onChanged: (_) => unawaited(_saveDraft()),
+                  style: const TextStyle(color: _setupTextHigh),
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Referencia (opcional)',
+                    hintText: 'Ej. Frente a la plaza, local esquina, piso 2',
+                    labelStyle: const TextStyle(color: _setupTextLow),
+                    hintStyle: const TextStyle(color: _setupTextLow),
+                    filled: true,
+                    fillColor: const Color(0xFF120E25),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF3B2F63)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: _palette.primary,
+                        width: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          value: _allowDelivery,
+          onChanged: _isVirtualBusiness
+              ? null
+              : (value) {
+                  setState(() => _allowDelivery = value);
+                  unawaited(_saveDraft());
+                },
+          activeThumbColor: _palette.primary,
+          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+          inactiveThumbColor: const Color(0xFFE7E0F9),
+          inactiveTrackColor: const Color(0xFF3A305A),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: Text(
+            'Permitir delivery',
+            style: TextStyle(
+              color: _isVirtualBusiness ? _setupTextMedium : _setupTextHigh,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            _isVirtualBusiness
+                ? 'No disponible para negocios virtuales sin ubicacion fisica.'
+                : 'Activa entregas a domicilio para tus clientes.',
+            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
         const SizedBox(height: 8),
@@ -9261,12 +9342,37 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           inactiveThumbColor: const Color(0xFFE7E0F9),
           inactiveTrackColor: const Color(0xFF3A305A),
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: const Text('Mostrar boton de contacto por WhatsApp'),
+          title: Text(
+            'Mostrar boton de contacto por WhatsApp',
+            style: TextStyle(
+              color: _whatsappE164.isEmpty ? _setupTextMedium : _setupTextHigh,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           subtitle: Text(
             _whatsappE164.isEmpty
                 ? 'Agrega un numero para habilitar esta opcion.'
                 : 'Muestra un boton para que el cliente te contacte por WhatsApp.',
             style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          value: _showOnPublicDirectory,
+          onChanged: (value) {
+            setState(() => _showOnPublicDirectory = value);
+            unawaited(_saveDraft());
+          },
+          activeThumbColor: _palette.primary,
+          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+          inactiveThumbColor: const Color(0xFFE7E0F9),
+          inactiveTrackColor: const Color(0xFF3A305A),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: const Text('Mostrar en elmenuxfa.com'),
+          subtitle: const Text(
+            'Aparece en el directorio publico donde los clientes descubren negocios. Tu menu propio sigue en tu enlace.',
+            style: TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
       ],

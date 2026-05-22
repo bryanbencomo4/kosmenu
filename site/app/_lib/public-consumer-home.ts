@@ -29,6 +29,7 @@ type CommerceRow = {
   permite_delivery: boolean | null;
   recibe_pedidos_whatsapp: boolean | null;
   en_linea: boolean | null;
+  mostrar_en_directorio_publico: boolean | null;
   color_principal: string | null;
   updated_at: string | null;
   created_at: string | null;
@@ -408,9 +409,10 @@ export async function getPublicConsumerHomeData(): Promise<PublicConsumerHomeDat
     const { data: commerces, error: commercesError } = await supabase
       .from('comercios')
       .select(
-        'id,nombre,categoria,slug,direccion,logo_url,latitud,longitud,permite_delivery,recibe_pedidos_whatsapp,en_linea,color_principal,updated_at,created_at',
+        'id,nombre,categoria,slug,direccion,logo_url,latitud,longitud,permite_delivery,recibe_pedidos_whatsapp,en_linea,mostrar_en_directorio_publico,color_principal,updated_at,created_at',
       )
       .eq('en_linea', true)
+      .eq('mostrar_en_directorio_publico', true)
       .order('updated_at', { ascending: false })
       .limit(24);
 
