@@ -1612,6 +1612,7 @@ export default function PublicMenuPage() {
   const mapPickerAutocompleteRef = useRef<GoogleAutocomplete | null>(null);
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
   const shouldReturnToMenuOnEmptyCartRef = useRef(false);
+  const userChangedCurrencyRef = useRef(false);
   const [infoSections, setInfoSections] = useState({
     location: true,
     delivery: true,
@@ -2553,11 +2554,9 @@ export default function PublicMenuPage() {
       const savedName = (parsed.clientName ?? '').trim();
       const savedEmail = (parsed.clientEmail ?? '').trim();
       const savedWhatsapp = (parsed.clientWhatsapp ?? '').trim();
-      const savedCurrency = (parsed.selectedCurrency ?? '').trim().toUpperCase();
 
       if (savedName) setClientName(savedName);
       if (savedEmail) setClientEmail(savedEmail);
-      if (savedCurrency) setSelectedCurrency(savedCurrency);
 
       if (savedWhatsapp) {
         const parsedPhone = parsePhoneNumber(savedWhatsapp);
@@ -2585,32 +2584,31 @@ export default function PublicMenuPage() {
   }, [isDigitalPayment]);
 
   useEffect(() => {
+    userChangedCurrencyRef.current = false;
+  }, [resolvedComercioId]);
+
+  useEffect(() => {
     if (paymentMethodsByCurrency.length === 0) {
       setSelectedCurrency('');
       return;
     }
 
-    const availableCurrencies = new Set(paymentMethodsByCurrency.map((group) => group.currency));
-    const hasSelected = availableCurrencies.has(selectedCurrency);
-    if (!hasSelected) {
-      if (typeof window !== 'undefined') {
-        const storedCurrency = (window.localStorage.getItem(`${selectedCurrencyStorageKeyPrefix}${resolvedComercioId}`) ?? '')
-          .trim()
-          .toUpperCase();
-        if (storedCurrency && availableCurrencies.has(storedCurrency)) {
-          setSelectedCurrency(storedCurrency);
-          return;
-        }
-      }
-
-      setSelectedCurrency(availableCurrencies.has(businessBaseCurrency) ? businessBaseCurrency : paymentMethodsByCurrency[0].currency);
+    if (userChangedCurrencyRef.current) {
+      return;
     }
-  }, [businessBaseCurrency, paymentMethodsByCurrency, resolvedComercioId, selectedCurrency]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !resolvedComercioId || !selectedCurrencyCode) return;
-    window.localStorage.setItem(`${selectedCurrencyStorageKeyPrefix}${resolvedComercioId}`, selectedCurrencyCode);
-  }, [resolvedComercioId, selectedCurrencyCode]);
+    const availableCurrencies = new Set(paymentMethodsByCurrency.map((group) => group.currency));
+  const defaultCurrency = availableCurrencies.has(businessBaseCurrency)
+      ? businessBaseCurrency
+      : paymentMethodsByCurrency[0].currency;
+
+    setSelectedCurrency(defaultCurrency);
+  }, [businessBaseCurrency, paymentMethodsByCurrency, resolvedComercioId]);
+
+  function selectMenuCurrency(currency: string) {
+    userChangedCurrencyRef.current = true;
+    setSelectedCurrency(normalizeCurrencyCode(currency));
+  }
 
   useEffect(() => {
     if (!isInfoOpen && !isConfirmOpen && !expandedProductImage && !isMapPickerOpen && !isQuickActionsOpen) return;
@@ -3862,7 +3860,7 @@ export default function PublicMenuPage() {
                   <p className="px-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Divisa</p>
                   <select
                     value={selectedCurrencyCode}
-                    onChange={(event) => setSelectedCurrency(normalizeCurrencyCode(event.target.value))}
+                    onChange={(event) => selectMenuCurrency(event.target.value)}
                     className="mt-3 h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-xs font-black uppercase tracking-[0.08em] text-slate-700 outline-none transition focus:border-slate-300 focus:bg-white"
                   >
                     {(paymentMethodsByCurrency.length > 0
@@ -5463,7 +5461,7 @@ export default function PublicMenuPage() {
                             <button
                               key={`footer-currency-chip-${group.currency}`}
                               type="button"
-                              onClick={() => setSelectedCurrency(group.currency)}
+                              onClick={() => selectMenuCurrency(group.currency)}
                               className="shrink-0 rounded-full px-3 py-1.5 text-[11px] font-black transition-colors duration-200"
                               style={
                                 selectedCurrency === group.currency
