@@ -5,6 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 import { ArrowRight, ArrowUp, ChevronDown, Flame, Info, Mail, MapPin, Menu, MessageCircle, Phone, Share2, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
+import { CurrencyTicker } from './_components/CurrencyTicker';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
 import type { Country } from 'react-phone-number-input';
 
@@ -43,6 +45,11 @@ type BrandingConfig = {
   config_negocio?: {
     metodos_pago?: string[] | null;
     moneda_default?: string | null;
+    checkout_currencies?: string[] | null;
+    currencies?: string[] | null;
+    exchange_rates?: Record<string, number | string | null> | null;
+    exchange_rate_modes?: Record<string, string | null> | null;
+    exchange_rate_sources?: Record<string, string | null> | null;
   } | null;
   colores_personalizados?: {
     background?: string | null;
@@ -58,6 +65,7 @@ type ComercioRow = {
   moneda?: string | null;
   costo_envio?: number | string | null;
   tasa_cambio_pesos?: number | string | null;
+  exchange_rate_mode?: string | null;
   exchange_rate_source?: string | null;
   exchange_rate_value?: number | string | null;
   exchange_rate_quote_currency?: string | null;
@@ -719,6 +727,21 @@ function paymentMethodDetails(method: MetodoPagoRow) {
   return details;
 }
 
+function currencyCodeFromPaymentMethodTipo(tipo: string) {
+  if (!tipo.includes('__')) {
+    return null;
+  }
+
+  const parts = tipo.split('__').map((part) => part.trim()).filter(Boolean);
+  for (const part of parts) {
+    if (/^[a-z]{3}$/.test(part)) {
+      return part.toUpperCase();
+    }
+  }
+
+  return null;
+}
+
 function paymentMethodCurrency(method: MetodoPagoRow) {
   const explicit = (method.moneda ?? method.currency ?? method.moneda_codigo ?? '')
     .toString()
@@ -728,13 +751,9 @@ function paymentMethodCurrency(method: MetodoPagoRow) {
   }
 
   const tipo = (method.tipo ?? '').toString().trim().toLowerCase();
-  if (tipo.includes('__')) {
-    const parts = tipo.split('__').map((part) => part.trim()).filter(Boolean);
-    for (const part of parts) {
-      if (/^[a-z]{3}$/.test(part)) {
-        return part.toUpperCase();
-      }
-    }
+  const currencyFromTipo = currencyCodeFromPaymentMethodTipo(tipo);
+  if (currencyFromTipo) {
+    return currencyFromTipo;
   }
 
   const detalles = (method.detalles ?? '').toString().trim();
@@ -833,8 +852,14 @@ function googleRateForPair(baseCurrency: string, quoteCurrency: string, anchors:
   const usdEur = anchors.get('USD/EUR') ?? 0;
   const vesUsd = anchors.get('VES/USD') ?? 0;
 
+  if (base === 'USD' && quote === 'VES' && vesUsd > 0) return 1 / vesUsd;
+  if (base === 'VES' && quote === 'USD' && vesUsd > 0) return vesUsd;
+
   if (base === 'COP' && quote === 'USD' && usdCop > 0) return 1 / usdCop;
   if (base === 'EUR' && quote === 'USD' && usdEur > 0) return 1 / usdEur;
+  if (base === 'USD' && quote === 'COP' && usdCop > 0) return usdCop;
+  if (base === 'USD' && quote === 'EUR' && usdEur > 0) return usdEur;
+
   if (base === 'VES' && quote === 'COP' && vesUsd > 0 && usdCop > 0) return vesUsd * usdCop;
   if (base === 'VES' && quote === 'EUR' && vesUsd > 0 && usdEur > 0) return vesUsd * usdEur;
   if (base === 'COP' && quote === 'VES' && vesUsd > 0 && usdCop > 0) {
@@ -902,7 +927,7 @@ function derivedExchangeRateForCurrency(
     if (rate > 0) return rate;
   }
 
-  if ((source === 'bcv' || source === 'p2p_binance') && isTrackedVesPair(base, quote)) {
+  if ((source === 'bcv' || source === 'p2p_binance' || source === 'google') && isTrackedVesPair(base, quote)) {
     const usdToBase = usdToCurrencyRateForSource(source, base, marketRates);
     const usdToQuote = usdToCurrencyRateForSource(source, quote, marketRates);
     if (usdToBase > 0 && usdToQuote > 0) {
@@ -930,6 +955,203 @@ function exchangeSourceLabel(source: string | null | undefined) {
     default:
       return 'Referencia del negocio';
   }
+}
+
+function formatTickerRate(rate: number) {
+  if (!Number.isFinite(rate) || rate <= 0) return '0';
+
+  if (rate >= 1000) {
+    return rate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  if (rate >= 1) {
+    return rate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
+
+  return rate.toLocaleString('es-VE', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+}
+
+type BrandingCheckoutConfig = {
+  currencies: string[];
+  exchangeRates: Record<string, number | null>;
+  exchangeRateModes: Record<string, string>;
+  exchangeRateSources: Record<string, string>;
+};
+
+function readBrandingCheckoutConfig(branding?: BrandingConfig | null): BrandingCheckoutConfig {
+  const config = branding?.config_negocio ?? {};
+  const currencies = new Set<string>();
+
+  for (const listKey of ['checkout_currencies', 'currencies'] as const) {
+    const list = config[listKey];
+    if (Array.isArray(list)) {
+      for (const item of list) {
+        currencies.add(normalizeCurrencyCode(item?.toString()));
+      }
+    }
+  }
+
+  const exchangeRates: Record<string, number | null> = {};
+  const rawRates = config.exchange_rates ?? {};
+  for (const [key, value] of Object.entries(rawRates)) {
+    const code = normalizeCurrencyCode(key);
+    exchangeRates[code] = parseExchangeRate(value);
+    if (code) {
+      currencies.add(code);
+    }
+  }
+
+  const exchangeRateModes: Record<string, string> = {};
+  const rawModes = config.exchange_rate_modes ?? {};
+  for (const [key, value] of Object.entries(rawModes)) {
+    exchangeRateModes[normalizeCurrencyCode(key)] = (value ?? '').toString().trim().toLowerCase();
+  }
+
+  const exchangeRateSources: Record<string, string> = {};
+  const rawSources = config.exchange_rate_sources ?? {};
+  for (const [key, value] of Object.entries(rawSources)) {
+    exchangeRateSources[normalizeCurrencyCode(key)] = (value ?? '').toString().trim().toLowerCase();
+  }
+
+  return {
+    currencies: Array.from(currencies),
+    exchangeRates,
+    exchangeRateModes,
+    exchangeRateSources,
+  };
+}
+
+function businessCheckoutCurrenciesFromData(
+  baseCurrency: string,
+  paymentMethodsByCurrency: Array<{ currency: string; methods: MetodoPagoRow[] }>,
+  branding: BrandingCheckoutConfig,
+  businessQuoteCurrency: string | null,
+) {
+  const currencies = new Set<string>();
+
+  for (const code of branding.currencies) {
+    if (code !== baseCurrency) {
+      currencies.add(code);
+    }
+  }
+
+  for (const code of Object.keys(branding.exchangeRates)) {
+    if (code !== baseCurrency) {
+      currencies.add(code);
+    }
+  }
+
+  for (const group of paymentMethodsByCurrency) {
+    if (group.currency !== baseCurrency && group.methods.length > 0) {
+      currencies.add(group.currency);
+    }
+  }
+
+  if (businessQuoteCurrency) {
+    const quote = normalizeCurrencyCode(businessQuoteCurrency);
+    if (quote !== baseCurrency) {
+      currencies.add(quote);
+    }
+  }
+
+  return Array.from(currencies).sort((left, right) => left.localeCompare(right));
+}
+
+function buildConfiguredTickerEntries(
+  baseCurrency: string,
+  checkoutCurrencies: string[],
+  options: {
+    paymentMethodsByCurrency: Array<{ currency: string; methods: MetodoPagoRow[]; exchangeRate: number | null }>;
+    brandingConfig: BrandingCheckoutConfig;
+    businessExchangeRate: number | null | undefined;
+    businessQuoteCurrency: string | null;
+    businessExchangeSource: string;
+    businessExchangeMode: string;
+    marketRates: MarketRatesRow | null | undefined;
+  },
+) {
+  const lines: string[] = [];
+
+  for (const currency of checkoutCurrencies) {
+    const paymentGroup = options.paymentMethodsByCurrency.find((group) => group.currency === currency);
+    const rate = resolveCheckoutCurrencyRate(currency, {
+      baseCurrency,
+      paymentExchangeRate: paymentGroup?.exchangeRate,
+      brandingConfig: options.brandingConfig,
+      businessExchangeRate: options.businessExchangeRate,
+      businessQuoteCurrency: options.businessQuoteCurrency,
+      businessExchangeSource: options.businessExchangeSource,
+      businessExchangeMode: options.businessExchangeMode,
+      marketRates: options.marketRates,
+    });
+
+    if (!Number.isFinite(rate) || rate <= 0 || rate === 1) {
+      continue;
+    }
+
+    lines.push(`1 ${baseCurrency} = ${formatTickerRate(rate)} ${currency}`);
+  }
+
+  return lines;
+}
+
+function resolveCheckoutCurrencyRate(
+  currency: string,
+  options: {
+    baseCurrency: string;
+    paymentExchangeRate: number | null | undefined;
+    brandingConfig: BrandingCheckoutConfig;
+    businessExchangeRate: number | null | undefined;
+    businessQuoteCurrency: string | null;
+    businessExchangeSource: string;
+    businessExchangeMode: string;
+    marketRates: MarketRatesRow | null | undefined;
+  },
+) {
+  const quote = normalizeCurrencyCode(currency);
+  const base = normalizeCurrencyCode(options.baseCurrency);
+  if (quote === base) {
+    return 1;
+  }
+
+  const brandingRate = options.brandingConfig.exchangeRates[quote];
+  const currencyMode = options.brandingConfig.exchangeRateModes[quote] ?? options.businessExchangeMode;
+  const currencySource =
+    options.brandingConfig.exchangeRateSources[quote] ?? options.businessExchangeSource ?? 'google';
+
+  if (brandingRate && brandingRate > 0 && brandingRate !== 1) {
+    return brandingRate;
+  }
+
+  if (
+    options.businessExchangeRate &&
+    options.businessExchangeRate > 0 &&
+    options.businessExchangeRate !== 1 &&
+    quote === normalizeCurrencyCode(options.businessQuoteCurrency ?? '')
+  ) {
+    return options.businessExchangeRate;
+  }
+
+  if (
+    options.paymentExchangeRate &&
+    options.paymentExchangeRate > 0 &&
+    options.paymentExchangeRate !== 1
+  ) {
+    return options.paymentExchangeRate;
+  }
+
+  if (brandingRate && brandingRate > 0) {
+    return brandingRate;
+  }
+
+  return derivedExchangeRateForCurrency(
+    base,
+    quote,
+    currencySource,
+    options.marketRates,
+    options.businessExchangeRate,
+    options.businessQuoteCurrency,
+  );
 }
 
 function convertFromBaseCurrency(amountInBaseCurrency: number, baseCurrency: string, targetCurrency: string, exchangeRate: number) {
@@ -1443,10 +1665,21 @@ export default function PublicMenuPage() {
         setError(null);
 
         const encodedIdentifier = encodeURIComponent(commerceIdentifier);
-        const response = await fetch(`/api/menu/${encodedIdentifier}`, {
-          method: 'GET',
-          cache: 'no-store',
-        });
+        const requestPath = `/api/menu/${encodedIdentifier}`;
+        let response: Response;
+
+        try {
+          response = await fetch(requestPath, {
+            method: 'GET',
+            cache: 'no-store',
+          });
+        } catch {
+          // Fallback to absolute URL when relative fetch fails on edge/proxy clients.
+          response = await fetch(`${publicBaseUrl}${requestPath}`, {
+            method: 'GET',
+            cache: 'no-store',
+          });
+        }
 
         const payload = (await response.json().catch(() => ({}))) as {
           error?: string;
@@ -1930,6 +2163,7 @@ export default function PublicMenuPage() {
   const businessQuoteCurrencyRaw = (menuData?.comercio.exchange_rate_quote_currency ?? '').toString().trim();
   const businessQuoteCurrency = businessQuoteCurrencyRaw ? normalizeCurrencyCode(businessQuoteCurrencyRaw) : null;
   const businessExchangeSource = (menuData?.comercio.exchange_rate_source ?? 'google').toString().trim().toLowerCase();
+  const businessExchangeMode = (menuData?.comercio.exchange_rate_mode ?? 'auto').toString().trim().toLowerCase();
   const businessExchangeRate =
     parseExchangeRate(menuData?.comercio.exchange_rate_value) ?? parseExchangeRate(menuData?.comercio.tasa_cambio_pesos);
   const paymentMethodsByCurrency = useMemo(() => {
@@ -1976,30 +2210,47 @@ export default function PublicMenuPage() {
     menuData?.marketRates,
     menuData?.metodosPago,
   ]);
+  const brandingCheckoutConfig = useMemo(
+    () => readBrandingCheckoutConfig(menuData?.comercio.branding_ia),
+    [menuData?.comercio.branding_ia],
+  );
+  const businessCheckoutCurrencies = useMemo(
+    () =>
+      businessCheckoutCurrenciesFromData(
+        businessBaseCurrency,
+        paymentMethodsByCurrency,
+        brandingCheckoutConfig,
+        businessQuoteCurrency,
+      ),
+    [brandingCheckoutConfig, businessBaseCurrency, businessQuoteCurrency, paymentMethodsByCurrency],
+  );
   const selectedCurrencyGroup =
     paymentMethodsByCurrency.find((group) => group.currency === normalizeCurrencyCode(selectedCurrency)) ?? null;
-  const businessRateEntries = useMemo(
+  const tickerRateEntries = useMemo(
     () =>
-      paymentMethodsByCurrency.filter(
-        (group) => group.currency !== businessBaseCurrency && Number.isFinite(group.exchangeRate) && group.exchangeRate > 0,
-      ),
-    [businessBaseCurrency, paymentMethodsByCurrency],
+      buildConfiguredTickerEntries(businessBaseCurrency, businessCheckoutCurrencies, {
+        paymentMethodsByCurrency,
+        brandingConfig: brandingCheckoutConfig,
+        businessExchangeRate,
+        businessQuoteCurrency,
+        businessExchangeSource,
+        businessExchangeMode,
+        marketRates: menuData?.marketRates,
+      }),
+    [
+      brandingCheckoutConfig,
+      businessBaseCurrency,
+      businessCheckoutCurrencies,
+      businessExchangeMode,
+      businessExchangeRate,
+      businessExchangeSource,
+      businessQuoteCurrency,
+      menuData?.marketRates,
+      paymentMethodsByCurrency,
+    ],
   );
-  const tickerRateEntries = useMemo(() => {
-    if (businessRateEntries.length === 0) {
-      return [
-        `Moneda principal: ${businessBaseCurrency}`,
-        `Fuente: ${exchangeSourceLabel(businessExchangeSource)}`,
-        `Moneda principal: ${businessBaseCurrency}`,
-        `Fuente: ${exchangeSourceLabel(businessExchangeSource)}`,
-      ];
-    }
-
-    const entries = businessRateEntries.map(
-      (group) => `1 ${businessBaseCurrency} = ${group.exchangeRate} ${group.currency}`,
-    );
-    return [...entries, ...entries];
-  }, [businessBaseCurrency, businessExchangeSource, businessRateEntries]);
+  const tickerDisplayEntries = tickerRateEntries;
+  const activeTopTickerHeightPx = topTickerHeightPx;
   const selectedCurrencyCode = normalizeCurrencyCode(
     selectedCurrency || selectedCurrencyGroup?.currency || businessBaseCurrency,
   );
@@ -3110,68 +3361,11 @@ export default function PublicMenuPage() {
 
   if (loading) {
     return (
-      <main
-        className="relative min-h-screen overflow-hidden"
-        style={{
-          background:
-            'radial-gradient(circle at 50% 18%, rgba(214,90,31,0.16), transparent 22%), linear-gradient(180deg, #fff8f0 0%, #fffaf5 36%, #ffffff 100%)',
-        }}
-      >
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="kos-loader-aura absolute left-1/2 top-[12%] h-72 w-72 -translate-x-1/2 rounded-full bg-[rgba(214,90,31,0.12)]" />
-          <div className="kos-loader-aura absolute left-[10%] top-[30%] h-28 w-28 rounded-full bg-[rgba(255,194,102,0.20)]" style={{ animationDelay: '220ms' }} />
-          <div className="kos-loader-aura absolute bottom-[14%] right-[14%] h-36 w-36 rounded-full bg-[rgba(15,23,42,0.06)]" style={{ animationDelay: '420ms' }} />
-          <div className="absolute inset-x-10 top-[22%] h-px bg-gradient-to-r from-transparent via-[rgba(214,90,31,0.18)] to-transparent" />
-        </div>
-
-        <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 text-center">
-          <div className="relative flex h-36 w-36 items-center justify-center sm:h-40 sm:w-40">
-            <div className="kos-loader-orbit absolute inset-0 rounded-full border border-[rgba(214,90,31,0.16)]" />
-            <div className="kos-loader-orbit-reverse absolute inset-[10px] rounded-full border border-dashed border-[rgba(15,23,42,0.12)]" />
-            <div className="absolute inset-[20px] rounded-full bg-white/78 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur-md" />
-
-            <div
-              className="relative z-[1] grid h-20 w-20 place-items-center rounded-[26px] text-3xl font-black text-white shadow-[0_16px_36px_rgba(15,23,42,0.16)] sm:h-24 sm:w-24 sm:text-4xl"
-              style={{ backgroundColor: '#D65A1F' }}
-            >
-              {comercioInitialLetter}
-            </div>
-
-            {comercioLogoUrl ? (
-              <img
-                src={comercioLogoUrl}
-                alt={`Logo de ${comercioNombre}`}
-                className="absolute z-10 h-20 w-20 rounded-[26px] object-cover shadow-[0_16px_36px_rgba(15,23,42,0.16)] sm:h-24 sm:w-24"
-                onError={(event) => {
-                  event.currentTarget.style.display = 'none';
-                }}
-              />
-            ) : null}
-          </div>
-
-          <div className="mt-8">
-            <p className="text-[10px] font-black uppercase tracking-[0.32em] text-slate-500">Cargando menu</p>
-            <h1 className="mt-4 text-3xl font-black tracking-[-0.05em] text-slate-950 sm:text-5xl" style={titleFontStyle}>
-              {comercioNombre}
-            </h1>
-            <p className="mx-auto mt-3 max-w-sm text-sm font-medium leading-6 text-slate-500 sm:text-[15px]">
-              Preparando la experiencia del menu digital.
-            </p>
-          </div>
-
-          <div className="mt-8 flex items-center gap-2">
-            <span className="kos-loader-dot h-2 w-2 rounded-full bg-[#D65A1F]" />
-            <span className="kos-loader-dot h-2 w-2 rounded-full bg-[#F59E0B]" style={{ animationDelay: '140ms' }} />
-            <span className="kos-loader-dot h-2 w-2 rounded-full bg-slate-400" style={{ animationDelay: '280ms' }} />
-          </div>
-
-          <div className="kos-loader-bar relative mt-6 h-[3px] w-40 overflow-hidden rounded-full bg-slate-200/80" />
-        </section>
-
-        <div className="pointer-events-none absolute inset-x-0 bottom-10 z-10 text-center">
-          <p className="text-[11px] font-semibold tracking-[0.22em] text-slate-400">elmenuxfa.com</p>
-        </div>
-      </main>
+      <PublicMenuSkeletonLoader
+        businessName={comercioNombre}
+        logoUrl={comercioLogoUrl}
+        initialLetter={comercioInitialLetter}
+      />
     );
   }
 
@@ -3497,39 +3691,29 @@ export default function PublicMenuPage() {
         }
       `}</style>
       <main
-        className="min-h-screen pt-9 text-slate-900"
+        className={`min-h-screen text-slate-900 ${tickerDisplayEntries.length > 0 ? 'pt-9' : ''}`}
         style={{
           ...containerStyle,
           background: pageBackgroundByPreset(rubroPreset.id),
         }}
       >
+        {tickerDisplayEntries.length > 0 ? (
         <section className="fixed inset-x-0 top-0 z-50 border-b border-slate-900/10 bg-slate-950 text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)]">
           <div className="mx-auto flex h-9 max-w-6xl items-center overflow-hidden px-4 sm:px-6">
             <div className="mr-3 shrink-0 rounded-full bg-white/12 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/90">
               Divisas
             </div>
-            <div className="relative min-w-0 flex-1 overflow-hidden">
-              <div
-                className="flex min-w-max items-center gap-3 whitespace-nowrap"
-                style={{ animation: 'kosmenuTickerScroll 24s linear infinite' }}
-              >
-                {tickerRateEntries.map((entry, index) => (
-                  <div key={`ticker-rate-${index}`} className="flex items-center gap-3">
-                    <span className="text-xs font-bold tracking-[0.04em] text-white/95">{entry}</span>
-                    <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--primary-color)]" />
-                  </div>
-                ))}
-              </div>
-            </div>
+            <CurrencyTicker entries={tickerDisplayEntries} accentColor="var(--primary-color)" />
             <div className="ml-3 shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70">
               {exchangeSourceLabel(businessExchangeSource)}
             </div>
           </div>
         </section>
+        ) : null}
 
         <section
           className="sticky z-40 border-b border-slate-200/90 bg-white/95 backdrop-blur-sm"
-          style={{ top: `${topTickerHeightPx}px` }}
+          style={{ top: `${tickerDisplayEntries.length > 0 ? activeTopTickerHeightPx : 0}px` }}
         >
           <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">

@@ -138,6 +138,49 @@ class WebCameraHandoffService {
     return !isLikelyMobileWebBrowser();
   }
 
+  static const String defaultHandoffBucket = 'logos-comercios';
+
+  static String handoffObjectPathPrefix(String feature) {
+    final userId =
+        Supabase.instance.client.auth.currentUser?.id.trim() ?? 'anon';
+    final normalizedFeature = feature
+        .trim()
+        .replaceAll(RegExp(r'[^a-z0-9_]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
+    return '$userId/camera_handoff/${normalizedFeature.isEmpty ? 'capture' : normalizedFeature}';
+  }
+
+  Future<XFile?> pickCameraImage(
+    BuildContext context, {
+    required String feature,
+    required String waitingTitle,
+    required String waitingSubtitle,
+    String bucketName = defaultHandoffBucket,
+    int imageQuality = 90,
+    int maxWidth = 1600,
+    int? maxHeight,
+  }) async {
+    if (isDesktopWebCameraBridgeRequired) {
+      return pickImage(
+        context,
+        bucketName: bucketName,
+        objectPathPrefix: handoffObjectPathPrefix(feature),
+        waitingTitle: waitingTitle,
+        waitingSubtitle: waitingSubtitle,
+        imageQuality: imageQuality,
+        maxWidth: maxWidth,
+        maxHeight: maxHeight,
+      );
+    }
+
+    return ImagePicker().pickImage(
+      source: ImageSource.camera,
+      imageQuality: imageQuality,
+      maxWidth: maxWidth.toDouble(),
+      maxHeight: maxHeight?.toDouble(),
+    );
+  }
+
   Future<XFile?> pickImage(
     BuildContext context, {
     required String bucketName,

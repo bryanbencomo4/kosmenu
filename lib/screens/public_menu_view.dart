@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -2405,10 +2406,10 @@ class _PublicMenuPalette {
     int? textArgb,
   }) {
     if (primaryArgb != null && surfaceArgb != null && textArgb != null) {
-      final primary = Color(primaryArgb);
-      final accent = Color(accentArgb ?? primaryArgb);
-      final surface = Color(surfaceArgb);
-      final onSurface = Color(textArgb);
+      final primary = ColorArgbCodec.toColor(primaryArgb);
+      final accent = ColorArgbCodec.toColor(accentArgb ?? primaryArgb);
+      final surface = ColorArgbCodec.toColor(surfaceArgb);
+      final onSurface = ColorArgbCodec.toColor(textArgb);
       final onPrimary = primary.computeLuminance() > 0.5
           ? const Color(0xFF1F2937)
           : Colors.white;

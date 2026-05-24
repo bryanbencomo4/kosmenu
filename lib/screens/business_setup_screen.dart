@@ -14,6 +14,7 @@ import 'package:intl_phone_field/countries.dart' as intl_phone_countries;
 import 'package:intl_phone_field/country_picker_dialog.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:intl_phone_field/phone_number.dart' as intl_phone_number;
+import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
@@ -267,6 +268,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _lastFontLogoPath = '';
   bool _paletteManuallyEdited = false;
   bool _fontManuallyEdited = false;
+  Map<String, dynamic> _seedBrandingIa = <String, dynamic>{};
   String _selectedHeadingFont = 'Poppins';
   bool _showAllFontSuggestions = false;
   String _selectedFooter = 'Simple';
@@ -494,7 +496,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
       unawaited(_checkSlugAvailability(_slugController.text));
       final logoPath = _selectedLogo?.path ?? '';
-      if (_shouldGeneratePaletteForLogo(logoPath)) {
+      if (_shouldGeneratePaletteForLogo(logoPath) && !_paletteManuallyEdited) {
         unawaited(_refreshSmartStyleSuggestions());
       }
       if (_step.index >= _SetupStep.checkout.index &&
@@ -643,6 +645,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     final branding = _toStringDynamicMap(raw?['branding_ia']);
+    _seedBrandingIa = Map<String, dynamic>.from(branding);
     final customColors = _toStringDynamicMap(
       branding['colores_personalizados'],
     );
@@ -676,16 +679,32 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final paletteText = _toIntOrNull(
       raw?['menu_palette_text'] ?? comercio.menuPaletteTextArgb,
     );
-    if (palettePrimary != null &&
+    if (brandingPrimary != null &&
+        brandingSurface != null &&
+        brandingText != null) {
+      _paletteSuggestion = _PaletteOption(
+        id: _selectedPaletteId,
+        name: _selectedPaletteId == 'custom'
+            ? 'Paleta personalizada'
+            : 'Guardada',
+        primary: brandingPrimary,
+        accent: brandingAccent ?? brandingPrimary,
+        surface: brandingSurface,
+        text: brandingText,
+      );
+      if (_selectedPaletteId == 'custom') {
+        _paletteManuallyEdited = true;
+      }
+    } else if (palettePrimary != null &&
         paletteSurface != null &&
         paletteText != null) {
       _paletteSuggestion = _PaletteOption(
         id: _selectedPaletteId,
         name: 'Guardada',
-        primary: Color(palettePrimary),
-        accent: Color(paletteAccent ?? palettePrimary),
-        surface: Color(paletteSurface),
-        text: Color(paletteText),
+        primary: _colorFromPaletteInt(palettePrimary),
+        accent: _colorFromPaletteInt(paletteAccent ?? palettePrimary),
+        surface: _colorFromPaletteInt(paletteSurface),
+        text: _colorFromPaletteInt(paletteText),
       );
     } else if (brandingPrimary != null || legacyPrimary != null) {
       final resolvedPrimary = brandingPrimary ?? legacyPrimary!;
@@ -1038,9 +1057,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         final map = Map<String, dynamic>.from(row as Map);
         final rawType = map['tipo']?.toString().trim().toLowerCase() ?? '';
         final typeParts = rawType.split('__');
-        final currency = typeParts.length > 1
-            ? typeParts.last.toUpperCase()
-            : _currentCurrency;
+        String? currencyCode;
+        for (final part in typeParts) {
+          if (RegExp(r'^[a-z]{3}$').hasMatch(part)) {
+            currencyCode = part.toUpperCase();
+            break;
+          }
+        }
+        final currency = currencyCode ?? _currentCurrency;
         if (!_currencies.contains(currency)) {
           continue;
         }
@@ -1223,10 +1247,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _paletteSuggestion = _PaletteOption(
           id: _selectedPaletteId,
           name: 'Sugerida',
-          primary: Color(primary),
-          accent: Color(accent ?? primary),
-          surface: Color(surface),
-          text: Color(text),
+          primary: _colorFromPaletteInt(primary),
+          accent: _colorFromPaletteInt(accent ?? primary),
+          surface: _colorFromPaletteInt(surface),
+          text: _colorFromPaletteInt(text),
         );
       } else {
         final legacy = _legacyPalettes.where((item) => item.id == palette);
@@ -1518,10 +1542,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'primaryCurrency': _baseCurrency,
       'layout': _selectedLayoutId,
       'palette': _selectedPaletteId,
-      'palettePrimary': _paletteSuggestion.primary.toARGB32(),
-      'paletteAccent': _paletteSuggestion.accent.toARGB32(),
-      'paletteSurface': _paletteSuggestion.surface.toARGB32(),
-      'paletteText': _paletteSuggestion.text.toARGB32(),
+      'palettePrimary': ColorArgbCodec.fromColor(_paletteSuggestion.primary),
+      'paletteAccent': ColorArgbCodec.fromColor(_paletteSuggestion.accent),
+      'paletteSurface': ColorArgbCodec.fromColor(_paletteSuggestion.surface),
+      'paletteText': ColorArgbCodec.fromColor(_paletteSuggestion.text),
       'headingFont': _selectedHeadingFont,
       'exchangeRate':
           _exchangeRateByCurrency[_currentCurrency] ??
@@ -1894,13 +1918,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             ? ImageSource.camera
             : ImageSource.gallery;
 
-        final picked = source == ImageSource.camera &&
-                WebCameraHandoffService.isDesktopWebCameraBridgeRequired
-            ? await _webCameraHandoffService.pickImage(
+        final picked = source == ImageSource.camera
+            ? await _webCameraHandoffService.pickCameraImage(
                 context,
-                bucketName: 'logos-comercios',
-                objectPathPrefix:
-                    '${Supabase.instance.client.auth.currentUser?.id ?? 'anon'}/camera_handoff/logo',
+                feature: 'logo',
                 waitingTitle: 'Toma la foto del logo desde tu celular',
                 waitingSubtitle:
                     'Escanea el código con tu teléfono y conectaremos la imagen con este panel en cuanto la subas.',
@@ -2255,9 +2276,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     setState(() {
-      final canApplyGeneratedPalette =
-          !_paletteManuallyEdited || _lastPaletteLogoPath != logoPath;
-      if (canApplyGeneratedPalette) {
+      if (!_paletteManuallyEdited) {
         _paletteSuggestion =
             localAnalysis?.palette ??
             const _PaletteOption(
@@ -2269,6 +2288,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               text: _defaultPaletteText,
             );
         _lastPaletteLogoPath = logoPath;
+        _selectedPaletteId = localAnalysis == null ? 'elmenuxfa' : 'logo-smart';
       }
 
       _logoDetectedColors =
@@ -2279,7 +2299,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             _defaultPaletteSurface,
             _defaultPaletteText,
           ];
-      if (canApplyGeneratedPalette) {
+      if (!_paletteManuallyEdited) {
         _selectedPaletteId = localAnalysis == null ? 'elmenuxfa' : 'logo-smart';
       }
       _isGeminiPaletteLoading = true;
@@ -2303,9 +2323,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     setState(() {
       if (geminiAnalysis != null) {
-        final canApplyGeneratedPalette =
-            !_paletteManuallyEdited || _lastPaletteLogoPath != logoPath;
-        if (canApplyGeneratedPalette) {
+        if (!_paletteManuallyEdited) {
           _paletteSuggestion = geminiAnalysis.palette;
           _selectedPaletteId = 'logo-smart';
           _lastPaletteLogoPath = logoPath;
@@ -2315,9 +2333,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
       _isGeminiPaletteLoading = false;
       if (geminiAnalysis == null) {
-        final canApplyRescuePalette =
-            !_paletteManuallyEdited || _lastPaletteLogoPath != logoPath;
-        if (canApplyRescuePalette) {
+        if (!_paletteManuallyEdited) {
           _paletteSuggestion = const _PaletteOption(
             id: 'rescue-premium',
             name: 'Premium de respaldo',
@@ -2832,9 +2848,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   child: const Text('Cancelar'),
                 ),
                 FilledButton(
-                  onPressed: () => Navigator.of(
-                    context,
-                  ).pop(_tryParseHexColor(controller.text)),
+                  onPressed: () {
+                    final resolved =
+                        _tryParseHexColor(controller.text) ?? preview;
+                    Navigator.of(context).pop(resolved);
+                  },
                   child: const Text('Aplicar'),
                 ),
               ],
@@ -2859,9 +2877,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       );
       _selectedPaletteId = 'custom';
       _paletteManuallyEdited = true;
-      _lastPaletteLogoPath = _selectedLogo?.path ?? '';
+      _lastPaletteLogoPath = _selectedLogo != null
+          ? _logoIdentity(_selectedLogo!)
+          : 'manual-palette';
     });
     await _saveDraft();
+    await _persistPaletteChanges();
   }
 
   TextStyle _headingFontStyle({
@@ -4093,6 +4114,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
+    if (_step == _SetupStep.style && (_editingComercioId ?? '').trim().isNotEmpty) {
+      await _persistPaletteChanges();
+    }
+
     if (_isLastStepInFlow) {
       await _saveBusiness();
       return;
@@ -4108,6 +4133,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
       unawaited(_suggestExchangeRate());
     }
+  }
+
+  Color _colorFromPaletteInt(int value) {
+    if (value > 0x7FFFFFFF) {
+      return Color(value);
+    }
+    return ColorArgbCodec.toColor(value);
   }
 
   String _colorToHex(Color color) {
@@ -7164,6 +7196,34 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     await _saveDraft();
   }
 
+  Future<void> _persistCheckoutBranding(String comercioId) async {
+    final primaryCurrency = _baseCurrency;
+    var quotedCurrency = primaryCurrency;
+    var primaryExchangeRate = 1.0;
+    for (final currency in _selectedCurrencies) {
+      if (currency == primaryCurrency) {
+        continue;
+      }
+      final rate = _effectiveExchangeRateForCurrency(currency);
+      if (rate > primaryExchangeRate) {
+        quotedCurrency = currency;
+        primaryExchangeRate = rate;
+      }
+    }
+
+    await Supabase.instance.client.from('comercios').update(<String, dynamic>{
+      'branding_ia': _buildBrandingIaPayload(),
+      'exchange_rate_mode': _exchangeRateMode,
+      'exchange_rate_source': _exchangeRateSource,
+      'exchange_rate_quote_currency':
+          quotedCurrency == primaryCurrency ? null : quotedCurrency,
+      'exchange_rate_value': primaryExchangeRate > 0 ? primaryExchangeRate : null,
+      'last_rate_update': primaryExchangeRate > 0
+          ? DateTime.now().toUtc().toIso8601String()
+          : null,
+    }).eq('id', comercioId);
+  }
+
   Future<void> _syncPaymentMethods(String comercioId) async {
     final rows = <Map<String, dynamic>>[];
     for (final currency in _selectedCurrencies) {
@@ -7217,25 +7277,221 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     unawaited(_saveDraft());
   }
 
+  Map<String, dynamic> _defaultBrandingIaPayload({
+    required String primary,
+    required String accent,
+    required String surface,
+    required String text,
+  }) {
+    final layoutType = switch (_selectedLayoutId) {
+      'list' => 'list',
+      'compact' => 'compact',
+      _ => 'grid',
+    };
+
+    return <String, dynamic>{
+      'schema_version': 2,
+      'color_principal': primary,
+      'color_secundario': accent,
+      'fuente_titulos': _selectedHeadingFont,
+      'fuente_cuerpo': 'Roboto',
+      'estilo_botones': 'rounded',
+      'mood_tags': <String>['moderno'],
+      'descripcion_visual': 'Menu digital personalizado.',
+      'layout_type': layoutType,
+      'config_visual': <String, dynamic>{
+        'items_per_row': 2,
+        'menu_sticky': true,
+        'show_images': true,
+      },
+      'config_negocio': <String, dynamic>{
+        'metodos_pago': <String>['efectivo'],
+        'moneda_default': _baseCurrency,
+      },
+      'colores_personalizados': <String, dynamic>{
+        'background': surface,
+        'card_surface': surface,
+        'text_on_primary': text,
+      },
+    };
+  }
+
+  Map<String, dynamic> _buildBrandingIaPayload() {
+    final primary = _colorToHex(_paletteSuggestion.primary);
+    final accent = _colorToHex(_paletteSuggestion.accent);
+    final surface = _colorToHex(_paletteSuggestion.surface);
+    final text = _colorToHex(_paletteSuggestion.text);
+
+    if (_seedBrandingIa.isEmpty) {
+      return _defaultBrandingIaPayload(
+        primary: primary,
+        accent: accent,
+        surface: surface,
+        text: text,
+      );
+    }
+
+    final merged = Map<String, dynamic>.from(_seedBrandingIa);
+    merged['color_principal'] = primary;
+    merged['color_secundario'] = accent;
+    merged['fuente_titulos'] = _selectedHeadingFont;
+    if ((merged['fuente_cuerpo']?.toString().trim() ?? '').isEmpty) {
+      merged['fuente_cuerpo'] = 'Roboto';
+    }
+
+    final customColors = Map<String, dynamic>.from(
+      _toStringDynamicMap(merged['colores_personalizados']),
+    );
+    customColors['background'] = surface;
+    customColors['card_surface'] = surface;
+    customColors['text_on_primary'] = text;
+    merged['colores_personalizados'] = customColors;
+
+  if (merged['schema_version'] == null) {
+      merged['schema_version'] = 2;
+    }
+    if (!merged.containsKey('layout_type')) {
+      merged['layout_type'] = switch (_selectedLayoutId) {
+        'list' => 'list',
+        'compact' => 'compact',
+        _ => 'grid',
+      };
+    }
+    if (!merged.containsKey('config_visual')) {
+      merged['config_visual'] = <String, dynamic>{
+        'items_per_row': 2,
+        'menu_sticky': true,
+        'show_images': true,
+      };
+    }
+    if (!merged.containsKey('config_negocio')) {
+      merged['config_negocio'] = <String, dynamic>{
+        'metodos_pago': <String>['efectivo'],
+        'moneda_default': _baseCurrency,
+      };
+    }
+
+    final configNegocio = Map<String, dynamic>.from(
+      _toStringDynamicMap(merged['config_negocio']),
+    );
+    configNegocio['moneda_default'] = _baseCurrency;
+    configNegocio['checkout_currencies'] = _selectedCurrencies.toList();
+
+    final exchangeRates = <String, dynamic>{};
+    final exchangeRateModes = <String, dynamic>{};
+    final exchangeRateSources = <String, dynamic>{};
+    for (final currency in _selectedCurrencies) {
+      if (currency == _baseCurrency) {
+        continue;
+      }
+      final rate = _effectiveExchangeRateForCurrency(currency);
+      if (rate > 0) {
+        exchangeRates[currency] = rate;
+      }
+      exchangeRateModes[currency] =
+          _exchangeRateModeByCurrency[currency] ?? _exchangeRateMode;
+      exchangeRateSources[currency] =
+          _exchangeRateSourceByCurrency[currency] ?? _exchangeRateSource;
+    }
+    configNegocio['exchange_rates'] = exchangeRates;
+    configNegocio['exchange_rate_modes'] = exchangeRateModes;
+    configNegocio['exchange_rate_sources'] = exchangeRateSources;
+    merged['config_negocio'] = configNegocio;
+
+    return merged;
+  }
+
+  Map<String, dynamic> _paletteFieldsPayload() {
+    return <String, dynamic>{
+      'menu_palette': _selectedPaletteId,
+      'menu_palette_primary': ColorArgbCodec.fromColor(_paletteSuggestion.primary),
+      'menu_palette_accent': ColorArgbCodec.fromColor(_paletteSuggestion.accent),
+      'menu_palette_surface': ColorArgbCodec.fromColor(_paletteSuggestion.surface),
+      'menu_palette_text': ColorArgbCodec.fromColor(_paletteSuggestion.text),
+      'color_principal': _colorToHex(_paletteSuggestion.primary),
+      'menu_font': _selectedHeadingFont,
+      'branding_ia': _buildBrandingIaPayload(),
+    };
+  }
+
+  Future<void> _writeComercioFields(
+    Map<String, dynamic> payload, {
+    required Set<String> removable,
+  }) async {
+    final comercioId = (_editingComercioId ?? '').trim();
+    if (comercioId.isEmpty) {
+      return;
+    }
+
+    final data = Map<String, dynamic>.from(payload);
+    while (true) {
+      try {
+        await Supabase.instance.client
+            .from('comercios')
+            .update(data)
+            .eq('id', comercioId);
+        final branding = data['branding_ia'];
+        if (branding is Map) {
+          _seedBrandingIa = Map<String, dynamic>.from(branding);
+        }
+        return;
+      } on PostgrestException catch (error) {
+        final msg = error.message.toLowerCase();
+        String? key;
+
+        for (final candidate in removable) {
+          if (data.containsKey(candidate) &&
+              msg.contains(candidate.toLowerCase())) {
+            key = candidate;
+            break;
+          }
+        }
+
+        if (key == null) {
+          rethrow;
+        }
+        data.remove(key);
+      }
+    }
+  }
+
+  Future<void> _persistPaletteChanges() async {
+    if ((_editingComercioId ?? '').trim().isEmpty) {
+      return;
+    }
+
+    await _writeComercioFields(
+      _paletteFieldsPayload(),
+      removable: <String>{
+        'menu_palette',
+        'menu_palette_primary',
+        'menu_palette_accent',
+        'menu_palette_surface',
+        'menu_palette_text',
+        'color_principal',
+        'branding_ia',
+        'menu_font',
+      },
+    );
+  }
+
   Future<ComercioModel> _upsertComercio({
     required User user,
     required String? logoUrl,
   }) async {
     final primaryCurrency = _baseCurrency;
-    final quotedCurrency = _selectedCurrencies.firstWhere(
-      (currency) => currency != primaryCurrency,
-      orElse: () => primaryCurrency,
-    );
-    final manualRate = _parseExchangeRate(
-      _exchangeRateByCurrency[quotedCurrency],
-    );
-    final autoRate = _rateForSource(
-      _exchangeRateSource,
-      quoteCurrency: quotedCurrency,
-    );
-    final primaryExchangeRate = _exchangeRateMode == _exchangeModeAuto
-        ? autoRate
-        : manualRate;
+    var quotedCurrency = primaryCurrency;
+    var primaryExchangeRate = 1.0;
+    for (final currency in _selectedCurrencies) {
+      if (currency == primaryCurrency) {
+        continue;
+      }
+      final rate = _effectiveExchangeRateForCurrency(currency);
+      if (rate > primaryExchangeRate) {
+        quotedCurrency = currency;
+        primaryExchangeRate = rate;
+      }
+    }
     final allMethods = _selectedCurrencies
         .expand((currency) => _selectedPaymentsForCurrency(currency))
         .toSet();
@@ -7280,19 +7536,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'metodo_pago_predeterminado': defaultMethod,
       'metodos_pago': allMethods.toList(),
       'menu_layout': _selectedLayoutId,
-      'menu_palette': _selectedPaletteId,
-      'color_principal': _colorToHex(_paletteSuggestion.primary),
-      'branding_ia': {
-        'color_principal': _colorToHex(_paletteSuggestion.primary),
-        'color_secundario': _colorToHex(_paletteSuggestion.accent),
-        'tipografia_principal': _selectedHeadingFont,
-        'colores_personalizados': {
-          'background': _colorToHex(_paletteSuggestion.surface),
-          'card_surface': _colorToHex(_paletteSuggestion.surface),
-          'text_on_primary': _colorToHex(_paletteSuggestion.text),
-        },
-      },
-      'menu_font': _selectedHeadingFont,
+      ..._paletteFieldsPayload(),
       'menu_footer': _selectedFooter,
       if (!widget.businessConfigOnly) 'onboarding_completed': true,
     };
@@ -7320,6 +7564,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'metodos_pago',
       'menu_layout',
       'menu_palette',
+      'menu_palette_primary',
+      'menu_palette_accent',
+      'menu_palette_surface',
+      'menu_palette_text',
       'color_principal',
       'branding_ia',
       'menu_font',
@@ -7452,6 +7700,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final logoUrl = await _uploadLogoIfNeeded(user);
       final comercio = await _upsertComercio(user: user, logoUrl: logoUrl);
       await _syncPaymentMethods(comercio.id);
+      await _persistCheckoutBranding(comercio.id);
 
       SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
       _draftPersistenceEnabled = false;

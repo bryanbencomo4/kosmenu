@@ -7,6 +7,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/models/catalog.dart';
 import 'package:kosmenu_app/services/storage_service.dart';
+import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class MagicOnboardingResult {
@@ -54,6 +55,8 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     with SingleTickerProviderStateMixin {
   final ImagePicker _picker = ImagePicker();
   final StorageService _storageService = const StorageService();
+  final WebCameraHandoffService _webCameraHandoffService =
+      const WebCameraHandoffService();
   final TextEditingController _menuPromptController = TextEditingController();
   static const String _defaultCatalogName = 'Menu principal';
   static const int _maxPromptLength = 2800;
@@ -745,9 +748,14 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
   }
 
   Future<List<_MenuImportAsset>> _captureMenuPages() async {
-    final image = await _picker.pickImage(
-      source: ImageSource.camera,
+    final image = await _webCameraHandoffService.pickCameraImage(
+      context,
+      feature: 'menu_scan',
+      waitingTitle: 'Toma la foto del menu desde tu celular',
+      waitingSubtitle:
+          'Escanea el codigo con tu telefono y la usaremos para escanear tu menu con IA.',
       imageQuality: 90,
+      maxWidth: 2200,
     );
     if (image == null) {
       return <_MenuImportAsset>[];

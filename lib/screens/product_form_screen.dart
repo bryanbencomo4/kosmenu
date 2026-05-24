@@ -10,6 +10,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -40,6 +41,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _descriptionController = TextEditingController();
   final _priceController = TextEditingController();
   final _picker = ImagePicker();
+  final WebCameraHandoffService _webCameraHandoffService =
+      const WebCameraHandoffService();
 
   String? _selectedCategoryId;
   String? _remoteImageUrl;
@@ -269,11 +272,21 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   }
 
   Future<void> _pickImage(ImageSource source) async {
-    final file = await _picker.pickImage(
-      source: source,
-      imageQuality: 82,
-      maxWidth: 1600,
-    );
+    final file = source == ImageSource.camera
+        ? await _webCameraHandoffService.pickCameraImage(
+            context,
+            feature: 'product',
+            waitingTitle: 'Toma la foto del producto desde tu celular',
+            waitingSubtitle:
+                'Escanea el codigo con tu telefono y la cargaremos aqui automaticamente.',
+            imageQuality: 82,
+            maxWidth: 1600,
+          )
+        : await _picker.pickImage(
+            source: source,
+            imageQuality: 82,
+            maxWidth: 1600,
+          );
     if (file == null) return;
 
     if (!mounted) return;

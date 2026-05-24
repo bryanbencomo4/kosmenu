@@ -9,6 +9,7 @@ import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -47,6 +48,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
   Timer? _aiImageRefreshTimer;
   final Set<String> _aiRetryPromptProductIds = <String>{};
   final AiImageService _aiImageService = const AiImageService();
+  final WebCameraHandoffService _webCameraHandoffService =
+      const WebCameraHandoffService();
 
   @override
   void initState() {
@@ -304,12 +307,21 @@ class _ProductListScreenState extends State<ProductListScreen> {
     ProductModel product,
     ImageSource source,
   ) async {
-    final picker = ImagePicker();
-    final photo = await picker.pickImage(
-      source: source,
-      imageQuality: 82,
-      maxWidth: 1600,
-    );
+    final photo = source == ImageSource.camera
+        ? await _webCameraHandoffService.pickCameraImage(
+            context,
+            feature: 'product',
+            waitingTitle: 'Toma la foto del producto desde tu celular',
+            waitingSubtitle:
+                'Escanea el codigo con tu telefono y la cargaremos aqui automaticamente.',
+            imageQuality: 82,
+            maxWidth: 1600,
+          )
+        : await ImagePicker().pickImage(
+            source: source,
+            imageQuality: 82,
+            maxWidth: 1600,
+          );
     if (photo == null) return;
 
     final comercioId = SupabaseConfig.currentComercioId.trim();
