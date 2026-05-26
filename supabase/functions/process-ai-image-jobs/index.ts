@@ -9,6 +9,7 @@ import {
   recordAiImagesGenerated,
   recordGeminiUsage,
 } from '../_shared/ai-usage.ts';
+import { buildProductImagePrompt } from '../_shared/product-image-prompt.ts';
 
 type JobRow = {
   id: string;
@@ -38,6 +39,7 @@ type CategoryRow = {
 type CommerceRow = {
   id: string;
   nombre?: string | null;
+  categoria?: string | null;
 };
 
 const corsHeaders = {
@@ -396,7 +398,7 @@ async function loadCommerce(
 ): Promise<CommerceRow | null> {
   const { data, error } = await supabase
     .from('comercios')
-    .select('id, nombre')
+    .select('id, nombre, categoria')
     .eq('id', commerceId)
     .maybeSingle();
 
@@ -412,17 +414,13 @@ function buildPromptFromProduct(
   category: CategoryRow | null,
   commerce: CommerceRow | null,
 ): string {
-  return [
-    commerce?.nombre ? `Negocio: ${commerce.nombre}.` : '',
-    `Producto: ${product.nombre}.`,
-    category?.nombre ? `Categoria: ${category.nombre}.` : '',
-    normalizeString(product.descripcion).length > 0
-      ? `Descripcion: ${normalizeString(product.descripcion)}.`
-      : '',
-    'Genera una fotografia gastronomica realista, profesional y comercial del producto.',
-    'Sin texto, sin manos, sin logos, sin empaque, sin cubiertos duplicados y sin collage.',
-    'Composicion cuadrada 1:1, fondo limpio, luz de estudio suave, enfoque nitido sobre el alimento.',
-  ].filter((part) => part.length > 0).join(' ');
+  return buildProductImagePrompt({
+    productName: product.nombre,
+    description: normalizeString(product.descripcion),
+    categoryName: category?.nombre ?? undefined,
+    businessName: commerce?.nombre ?? undefined,
+    businessCategory: commerce?.categoria ?? undefined,
+  });
 }
 
 async function generateImageWithGemini(params: {

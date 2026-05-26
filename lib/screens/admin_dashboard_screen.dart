@@ -1487,17 +1487,72 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     );
                     final ordersLabel = _selectedSalesRange.ordersLabel;
                     final incomeLabel = _selectedSalesRange.incomeLabel;
+                    final kpiCards = [
+                      _CompactKpiCardData(
+                        title: 'Pedidos',
+                        value: '${validOrders.length}',
+                        icon: Icons.shopping_bag_outlined,
+                        color: _purple,
+                        deltaPercent: _deltaPercentVsYesterday(
+                          todayValue: validOrders.length,
+                          yesterdayValue: data.yesterdayTotalOrders,
+                        ),
+                      ),
+                      _CompactKpiCardData(
+                        title: 'Completados',
+                        value: '$completedCount',
+                        icon: Icons.check_circle_outline_rounded,
+                        color: _green,
+                        deltaPercent: _deltaPercentVsYesterday(
+                          todayValue: completedCount,
+                          yesterdayValue: data.yesterdayCompletedOrders,
+                        ),
+                      ),
+                      _CompactKpiCardData(
+                        title: 'Pendientes',
+                        value: '$pendingCount',
+                        icon: Icons.access_time_rounded,
+                        color: _orange,
+                        deltaPercent: _deltaPercentVsYesterday(
+                          todayValue: pendingCount,
+                          yesterdayValue: data.yesterdayPendingOrders,
+                        ),
+                        trendSemantics: _KpiTrendSemantics.growthIsNegativeWarning,
+                      ),
+                      _CompactKpiCardData(
+                        title: 'Cancelados',
+                        value: '$canceledCount',
+                        icon: Icons.cancel_outlined,
+                        color: _red,
+                        deltaPercent: _deltaPercentVsYesterday(
+                          todayValue: canceledCount,
+                          yesterdayValue: data.yesterdayCanceledOrders,
+                        ),
+                        trendSemantics: _KpiTrendSemantics.growthIsNegativeBad,
+                      ),
+                    ];
 
                     return RefreshIndicator(
                       onRefresh: _refreshDashboard,
-                      child: ListView(
-                        padding: EdgeInsets.fromLTRB(
-                          16,
-                          12,
-                          16,
-                          (isSmallScreen ? 124 : 136) + bottomInset,
-                        ),
-                        children: [
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final viewportWidth = constraints.maxWidth;
+                          final isDesktop = viewportWidth >= 1024;
+                          final isTablet = viewportWidth >= 720 && viewportWidth < 1024;
+                          final contentMaxWidth = viewportWidth >= 1200 ? 1320.0 : double.infinity;
+                          final horizontalPadding = viewportWidth >= 1200
+                              ? 28.0
+                              : (viewportWidth >= 720 ? 22.0 : 16.0);
+                          final bottomPadding = (isSmallScreen ? 124 : 136) + bottomInset;
+
+                          final list = ListView(
+                            padding: EdgeInsets.fromLTRB(
+                              horizontalPadding,
+                              12,
+                              horizontalPadding,
+                              bottomPadding,
+                            ),
+                            children: [
                           _DashboardHeader(
                             commerceName: data.comercio.nombre,
                             darkText: _darkText,
@@ -1530,177 +1585,292 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               }
                             },
                           ),
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 16),
                           if (_recentCatalogResult != null)
                             _CatalogUpdateBanner(result: _recentCatalogResult!),
-                          _CompactKpiScroller(
-                            cards: [
-                              _CompactKpiCardData(
-                                title: 'Pedidos',
-                                value: '${validOrders.length}',
-                                icon: Icons.shopping_bag_outlined,
-                                color: _purple,
-                                deltaPercent: _deltaPercentVsYesterday(
-                                  todayValue: validOrders.length,
-                                  yesterdayValue: data.yesterdayTotalOrders,
+                          if (!isTablet && !isDesktop)
+                            _CompactKpiScroller(cards: kpiCards)
+                          else
+                            _DashboardKpiGrid(
+                              cards: kpiCards,
+                              columns: isDesktop ? 4 : 2,
+                            ),
+                          SizedBox(height: isDesktop ? 16 : 14),
+                          if (isDesktop)
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      _CompactBusinessConfigBanner(
+                                        title: 'Configuración del negocio',
+                                        subtitle:
+                                            'Administra tu perfil público y abre el menú en segundos.',
+                                        onEdit: () => _editBusinessInfo(data.comercio),
+                                        onManageMenu: _openCurrentMenuManager,
+                                        businessOnline: _businessOnline,
+                                        businessLogoUrl: data.comercio.logoUrl,
+                                        purple: _purple,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      _CompactBusinessInfoCard(
+                                        comercio: data.comercio,
+                                        aiCreditsBalance: data.aiCreditsBalance,
+                                        aiCreditsUsed: data.aiCreditsUsed,
+                                        isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
+                                        businessOnline: _businessOnline,
+                                        onToggleOnline: _updateBusinessOnline,
+                                        onBuyAiCredits: _openBuyAiCreditsSheet,
+                                        darkText: _darkText,
+                                        mutedText: _mutedText,
+                                        purple: _purple,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              _CompactKpiCardData(
-                                title: 'Completados',
-                                value: '$completedCount',
-                                icon: Icons.check_circle_outline_rounded,
-                                color: _green,
-                                deltaPercent: _deltaPercentVsYesterday(
-                                  todayValue: completedCount,
-                                  yesterdayValue: data.yesterdayCompletedOrders,
-                                ),
-                              ),
-                              _CompactKpiCardData(
-                                title: 'Pendientes',
-                                value: '$pendingCount',
-                                icon: Icons.access_time_rounded,
-                                color: _orange,
-                                deltaPercent: _deltaPercentVsYesterday(
-                                  todayValue: pendingCount,
-                                  yesterdayValue: data.yesterdayPendingOrders,
-                                ),
-                                downColor: _orange,
-                              ),
-                              _CompactKpiCardData(
-                                title: 'Cancelados',
-                                value: '$canceledCount',
-                                icon: Icons.cancel_outlined,
-                                color: _red,
-                                deltaPercent: _deltaPercentVsYesterday(
-                                  todayValue: canceledCount,
-                                  yesterdayValue: data.yesterdayCanceledOrders,
-                                ),
-                                downColor: _red,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          _CompactBusinessConfigBanner(
-                            title: 'Configuración del negocio',
-                            subtitle:
-                                'Administra tu perfil público y abre el menú en segundos.',
-                            onEdit: () => _editBusinessInfo(data.comercio),
-                            onManageMenu: _openCurrentMenuManager,
-                            businessOnline: _businessOnline,
-                            businessLogoUrl: data.comercio.logoUrl,
-                            purple: _purple,
-                          ),
-                          const SizedBox(height: 12),
-                          _CompactSalesSummaryCard(
-                            salesToday: selectedRevenue,
-                            ordersToday: selectedCount,
-                            averageTicket: ticketPromedio,
-                            darkText: _darkText,
-                            mutedText: _mutedText,
-                            purple: _purple,
-                            salesHistory: salesSeries.values,
-                            salesLabels: salesSeries.labels,
-                            salesTooltipLabels: salesSeries.tooltipLabels,
-                            rangeLabel: _activeRangeLabel(),
-                            ordersLabel: ordersLabel,
-                            incomeLabel: incomeLabel,
-                            onRangeSelected: (range) async {
-                              if (range == _SalesRange.custom) {
-                                final earliest = validOrders
-                                    .map((o) => o.createdAt?.toLocal())
-                                    .whereType<DateTime>()
-                                    .fold<DateTime?>(null, (acc, date) {
-                                      if (acc == null || date.isBefore(acc)) {
-                                        return date;
-                                      }
-                                      return acc;
-                                    });
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      _CompactSalesSummaryCard(
+                                        salesToday: selectedRevenue,
+                                        ordersToday: selectedCount,
+                                        averageTicket: ticketPromedio,
+                                        darkText: _darkText,
+                                        mutedText: _mutedText,
+                                        purple: _purple,
+                                        salesHistory: salesSeries.values,
+                                        salesLabels: salesSeries.labels,
+                                        salesTooltipLabels: salesSeries.tooltipLabels,
+                                        rangeLabel: _activeRangeLabel(),
+                                        ordersLabel: ordersLabel,
+                                        incomeLabel: incomeLabel,
+                                        onRangeSelected: (range) async {
+                                          if (range == _SalesRange.custom) {
+                                            final earliest = validOrders
+                                                .map((o) => o.createdAt?.toLocal())
+                                                .whereType<DateTime>()
+                                                .fold<DateTime?>(null, (acc, date) {
+                                              if (acc == null || date.isBefore(acc)) {
+                                                return date;
+                                              }
+                                              return acc;
+                                            });
 
-                                final firstDate = earliest != null
-                                    ? _startOfDay(earliest)
-                                    : _startOfDay(
-                                        DateTime.now().subtract(
-                                          const Duration(days: 365 * 5),
+                                            final firstDate = earliest != null
+                                                ? _startOfDay(earliest)
+                                                : _startOfDay(
+                                                    DateTime.now().subtract(
+                                                      const Duration(days: 365 * 5),
+                                                    ),
+                                                  );
+
+                                            final picked = await showDateRangePicker(
+                                              context: context,
+                                              firstDate: firstDate,
+                                              lastDate: DateTime.now(),
+                                              initialDateRange: _customSalesRange,
+                                              helpText: 'Selecciona un rango',
+                                              locale: const Locale('es'),
+                                            );
+
+                                            if (!mounted || picked == null) return;
+                                            setState(() {
+                                              _customSalesRange = picked;
+                                              _selectedSalesRange = _SalesRange.custom;
+                                            });
+                                            return;
+                                          }
+
+                                          if (_selectedSalesRange == range) return;
+                                          setState(() => _selectedSalesRange = range);
+                                        },
+                                      ),
+                                      const SizedBox(height: 16),
+                                      _SectionTitle(
+                                        title: 'Pedidos recientes',
+                                        actionLabel: validOrders.length > 3
+                                            ? 'Ver todos'
+                                            : null,
+                                        onActionTap: validOrders.length > 3
+                                            ? () => _openAllOrdersSheet(validOrders)
+                                            : null,
+                                      ),
+                                      const SizedBox(height: 10),
+                                      if (ordersSnapshot.hasError)
+                                        _EmptyStateCard(
+                                          title: 'No se pudieron cargar los pedidos',
+                                          subtitle: _ordersErrorSubtitle(
+                                            ordersSnapshot.error,
+                                          ),
+                                          icon: Icons.error_outline_rounded,
+                                          actionLabel: 'Reintentar',
+                                          onAction: _refreshDashboard,
+                                        )
+                                      else if (recentOrders.isEmpty &&
+                                          malformedOrders.isEmpty)
+                                        _EmptyStateCard(
+                                          title: 'Sin pedidos recientes',
+                                          subtitle:
+                                              'Aún no recibes pedidos. Aquí aparecerán los últimos cuando entren.',
+                                          icon: Icons.inbox_outlined,
+                                        )
+                                      else ...[
+                                        ...malformedOrders.map(
+                                          (pedido) => _MalformedOrderTile(pedido: pedido),
                                         ),
-                                      );
-
-                                final picked = await showDateRangePicker(
-                                  context: context,
-                                  firstDate: firstDate,
-                                  lastDate: DateTime.now(),
-                                  initialDateRange: _customSalesRange,
-                                  helpText: 'Selecciona un rango',
-                                  locale: const Locale('es'),
-                                );
-
-                                if (!mounted || picked == null) return;
-                                setState(() {
-                                  _customSalesRange = picked;
-                                  _selectedSalesRange = _SalesRange.custom;
-                                });
-                                return;
-                              }
-
-                              if (_selectedSalesRange == range) return;
-                              setState(() => _selectedSalesRange = range);
-                            },
-                          ),
-                          const SizedBox(height: 14),
-                          _CompactBusinessInfoCard(
-                            comercio: data.comercio,
-                            aiCreditsBalance: data.aiCreditsBalance,
-                            aiCreditsUsed: data.aiCreditsUsed,
-                            isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
-                            businessOnline: _businessOnline,
-                            onToggleOnline: _updateBusinessOnline,
-                            onBuyAiCredits: _openBuyAiCreditsSheet,
-                            darkText: _darkText,
-                            mutedText: _mutedText,
-                            purple: _purple,
-                          ),
-                          const SizedBox(height: 16),
-                          _SectionTitle(
-                            title: 'Pedidos recientes',
-                            actionLabel: validOrders.length > 3
-                                ? 'Ver todos'
-                                : null,
-                            onActionTap: validOrders.length > 3
-                                ? () => _openAllOrdersSheet(validOrders)
-                                : null,
-                          ),
-                          const SizedBox(height: 10),
-                          if (ordersSnapshot.hasError)
-                            _EmptyStateCard(
-                              title: 'No se pudieron cargar los pedidos',
-                              subtitle: _ordersErrorSubtitle(
-                                ordersSnapshot.error,
-                              ),
-                              icon: Icons.error_outline_rounded,
-                              actionLabel: 'Reintentar',
-                              onAction: _refreshDashboard,
-                            )
-                          else if (recentOrders.isEmpty &&
-                              malformedOrders.isEmpty)
-                            _EmptyStateCard(
-                              title: 'Sin pedidos recientes',
-                              subtitle:
-                                  'Aún no recibes pedidos. Aquí aparecerán los últimos cuando entren.',
-                              icon: Icons.inbox_outlined,
+                                        ...recentOrders.map(
+                                          (pedido) => _CompactRecentOrderTile(
+                                            pedido: pedido,
+                                            onTap: () => _openOrderDetail(pedido),
+                                            darkText: _darkText,
+                                            mutedText: _mutedText,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
                             )
                           else ...[
-                            ...malformedOrders.map(
-                              (pedido) => _MalformedOrderTile(pedido: pedido),
+                            _CompactBusinessConfigBanner(
+                              title: 'Configuración del negocio',
+                              subtitle:
+                                  'Administra tu perfil público y abre el menú en segundos.',
+                              onEdit: () => _editBusinessInfo(data.comercio),
+                              onManageMenu: _openCurrentMenuManager,
+                              businessOnline: _businessOnline,
+                              businessLogoUrl: data.comercio.logoUrl,
+                              purple: _purple,
                             ),
-                            ...recentOrders.map(
-                              (pedido) => _CompactRecentOrderTile(
-                                pedido: pedido,
-                                onTap: () => _openOrderDetail(pedido),
-                                darkText: _darkText,
-                                mutedText: _mutedText,
-                              ),
+                            const SizedBox(height: 12),
+                            _CompactSalesSummaryCard(
+                              salesToday: selectedRevenue,
+                              ordersToday: selectedCount,
+                              averageTicket: ticketPromedio,
+                              darkText: _darkText,
+                              mutedText: _mutedText,
+                              purple: _purple,
+                              salesHistory: salesSeries.values,
+                              salesLabels: salesSeries.labels,
+                              salesTooltipLabels: salesSeries.tooltipLabels,
+                              rangeLabel: _activeRangeLabel(),
+                              ordersLabel: ordersLabel,
+                              incomeLabel: incomeLabel,
+                              onRangeSelected: (range) async {
+                                if (range == _SalesRange.custom) {
+                                  final earliest = validOrders
+                                      .map((o) => o.createdAt?.toLocal())
+                                      .whereType<DateTime>()
+                                      .fold<DateTime?>(null, (acc, date) {
+                                    if (acc == null || date.isBefore(acc)) {
+                                      return date;
+                                    }
+                                    return acc;
+                                  });
+
+                                  final firstDate = earliest != null
+                                      ? _startOfDay(earliest)
+                                      : _startOfDay(
+                                          DateTime.now().subtract(
+                                            const Duration(days: 365 * 5),
+                                          ),
+                                        );
+
+                                  final picked = await showDateRangePicker(
+                                    context: context,
+                                    firstDate: firstDate,
+                                    lastDate: DateTime.now(),
+                                    initialDateRange: _customSalesRange,
+                                    helpText: 'Selecciona un rango',
+                                    locale: const Locale('es'),
+                                  );
+
+                                  if (!mounted || picked == null) return;
+                                  setState(() {
+                                    _customSalesRange = picked;
+                                    _selectedSalesRange = _SalesRange.custom;
+                                  });
+                                  return;
+                                }
+
+                                if (_selectedSalesRange == range) return;
+                                setState(() => _selectedSalesRange = range);
+                              },
+                            ),
+                            const SizedBox(height: 14),
+                            _CompactBusinessInfoCard(
+                              comercio: data.comercio,
+                              aiCreditsBalance: data.aiCreditsBalance,
+                              aiCreditsUsed: data.aiCreditsUsed,
+                              isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
+                              businessOnline: _businessOnline,
+                              onToggleOnline: _updateBusinessOnline,
+                              onBuyAiCredits: _openBuyAiCreditsSheet,
+                              darkText: _darkText,
+                              mutedText: _mutedText,
+                              purple: _purple,
                             ),
                           ],
-                        ],
+                          const SizedBox(height: 16),
+                          if (!isDesktop) ...[
+                            _SectionTitle(
+                              title: 'Pedidos recientes',
+                              actionLabel: validOrders.length > 3
+                                  ? 'Ver todos'
+                                  : null,
+                              onActionTap: validOrders.length > 3
+                                  ? () => _openAllOrdersSheet(validOrders)
+                                  : null,
+                            ),
+                            const SizedBox(height: 10),
+                            if (ordersSnapshot.hasError)
+                              _EmptyStateCard(
+                                title: 'No se pudieron cargar los pedidos',
+                                subtitle: _ordersErrorSubtitle(
+                                  ordersSnapshot.error,
+                                ),
+                                icon: Icons.error_outline_rounded,
+                                actionLabel: 'Reintentar',
+                                onAction: _refreshDashboard,
+                              )
+                            else if (recentOrders.isEmpty &&
+                                malformedOrders.isEmpty)
+                              _EmptyStateCard(
+                                title: 'Sin pedidos recientes',
+                                subtitle:
+                                    'Aún no recibes pedidos. Aquí aparecerán los últimos cuando entren.',
+                                icon: Icons.inbox_outlined,
+                              )
+                            else ...[
+                              ...malformedOrders.map(
+                                (pedido) => _MalformedOrderTile(pedido: pedido),
+                              ),
+                              ...recentOrders.map(
+                                (pedido) => _CompactRecentOrderTile(
+                                  pedido: pedido,
+                                  onTap: () => _openOrderDetail(pedido),
+                                  darkText: _darkText,
+                                  mutedText: _mutedText,
+                                ),
+                              ),
+                            ],
+                          ],
+                            ],
+                          );
+
+                          return Align(
+                            alignment: Alignment.topCenter,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(maxWidth: contentMaxWidth),
+                              child: list,
+                            ),
+                          );
+                        },
                       ),
                     );
                   },
@@ -1940,7 +2110,7 @@ class _CompactKpiCardData {
     required this.icon,
     required this.color,
     required this.deltaPercent,
-    this.downColor,
+    this.trendSemantics = _KpiTrendSemantics.growthIsPositive,
   });
 
   final String title;
@@ -1948,7 +2118,13 @@ class _CompactKpiCardData {
   final IconData icon;
   final Color color;
   final double deltaPercent;
-  final Color? downColor;
+  final _KpiTrendSemantics trendSemantics;
+}
+
+enum _KpiTrendSemantics {
+  growthIsPositive,
+  growthIsNegativeWarning,
+  growthIsNegativeBad,
 }
 
 class _CompactKpiScroller extends StatelessWidget {
@@ -1966,28 +2142,182 @@ class _CompactKpiScroller extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(width: 10),
         itemBuilder: (context, index) {
           final item = cards[index];
-          return _CompactKpiCard(data: item);
+          return _CompactKpiCard(data: item, fixedWidth: 132);
         },
       ),
     );
   }
 }
 
+class _DashboardKpiGrid extends StatelessWidget {
+  const _DashboardKpiGrid({
+    required this.cards,
+    required this.columns,
+  });
+
+  final List<_CompactKpiCardData> cards;
+  final int columns;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const gap = 12.0;
+        const gridCardHeight = 112.0;
+        final safeColumns = columns.clamp(1, 6);
+        final totalGap = gap * (safeColumns - 1);
+        final itemWidth = safeColumns == 1
+            ? constraints.maxWidth
+            : (constraints.maxWidth - totalGap) / safeColumns;
+
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final card in cards)
+              SizedBox(
+                width: itemWidth,
+                height: gridCardHeight,
+                child: _CompactKpiCard(
+                  data: card,
+                  fixedWidth: null,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _CompactKpiCard extends StatelessWidget {
-  const _CompactKpiCard({required this.data});
+  const _CompactKpiCard({
+    required this.data,
+    required this.fixedWidth,
+  });
 
   final _CompactKpiCardData data;
+  final double? fixedWidth;
+
+  static const _greenTrend = Color(0xFF16A34A);
+  static const _redTrend = Color(0xFFEF4444);
+  static const _orangeTrend = Color(0xFFF97316);
+
+  Color _trendColor(bool isUp) {
+    switch (data.trendSemantics) {
+      case _KpiTrendSemantics.growthIsPositive:
+        return isUp ? _greenTrend : _redTrend;
+      case _KpiTrendSemantics.growthIsNegativeWarning:
+        return isUp ? _orangeTrend : _greenTrend;
+      case _KpiTrendSemantics.growthIsNegativeBad:
+        return isUp ? _redTrend : _greenTrend;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final isUp = data.deltaPercent >= 0;
-    final trendColor = isUp
-        ? const Color(0xFF16A34A)
-        : (data.downColor ?? const Color(0xFFEF4444));
+    final trendColor = _trendColor(isUp);
     final trendValue = data.deltaPercent.abs().round();
+    final useGridLayout = fixedWidth == null;
+
+    if (useGridLayout) {
+      return Container(
+        width: double.infinity,
+        height: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFE8EAF2)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x100F172A),
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    data.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: const Color(0xFF6B6F92),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: data.color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(data.icon, color: data.color, size: 18),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Text(
+                    data.value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF11183C),
+                      height: 1,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Icon(
+                      isUp
+                          ? Icons.arrow_drop_up_rounded
+                          : Icons.arrow_drop_down_rounded,
+                      size: 18,
+                      color: trendColor,
+                    ),
+                    Text(
+                      '$trendValue% vs ayer',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        color: trendColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
 
     return Container(
-      width: 132,
+      width: fixedWidth,
       height: 124,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -2022,6 +2352,7 @@ class _CompactKpiCard extends StatelessWidget {
               fontWeight: FontWeight.w800,
               color: const Color(0xFF11183C),
               height: 1,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
           const SizedBox(height: 1),
@@ -2045,14 +2376,16 @@ class _CompactKpiCard extends StatelessWidget {
                 size: 14,
                 color: trendColor,
               ),
-              Text(
-                '$trendValue% vs ayer',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 10.5,
-                  color: trendColor,
-                  fontWeight: FontWeight.w600,
+              Flexible(
+                child: Text(
+                  '$trendValue% vs ayer',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.poppins(
+                    fontSize: 10.5,
+                    color: trendColor,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -2102,6 +2435,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
       builder: (context, constraints) {
         final stackActions = constraints.maxWidth < 360;
         final compactHeader = constraints.maxWidth < 430;
+        final denseDesktop = MediaQuery.sizeOf(context).width >= 1024;
 
         final editAction = _BusinessActionTile(
           title: 'Configuración',
@@ -2109,6 +2443,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
           icon: Icons.settings_outlined,
           accent: accentText,
           onTap: onEdit,
+          compact: denseDesktop,
         );
         final menuAction = _BusinessActionTile(
           title: 'Menú digital',
@@ -2116,10 +2451,13 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
           icon: Icons.restaurant_menu_rounded,
           accent: success,
           onTap: onManageMenu,
+          compact: denseDesktop,
         );
 
         return Container(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          padding: denseDesktop
+              ? const EdgeInsets.fromLTRB(16, 14, 16, 14)
+              : const EdgeInsets.fromLTRB(18, 18, 18, 16),
           decoration: BoxDecoration(
             color: background,
             borderRadius: BorderRadius.circular(22),
@@ -2142,8 +2480,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
-                          width: 56,
-                          height: 56,
+                          width: denseDesktop ? 48 : 56,
+                          height: denseDesktop ? 48 : 56,
                           decoration: BoxDecoration(
                             color: surface.withValues(alpha: 0.9),
                             shape: BoxShape.circle,
@@ -2156,39 +2494,41 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                                 ? Image.network(
                                     businessLogoUrl!.trim(),
                                     fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) => const Icon(
+                                    errorBuilder: (_, _, _) => Icon(
                                       Icons.storefront_rounded,
                                       color: accentText,
-                                      size: 28,
+                                      size: denseDesktop ? 24 : 28,
                                     ),
                                   )
-                                : const Icon(
+                                : Icon(
                                     Icons.storefront_rounded,
                                     color: accentText,
-                                    size: 28,
+                                    size: denseDesktop ? 24 : 28,
                                   ),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        SizedBox(height: denseDesktop ? 8 : 12),
                         Text(
                           'Centro de gestión',
                           style: GoogleFonts.poppins(
                             color: accentText,
                             fontWeight: FontWeight.w600,
-                            fontSize: 13,
+                            fontSize: denseDesktop ? 12.5 : 13,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        SizedBox(height: denseDesktop ? 3 : 4),
                         Text(
                           'Tu negocio',
                           style: GoogleFonts.poppins(
                             color: darkText,
                             fontWeight: FontWeight.w700,
-                            fontSize: compactHeader ? 28 : 32,
+                            fontSize: compactHeader
+                                ? 28
+                                : (denseDesktop ? 26 : 32),
                             height: 1,
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        SizedBox(height: denseDesktop ? 6 : 8),
                         ConstrainedBox(
                           constraints: BoxConstraints(
                             maxWidth: compactHeader ? 280 : 360,
@@ -2198,8 +2538,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                             style: GoogleFonts.poppins(
                               color: bodyText,
                               fontWeight: FontWeight.w500,
-                              fontSize: 14,
-                              height: 1.45,
+                              fontSize: denseDesktop ? 13.5 : 14,
+                              height: denseDesktop ? 1.35 : 1.45,
                             ),
                           ),
                         ),
@@ -2208,8 +2548,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                   ),
                   const SizedBox(width: 14),
                   Container(
-                    width: compactHeader ? 96 : 128,
-                    height: compactHeader ? 96 : 128,
+                    width: compactHeader ? 96 : (denseDesktop ? 88 : 128),
+                    height: compactHeader ? 96 : (denseDesktop ? 88 : 128),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: LinearGradient(
@@ -2225,8 +2565,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                       alignment: Alignment.center,
                       children: [
                         Container(
-                          width: compactHeader ? 70 : 92,
-                          height: compactHeader ? 70 : 92,
+                          width: compactHeader ? 70 : (denseDesktop ? 64 : 92),
+                          height: compactHeader ? 70 : (denseDesktop ? 64 : 92),
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: Colors.white.withValues(alpha: 0.42),
@@ -2234,7 +2574,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                         ),
                         Icon(
                           Icons.store_mall_directory_rounded,
-                          size: compactHeader ? 42 : 56,
+                          size: compactHeader ? 42 : (denseDesktop ? 44 : 56),
                           color: purple.withValues(alpha: 0.72),
                         ),
                       ],
@@ -2242,7 +2582,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 18),
+              SizedBox(height: denseDesktop ? 14 : 18),
               if (stackActions)
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2260,7 +2600,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                     Expanded(child: menuAction),
                   ],
                 ),
-              const SizedBox(height: 14),
+              SizedBox(height: denseDesktop ? 12 : 14),
               Row(
                 children: [
                   Container(
@@ -2316,6 +2656,7 @@ class _BusinessActionTile extends StatelessWidget {
     required this.icon,
     required this.accent,
     required this.onTap,
+    this.compact = false,
   });
 
   final String title;
@@ -2323,6 +2664,7 @@ class _BusinessActionTile extends StatelessWidget {
   final IconData icon;
   final Color accent;
   final VoidCallback onTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -2332,7 +2674,10 @@ class _BusinessActionTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
         child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 12 : 14,
+            vertical: compact ? 11 : 14,
+          ),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(18),
@@ -2347,13 +2692,13 @@ class _BusinessActionTile extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 50,
-                height: 50,
+                width: compact ? 44 : 50,
+                height: compact ? 44 : 50,
                 decoration: BoxDecoration(
                   color: accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(compact ? 14 : 16),
                 ),
-                child: Icon(icon, color: accent, size: 26),
+                child: Icon(icon, color: accent, size: compact ? 22 : 26),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3021,9 +3366,12 @@ class _CompactBusinessInfoCard extends StatelessWidget {
       required String value,
       required IconData icon,
       required Color accent,
+      bool stretchVertically = false,
+      int valueMaxLines = 2,
     }) {
       return Container(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 11),
+        height: stretchVertically ? double.infinity : null,
+        padding: const EdgeInsets.fromLTRB(12, 11, 12, 10),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -3048,6 +3396,8 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                 children: [
                   Text(
                     label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
                       fontSize: 10.8,
                       color: mutedText,
@@ -3057,8 +3407,9 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     value,
-                    maxLines: 2,
+                    maxLines: valueMaxLines,
                     overflow: TextOverflow.ellipsis,
+                    softWrap: true,
                     style: GoogleFonts.poppins(
                       fontSize: 12.5,
                       color: darkText,
@@ -3074,15 +3425,72 @@ class _CompactBusinessInfoCard extends StatelessWidget {
       );
     }
 
+    Widget buildDetailFieldsLayout({
+      required double maxWidth,
+    }) {
+      const gap = 10.0;
+      final canUseTwoColumns = maxWidth >= 520;
+
+      final nameCard = detailCard(
+        label: 'Nombre del negocio',
+        value: comercio.nombre,
+        icon: Icons.storefront_rounded,
+        accent: purple,
+        stretchVertically: canUseTwoColumns,
+      );
+      final whatsappCard = detailCard(
+        label: 'WhatsApp',
+        value: whatsappLabel,
+        icon: FontAwesomeIcons.whatsapp,
+        accent: const Color(0xFF16A34A),
+        stretchVertically: canUseTwoColumns,
+      );
+      final slugCard = detailCard(
+        label: 'Slug público',
+        value: slugLabel,
+        icon: Icons.alternate_email_rounded,
+        accent: const Color(0xFF2563EB),
+        valueMaxLines: 2,
+      );
+
+      if (!canUseTwoColumns) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            nameCard,
+            const SizedBox(height: gap),
+            whatsappCard,
+            const SizedBox(height: gap),
+            slugCard,
+          ],
+        );
+      }
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: nameCard),
+                const SizedBox(width: gap),
+                Expanded(child: whatsappCard),
+              ],
+            ),
+          ),
+          const SizedBox(height: gap),
+          slugCard,
+        ],
+      );
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useSingleColumn = constraints.maxWidth < 360;
-        final infoCardWidth = useSingleColumn
-            ? constraints.maxWidth
-            : (constraints.maxWidth - 12) / 2;
+        final maxWidth = constraints.maxWidth;
 
         return Container(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [Color(0xFFF8F4FF), Color(0xFFFFFFFF)],
@@ -3146,219 +3554,178 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  SizedBox(
-                    width: infoCardWidth,
-                    child: detailCard(
-                      label: 'Nombre del negocio',
-                      value: comercio.nombre,
-                      icon: Icons.storefront_rounded,
-                      accent: purple,
-                    ),
+              const SizedBox(height: 12),
+              buildDetailFieldsLayout(maxWidth: maxWidth),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3EDFF),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: purple.withValues(alpha: 0.14),
                   ),
-                  SizedBox(
-                    width: infoCardWidth,
-                    child: detailCard(
-                      label: 'WhatsApp',
-                      value: whatsappLabel,
-                      icon: FontAwesomeIcons.whatsapp,
-                      accent: const Color(0xFF16A34A),
-                    ),
-                  ),
-                  SizedBox(
-                    width: infoCardWidth,
-                    child: detailCard(
-                      label: 'Slug público',
-                      value: slugLabel,
-                      icon: Icons.alternate_email_rounded,
-                      accent: const Color(0xFF2563EB),
-                    ),
-                  ),
-                  SizedBox(
-                    width: constraints.maxWidth,
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF3EDFF),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: purple.withValues(alpha: 0.14),
-                        ),
+                        color: purple.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Row(
+                      child: Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 20,
+                        color: purple,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: purple.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              Icons.auto_awesome_rounded,
-                              size: 20,
-                              color: purple,
+                          Text(
+                            'Créditos IA',
+                            style: GoogleFonts.poppins(
+                              fontSize: 11.5,
+                              color: mutedText,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Créditos IA',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 11.5,
-                                    color: mutedText,
-                                    fontWeight: FontWeight.w600,
+                          Text(
+                            'Te quedan $balanceText créditos',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              color: darkText,
+                              fontWeight: FontWeight.w700,
+                              height: 1.15,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '1 crédito = 1 imagen profesional para tu menú',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12.4,
+                              color: darkText,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Mejores fotos = más pedidos 🍔',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12.1,
+                              color: mutedText,
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          if (isLowCredits)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFE9E9),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.warning_amber_rounded,
+                                    color: Color(0xFFDC2626),
+                                    size: 16,
                                   ),
-                                ),
-                                Text(
-                                  'Te quedan $balanceText créditos',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 18,
-                                    color: darkText,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.15,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  '1 crédito = 1 imagen profesional para tu menú',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12.4,
-                                    color: darkText,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Mejores fotos = más pedidos 🍔',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12.1,
-                                    color: mutedText,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.3,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                if (isLowCredits)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFFFE9E9),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Row(
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        const Icon(
-                                          Icons.warning_amber_rounded,
-                                          color: Color(0xFFDC2626),
-                                          size: 16,
+                                        Text(
+                                          'Te quedan solo $balanceText créditos',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12.2,
+                                            color: const Color(0xFFB91C1C),
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                         ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Te quedan solo $balanceText créditos',
-                                                style: GoogleFonts.poppins(
-                                                  fontSize: 12.2,
-                                                  color: const Color(
-                                                    0xFFB91C1C,
-                                                  ),
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                'Te estás quedando sin imágenes para tus productos.',
-                                                style: GoogleFonts.poppins(
-                                                  fontSize: 11.6,
-                                                  color: const Color(
-                                                    0xFFB91C1C,
-                                                  ),
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ],
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Te estás quedando sin imágenes para tus productos.',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 11.6,
+                                            color: const Color(0xFFB91C1C),
+                                            fontWeight: FontWeight.w500,
                                           ),
                                         ),
                                       ],
                                     ),
-                                  )
-                                else
-                                  Text(
-                                    creditsLabel,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 11.5,
-                                      color: mutedText,
-                                      fontWeight: FontWeight.w500,
-                                    ),
                                   ),
-                                const SizedBox(height: 10),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: SizedBox(
-                                    width: double.infinity,
-                                    child: FilledButton.icon(
-                                      onPressed: onBuyAiCredits,
-                                      icon: Icon(
-                                        isLowCredits
-                                            ? Icons.bolt_rounded
-                                            : Icons.auto_awesome_rounded,
-                                        size: 18,
-                                      ),
-                                      style: FilledButton.styleFrom(
-                                        foregroundColor: Colors.white,
-                                        backgroundColor: purple,
-                                        minimumSize: const Size.fromHeight(48),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 14,
-                                          vertical: 12,
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                        ),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      label: Text(
-                                        isLowCredits
-                                            ? 'Recargar ahora'
-                                            : 'Recargar créditos IA',
-                                        style: GoogleFonts.poppins(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 12.4,
-                                        ),
-                                      ),
-                                    ),
+                                ],
+                              ),
+                            )
+                          else
+                            Text(
+                              creditsLabel,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11.5,
+                                color: mutedText,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          const SizedBox(height: 10),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: onBuyAiCredits,
+                                icon: Icon(
+                                  isLowCredits
+                                      ? Icons.bolt_rounded
+                                      : Icons.auto_awesome_rounded,
+                                  size: 18,
+                                ),
+                                style: FilledButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  backgroundColor: purple,
+                                  minimumSize: const Size.fromHeight(48),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                label: Text(
+                                  isLowCredits
+                                      ? 'Recargar ahora'
+                                      : 'Recargar créditos IA',
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12.4,
                                   ),
                                 ),
-                              ],
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(

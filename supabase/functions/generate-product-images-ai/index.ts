@@ -11,6 +11,7 @@ import {
   enforceAiImageOnboardingLimit,
   hasEnoughCredits,
 } from '../_shared/ai-usage.ts';
+import { buildProductImagePrompt } from '../_shared/product-image-prompt.ts';
 
 type ImageGenerationItem = {
   type: 'product';
@@ -30,6 +31,12 @@ type ProductRow = {
 type CategoryRow = {
   id: string;
   nombre: string;
+};
+
+type CommerceRow = {
+  id: string;
+  nombre?: string | null;
+  categoria?: string | null;
 };
 
 const corsHeaders = {
@@ -125,6 +132,7 @@ Deno.serve(async (req: Request) => {
     const plannedCreditsCost = items.length * COST_IMAGE;
     await hasEnoughCredits(supabase, commerceId, plannedCreditsCost);
 
+    const commerce = await loadCommerce(supabase, commerceId);
     const batchId = crypto.randomUUID();
     let creditsCharged = false;
     let triggerRequestId: number | null = null;
@@ -149,7 +157,13 @@ Deno.serve(async (req: Request) => {
         commerce_id: commerceId,
         catalog_id: catalogId || null,
         product_id: item.id,
-        prompt: buildProductImagePrompt(item),
+        prompt: buildProductImagePrompt({
+          productName: item.name,
+          description: item.description,
+          categoryName: item.categoryName,
+          businessName: commerce?.nombre ?? undefined,
+          businessCategory: commerce?.categoria ?? undefined,
+        }),
         status: 'pending',
         provider: 'google',
         credits_charged: COST_IMAGE,
@@ -332,6 +346,23 @@ async function resolveItems(params: {
     .slice(0, MAX_AI_IMAGES_ONBOARDING));
 }
 
+async function loadCommerce(
+  supabase: ReturnType<typeof createClient>,
+  commerceId: string,
+): Promise<CommerceRow | null> {
+  const { data, error } = await supabase
+    .from('comercios')
+    .select('id, nombre, categoria')
+    .eq('id', commerceId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Error loading comercio for AI image queue: ${error.message}`);
+  }
+
+  return (data as CommerceRow | null) ?? null;
+}
+
 function normalizeItems(value: unknown): Array<ImageGenerationItem & { description?: string; categoryName?: string }> {
   if (!Array.isArray(value)) {
     return [];
@@ -362,21 +393,6 @@ function normalizeItems(value: unknown): Array<ImageGenerationItem & { descripti
   }
 
   return items;
-}
-
-function buildProductImagePrompt(
-  item: ImageGenerationItem & { description?: string; categoryName?: string },
-): string {
-  const details = [
-    `Producto: ${item.name}.`,
-    item.categoryName ? `Categoria: ${item.categoryName}.` : '',
-    item.description ? `Descripcion: ${item.description}.` : '',
-    'Genera una fotografia gastronomica profesional, realista y apetecible del producto listo para ecommerce.',
-    'Sin texto, sin manos, sin logos, sin platos duplicados y sin collage.',
-    'Fondo limpio, iluminacion de estudio suave, encuadre cercano 1:1, enfoque nitido en el alimento.',
-  ];
-
-  return details.filter((part) => part.length > 0).join(' ');
 }
 
 function normalizeString(value: unknown): string {

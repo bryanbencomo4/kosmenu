@@ -10,6 +10,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/product_description_ai_service.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -47,6 +48,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _selectedCategoryId;
   String? _remoteImageUrl;
   String? _businessLogoUrl;
+  String? _businessCategory;
+  String? _businessName;
   XFile? _pickedImage;
   bool _isLoadingPricingConfig = false;
   String _baseCurrency = 'USD';
@@ -59,6 +62,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   bool _isGeneratingDescription = false;
   double _aiCreditsBalance = 0;
   final AiImageService _aiImageService = const AiImageService();
+  final ProductDescriptionAiService _productDescriptionAiService =
+      const ProductDescriptionAiService();
 
   @override
   void initState() {
@@ -160,12 +165,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     try {
       final row = await Supabase.instance.client
           .from('comercios')
-          .select('logo_url')
+          .select('logo_url, nombre, categoria')
           .eq('id', comercioId)
           .maybeSingle();
 
       if (!mounted || row == null) return;
-      setState(() => _businessLogoUrl = row['logo_url']?.toString().trim());
+      setState(() {
+        _businessLogoUrl = row['logo_url']?.toString().trim();
+        _businessName = row['nombre']?.toString().trim();
+        _businessCategory = row['categoria']?.toString().trim();
+      });
     } catch (_) {
       // Keep default fallback image when logo lookup fails.
     }
@@ -535,23 +544,128 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     );
   }
 
+  String _normalizeProductHaystack(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u');
+  }
+
+  bool _isRedundantProductDescription({
+    required String productName,
+    required String description,
+  }) {
+    final name = _normalizeProductHaystack(productName.trim());
+    final text = _normalizeProductHaystack(description.trim());
+    if (text.isEmpty) {
+      return true;
+    }
+    if (text == name) {
+      return true;
+    }
+    if (text.startsWith('$name:') || text.startsWith('$name -')) {
+      return true;
+    }
+    return false;
+  }
+
+  String? _descriptionContextForAi(String productName) {
+    final raw = _descriptionController.text.trim();
+    if (_isRedundantProductDescription(productName: productName, description: raw)) {
+      return null;
+    }
+    return raw;
+  }
+
   String _buildAiDescriptionSuggestion() {
     final rawName = _nameController.text.trim();
     final productName = rawName.isEmpty ? 'Este producto' : rawName;
     final categoryName = _selectedCategoryName;
-    final existingDescription = _descriptionController.text.trim();
-
-    if (existingDescription.isNotEmpty) {
-      final normalized = existingDescription.endsWith('.')
-          ? existingDescription.substring(0, existingDescription.length - 1)
-          : existingDescription;
-      return '$productName: $normalized. Ideal para antojar desde el primer vistazo y destacar en tu menú.';
-    }
+    final isFoodContext = _isLikelyFoodProductContext(
+      productName: productName,
+      categoryName: categoryName,
+    );
+    final haystack = _normalizeProductHaystack('$productName $categoryName');
 
     final categoryFragment = categoryName.isNotEmpty
         ? 'de la categoría $categoryName'
-        : 'de tu menú';
-    return '$productName $categoryFragment, preparado para abrir el apetito con una presentación irresistible y un sabor que invita a pedirlo una y otra vez.';
+        : 'de tu catálogo';
+
+    if (isFoodContext) {
+      return '$productName $categoryFragment, preparado para abrir el apetito con una presentación irresistible y un sabor que invita a pedirlo una y otra vez.';
+    }
+
+    if (haystack.contains('spotify')) {
+      return 'Suscripción Premium Individual de Spotify con música sin anuncios, audio de alta calidad y descarga offline. Activación digital rápida tras confirmar tu pedido.';
+    }
+    if (haystack.contains('netflix') || haystack.contains('streaming')) {
+      return 'Acceso digital a contenido en streaming con activación rápida y reproducción en alta calidad. Ideal para disfrutar series y películas sin complicaciones.';
+    }
+    if (haystack.contains('gaming') ||
+        haystack.contains('free fire') ||
+        haystack.contains('diamante')) {
+      return 'Recarga o membresía digital con entrega inmediata para mejorar tu experiencia de juego. Compra segura y activación rápida desde tu pedido.';
+    }
+    if (haystack.contains('musica') || haystack.contains('premium')) {
+      return 'Servicio digital con activación rápida, beneficios del plan contratado y entrega inmediata tras tu compra. Ideal para disfrutarlo desde el primer minuto.';
+    }
+
+    return 'Producto digital con entrega rápida, beneficios claros del plan y compra segura desde el catálogo del negocio.';
+  }
+
+  bool _isLikelyFoodProductContext({
+    required String productName,
+    required String categoryName,
+  }) {
+    final haystack = _normalizeProductHaystack('$productName $categoryName');
+    const digitalKeywords = <String>[
+      'spotify',
+      'netflix',
+      'streaming',
+      'premium',
+      'gaming',
+      'free fire',
+      'digital',
+      'software',
+      'recarga',
+      'suscripcion',
+      'musica',
+      'membresia',
+      'licencia',
+      'vpn',
+      'cine',
+      'juego',
+      'videojuego',
+    ];
+    const foodKeywords = <String>[
+      'comida',
+      'pollo',
+      'pizza',
+      'hamburgues',
+      'postre',
+      'bebida',
+      'restaurant',
+      'café',
+      'cafe',
+      'pastel',
+      'tacos',
+      'sushi',
+      'marisco',
+      'asado',
+      'panader',
+    ];
+
+    if (digitalKeywords.any(haystack.contains)) {
+      return false;
+    }
+    if (foodKeywords.any(haystack.contains)) {
+      return true;
+    }
+    return false;
   }
 
   Future<bool?> _confirmAiDescriptionGeneration() {
@@ -623,16 +737,50 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() => _isGeneratingDescription = true);
 
     try {
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
-      final result = _buildAiDescriptionSuggestion();
+      final comercioId = SupabaseConfig.currentComercioId.trim();
+      var resultText = '';
+      var creditsUsed = 0.0;
+
+      final productName = _nameController.text.trim();
+
+      if (comercioId.isNotEmpty) {
+        try {
+          final generated = await _productDescriptionAiService.generateDescription(
+            comercioId: comercioId,
+            productName: productName,
+            categoryName: _selectedCategoryName,
+            description: _descriptionContextForAi(productName),
+            businessName: _businessName,
+            businessCategory: _businessCategory,
+          );
+          resultText = generated.description;
+          creditsUsed = generated.creditsCharged;
+        } catch (error) {
+          creditsUsed = 0;
+          resultText = _buildAiDescriptionSuggestion();
+          if (mounted) {
+            _showMessage(
+              error is StateError
+                  ? error.message
+                  : 'No se pudo conectar con IA. Se usó una sugerencia local.',
+            );
+          }
+        }
+      } else {
+        resultText = _buildAiDescriptionSuggestion();
+      }
+
       if (!mounted) return;
       setState(() {
         _descriptionController
-          ..text = result
-          ..selection = TextSelection.collapsed(offset: result.length);
-        _aiCreditsBalance = (_aiCreditsBalance - 1).clamp(0, double.infinity);
+          ..text = resultText
+          ..selection = TextSelection.collapsed(offset: resultText.length);
+        _aiCreditsBalance =
+            (_aiCreditsBalance - creditsUsed).clamp(0, double.infinity);
       });
-      _showMessage('Descripción generada con IA');
+      if (comercioId.isNotEmpty) {
+        _showMessage('Descripción generada con IA');
+      }
     } finally {
       if (mounted) {
         setState(() => _isGeneratingDescription = false);
