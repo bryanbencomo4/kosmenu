@@ -1357,31 +1357,39 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           backgroundColor: _dashboardBg,
           floatingActionButton: dashboardData == null
               ? null
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final compactFab = constraints.maxWidth < 390;
-                    if (compactFab) {
-                      return FloatingActionButton(
-                        heroTag: 'assisted-order-fab',
-                        backgroundColor: _purple,
-                        foregroundColor: Colors.white,
-                        onPressed: () =>
-                            _openAssistedPublicMenu(dashboardData.comercio),
-                        child: const Icon(Icons.add_rounded),
-                      );
-                    }
-
-                    return FloatingActionButton.extended(
-                      heroTag: 'assisted-order-fab',
-                      backgroundColor: _purple,
-                      foregroundColor: Colors.white,
-                      onPressed: () =>
-                          _openAssistedPublicMenu(dashboardData.comercio),
-                      icon: const Icon(Icons.receipt_long_rounded),
-                      label: const Text('Nuevo pedido'),
-                    );
-                  },
+              : Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    screenWidth < 720 ? 16 : 0,
+                    0,
+                    screenWidth < 720 ? 16 : 0,
+                    bottomInset > 0 ? 4 : 0,
+                  ),
+                  child: screenWidth < 720
+                      ? SizedBox(
+                          width: double.infinity,
+                          child: FloatingActionButton.extended(
+                            heroTag: 'assisted-order-fab',
+                            backgroundColor: _purple,
+                            foregroundColor: Colors.white,
+                            onPressed: () =>
+                                _openAssistedPublicMenu(dashboardData.comercio),
+                            icon: const Icon(Icons.receipt_long_rounded),
+                            label: const Text('Nuevo pedido'),
+                          ),
+                        )
+                      : FloatingActionButton.extended(
+                          heroTag: 'assisted-order-fab',
+                          backgroundColor: _purple,
+                          foregroundColor: Colors.white,
+                          onPressed: () =>
+                              _openAssistedPublicMenu(dashboardData.comercio),
+                          icon: const Icon(Icons.receipt_long_rounded),
+                          label: const Text('Nuevo pedido'),
+                        ),
                 ),
+          floatingActionButtonLocation: screenWidth < 720
+              ? FloatingActionButtonLocation.centerFloat
+              : FloatingActionButtonLocation.endFloat,
           body: SafeArea(
             child: Builder(
               builder: (context) {
@@ -1543,7 +1551,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           final horizontalPadding = viewportWidth >= 1200
                               ? 28.0
                               : (viewportWidth >= 720 ? 22.0 : 16.0);
-                          final bottomPadding = (isSmallScreen ? 124 : 136) + bottomInset;
+                          final isMobile = viewportWidth < 720;
+                          final bottomPadding = (isMobile
+                                  ? 168
+                                  : (isSmallScreen ? 136 : 148)) +
+                              bottomInset;
 
                           final list = ListView(
                             padding: EdgeInsets.fromLTRB(
@@ -1588,13 +1600,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           const SizedBox(height: 16),
                           if (_recentCatalogResult != null)
                             _CatalogUpdateBanner(result: _recentCatalogResult!),
-                          if (!isTablet && !isDesktop)
-                            _CompactKpiScroller(cards: kpiCards)
-                          else
-                            _DashboardKpiGrid(
-                              cards: kpiCards,
-                              columns: isDesktop ? 4 : 2,
-                            ),
+                          _DashboardKpiGrid(
+                            cards: kpiCards,
+                            columns: isDesktop ? 4 : 2,
+                            useVerticalLayout: isMobile,
+                          ),
                           SizedBox(height: isDesktop ? 16 : 14),
                           if (isDesktop)
                             Row(
@@ -1945,116 +1955,137 @@ class _DashboardHeader extends StatelessWidget {
     final resolvedName = commerceName.trim().isEmpty
         ? 'Comercio'
         : commerceName.trim();
+    final isMobile = MediaQuery.sizeOf(context).width < 720;
+
+    final actionButtons = Wrap(
+      spacing: isMobile ? 6 : 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.end,
+      children: [
+        _HeaderCircleButton(
+          icon: Icons.notifications_none_rounded,
+          tooltip: 'Notificaciones',
+          onTap: onOpenNotifications,
+          size: isMobile ? 40 : 36,
+        ),
+        _HeaderCircleButton(
+          icon: Icons.account_circle_outlined,
+          tooltip: 'Perfil',
+          onTap: onOpenProfile,
+          size: isMobile ? 40 : 36,
+        ),
+        PopupMenuButton<_DashboardAction>(
+          tooltip: 'Más acciones',
+          onSelected: onActionSelected,
+          itemBuilder: (context) => const [
+            PopupMenuItem(
+              value: _DashboardAction.refresh,
+              child: _MenuActionRow(
+                icon: Icons.refresh_rounded,
+                label: 'Refrescar dashboard',
+              ),
+            ),
+            PopupMenuDivider(),
+            PopupMenuItem(
+              value: _DashboardAction.magicMenu,
+              child: _MenuActionRow(
+                icon: Icons.auto_awesome_rounded,
+                label: 'Escanear con IA',
+              ),
+            ),
+            PopupMenuItem(
+              value: _DashboardAction.manageMenu,
+              child: _MenuActionRow(
+                icon: Icons.restaurant_menu_rounded,
+                label: 'Gestionar menú actual',
+              ),
+            ),
+            PopupMenuItem(
+              value: _DashboardAction.showQr,
+              child: _MenuActionRow(
+                icon: Icons.qr_code_2_rounded,
+                label: 'Generar QR',
+              ),
+            ),
+            PopupMenuItem(
+              value: _DashboardAction.shareMenu,
+              child: _MenuActionRow(
+                icon: Icons.share_rounded,
+                label: 'Compartir menú',
+              ),
+            ),
+            PopupMenuItem(
+              value: _DashboardAction.copyLink,
+              child: _MenuActionRow(
+                icon: Icons.copy_all_rounded,
+                label: 'Copiar enlace',
+              ),
+            ),
+            PopupMenuItem(
+              value: _DashboardAction.openWeb,
+              child: _MenuActionRow(
+                icon: Icons.open_in_browser_rounded,
+                label: 'Abrir menú web',
+              ),
+            ),
+          ],
+          child: _HeaderCircleButton(
+            icon: Icons.more_horiz_rounded,
+            tooltip: 'Más acciones',
+            size: isMobile ? 40 : 36,
+          ),
+        ),
+      ],
+    );
+
+    final greetingBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '¡Hola, $resolvedName! 👋',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.poppins(
+            fontSize: isMobile ? 20 : 22,
+            fontWeight: FontWeight.w800,
+            color: darkText,
+            height: 1.15,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Aquí tienes un resumen de tu negocio.',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.poppins(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: mutedText,
+          ),
+        ),
+      ],
+    );
+
+    if (isMobile) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          greetingBlock,
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: actionButtons,
+          ),
+        ],
+      );
+    }
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '¡Hola, $resolvedName! 👋',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: darkText,
-                  height: 1.1,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Aquí tienes un resumen de tu negocio.',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: mutedText,
-                ),
-              ),
-            ],
-          ),
-        ),
+        Expanded(child: greetingBlock),
         const SizedBox(width: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _HeaderCircleButton(
-              icon: Icons.notifications_none_rounded,
-              tooltip: 'Notificaciones',
-              onTap: onOpenNotifications,
-            ),
-            _HeaderCircleButton(
-              icon: Icons.account_circle_outlined,
-              tooltip: 'Perfil',
-              onTap: onOpenProfile,
-            ),
-            PopupMenuButton<_DashboardAction>(
-              tooltip: 'Más acciones',
-              onSelected: onActionSelected,
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: _DashboardAction.refresh,
-                  child: _MenuActionRow(
-                    icon: Icons.refresh_rounded,
-                    label: 'Refrescar dashboard',
-                  ),
-                ),
-                PopupMenuDivider(),
-                PopupMenuItem(
-                  value: _DashboardAction.magicMenu,
-                  child: _MenuActionRow(
-                    icon: Icons.auto_awesome_rounded,
-                    label: 'Escanear con IA',
-                  ),
-                ),
-                PopupMenuItem(
-                  value: _DashboardAction.manageMenu,
-                  child: _MenuActionRow(
-                    icon: Icons.restaurant_menu_rounded,
-                    label: 'Gestionar menú actual',
-                  ),
-                ),
-                PopupMenuItem(
-                  value: _DashboardAction.showQr,
-                  child: _MenuActionRow(
-                    icon: Icons.qr_code_2_rounded,
-                    label: 'Generar QR',
-                  ),
-                ),
-                PopupMenuItem(
-                  value: _DashboardAction.shareMenu,
-                  child: _MenuActionRow(
-                    icon: Icons.share_rounded,
-                    label: 'Compartir menú',
-                  ),
-                ),
-                PopupMenuItem(
-                  value: _DashboardAction.copyLink,
-                  child: _MenuActionRow(
-                    icon: Icons.copy_all_rounded,
-                    label: 'Copiar enlace',
-                  ),
-                ),
-                PopupMenuItem(
-                  value: _DashboardAction.openWeb,
-                  child: _MenuActionRow(
-                    icon: Icons.open_in_browser_rounded,
-                    label: 'Abrir menú web',
-                  ),
-                ),
-              ],
-              child: const _HeaderCircleButton(
-                icon: Icons.more_horiz_rounded,
-                tooltip: 'Más acciones',
-              ),
-            ),
-          ],
-        ),
+        actionButtons,
       ],
     );
   }
@@ -2065,14 +2096,18 @@ class _HeaderCircleButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     this.onTap,
+    this.size = 36,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback? onTap;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
+    final iconSize = size >= 40 ? 20.0 : 18.0;
+
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(999),
@@ -2082,8 +2117,8 @@ class _HeaderCircleButton extends StatelessWidget {
         child: Tooltip(
           message: tooltip,
           child: Container(
-            width: 36,
-            height: 36,
+            width: size,
+            height: size,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: const Color(0xFFE5E7EB)),
@@ -2095,7 +2130,7 @@ class _HeaderCircleButton extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(icon, size: 18, color: const Color(0xFF11183C)),
+            child: Icon(icon, size: iconSize, color: const Color(0xFF11183C)),
           ),
         ),
       ),
@@ -2134,17 +2169,11 @@ class _CompactKpiScroller extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 124,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: cards.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 10),
-        itemBuilder: (context, index) {
-          final item = cards[index];
-          return _CompactKpiCard(data: item, fixedWidth: 132);
-        },
-      ),
+    // Legacy horizontal scroller — replaced by _DashboardKpiGrid on mobile.
+    return _DashboardKpiGrid(
+      cards: cards,
+      columns: 2,
+      useVerticalLayout: true,
     );
   }
 }
@@ -2153,17 +2182,19 @@ class _DashboardKpiGrid extends StatelessWidget {
   const _DashboardKpiGrid({
     required this.cards,
     required this.columns,
+    this.useVerticalLayout = false,
   });
 
   final List<_CompactKpiCardData> cards;
   final int columns;
+  final bool useVerticalLayout;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         const gap = 12.0;
-        const gridCardHeight = 112.0;
+        final gridCardHeight = useVerticalLayout ? 118.0 : 112.0;
         final safeColumns = columns.clamp(1, 6);
         final totalGap = gap * (safeColumns - 1);
         final itemWidth = safeColumns == 1
@@ -2181,6 +2212,7 @@ class _DashboardKpiGrid extends StatelessWidget {
                 child: _CompactKpiCard(
                   data: card,
                   fixedWidth: null,
+                  useVerticalLayout: useVerticalLayout,
                 ),
               ),
           ],
@@ -2194,10 +2226,12 @@ class _CompactKpiCard extends StatelessWidget {
   const _CompactKpiCard({
     required this.data,
     required this.fixedWidth,
+    this.useVerticalLayout = false,
   });
 
   final _CompactKpiCardData data;
   final double? fixedWidth;
+  final bool useVerticalLayout;
 
   static const _greenTrend = Color(0xFF16A34A);
   static const _redTrend = Color(0xFFEF4444);
@@ -2222,6 +2256,88 @@ class _CompactKpiCard extends StatelessWidget {
     final useGridLayout = fixedWidth == null;
 
     if (useGridLayout) {
+      if (useVerticalLayout) {
+        return Container(
+          width: double.infinity,
+          height: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFE8EAF2)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x100F172A),
+                blurRadius: 10,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: data.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(data.icon, color: data.color, size: 16),
+              ),
+              const Spacer(),
+              Text(
+                data.value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF11183C),
+                  height: 1,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                data.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  color: const Color(0xFF6B6F92),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  Icon(
+                    isUp
+                        ? Icons.arrow_drop_up_rounded
+                        : Icons.arrow_drop_down_rounded,
+                    size: 14,
+                    color: trendColor,
+                  ),
+                  Flexible(
+                    child: Text(
+                      '$trendValue% vs ayer',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(
+                        fontSize: 10,
+                        color: trendColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }
+
       return Container(
         width: double.infinity,
         height: double.infinity,
@@ -2433,9 +2549,13 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final stackActions = constraints.maxWidth < 360;
-        final compactHeader = constraints.maxWidth < 430;
-        final denseDesktop = MediaQuery.sizeOf(context).width >= 1024;
+        final viewportWidth = MediaQuery.sizeOf(context).width;
+        final isMobile = viewportWidth < 720;
+        final isDesktop = viewportWidth >= 1024;
+        final stackActions =
+            isMobile || (!isDesktop && constraints.maxWidth < 520);
+        final compactHeader = isMobile || constraints.maxWidth < 430;
+        final denseDesktop = isDesktop;
 
         final editAction = _BusinessActionTile(
           title: 'Configuración',
@@ -2443,7 +2563,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
           icon: Icons.settings_outlined,
           accent: accentText,
           onTap: onEdit,
-          compact: denseDesktop,
+          compact: denseDesktop || isMobile,
+          stacked: stackActions,
         );
         final menuAction = _BusinessActionTile(
           title: 'Menú digital',
@@ -2451,13 +2572,16 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
           icon: Icons.restaurant_menu_rounded,
           accent: success,
           onTap: onManageMenu,
-          compact: denseDesktop,
+          compact: denseDesktop || isMobile,
+          stacked: stackActions,
         );
 
         return Container(
           padding: denseDesktop
               ? const EdgeInsets.fromLTRB(16, 14, 16, 14)
-              : const EdgeInsets.fromLTRB(18, 18, 18, 16),
+              : (isMobile
+                  ? const EdgeInsets.fromLTRB(14, 14, 14, 12)
+                  : const EdgeInsets.fromLTRB(18, 18, 18, 16)),
           decoration: BoxDecoration(
             color: background,
             borderRadius: BorderRadius.circular(22),
@@ -2480,8 +2604,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
-                          width: denseDesktop ? 48 : 56,
-                          height: denseDesktop ? 48 : 56,
+                          width: denseDesktop ? 48 : (isMobile ? 44 : 56),
+                          height: denseDesktop ? 48 : (isMobile ? 44 : 56),
                           decoration: BoxDecoration(
                             color: surface.withValues(alpha: 0.9),
                             shape: BoxShape.circle,
@@ -2523,7 +2647,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                             color: darkText,
                             fontWeight: FontWeight.w700,
                             fontSize: compactHeader
-                                ? 28
+                                ? (isMobile ? 24 : 28)
                                 : (denseDesktop ? 26 : 32),
                             height: 1,
                           ),
@@ -2531,7 +2655,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                         SizedBox(height: denseDesktop ? 6 : 8),
                         ConstrainedBox(
                           constraints: BoxConstraints(
-                            maxWidth: compactHeader ? 280 : 360,
+                            maxWidth: compactHeader ? double.infinity : 360,
                           ),
                           child: Text(
                             'Administra la información de tu negocio y tu menú digital.',
@@ -2546,49 +2670,79 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 14),
-                  Container(
-                    width: compactHeader ? 96 : (denseDesktop ? 88 : 128),
-                    height: compactHeader ? 96 : (denseDesktop ? 88 : 128),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: [
-                          Colors.white.withValues(alpha: 0.95),
-                          const Color(0xFFE4D7FF),
+                  if (!isMobile) ...[
+                    const SizedBox(width: 14),
+                    Container(
+                      width: compactHeader ? 96 : (denseDesktop ? 88 : 128),
+                      height: compactHeader ? 96 : (denseDesktop ? 88 : 128),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.white.withValues(alpha: 0.95),
+                            const Color(0xFFE4D7FF),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            width: compactHeader
+                                ? 70
+                                : (denseDesktop ? 64 : 92),
+                            height: compactHeader
+                                ? 70
+                                : (denseDesktop ? 64 : 92),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white.withValues(alpha: 0.42),
+                            ),
+                          ),
+                          Icon(
+                            Icons.store_mall_directory_rounded,
+                            size: compactHeader
+                                ? 42
+                                : (denseDesktop ? 44 : 56),
+                            color: purple.withValues(alpha: 0.72),
+                          ),
                         ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
                       ),
                     ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Container(
-                          width: compactHeader ? 70 : (denseDesktop ? 64 : 92),
-                          height: compactHeader ? 70 : (denseDesktop ? 64 : 92),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white.withValues(alpha: 0.42),
-                          ),
+                  ] else ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.white.withValues(alpha: 0.95),
+                            const Color(0xFFE4D7FF),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                        Icon(
-                          Icons.store_mall_directory_rounded,
-                          size: compactHeader ? 42 : (denseDesktop ? 44 : 56),
-                          color: purple.withValues(alpha: 0.72),
-                        ),
-                      ],
+                      ),
+                      child: Icon(
+                        Icons.store_mall_directory_rounded,
+                        size: 26,
+                        color: purple.withValues(alpha: 0.72),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
-              SizedBox(height: denseDesktop ? 14 : 18),
+              SizedBox(height: denseDesktop ? 14 : (isMobile ? 12 : 18)),
               if (stackActions)
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     editAction,
-                    const SizedBox(height: 12),
+                    SizedBox(height: isMobile ? 10 : 12),
                     menuAction,
                   ],
                 )
@@ -2600,7 +2754,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                     Expanded(child: menuAction),
                   ],
                 ),
-              SizedBox(height: denseDesktop ? 12 : 14),
+              SizedBox(height: denseDesktop ? 12 : (isMobile ? 10 : 14)),
               Row(
                 children: [
                   Container(
@@ -2657,6 +2811,7 @@ class _BusinessActionTile extends StatelessWidget {
     required this.accent,
     required this.onTap,
     this.compact = false,
+    this.stacked = false,
   });
 
   final String title;
@@ -2665,9 +2820,20 @@ class _BusinessActionTile extends StatelessWidget {
   final Color accent;
   final VoidCallback onTap;
   final bool compact;
+  final bool stacked;
 
   @override
   Widget build(BuildContext context) {
+    final viewportWidth = MediaQuery.sizeOf(context).width;
+    final isVeryNarrow = viewportWidth < 360;
+    final horizontalPadding = stacked ? 12.0 : (compact ? 12.0 : 14.0);
+    final verticalPadding = stacked ? 10.0 : (compact ? 11.0 : 14.0);
+    final badgeSize = stacked ? 42.0 : (compact ? 44.0 : 50.0);
+    final badgeRadius = stacked ? 13.0 : (compact ? 14.0 : 16.0);
+    final iconSize = stacked ? 21.0 : (compact ? 22.0 : 26.0);
+    final titleSize = stacked ? 14.5 : (compact ? 15.0 : 16.0);
+    final subtitleSize = stacked ? 12.0 : (compact ? 12.5 : 13.0);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -2675,8 +2841,8 @@ class _BusinessActionTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         child: Ink(
           padding: EdgeInsets.symmetric(
-            horizontal: compact ? 12 : 14,
-            vertical: compact ? 11 : 14,
+            horizontal: horizontalPadding,
+            vertical: verticalPadding,
           ),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -2692,13 +2858,13 @@ class _BusinessActionTile extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: compact ? 44 : 50,
-                height: compact ? 44 : 50,
+                width: badgeSize,
+                height: badgeSize,
                 decoration: BoxDecoration(
                   color: accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(compact ? 14 : 16),
+                  borderRadius: BorderRadius.circular(badgeRadius),
                 ),
-                child: Icon(icon, color: accent, size: compact ? 22 : 26),
+                child: Icon(icon, color: accent, size: iconSize),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -2707,19 +2873,24 @@ class _BusinessActionTile extends StatelessWidget {
                   children: [
                     Text(
                       title,
+                      maxLines: stacked ? 1 : null,
+                      overflow: stacked ? TextOverflow.ellipsis : null,
                       style: GoogleFonts.poppins(
                         color: const Color(0xFF11183C),
                         fontWeight: FontWeight.w700,
-                        fontSize: 16,
+                        fontSize: titleSize,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       subtitle,
+                      maxLines: stacked ? (isVeryNarrow ? 2 : 1) : null,
+                      overflow: stacked ? TextOverflow.ellipsis : null,
+                      softWrap: true,
                       style: GoogleFonts.poppins(
                         color: const Color(0xFF5E6282),
                         fontWeight: FontWeight.w500,
-                        fontSize: 13,
+                        fontSize: subtitleSize,
                         height: 1.35,
                       ),
                     ),
@@ -2788,212 +2959,242 @@ class _CompactSalesSummaryCard extends StatelessWidget {
       }
     }
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x100F172A),
-            blurRadius: 10,
-            offset: Offset(0, 4),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = MediaQuery.sizeOf(context).width < 720;
+
+        final rangeSelector = PopupMenuButton<_SalesRange>(
+          onSelected: onRangeSelected,
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: _SalesRange.today, child: Text('Hoy')),
+            PopupMenuItem(
+              value: _SalesRange.yesterday,
+              child: Text('Ayer'),
+            ),
+            PopupMenuItem(
+              value: _SalesRange.lastWeek,
+              child: Text('Última semana'),
+            ),
+            PopupMenuItem(
+              value: _SalesRange.lastFortnight,
+              child: Text('Última quincena'),
+            ),
+            PopupMenuItem(
+              value: _SalesRange.thisMonth,
+              child: Text('Este mes'),
+            ),
+            PopupMenuItem(
+              value: _SalesRange.lastMonth,
+              child: Text('Último mes'),
+            ),
+            PopupMenuItem(
+              value: _SalesRange.last3Months,
+              child: Text('Últimos 3 meses'),
+            ),
+            PopupMenuItem(
+              value: _SalesRange.last6Months,
+              child: Text('Últimos 6 meses'),
+            ),
+            PopupMenuItem(
+              value: _SalesRange.lastYear,
+              child: Text('Último año'),
+            ),
+            PopupMenuItem(
+              value: _SalesRange.allTime,
+              child: Text('Desde el principio'),
+            ),
+            PopupMenuDivider(),
+            PopupMenuItem(
+              value: _SalesRange.custom,
+              child: Text('Personalizado'),
+            ),
+          ],
+          child: Container(
+            height: 30,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F8FD),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE9EAF4)),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  rangeLabel,
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: mutedText,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 16,
+                  color: mutedText,
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Resumen de ventas',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: darkText,
-                ),
+        );
+
+        final salesTotalBlock = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ventas totales',
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: mutedText,
               ),
-              const Spacer(),
-              PopupMenuButton<_SalesRange>(
-                onSelected: onRangeSelected,
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: _SalesRange.today, child: Text('Hoy')),
-                  PopupMenuItem(
-                    value: _SalesRange.yesterday,
-                    child: Text('Ayer'),
-                  ),
-                  PopupMenuItem(
-                    value: _SalesRange.lastWeek,
-                    child: Text('Última semana'),
-                  ),
-                  PopupMenuItem(
-                    value: _SalesRange.lastFortnight,
-                    child: Text('Última quincena'),
-                  ),
-                  PopupMenuItem(
-                    value: _SalesRange.thisMonth,
-                    child: Text('Este mes'),
-                  ),
-                  PopupMenuItem(
-                    value: _SalesRange.lastMonth,
-                    child: Text('Último mes'),
-                  ),
-                  PopupMenuItem(
-                    value: _SalesRange.last3Months,
-                    child: Text('Últimos 3 meses'),
-                  ),
-                  PopupMenuItem(
-                    value: _SalesRange.last6Months,
-                    child: Text('Últimos 6 meses'),
-                  ),
-                  PopupMenuItem(
-                    value: _SalesRange.lastYear,
-                    child: Text('Último año'),
-                  ),
-                  PopupMenuItem(
-                    value: _SalesRange.allTime,
-                    child: Text('Desde el principio'),
-                  ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
-                    value: _SalesRange.custom,
-                    child: Text('Personalizado'),
-                  ),
-                ],
-                child: Container(
-                  height: 30,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8F8FD),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFE9EAF4)),
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        rangeLabel,
-                        style: GoogleFonts.poppins(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: mutedText,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        size: 16,
-                        color: mutedText,
-                      ),
-                    ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '\$${salesToday.toStringAsFixed(2)}',
+              style: GoogleFonts.poppins(
+                fontSize: isMobile ? 32 : 38,
+                height: 0.98,
+                fontWeight: FontWeight.w700,
+                color: darkText,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(
+                  Icons.arrow_upward_rounded,
+                  color: Color(0xFF16A34A),
+                  size: 16,
+                ),
+                const SizedBox(width: 3),
+                Text(
+                  '15% vs ayer',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.3,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF16A34A),
                   ),
                 ),
+              ],
+            ),
+          ],
+        );
+
+        final chartWidget = SizedBox(
+          height: isMobile ? 112 : 108,
+          width: double.infinity,
+          child: _SalesSummaryChart(
+            salesHistory: chartData,
+            labels: labels,
+            tooltipLabels: tooltipLabels,
+            color: purple,
+            highlightIndex: highlightIndex,
+          ),
+        );
+
+        final ticketCard = _SalesMiniCard(
+          data: _SalesMiniData(
+            label: 'Ticket promedio',
+            value: '\$${averageTicket.toStringAsFixed(2)}',
+            color: const Color(0xFF8B5CF6),
+            icon: Icons.receipt_rounded,
+          ),
+        );
+        final ordersCard = _SalesMiniCard(
+          data: _SalesMiniData(
+            label: ordersLabel,
+            value: '$ordersToday',
+            color: const Color(0xFF3B82F6),
+            icon: Icons.bar_chart_rounded,
+          ),
+        );
+        final incomeCard = _SalesMiniCard(
+          data: _SalesMiniData(
+            label: incomeLabel,
+            value: '\$${salesToday.toStringAsFixed(2)}',
+            color: const Color(0xFF22C55E),
+            icon: Icons.attach_money_rounded,
+          ),
+        );
+
+        final Widget miniMetrics;
+        if (isMobile && constraints.maxWidth < 400) {
+          miniMetrics = Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(child: ticketCard),
+                  const SizedBox(width: 7),
+                  Expanded(child: ordersCard),
+                ],
+              ),
+              const SizedBox(height: 7),
+              incomeCard,
+            ],
+          );
+        } else {
+          miniMetrics = Row(
+            children: [
+              Expanded(child: ticketCard),
+              const SizedBox(width: 7),
+              Expanded(child: ordersCard),
+              const SizedBox(width: 7),
+              Expanded(child: incomeCard),
+            ],
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x100F172A),
+                blurRadius: 10,
+                offset: Offset(0, 4),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(
-                width: 122,
-                child: Column(
+              Row(
+                children: [
+                  Text(
+                    'Resumen de ventas',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: darkText,
+                    ),
+                  ),
+                  const Spacer(),
+                  rangeSelector,
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (isMobile) ...[
+                salesTotalBlock,
+                const SizedBox(height: 12),
+                chartWidget,
+              ] else
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Ventas totales',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: mutedText,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '\$${salesToday.toStringAsFixed(2)}',
-                      style: GoogleFonts.poppins(
-                        fontSize: 38,
-                        height: 0.98,
-                        fontWeight: FontWeight.w700,
-                        color: darkText,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.arrow_upward_rounded,
-                          color: Color(0xFF16A34A),
-                          size: 16,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          '15% vs ayer',
-                          style: GoogleFonts.poppins(
-                            fontSize: 12.3,
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFF16A34A),
-                          ),
-                        ),
-                      ],
-                    ),
+                    SizedBox(width: 122, child: salesTotalBlock),
+                    const SizedBox(width: 10),
+                    Expanded(child: chartWidget),
                   ],
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: SizedBox(
-                  height: 108,
-                  child: _SalesSummaryChart(
-                    salesHistory: chartData,
-                    labels: labels,
-                    tooltipLabels: tooltipLabels,
-                    color: purple,
-                    highlightIndex: highlightIndex,
-                  ),
-                ),
-              ),
+              const SizedBox(height: 12),
+              miniMetrics,
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _SalesMiniCard(
-                  data: _SalesMiniData(
-                    label: 'Ticket promedio',
-                    value: '\$${averageTicket.toStringAsFixed(2)}',
-                    color: const Color(0xFF8B5CF6),
-                    icon: Icons.receipt_rounded,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: _SalesMiniCard(
-                  data: _SalesMiniData(
-                    label: ordersLabel,
-                    value: '$ordersToday',
-                    color: const Color(0xFF3B82F6),
-                    icon: Icons.bar_chart_rounded,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: _SalesMiniCard(
-                  data: _SalesMiniData(
-                    label: incomeLabel,
-                    value: '\$${salesToday.toStringAsFixed(2)}',
-                    color: const Color(0xFF22C55E),
-                    icon: Icons.attach_money_rounded,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -3429,7 +3630,8 @@ class _CompactBusinessInfoCard extends StatelessWidget {
       required double maxWidth,
     }) {
       const gap = 10.0;
-      final canUseTwoColumns = maxWidth >= 520;
+      final canUseTwoColumns =
+          maxWidth >= 520 && MediaQuery.sizeOf(context).width >= 720;
 
       final nameCard = detailCard(
         label: 'Nombre del negocio',
