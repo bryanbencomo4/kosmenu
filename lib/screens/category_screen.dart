@@ -1,4 +1,4 @@
-// ignore_for_file: avoid_print
+﻿// ignore_for_file: avoid_print
 
 import 'dart:async';
 import 'dart:math';
@@ -216,6 +216,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   int _selectedTabIndex = 0;
   String? _selectedProductCategoryId;
   Map<String, int> _productCountByCategory = <String, int>{};
+  String _commerceCurrency = 'USD';
+  double _commerceExchangeRate = 0;
   Timer? _aiImageRefreshTimer;
   final AiImageService _aiImageService = const AiImageService();
   final CategoryIconAiService _categoryIconAiService =
@@ -227,7 +229,72 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    unawaited(_loadPricingConfig());
     _loadCategories();
+  }
+
+  Future<void> _loadPricingConfig() async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) return;
+
+    try {
+      final comercio = await Supabase.instance.client
+          .from('comercios')
+          .select('moneda, exchange_rate_value, tasa_cambio_pesos')
+          .eq('id', comercioId)
+          .maybeSingle();
+
+      final currency =
+          (comercio?['moneda']?.toString().trim().toUpperCase() ?? 'USD');
+      final rateRaw =
+          comercio?['exchange_rate_value'] ?? comercio?['tasa_cambio_pesos'];
+      final rate = rateRaw is num
+          ? rateRaw.toDouble()
+          : double.tryParse(
+                (rateRaw ?? '').toString().trim().replaceAll(',', '.'),
+              ) ??
+              0;
+
+      if (!mounted) return;
+      setState(() {
+        _commerceCurrency = currency.isEmpty ? 'USD' : currency;
+        _commerceExchangeRate = rate;
+      });
+    } catch (_) {
+      // Mantiene USD por defecto si no se puede cargar la configuración.
+    }
+  }
+
+  String _formatProductPrice(double storedPrice) {
+    final amount = storedPrice;
+    final currency = _commerceCurrency;
+    final decimals = currency == 'COP' ? 0 : 2;
+    final formatted = amount.toStringAsFixed(decimals);
+
+    switch (currency) {
+      case 'USD':
+        return '\$$formatted';
+      case 'COP':
+        return '\$$formatted COP';
+      case 'EUR':
+        return '€$formatted';
+      default:
+        return '$formatted $currency';
+    }
+  }
+
+  String? _formatProductPriceSecondary(double storedPrice) {
+    if (_commerceExchangeRate <= 0) return null;
+
+    if (_commerceCurrency == 'USD') {
+      final cop = storedPrice * _commerceExchangeRate;
+      return '\$${cop.toStringAsFixed(0)} COP';
+    }
+    if (_commerceCurrency == 'COP') {
+      final usd = storedPrice / _commerceExchangeRate;
+      return '\$${usd.toStringAsFixed(2)} USD';
+    }
+    return null;
   }
 
   void _onScroll() {
@@ -1980,6 +2047,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       key: ValueKey('dashboard-product-${product.id}'),
       product: product,
       categoryName: _categoryNameFor(product.categoriaId),
+      priceLabel: _formatProductPrice(product.precio),
+      priceSecondaryLabel: _formatProductPriceSecondary(product.precio),
       onEdit: () => _openProductFormDirect(product: product),
       onToggleVisible: () => _toggleProductVisible(product, !product.disponible),
       onImproveImage: () => _generateAiImageForProduct(product),
@@ -3370,6 +3439,8 @@ class _DashboardProductCard extends StatelessWidget {
     super.key,
     required this.product,
     required this.categoryName,
+    required this.priceLabel,
+    this.priceSecondaryLabel,
     required this.onEdit,
     required this.onToggleVisible,
     required this.onImproveImage,
@@ -3378,6 +3449,8 @@ class _DashboardProductCard extends StatelessWidget {
 
   final ProductModel product;
   final String categoryName;
+  final String priceLabel;
+  final String? priceSecondaryLabel;
   final VoidCallback onEdit;
   final VoidCallback onToggleVisible;
   final VoidCallback onImproveImage;
@@ -3472,13 +3545,24 @@ class _DashboardProductCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '4${product.precio.toStringAsFixed(2)}',
+                      priceLabel,
                       style: GoogleFonts.manrope(
                         color: const Color(0xFF6D28D9),
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
+                    if (priceSecondaryLabel != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        priceSecondaryLabel!,
+                        style: GoogleFonts.manrope(
+                          color: const Color(0xFF6B7280),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
