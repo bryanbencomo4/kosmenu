@@ -226,6 +226,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   _VisibilityFilterOption _productVisibilityFilter = _VisibilityFilterOption.all;
   int _categoryVisibleCount = 20;
   int _productVisibleCount = 24;
+  int _desktopProductPage = 0;
+  static const int _desktopPageSize = 10;
   String _commerceCurrency = 'USD';
   double _commerceExchangeRate = 0;
   Timer? _aiImageRefreshTimer;
@@ -1192,6 +1194,22 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           (product) => _normalizedId(product.categoriaId) == selectedCategoryId,
         )
         .toList();
+  }
+
+  List<ProductModel> get _desktopPanelProducts => _filteredProductsForCategoryTab;
+
+  List<ProductModel> get _desktopPagedProducts {
+    final products = _desktopPanelProducts;
+    final start = _desktopProductPage * _desktopPageSize;
+    if (start >= products.length) return const [];
+    final end = min(start + _desktopPageSize, products.length);
+    return products.sublist(start, end);
+  }
+
+  int get _desktopTotalProductPages {
+    final total = _desktopPanelProducts.length;
+    if (total == 0) return 1;
+    return (total / _desktopPageSize).ceil();
   }
 
   List<ProductModel> get _hiddenProducts {
@@ -2418,6 +2436,919 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     );
   }
 
+  void _ensureDesktopCategorySelected(List<CategoryModel> categories) {
+    if (!mounted || categories.isEmpty) return;
+    final current = _normalizedId(_selectedProductCategoryId);
+    final exists = categories.any((c) => _normalizedId(c.id) == current);
+    if (!exists) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _selectedProductCategoryId = categories.first.id);
+      });
+    }
+  }
+
+  void _selectDesktopCategory(String categoryId) {
+    if (_normalizedId(_selectedProductCategoryId) == _normalizedId(categoryId)) {
+      return;
+    }
+    setState(() {
+      _selectedProductCategoryId = categoryId;
+      _desktopProductPage = 0;
+    });
+  }
+
+  Widget _buildDesktopMenuLayout({required double horizontalPadding}) {
+    const purple = Color(0xFF6D28D9);
+    const darkText = Color(0xFF11183C);
+    const mutedText = Color(0xFF6B6F92);
+    const borderColor = Color(0xFFE8EAF2);
+    final disabled = _loading || _isMutating;
+    final categories = _filteredCategories;
+
+    if (_categories.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.fromLTRB(horizontalPadding, 24, horizontalPadding, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildDesktopHeader(
+              purple: purple,
+              darkText: darkText,
+              mutedText: mutedText,
+              disabled: disabled,
+            ),
+            const SizedBox(height: 20),
+            _buildDesktopSearchField(borderColor: borderColor),
+            const SizedBox(height: 24),
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: _buildDesktopEmptyState(
+                    purple: purple,
+                    disabled: disabled,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    _ensureDesktopCategorySelected(categories);
+    final selectedId = _normalizedId(_selectedProductCategoryId);
+    CategoryModel? selectedCategory;
+    for (final category in categories) {
+      if (_normalizedId(category.id) == selectedId) {
+        selectedCategory = category;
+        break;
+      }
+    }
+    selectedCategory ??= categories.isNotEmpty ? categories.first : null;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(horizontalPadding, 16, horizontalPadding, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildDesktopHeader(
+            purple: purple,
+            darkText: darkText,
+            mutedText: mutedText,
+            disabled: disabled,
+          ),
+          const SizedBox(height: 20),
+          _buildDesktopSearchField(borderColor: borderColor),
+          const SizedBox(height: 20),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildDesktopCategorySidebar(
+                  categories: categories,
+                  selectedCategoryId: selectedId,
+                  borderColor: borderColor,
+                  purple: purple,
+                  darkText: darkText,
+                  mutedText: mutedText,
+                  disabled: disabled,
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: _buildDesktopProductsPanel(
+                    selectedCategory: selectedCategory,
+                    borderColor: borderColor,
+                    purple: purple,
+                    darkText: darkText,
+                    mutedText: mutedText,
+                    disabled: disabled,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopHeader({
+    required Color purple,
+    required Color darkText,
+    required Color mutedText,
+    required bool disabled,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Menú Digital',
+          style: GoogleFonts.poppins(
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+            color: darkText,
+            height: 1.15,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Gestiona categorías y productos desde un solo lugar.',
+          style: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: mutedText,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            FilledButton.icon(
+              onPressed: disabled ? null : _openProductFormDirect,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Crear producto'),
+              style: FilledButton.styleFrom(
+                backgroundColor: purple,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: disabled ? null : _createCategory,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Crear categoría'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: darkText,
+                side: const BorderSide(color: Color(0xFFE8EAF2)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: disabled ? null : _openAiMenuGenerator,
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              label: const Text('Crear con IA'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: purple,
+                side: BorderSide(color: purple.withValues(alpha: 0.35)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopSearchField({required Color borderColor}) {
+    return TextField(
+      controller: _searchController,
+      onChanged: (value) {
+        if (!mounted) return;
+        setState(() {
+          _searchQuery = value;
+          _categoryVisibleCount = 20;
+          _productVisibleCount = 24;
+          _desktopProductPage = 0;
+        });
+      },
+      style: GoogleFonts.poppins(
+        color: const Color(0xFF11183C),
+        fontSize: 14,
+      ),
+      decoration: InputDecoration(
+        hintText: 'Buscar productos o categorías...',
+        hintStyle: GoogleFonts.poppins(
+          color: const Color(0xFF6B6F92),
+          fontSize: 14,
+        ),
+        prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6B6F92)),
+        suffixIcon: _searchQuery.trim().isEmpty
+            ? null
+            : IconButton(
+                onPressed: () {
+                  if (!mounted) return;
+                  _searchController.clear();
+                  setState(() {
+                    _searchQuery = '';
+                    _categoryVisibleCount = 20;
+                    _productVisibleCount = 24;
+                    _desktopProductPage = 0;
+                  });
+                },
+                icon: const Icon(Icons.close_rounded),
+                tooltip: 'Limpiar búsqueda',
+              ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Color(0xFF6D28D9), width: 1.4),
+        ),
+        isDense: true,
+      ),
+    );
+  }
+
+  Widget _buildDesktopEmptyState({
+    required Color purple,
+    required bool disabled,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE8EAF2)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.restaurant_menu_rounded, size: 40, color: purple),
+          const SizedBox(height: 16),
+          Text(
+            'Tu menú está vacío',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF11183C),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Comienza creando tu primera categoría\no deja que la IA lo haga por ti.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: const Color(0xFF6B6F92),
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton(
+                onPressed: disabled ? null : _createCategory,
+                style: FilledButton.styleFrom(
+                  backgroundColor: purple,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Crear categoría'),
+              ),
+              OutlinedButton.icon(
+                onPressed: disabled ? null : _openAiMenuGenerator,
+                icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                label: const Text('Crear con IA'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: purple,
+                  side: BorderSide(color: purple.withValues(alpha: 0.35)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopCategorySidebar({
+    required List<CategoryModel> categories,
+    required String selectedCategoryId,
+    required Color borderColor,
+    required Color purple,
+    required Color darkText,
+    required Color mutedText,
+    required bool disabled,
+  }) {
+    return SizedBox(
+      width: 280,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 12, 12),
+              child: Row(
+                children: [
+                  Text(
+                    'Categorías',
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: darkText,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '${categories.length}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: mutedText,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: categories.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          'No hay categorías que coincidan con tu búsqueda.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.poppins(
+                            color: mutedText,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      itemCount: categories.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final category = categories[index];
+                        final isSelected =
+                            selectedCategoryId == category.id.trim();
+                        final count =
+                            _productCountByCategory[category.id] ?? 0;
+                        return Material(
+                          color: isSelected
+                              ? purple.withValues(alpha: 0.08)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                          child: InkWell(
+                            onTap: () => _selectDesktopCategory(category.id),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected ? purple : borderColor,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: purple.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Center(
+                                      child: _buildCategoryIconVisual(
+                                        iconValue: category.icono,
+                                        name: category.nombre,
+                                        size: 20,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          category.nombre,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: isSelected
+                                                ? purple
+                                                : darkText,
+                                          ),
+                                        ),
+                                        Text(
+                                          '$count producto${count == 1 ? '' : 's'}',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                            color: mutedText,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: OutlinedButton.icon(
+                onPressed: disabled ? null : _createCategory,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Nueva categoría'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: purple,
+                  side: BorderSide(color: purple.withValues(alpha: 0.35)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopProductsPanel({
+    required CategoryModel? selectedCategory,
+    required Color borderColor,
+    required Color purple,
+    required Color darkText,
+    required Color mutedText,
+    required bool disabled,
+  }) {
+    final panelProducts = _desktopPanelProducts;
+    final totalProducts = panelProducts.length;
+    final totalPages = _desktopTotalProductPages;
+    if (_desktopProductPage >= totalPages && totalPages > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _desktopProductPage = totalPages - 1);
+      });
+    }
+    final pagedProducts = _desktopPagedProducts;
+    final start = totalProducts == 0 ? 0 : (_desktopProductPage * _desktopPageSize) + 1;
+    final end = min((_desktopProductPage + 1) * _desktopPageSize, totalProducts);
+    final title = selectedCategory == null
+        ? 'Todos los productos'
+        : 'Productos en ${selectedCategory.nombre}';
+
+    InputDecoration filterDecoration(String label) {
+      return InputDecoration(
+        labelText: label,
+        isDense: true,
+        filled: true,
+        fillColor: const Color(0xFFF9FAFB),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: borderColor),
+        ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: borderColor),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: darkText,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$totalProducts producto${totalProducts == 1 ? '' : 's'}',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: mutedText,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton.icon(
+                          onPressed: disabled
+                              ? null
+                              : () => _openProductFormDirect(
+                                    initialCategoryId: _selectedProductCategoryId,
+                                  ),
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('Nuevo producto'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: purple,
+                            side: BorderSide(
+                              color: purple.withValues(alpha: 0.35),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 160,
+                        child: DropdownButtonFormField<_VisibilityFilterOption>(
+                    value: _productVisibilityFilter,
+                    isExpanded: true,
+                    decoration: filterDecoration('Estado'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: _VisibilityFilterOption.all,
+                        child: Text('Todos'),
+                      ),
+                      DropdownMenuItem(
+                        value: _VisibilityFilterOption.visible,
+                        child: Text('Visibles'),
+                      ),
+                      DropdownMenuItem(
+                        value: _VisibilityFilterOption.hidden,
+                        child: Text('Ocultos'),
+                      ),
+                    ],
+                    onChanged: disabled
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _productVisibilityFilter = value;
+                              _desktopProductPage = 0;
+                            });
+                          },
+                        ),
+                      ),
+                      SizedBox(
+                        width: 220,
+                        child: DropdownButtonFormField<_ProductSortOption>(
+                          value: _productSortOption,
+                          isExpanded: true,
+                          decoration: filterDecoration('Ordenar'),
+                          items: const [
+                            DropdownMenuItem(
+                              value: _ProductSortOption.order,
+                              child: Text('Orden manual'),
+                            ),
+                            DropdownMenuItem(
+                              value: _ProductSortOption.nameAsc,
+                              child: Text('Nombre A-Z'),
+                            ),
+                            DropdownMenuItem(
+                              value: _ProductSortOption.nameDesc,
+                              child: Text('Nombre Z-A'),
+                            ),
+                            DropdownMenuItem(
+                              value: _ProductSortOption.priceAsc,
+                              child: Text('Precio menor a mayor'),
+                            ),
+                            DropdownMenuItem(
+                              value: _ProductSortOption.priceDesc,
+                              child: Text('Precio mayor a menor'),
+                            ),
+                          ],
+                          onChanged: disabled
+                              ? null
+                              : (value) {
+                                  if (value == null) return;
+                                  setState(() {
+                                    _productSortOption = value;
+                                    _desktopProductPage = 0;
+                                  });
+                                },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Color(0xFFE8EAF2)),
+                const _DesktopProductsTableHeader(),
+                Expanded(
+                  child: totalProducts == 0
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.inventory_2_outlined,
+                            size: 40,
+                            color: mutedText,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Sin productos',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: darkText,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Agrega tu primer producto para empezar a vender.',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: mutedText,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton(
+                            onPressed: disabled
+                                ? null
+                                : () => _openProductFormDirect(
+                                      initialCategoryId:
+                                          _selectedProductCategoryId,
+                                    ),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: purple,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: const Text('Crear producto'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: EdgeInsets.zero,
+                    itemCount: pagedProducts.length,
+                    separatorBuilder: (_, _) => const Divider(
+                      height: 1,
+                      color: Color(0xFFF3F4F6),
+                    ),
+                    itemBuilder: (context, index) {
+                      final product = pagedProducts[index];
+                      return _DesktopProductsTableRow(
+                        product: product,
+                        categoryName: _categoryNameFor(product.categoriaId),
+                        priceLabel: _formatProductPrice(product.precio),
+                        priceSecondaryLabel:
+                            _formatProductPriceSecondary(product.precio),
+                        disabled: disabled,
+                        onEdit: () => _openProductFormDirect(product: product),
+                        onToggleVisibility: () {
+                          if (product.disponible) {
+                            unawaited(_hideProduct(product));
+                          } else {
+                            unawaited(_showProduct(product));
+                          }
+                        },
+                        onImproveImage: () =>
+                            _generateAiImageForProduct(product),
+                      );
+                    },
+                  ),
+          ),
+          const Divider(height: 1, color: Color(0xFFE8EAF2)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            child: Row(
+              children: [
+                Text(
+                  totalProducts == 0
+                      ? 'Sin productos para mostrar'
+                      : 'Mostrando $start-$end de $totalProducts productos',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: mutedText,
+                  ),
+                ),
+                const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: _desktopProductPage > 0
+                      ? () => setState(() => _desktopProductPage -= 1)
+                      : null,
+                  icon: const Icon(Icons.chevron_left_rounded, size: 18),
+                  label: const Text('Anterior'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    side: BorderSide(color: borderColor),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _desktopProductPage < totalPages - 1
+                      ? () => setState(() => _desktopProductPage += 1)
+                      : null,
+                  icon: const Icon(Icons.chevron_right_rounded, size: 18),
+                  label: const Text('Siguiente'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    side: BorderSide(color: borderColor),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileMenuLayout({
+    required double horizontalPadding,
+    required double contentMaxWidth,
+  }) {
+    final tabSections = _buildCurrentTabSections();
+
+    final scrollView = CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: ClampingScrollPhysics(),
+      ),
+      slivers: [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            12,
+            horizontalPadding,
+            0,
+          ),
+          sliver: SliverToBoxAdapter(
+            child: _buildDashboardHeaderCard(isDesktop: false),
+          ),
+        ),
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            12,
+            horizontalPadding,
+            120,
+          ),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate([
+              _SegmentTabsContainer(
+                selectedTabIndex: _selectedTabIndex,
+                onSelected: (index) {
+                  if (!mounted) return;
+                  setState(() {
+                    _selectedTabIndex = index;
+                    _categoryVisibleCount = 20;
+                    _productVisibleCount = 24;
+                  });
+                },
+              ),
+              const SizedBox(height: 14),
+              ...tabSections,
+            ]),
+          ),
+        ),
+      ],
+    );
+
+    return SafeArea(
+      top: false,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: contentMaxWidth),
+          child: scrollView,
+        ),
+      ),
+    );
+  }
+
   Widget _buildDashboardHeaderCard({required bool isDesktop}) {
     final activeCategories = _categories.where((item) => item.activo).length;
     final totalProducts = _productCountByCategory.values.fold<int>(
@@ -2589,48 +3520,53 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     final isDesktopLayout = screenWidth >= 1024;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F7FB),
+      backgroundColor: isDesktopLayout
+          ? const Color(0xFFF8F7FC)
+          : const Color(0xFFF8F7FB),
       appBar: AppBar(
-        backgroundColor: colorScheme.surfaceContainerHighest,
+        backgroundColor: isDesktopLayout
+            ? const Color(0xFFF8F7FC)
+            : colorScheme.surfaceContainerHighest,
         foregroundColor: colorScheme.onSurface,
+        elevation: isDesktopLayout ? 0 : null,
+        scrolledUnderElevation: isDesktopLayout ? 0 : null,
         titleTextStyle: GoogleFonts.manrope(
           color: colorScheme.onSurface,
           fontSize: 22,
           fontWeight: FontWeight.w800,
         ),
-        title: (!isDesktopLayout && _showAppBarSearch)
-            ? TextField(
-                controller: _searchController,
-                autofocus: true,
-                onChanged: (value) {
-                  if (!mounted) return;
-                  setState(() {
-                    _searchQuery = value;
-                    _categoryVisibleCount = 20;
-                    _productVisibleCount = 24;
-                  });
-                },
-                style: TextStyle(color: colorScheme.onSurface),
-                cursorColor: colorScheme.primary,
-                decoration: InputDecoration(
-                  hintText: 'Buscar categorías y productos...',
-                  hintStyle: TextStyle(
-                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
-                  ),
-                  border: InputBorder.none,
-                  isDense: true,
-                ),
-              )
-            : Text(
-                widget.catalog.nombre,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+        title: isDesktopLayout
+            ? null
+            : (_showAppBarSearch
+                ? TextField(
+                    controller: _searchController,
+                    autofocus: true,
+                    onChanged: (value) {
+                      if (!mounted) return;
+                      setState(() {
+                        _searchQuery = value;
+                        _categoryVisibleCount = 20;
+                        _productVisibleCount = 24;
+                      });
+                    },
+                    style: TextStyle(color: colorScheme.onSurface),
+                    cursorColor: colorScheme.primary,
+                    decoration: InputDecoration(
+                      hintText: 'Buscar categorías y productos...',
+                      hintStyle: TextStyle(
+                        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                    ),
+                  )
+                : Text(
+                    widget.catalog.nombre,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  )),
         actions: [
-          if (isDesktopLayout) ...[
-            _buildDesktopPrimaryAction(),
-            const SizedBox(width: 8),
-          ] else
+          if (!isDesktopLayout)
             IconButton(
               onPressed: _toggleAppBarSearch,
               icon: Icon(
@@ -2641,168 +3577,292 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         ],
       ),
       floatingActionButton: isDesktopLayout ? null : _buildContextualFab(),
-      body: RefreshIndicator(
-        onRefresh: _loadCategories,
-        color: colorScheme.primary,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final viewportWidth = constraints.maxWidth;
-            final isDesktop = viewportWidth >= 1024;
-            final contentMaxWidth =
-                viewportWidth >= 1200 ? 1280.0 : double.infinity;
-            final horizontalPadding = viewportWidth >= 1200
-                ? 28.0
-                : (viewportWidth >= 720 ? 24.0 : 16.0);
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final viewportWidth = constraints.maxWidth;
+          final contentMaxWidth =
+              viewportWidth >= 1200 ? 1280.0 : double.infinity;
+          final horizontalPadding = viewportWidth >= 1200
+              ? 28.0
+              : (viewportWidth >= 720 ? 24.0 : 16.0);
 
-            final tabSections = _buildCurrentTabSections();
+          if (isDesktopLayout) {
+            final contentWidth = contentMaxWidth == double.infinity
+                ? viewportWidth
+                : min(viewportWidth, contentMaxWidth);
 
-            final scrollView = CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: ClampingScrollPhysics(),
-              ),
-              slivers: [
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(
-                    horizontalPadding,
-                    12,
-                    horizontalPadding,
-                    0,
-                  ),
-                  sliver: SliverToBoxAdapter(
-                    child: _buildDashboardHeaderCard(isDesktop: isDesktop),
-                  ),
+            return Align(
+              alignment: Alignment.topCenter,
+              child: SizedBox(
+                width: contentWidth,
+                height: constraints.maxHeight,
+                child: _buildDesktopMenuLayout(
+                  horizontalPadding: horizontalPadding,
                 ),
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(
-                    horizontalPadding,
-                    12,
-                    horizontalPadding,
-                    120,
-                  ),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      if (isDesktop)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            IntrinsicWidth(
-                              child: _SegmentTabsContainer(
-                                selectedTabIndex: _selectedTabIndex,
-                                onSelected: (index) {
-                                  if (!mounted) return;
-                                  setState(() {
-                                    _selectedTabIndex = index;
-                                    _categoryVisibleCount = 20;
-                                    _productVisibleCount = 24;
-                                  });
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: TextField(
-                                controller: _searchController,
-                                onChanged: (value) {
-                                  if (!mounted) return;
-                                  setState(() {
-                                    _searchQuery = value;
-                                    _categoryVisibleCount = 20;
-                                    _productVisibleCount = 24;
-                                  });
-                                },
-                                style: GoogleFonts.manrope(
-                                  color: const Color(0xFF1F2555),
-                                  fontSize: 14,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'Buscar categorías y productos...',
-                                  hintStyle: GoogleFonts.manrope(
-                                    color: const Color(0xFF9CA3AF),
-                                    fontSize: 14,
-                                  ),
-                                  prefixIcon: const Icon(
-                                    Icons.search_rounded,
-                                    color: Color(0xFF6B7280),
-                                  ),
-                                  suffixIcon: _searchQuery.trim().isEmpty
-                                      ? null
-                                      : IconButton(
-                                          onPressed: () {
-                                            if (!mounted) return;
-                                            _searchController.clear();
-                                            setState(() {
-                                              _searchQuery = '';
-                                              _categoryVisibleCount = 20;
-                                              _productVisibleCount = 24;
-                                            });
-                                          },
-                                          icon: const Icon(Icons.close_rounded),
-                                          tooltip: 'Limpiar búsqueda',
-                                        ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 12,
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFFEAE7F2),
-                                    ),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFFEAE7F2),
-                                    ),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFF6D28D9),
-                                      width: 1.4,
-                                    ),
-                                  ),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      else
-                        _SegmentTabsContainer(
-                          selectedTabIndex: _selectedTabIndex,
-                          onSelected: (index) {
-                            if (!mounted) return;
-                            setState(() {
-                              _selectedTabIndex = index;
-                              _categoryVisibleCount = 20;
-                              _productVisibleCount = 24;
-                            });
-                          },
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: _loadCategories,
+            color: colorScheme.primary,
+            child: _buildMobileMenuLayout(
+              horizontalPadding: horizontalPadding,
+              contentMaxWidth: contentMaxWidth,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DesktopProductsTableHeader extends StatelessWidget {
+  const _DesktopProductsTableHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      color: const Color(0xFFF9FAFB),
+      child: Row(
+        children: [
+          const Expanded(
+            flex: 4,
+            child: Text(
+              'Producto',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const Expanded(
+            flex: 2,
+            child: Text(
+              'Categoría',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(
+            width: 96,
+            child: Text(
+              'Precio',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(
+            width: 100,
+            child: Text(
+              'Estado',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(
+            width: 220,
+            child: Text(
+              'Acciones',
+              textAlign: TextAlign.end,
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DesktopProductsTableRow extends StatelessWidget {
+  const _DesktopProductsTableRow({
+    required this.product,
+    required this.categoryName,
+    required this.priceLabel,
+    this.priceSecondaryLabel,
+    required this.disabled,
+    required this.onEdit,
+    required this.onToggleVisibility,
+    required this.onImproveImage,
+  });
+
+  final ProductModel product;
+  final String categoryName;
+  final String priceLabel;
+  final String? priceSecondaryLabel;
+  final bool disabled;
+  final VoidCallback onEdit;
+  final VoidCallback onToggleVisibility;
+  final VoidCallback onImproveImage;
+
+  @override
+  Widget build(BuildContext context) {
+    final description = product.descripcion.trim();
+    final statusLabel = product.disponible ? 'Disponible' : 'Oculto';
+    final statusColor =
+        product.disponible ? const Color(0xFF16A34A) : const Color(0xFFF97316);
+
+    Widget thumb() {
+      final imageUrl = product.imagenUrl?.trim();
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.network(
+            imageUrl,
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const _ProductThumbPlaceholder(
+              icon: Icons.fastfood_rounded,
+            ),
+          ),
+        );
+      }
+      return const SizedBox(
+        width: 44,
+        height: 44,
+        child: _ProductThumbPlaceholder(icon: Icons.fastfood_rounded),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            flex: 4,
+            child: Row(
+              children: [
+                thumb(),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        product.nombre,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF11183C),
                         ),
-                      const SizedBox(height: 14),
-                      ...tabSections,
-                    ]),
+                      ),
+                      if (description.isNotEmpty)
+                        Text(
+                          description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: const Color(0xFF6B6F92),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
-            );
-
-            return SafeArea(
-              top: false,
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: contentMaxWidth),
-                  child: scrollView,
-                ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              categoryName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: const Color(0xFF374151),
               ),
-            );
-          },
-        ),
+            ),
+          ),
+          SizedBox(
+            width: 96,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  priceLabel,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF11183C),
+                  ),
+                ),
+                if (priceSecondaryLabel != null)
+                  Text(
+                    priceSecondaryLabel!,
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF6B6F92),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 100,
+            child: _ProductStatusPill(label: statusLabel, color: statusColor),
+          ),
+          SizedBox(
+            width: 220,
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                TextButton(
+                  onPressed: disabled ? null : onEdit,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Editar'),
+                ),
+                TextButton(
+                  onPressed: disabled ? null : onToggleVisibility,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(product.disponible ? 'Ocultar' : 'Mostrar'),
+                ),
+                TextButton.icon(
+                  onPressed: disabled ? null : onImproveImage,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                  label: const Text('IA'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
