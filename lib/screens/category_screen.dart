@@ -201,6 +201,12 @@ class CatalogCategoriesScreen extends StatefulWidget {
       _CatalogCategoriesScreenState();
 }
 
+enum _CategorySortOption { order, nameAsc, nameDesc, mostProducts, leastProducts }
+
+enum _ProductSortOption { order, nameAsc, nameDesc, priceAsc, priceDesc }
+
+enum _VisibilityFilterOption { all, visible, hidden }
+
 class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   bool _loading = true;
   bool _hasLoadedInitialSnapshot = false;
@@ -209,13 +215,17 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   List<CategoryModel> _categories = <CategoryModel>[];
   List<ProductModel> _products = <ProductModel>[];
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
   bool _showAppBarSearch = false;
-  double _headerCollapse = 0;
   int _selectedTabIndex = 0;
   String? _selectedProductCategoryId;
   Map<String, int> _productCountByCategory = <String, int>{};
+  _CategorySortOption _categorySortOption = _CategorySortOption.order;
+  _ProductSortOption _productSortOption = _ProductSortOption.order;
+  _VisibilityFilterOption _categoryVisibilityFilter = _VisibilityFilterOption.all;
+  _VisibilityFilterOption _productVisibilityFilter = _VisibilityFilterOption.all;
+  int _categoryVisibleCount = 20;
+  int _productVisibleCount = 24;
   String _commerceCurrency = 'USD';
   double _commerceExchangeRate = 0;
   Timer? _aiImageRefreshTimer;
@@ -228,7 +238,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
     unawaited(_loadPricingConfig());
     _loadCategories();
   }
@@ -297,20 +306,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     return null;
   }
 
-  void _onScroll() {
-    final next =
-        (_scrollController.hasClients ? (_scrollController.offset / 140) : 0.0)
-            .clamp(0.0, 1.0);
-    if ((next - _headerCollapse).abs() < 0.02 || !mounted) return;
-    setState(() => _headerCollapse = next);
-  }
-
   @override
   void dispose() {
     _aiImageRefreshTimer?.cancel();
-    _scrollController
-      ..removeListener(_onScroll)
-      ..dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -1061,7 +1059,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
   }
 
-  List<CategoryModel> get _filteredCategories {
+  List<CategoryModel> get _searchedCategories {
     final query = _normalizedText(_searchQuery);
     if (query.isEmpty) return _categories;
     return _categories.where((category) {
@@ -1071,6 +1069,54 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           productCount.contains(query);
     }).toList();
   }
+
+  List<CategoryModel> _applyCategoryFiltersAndSorting(List<CategoryModel> input) {
+    var output = input.where((category) {
+      switch (_categoryVisibilityFilter) {
+        case _VisibilityFilterOption.visible:
+          return category.activo;
+        case _VisibilityFilterOption.hidden:
+          return !category.activo;
+        case _VisibilityFilterOption.all:
+          return true;
+      }
+    }).toList();
+
+    switch (_categorySortOption) {
+      case _CategorySortOption.nameAsc:
+        output.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        break;
+      case _CategorySortOption.nameDesc:
+        output.sort((a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()));
+        break;
+      case _CategorySortOption.mostProducts:
+        output.sort((a, b) {
+          final delta = (_productCountByCategory[b.id] ?? 0) - (_productCountByCategory[a.id] ?? 0);
+          if (delta != 0) return delta;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
+        break;
+      case _CategorySortOption.leastProducts:
+        output.sort((a, b) {
+          final delta = (_productCountByCategory[a.id] ?? 0) - (_productCountByCategory[b.id] ?? 0);
+          if (delta != 0) return delta;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
+        break;
+      case _CategorySortOption.order:
+        output.sort((a, b) {
+          final byOrder = a.orden.compareTo(b.orden);
+          if (byOrder != 0) return byOrder;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
+        break;
+    }
+
+    return output;
+  }
+
+  List<CategoryModel> get _filteredCategories =>
+      _applyCategoryFiltersAndSorting(_searchedCategories);
 
   Map<String, CategoryModel> get _categoryById {
     return {
@@ -1097,8 +1143,46 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     return _products.where(_matchesProductQuery).toList();
   }
 
+  List<ProductModel> _applyProductFiltersAndSorting(List<ProductModel> input) {
+    var output = input.where((product) {
+      switch (_productVisibilityFilter) {
+        case _VisibilityFilterOption.visible:
+          return product.disponible;
+        case _VisibilityFilterOption.hidden:
+          return !product.disponible;
+        case _VisibilityFilterOption.all:
+          return true;
+      }
+    }).toList();
+
+    switch (_productSortOption) {
+      case _ProductSortOption.nameAsc:
+        output.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        break;
+      case _ProductSortOption.nameDesc:
+        output.sort((a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()));
+        break;
+      case _ProductSortOption.priceAsc:
+        output.sort((a, b) => a.precio.compareTo(b.precio));
+        break;
+      case _ProductSortOption.priceDesc:
+        output.sort((a, b) => b.precio.compareTo(a.precio));
+        break;
+      case _ProductSortOption.order:
+        output.sort((a, b) {
+          final byCategory = a.categoriaId.compareTo(b.categoriaId);
+          if (byCategory != 0) return byCategory;
+          final byOrder = a.orden.compareTo(b.orden);
+          if (byOrder != 0) return byOrder;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
+        break;
+    }
+    return output;
+  }
+
   List<ProductModel> get _filteredProductsForCategoryTab {
-    final products = _searchFilteredProducts;
+    final products = _applyProductFiltersAndSorting(_searchFilteredProducts);
     final selectedCategoryId = _normalizedId(_selectedProductCategoryId);
     if (selectedCategoryId.isEmpty) {
       return products;
@@ -1111,13 +1195,69 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }
 
   List<ProductModel> get _hiddenProducts {
-    return _searchFilteredProducts
+    final output = _searchFilteredProducts
         .where((product) => !product.disponible)
         .toList();
+    switch (_productSortOption) {
+      case _ProductSortOption.nameAsc:
+        output.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        break;
+      case _ProductSortOption.nameDesc:
+        output.sort((a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()));
+        break;
+      case _ProductSortOption.priceAsc:
+        output.sort((a, b) => a.precio.compareTo(b.precio));
+        break;
+      case _ProductSortOption.priceDesc:
+        output.sort((a, b) => b.precio.compareTo(a.precio));
+        break;
+      case _ProductSortOption.order:
+        output.sort((a, b) {
+          final byCategory = a.categoriaId.compareTo(b.categoriaId);
+          if (byCategory != 0) return byCategory;
+          final byOrder = a.orden.compareTo(b.orden);
+          if (byOrder != 0) return byOrder;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
+        break;
+    }
+    return output;
   }
 
   List<CategoryModel> get _hiddenCategories {
-    return _filteredCategories.where((category) => !category.activo).toList();
+    final output = _searchedCategories
+        .where((category) => !category.activo)
+        .toList();
+    switch (_categorySortOption) {
+      case _CategorySortOption.nameAsc:
+        output.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        break;
+      case _CategorySortOption.nameDesc:
+        output.sort((a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()));
+        break;
+      case _CategorySortOption.mostProducts:
+        output.sort((a, b) {
+          final delta = (_productCountByCategory[b.id] ?? 0) - (_productCountByCategory[a.id] ?? 0);
+          if (delta != 0) return delta;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
+        break;
+      case _CategorySortOption.leastProducts:
+        output.sort((a, b) {
+          final delta = (_productCountByCategory[a.id] ?? 0) - (_productCountByCategory[b.id] ?? 0);
+          if (delta != 0) return delta;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
+        break;
+      case _CategorySortOption.order:
+        output.sort((a, b) {
+          final byOrder = a.orden.compareTo(b.orden);
+          if (byOrder != 0) return byOrder;
+          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+        });
+        break;
+    }
+    return output;
   }
 
   Future<void> _openProductFormDirect({
@@ -1157,32 +1297,70 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _toggleProductVisible(ProductModel product, bool value) async {
+  Future<bool> _updateProductVisibilityInDatabase(
+    ProductModel product,
+    bool disponible,
+  ) async {
+    final updatedRows = await Supabase.instance.client
+        .from('productos')
+        .update({'disponible': disponible})
+        .eq('id', product.id)
+        .eq('comercio_id', SupabaseConfig.currentComercioId)
+        .select('id');
+
+    return (updatedRows as List<dynamic>).isNotEmpty;
+  }
+
+  Future<void> _setProductVisibility(
+    ProductModel product,
+    bool disponible,
+  ) async {
+    if (_isMutating) return;
+
     final previous = List<ProductModel>.from(_products);
 
     setState(() {
       _products = _products
           .map(
             (item) => item.id == product.id
-                ? item.copyWith(disponible: value)
+                ? item.copyWith(disponible: disponible)
                 : item,
           )
           .toList();
     });
 
     try {
-      await Supabase.instance.client
-          .from('productos')
-          .update({'disponible': value})
-          .eq('id', product.id);
+      final updated = await _updateProductVisibilityInDatabase(
+        product,
+        disponible,
+      );
+      if (!updated) {
+        if (!mounted) return;
+        setState(() => _products = previous);
+        _showMessage(
+          disponible
+              ? 'No se pudo actualizar la visibilidad del producto. Intenta nuevamente.'
+              : 'No se pudo archivar el producto. Verifica tus permisos o intenta nuevamente.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      _showMessage(
+        disponible
+            ? 'Producto visible nuevamente.'
+            : 'Producto ocultado del menú público.',
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _products = previous);
-      _showMessage('No se pudo actualizar visibilidad: $error');
+      _showMessage(
+        'No se pudo actualizar la visibilidad del producto. Intenta nuevamente.',
+      );
     }
   }
 
-  Future<void> _deleteProduct(ProductModel product) async {
+  Future<void> _hideProduct(ProductModel product) async {
     if (_isMutating) return;
 
     final confirm = await showDialog<bool>(
@@ -1195,14 +1373,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
             borderRadius: BorderRadius.circular(18),
           ),
           title: Text(
-            'Eliminar producto',
+            'Ocultar producto',
             style: GoogleFonts.manrope(
               color: colorScheme.onSurface,
               fontWeight: FontWeight.w800,
             ),
           ),
           content: Text(
-            '¿Eliminar "${product.nombre}"?',
+            'Este producto dejará de estar visible en tu menú público, pero conservarás su información y podrás mostrarlo nuevamente cuando quieras.',
             style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
           actions: [
@@ -1219,7 +1397,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 backgroundColor: colorScheme.primary,
                 foregroundColor: colorScheme.onPrimary,
               ),
-              child: const Text('Eliminar'),
+              child: const Text('Ocultar producto'),
             ),
           ],
         );
@@ -1227,39 +1405,11 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     );
 
     if (!mounted || confirm != true) return;
+    await _setProductVisibility(product, false);
+  }
 
-    final previous = List<ProductModel>.from(_products);
-    setState(() {
-      _products = _products.where((item) => item.id != product.id).toList();
-      _productCountByCategory.update(
-        product.categoriaId,
-        (value) => value > 0 ? value - 1 : 0,
-        ifAbsent: () => 0,
-      );
-    });
-
-    try {
-      final deletedRows = await Supabase.instance.client
-          .from('productos')
-          .delete()
-          .eq('id', product.id)
-          .select('id');
-
-      if ((deletedRows as List<dynamic>).isEmpty) {
-        throw Exception('No se pudo confirmar el borrado en la base de datos.');
-      }
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _products = previous;
-        final counts = <String, int>{};
-        for (final item in previous) {
-          counts.update(item.categoriaId, (value) => value + 1, ifAbsent: () => 1);
-        }
-        _productCountByCategory = counts;
-      });
-      _showMessage('No se pudo eliminar producto: $error');
-    }
+  Future<void> _showProduct(ProductModel product) async {
+    await _setProductVisibility(product, true);
   }
 
   Future<bool?> _confirmAiImageGeneration(ProductModel product) {
@@ -1584,6 +1734,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       setState(() {
         _showAppBarSearch = false;
         _searchQuery = '';
+        _categoryVisibleCount = 20;
+        _productVisibleCount = 24;
       });
       return;
     }
@@ -1836,8 +1988,174 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     );
   }
 
+  Widget _buildCategoryControls() {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        SizedBox(
+          width: 180,
+          child: DropdownButtonFormField<_VisibilityFilterOption>(
+            value: _categoryVisibilityFilter,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Estado',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.all,
+                child: Text('Todas'),
+              ),
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.visible,
+                child: Text('Activas'),
+              ),
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.hidden,
+                child: Text('Ocultas'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() {
+                _categoryVisibilityFilter = value;
+                _categoryVisibleCount = 20;
+              });
+            },
+          ),
+        ),
+        SizedBox(
+          width: 220,
+          child: DropdownButtonFormField<_CategorySortOption>(
+            value: _categorySortOption,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Ordenar',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: _CategorySortOption.order,
+                child: Text('Orden manual'),
+              ),
+              DropdownMenuItem(
+                value: _CategorySortOption.nameAsc,
+                child: Text('Nombre A-Z'),
+              ),
+              DropdownMenuItem(
+                value: _CategorySortOption.nameDesc,
+                child: Text('Nombre Z-A'),
+              ),
+              DropdownMenuItem(
+                value: _CategorySortOption.mostProducts,
+                child: Text('Más productos'),
+              ),
+              DropdownMenuItem(
+                value: _CategorySortOption.leastProducts,
+                child: Text('Menos productos'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() {
+                _categorySortOption = value;
+                _categoryVisibleCount = 20;
+              });
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProductControls() {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        SizedBox(
+          width: 180,
+          child: DropdownButtonFormField<_VisibilityFilterOption>(
+            value: _productVisibilityFilter,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Visibilidad',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.all,
+                child: Text('Todos'),
+              ),
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.visible,
+                child: Text('Visibles'),
+              ),
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.hidden,
+                child: Text('Ocultos'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() {
+                _productVisibilityFilter = value;
+                _productVisibleCount = 24;
+              });
+            },
+          ),
+        ),
+        SizedBox(
+          width: 220,
+          child: DropdownButtonFormField<_ProductSortOption>(
+            value: _productSortOption,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Ordenar',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: _ProductSortOption.order,
+                child: Text('Orden manual'),
+              ),
+              DropdownMenuItem(
+                value: _ProductSortOption.nameAsc,
+                child: Text('Nombre A-Z'),
+              ),
+              DropdownMenuItem(
+                value: _ProductSortOption.nameDesc,
+                child: Text('Nombre Z-A'),
+              ),
+              DropdownMenuItem(
+                value: _ProductSortOption.priceAsc,
+                child: Text('Precio menor a mayor'),
+              ),
+              DropdownMenuItem(
+                value: _ProductSortOption.priceDesc,
+                child: Text('Precio mayor a menor'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() {
+                _productSortOption = value;
+                _productVisibleCount = 24;
+              });
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   List<Widget> _buildAllTabSections({required bool useAdminTable}) {
-    final featuredCategories = _filteredCategories.take(3).toList();
+    final featuredCategories = _searchedCategories.take(3).toList();
     final featuredProducts = _searchFilteredProducts.take(6).toList();
     final isDesktop = MediaQuery.sizeOf(context).width >= 1024;
 
@@ -1923,7 +2241,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       ];
     }
 
-    final canReorder = _searchQuery.trim().isEmpty;
+    final canReorder = _searchQuery.trim().isEmpty &&
+        _categoryVisibilityFilter == _VisibilityFilterOption.all &&
+        _categorySortOption == _CategorySortOption.order;
     final reorderHint = useAdminTable
         ? (canReorder
             ? 'Arrastra el ícono para cambiar el orden de las categorías.'
@@ -1934,7 +2254,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 : 'Arrastra las categorías para cambiar su orden.')
             : 'Desactiva la búsqueda para reordenar categorías.');
 
+    final pageItems = filtered.take(_categoryVisibleCount).toList();
+    final hasMore = filtered.length > pageItems.length;
+
     return [
+      _buildCategoryControls(),
+      const SizedBox(height: 10),
       Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Text(
@@ -1947,18 +2272,36 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         ),
       ),
       _buildCategoriesPresentation(
-        categories: canReorder ? _categories : filtered,
+        categories: pageItems,
         useAdminTable: useAdminTable,
         enabled: !_isMutating && !_isSavingCategoryOrder,
-        reorderable: canReorder,
+        reorderable: canReorder && !hasMore,
         onReorder: canReorder ? _onCategoryReorder : null,
       ),
+      if (hasMore) ...[
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: () {
+              if (!mounted) return;
+              setState(() => _categoryVisibleCount += 20);
+            },
+            icon: const Icon(Icons.expand_more_rounded),
+            label: Text('Cargar más categorías (${filtered.length - pageItems.length})'),
+          ),
+        ),
+      ],
     ];
   }
 
   List<Widget> _buildProductsTabSections() {
     final products = _filteredProductsForCategoryTab;
+    final pageItems = products.take(_productVisibleCount).toList();
+    final hasMore = products.length > pageItems.length;
     return [
+      _buildProductControls(),
+      const SizedBox(height: 10),
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
@@ -1997,7 +2340,21 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           onAction: _openProductFormDirect,
         )
       else
-        ...products.map(_buildProductCard),
+        ...pageItems.map(_buildProductCard),
+      if (hasMore) ...[
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: () {
+              if (!mounted) return;
+              setState(() => _productVisibleCount += 24);
+            },
+            icon: const Icon(Icons.expand_more_rounded),
+            label: Text('Cargar más productos (${products.length - pageItems.length})'),
+          ),
+        ),
+      ],
     ];
   }
 
@@ -2050,23 +2407,177 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       priceLabel: _formatProductPrice(product.precio),
       priceSecondaryLabel: _formatProductPriceSecondary(product.precio),
       onEdit: () => _openProductFormDirect(product: product),
-      onToggleVisible: () => _toggleProductVisible(product, !product.disponible),
+      onToggleVisible: () {
+        if (product.disponible) {
+          unawaited(_hideProduct(product));
+        } else {
+          unawaited(_showProduct(product));
+        }
+      },
       onImproveImage: () => _generateAiImageForProduct(product),
-      onDelete: () => _deleteProduct(product),
+    );
+  }
+
+  Widget _buildDashboardHeaderCard({required bool isDesktop}) {
+    final activeCategories = _categories.where((item) => item.activo).length;
+    final totalProducts = _productCountByCategory.values.fold<int>(
+      0,
+      (sum, count) => sum + count,
+    );
+
+    return Container(
+      padding: EdgeInsets.all(isDesktop ? 20 : 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isDesktop)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundColor:
+                            const Color(0xFF6D28D9).withValues(alpha: 0.1),
+                        child: const Icon(
+                          Icons.restaurant_menu,
+                          color: Color(0xFF6D28D9),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Estructura del menú',
+                              style: GoogleFonts.manrope(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF1F2555),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Administra categorías y productos desde un solo dashboard para reducir clicks del vendedor.',
+                              style: GoogleFonts.manrope(
+                                color: const Color(0xFF6B7280),
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w500,
+                                height: 1.45,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minWidth: 220,
+                    maxWidth: 280,
+                  ),
+                  child: _AiGeneratorButton(onTap: _openAiMenuGenerator),
+                ),
+              ],
+            )
+          else ...[
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor:
+                      const Color(0xFF6D28D9).withValues(alpha: 0.1),
+                  child: const Icon(
+                    Icons.restaurant_menu,
+                    color: Color(0xFF6D28D9),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Estructura del menú',
+                    style: GoogleFonts.manrope(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF1F2555),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Administra categorías y productos desde un solo dashboard para reducir clicks del vendedor.',
+              style: GoogleFonts.manrope(
+                color: const Color(0xFF6B7280),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _AiGeneratorButton(onTap: _openAiMenuGenerator),
+          ],
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _StatChip(
+                  label: 'Categorías',
+                  value: '${_categories.length}',
+                  icon: Icons.folder_rounded,
+                  tint: const Color(0xFF7C3AED),
+                  compact: isDesktop,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _StatChip(
+                  label: 'Activas',
+                  value: '$activeCategories',
+                  icon: Icons.check_circle_rounded,
+                  tint: const Color(0xFF16A34A),
+                  compact: isDesktop,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _StatChip(
+                  label: 'Productos',
+                  value: '$totalProducts',
+                  icon: Icons.inventory_2_rounded,
+                  tint: const Color(0xFF3B82F6),
+                  compact: isDesktop,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final totalProducts = _productCountByCategory.values.fold<int>(
-      0,
-      (sum, count) => sum + count,
-    );
-    final activeCategories = _categories.where((item) => item.activo).length;
-    final headerScale = (1 - (_headerCollapse * 0.2)).clamp(0.82, 1.0);
-    final headerOpacity = (1 - (_headerCollapse * 1.45)).clamp(0.0, 1.0);
-    final headerHeightFactor = (1 - (_headerCollapse * 1.4)).clamp(0.0, 1.0);
     final showInitialLoading =
         _loading && !_hasLoadedInitialSnapshot && _categories.isEmpty;
 
@@ -2093,7 +2604,11 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 autofocus: true,
                 onChanged: (value) {
                   if (!mounted) return;
-                  setState(() => _searchQuery = value);
+                  setState(() {
+                    _searchQuery = value;
+                    _categoryVisibleCount = 20;
+                    _productVisibleCount = 24;
+                  });
                 },
                 style: TextStyle(color: colorScheme.onSurface),
                 cursorColor: colorScheme.primary,
@@ -2139,260 +2654,140 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 ? 28.0
                 : (viewportWidth >= 720 ? 24.0 : 16.0);
 
-            final list = ListView(
-              controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.fromLTRB(horizontalPadding, 12, horizontalPadding, 120),
-              children: [
-                ClipRect(
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    heightFactor: headerHeightFactor,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 140),
-                      opacity: headerOpacity,
-                      child: Transform.scale(
-                        scale: headerScale,
-                        alignment: Alignment.topCenter,
-                        child: Container(
-                          padding: EdgeInsets.all(isDesktop ? 20 : 16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Color(0x0D000000),
-                                blurRadius: 10,
-                                offset: Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (isDesktop)
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          CircleAvatar(
-                                            radius: 24,
-                                            backgroundColor: const Color(0xFF6D28D9)
-                                                .withValues(alpha: 0.1),
-                                            child: const Icon(
-                                              Icons.restaurant_menu,
-                                              color: Color(0xFF6D28D9),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  'Estructura del menú',
-                                                  style: GoogleFonts.manrope(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: const Color(0xFF1F2555),
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 6),
-                                                Text(
-                                                  'Administra categorías y productos desde un solo dashboard para reducir clicks del vendedor.',
-                                                  style: GoogleFonts.manrope(
-                                                    color: const Color(0xFF6B7280),
-                                                    fontSize: 13.5,
-                                                    fontWeight: FontWeight.w500,
-                                                    height: 1.45,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    ConstrainedBox(
-                                      constraints: const BoxConstraints(
-                                        minWidth: 220,
-                                        maxWidth: 280,
-                                      ),
-                                      child: _AiGeneratorButton(onTap: _openAiMenuGenerator),
-                                    ),
-                                  ],
-                                )
-                              else ...[
-                                Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 24,
-                                      backgroundColor: const Color(0xFF6D28D9)
-                                          .withValues(alpha: 0.1),
-                                      child: const Icon(
-                                        Icons.restaurant_menu,
-                                        color: Color(0xFF6D28D9),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Text(
-                                        'Estructura del menú',
-                                        style: GoogleFonts.manrope(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                          color: const Color(0xFF1F2555),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Administra categorías y productos desde un solo dashboard para reducir clicks del vendedor.',
-                                  style: GoogleFonts.manrope(
-                                    color: const Color(0xFF6B7280),
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w500,
-                                    height: 1.45,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                _AiGeneratorButton(onTap: _openAiMenuGenerator),
-                              ],
-                              const SizedBox(height: 16),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: _StatChip(
-                                      label: 'Categorías',
-                                      value: '${_categories.length}',
-                                      icon: Icons.folder_rounded,
-                                      tint: const Color(0xFF7C3AED),
-                                      compact: isDesktop,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: _StatChip(
-                                      label: 'Activas',
-                                      value: '$activeCategories',
-                                      icon: Icons.check_circle_rounded,
-                                      tint: const Color(0xFF16A34A),
-                                      compact: isDesktop,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: _StatChip(
-                                      label: 'Productos',
-                                      value: '$totalProducts',
-                                      icon: Icons.inventory_2_rounded,
-                                      tint: const Color(0xFF3B82F6),
-                                      compact: isDesktop,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
+            final tabSections = _buildCurrentTabSections();
+
+            final scrollView = CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: ClampingScrollPhysics(),
+              ),
+              slivers: [
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    12,
+                    horizontalPadding,
+                    0,
+                  ),
+                  sliver: SliverToBoxAdapter(
+                    child: _buildDashboardHeaderCard(isDesktop: isDesktop),
                   ),
                 ),
-                const SizedBox(height: 12),
-                if (isDesktop)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      IntrinsicWidth(
-                        child: _SegmentTabsContainer(
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    12,
+                    horizontalPadding,
+                    120,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      if (isDesktop)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            IntrinsicWidth(
+                              child: _SegmentTabsContainer(
+                                selectedTabIndex: _selectedTabIndex,
+                                onSelected: (index) {
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _selectedTabIndex = index;
+                                    _categoryVisibleCount = 20;
+                                    _productVisibleCount = 24;
+                                  });
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: TextField(
+                                controller: _searchController,
+                                onChanged: (value) {
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _searchQuery = value;
+                                    _categoryVisibleCount = 20;
+                                    _productVisibleCount = 24;
+                                  });
+                                },
+                                style: GoogleFonts.manrope(
+                                  color: const Color(0xFF1F2555),
+                                  fontSize: 14,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText:
+                                      'Buscar categorías y productos...',
+                                  hintStyle: GoogleFonts.manrope(
+                                    color: const Color(0xFF9CA3AF),
+                                    fontSize: 14,
+                                  ),
+                                  prefixIcon: const Icon(
+                                    Icons.search_rounded,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                  suffixIcon: _searchQuery.trim().isEmpty
+                                      ? null
+                                      : IconButton(
+                                          onPressed: () {
+                                            if (!mounted) return;
+                                            _searchController.clear();
+                                            setState(() {
+                                              _searchQuery = '';
+                                              _categoryVisibleCount = 20;
+                                              _productVisibleCount = 24;
+                                            });
+                                          },
+                                          icon: const Icon(Icons.close_rounded),
+                                          tooltip: 'Limpiar búsqueda',
+                                        ),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 12,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFFEAE7F2),
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFFEAE7F2),
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFF6D28D9),
+                                      width: 1.4,
+                                    ),
+                                  ),
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        _SegmentTabsContainer(
                           selectedTabIndex: _selectedTabIndex,
                           onSelected: (index) {
                             if (!mounted) return;
-                            setState(() => _selectedTabIndex = index);
+                            setState(() {
+                              _selectedTabIndex = index;
+                              _categoryVisibleCount = 20;
+                              _productVisibleCount = 24;
+                            });
                           },
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextField(
-                          controller: _searchController,
-                          onChanged: (value) {
-                            if (!mounted) return;
-                            setState(() => _searchQuery = value);
-                          },
-                          style: GoogleFonts.manrope(
-                            color: const Color(0xFF1F2555),
-                            fontSize: 14,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: 'Buscar categorías y productos...',
-                            hintStyle: GoogleFonts.manrope(
-                              color: const Color(0xFF9CA3AF),
-                              fontSize: 14,
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.search_rounded,
-                              color: Color(0xFF6B7280),
-                            ),
-                            suffixIcon: _searchQuery.trim().isEmpty
-                                ? null
-                                : IconButton(
-                                    onPressed: () {
-                                      if (!mounted) return;
-                                      _searchController.clear();
-                                      setState(() => _searchQuery = '');
-                                    },
-                                    icon: const Icon(Icons.close_rounded),
-                                    tooltip: 'Limpiar búsqueda',
-                                  ),
-                            filled: true,
-                            fillColor: Colors.white,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Color(0xFFEAE7F2),
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Color(0xFFEAE7F2),
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Color(0xFF6D28D9),
-                                width: 1.4,
-                              ),
-                            ),
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  _SegmentTabsContainer(
-                    selectedTabIndex: _selectedTabIndex,
-                    onSelected: (index) {
-                      if (!mounted) return;
-                      setState(() => _selectedTabIndex = index);
-                    },
+                      const SizedBox(height: 14),
+                      ...tabSections,
+                    ]),
                   ),
-                const SizedBox(height: 14),
-                ..._buildCurrentTabSections(),
+                ),
               ],
             );
 
@@ -2402,7 +2797,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 alignment: Alignment.topCenter,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(maxWidth: contentMaxWidth),
-                  child: list,
+                  child: scrollView,
                 ),
               ),
             );
@@ -3444,7 +3839,6 @@ class _DashboardProductCard extends StatelessWidget {
     required this.onEdit,
     required this.onToggleVisible,
     required this.onImproveImage,
-    required this.onDelete,
   });
 
   final ProductModel product;
@@ -3454,7 +3848,6 @@ class _DashboardProductCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onToggleVisible;
   final VoidCallback onImproveImage;
-  final VoidCallback onDelete;
 
   Color _statusColor() {
     if (product.hasAiImageFailure) return const Color(0xFFDC2626);
@@ -3614,25 +4007,13 @@ class _DashboardProductCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _CategoryActionButton(
-                            icon: Icons.auto_awesome_rounded,
-                            label: 'Mejorar IA',
-                            onTap: onImproveImage,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _CategoryActionButton(
-                            icon: Icons.delete,
-                            label: 'Eliminar',
-                            onTap: onDelete,
-                            isDanger: true,
-                          ),
-                        ),
-                      ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: _CategoryActionButton(
+                        icon: Icons.auto_awesome_rounded,
+                        label: 'Mejorar IA',
+                        onTap: onImproveImage,
+                      ),
                     ),
                   ],
                 );
@@ -3663,15 +4044,6 @@ class _DashboardProductCard extends StatelessWidget {
                       icon: Icons.auto_awesome_rounded,
                       label: 'Mejorar IA',
                       onTap: onImproveImage,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _CategoryActionButton(
-                      icon: Icons.delete,
-                      label: 'Eliminar',
-                      onTap: onDelete,
-                      isDanger: true,
                     ),
                   ),
                 ],

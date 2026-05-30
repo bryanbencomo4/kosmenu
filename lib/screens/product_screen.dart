@@ -207,34 +207,76 @@ class _ProductListScreenState extends State<ProductListScreen> {
     }
   }
 
-  Future<void> _toggleVisibility(ProductModel product, bool value) async {
-    final originalProducts = List<ProductModel>.from(_products);
+  Future<bool> _updateProductVisibilityInDatabase(
+    ProductModel product,
+    bool disponible,
+  ) async {
+    final updatedRows = await Supabase.instance.client
+        .from('productos')
+        .update({'disponible': disponible})
+        .eq('id', product.id)
+        .eq('comercio_id', SupabaseConfig.currentComercioId)
+        .select('id');
+
+    return (updatedRows as List<dynamic>).isNotEmpty;
+  }
+
+  void _showVisibilityMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _setProductVisibility(
+    ProductModel product,
+    bool disponible,
+  ) async {
+    final previous = List<ProductModel>.from(_products);
 
     setState(() {
       _products = _products
           .map(
-            (item) =>
-                item.id == product.id ? item.copyWith(disponible: value) : item,
+            (item) => item.id == product.id
+                ? item.copyWith(disponible: disponible)
+                : item,
           )
           .toList();
     });
 
     try {
-      await Supabase.instance.client
-          .from('productos')
-          .update({'disponible': value})
-          .eq('id', product.id);
+      final updated = await _updateProductVisibilityInDatabase(
+        product,
+        disponible,
+      );
+      if (!updated) {
+        if (!mounted) return;
+        setState(() => _products = previous);
+        _showVisibilityMessage(
+          disponible
+              ? 'No se pudo actualizar la visibilidad del producto. Intenta nuevamente.'
+              : 'No se pudo archivar el producto. Verifica tus permisos o intenta nuevamente.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      _showVisibilityMessage(
+        disponible
+            ? 'Producto visible nuevamente.'
+            : 'Producto ocultado del menú público.',
+      );
     } catch (error) {
       if (!mounted) return;
-      setState(() => _products = originalProducts);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo actualizar visibilidad: $error')),
+      setState(() => _products = previous);
+      _showVisibilityMessage(
+        'No se pudo actualizar la visibilidad del producto. Intenta nuevamente.',
       );
     }
   }
 
-  Future<void> _deleteProduct(ProductModel product) async {
-    final confirmed = await showDialog<bool>(
+  Future<void> _hideProduct(ProductModel product) async {
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         final colorScheme = Theme.of(dialogContext).colorScheme;
@@ -244,14 +286,14 @@ class _ProductListScreenState extends State<ProductListScreen> {
             borderRadius: BorderRadius.circular(18),
           ),
           title: Text(
-            'Eliminar producto',
+            'Ocultar producto',
             style: GoogleFonts.manrope(
               color: colorScheme.onSurface,
               fontWeight: FontWeight.w800,
             ),
           ),
           content: Text(
-            '¿Seguro que deseas eliminar "${product.nombre}"?',
+            'Este producto dejará de estar visible en tu menú público, pero conservarás su información y podrás mostrarlo nuevamente cuando quieras.',
             style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
           actions: [
@@ -268,39 +310,19 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 backgroundColor: colorScheme.primary,
                 foregroundColor: colorScheme.onPrimary,
               ),
-              child: const Text('Eliminar'),
+              child: const Text('Ocultar producto'),
             ),
           ],
         );
       },
     );
 
-    if (confirmed != true) return;
+    if (!mounted || confirm != true) return;
+    await _setProductVisibility(product, false);
+  }
 
-    final previous = List<ProductModel>.from(_products);
-    if (!mounted) return;
-    setState(() {
-      _products = _products.where((item) => item.id != product.id).toList();
-    });
-
-    try {
-      final deletedRows = await Supabase.instance.client
-          .from('productos')
-          .delete()
-          .eq('id', product.id)
-          .select('id');
-
-      final deletedCount = (deletedRows as List<dynamic>).length;
-      if (deletedCount == 0) {
-        throw Exception('No se pudo confirmar el borrado en la base de datos.');
-      }
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _products = previous);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo eliminar producto: $error')),
-      );
-    }
+  Future<void> _showProduct(ProductModel product) async {
+    await _setProductVisibility(product, true);
   }
 
   Future<void> _pickAndUpdateProductImage(
@@ -1084,13 +1106,17 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                         _openProductForm(
                                                           product: product,
                                                         ),
-                                                    onDelete: () =>
-                                                        _deleteProduct(product),
-                                                    onToggleVisible: (value) =>
-                                                        _toggleVisibility(
-                                                          product,
-                                                          value,
-                                                        ),
+                                                    onToggleVisibility: () {
+                                                      if (product.disponible) {
+                                                        unawaited(
+                                                          _hideProduct(product),
+                                                        );
+                                                      } else {
+                                                        unawaited(
+                                                          _showProduct(product),
+                                                        );
+                                                      }
+                                                    },
                                                     dragHandle: Icon(
                                                       Icons.drag_indicator,
                                                       color: colorScheme
@@ -1168,16 +1194,21 @@ class _ProductListScreenState extends State<ProductListScreen> {
                                                           _openProductForm(
                                                             product: product,
                                                           ),
-                                                      onDelete: () =>
-                                                          _deleteProduct(
-                                                            product,
-                                                          ),
-                                                      onToggleVisible:
-                                                          (value) =>
-                                                              _toggleVisibility(
-                                                                product,
-                                                                value,
-                                                              ),
+                                                      onToggleVisibility: () {
+                                                        if (product.disponible) {
+                                                          unawaited(
+                                                            _hideProduct(
+                                                              product,
+                                                            ),
+                                                          );
+                                                        } else {
+                                                          unawaited(
+                                                            _showProduct(
+                                                              product,
+                                                            ),
+                                                          );
+                                                        }
+                                                      },
                                                       dragHandle:
                                                           ReorderableDragStartListener(
                                                             index: index,
@@ -1248,8 +1279,7 @@ class _ProductCard extends StatelessWidget {
     required this.onEditImage,
     required this.onOpenImageOptions,
     required this.onEdit,
-    required this.onDelete,
-    required this.onToggleVisible,
+    required this.onToggleVisibility,
     required this.dragHandle,
   });
 
@@ -1259,8 +1289,7 @@ class _ProductCard extends StatelessWidget {
   final VoidCallback onEditImage;
   final VoidCallback onOpenImageOptions;
   final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final ValueChanged<bool> onToggleVisible;
+  final VoidCallback onToggleVisibility;
   final Widget dragHandle;
 
   @override
@@ -1383,9 +1412,16 @@ class _ProductCard extends StatelessWidget {
               ),
               const Spacer(),
               IconButton(
-                onPressed: onDelete,
-                tooltip: 'Eliminar producto',
-                icon: const Icon(Icons.delete_outline, size: 18),
+                onPressed: onToggleVisibility,
+                tooltip: product.disponible
+                    ? 'Ocultar producto'
+                    : 'Mostrar producto',
+                icon: Icon(
+                  product.disponible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 18,
+                ),
                 style: IconButton.styleFrom(
                   minimumSize: const Size(38, 38),
                   padding: EdgeInsets.zero,
