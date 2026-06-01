@@ -2643,8 +2643,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     required Color mutedText,
     required bool disabled,
   }) {
-    const buttonWidth = 220.0;
-
     ButtonStyle headerOutlinedStyle({
       required Color foreground,
       required Color border,
@@ -2653,8 +2651,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         backgroundColor: Colors.white,
         foregroundColor: foreground,
         side: BorderSide(color: border),
-        minimumSize: const Size(buttonWidth, 44),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        minimumSize: const Size(0, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         textStyle: GoogleFonts.poppins(
           fontWeight: FontWeight.w600,
@@ -2663,8 +2661,20 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       );
     }
 
+    final filledHeaderStyle = FilledButton.styleFrom(
+      backgroundColor: purple,
+      foregroundColor: Colors.white,
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      textStyle: GoogleFonts.poppins(
+        fontWeight: FontWeight.w600,
+        fontSize: 14,
+      ),
+    );
+
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
           child: Column(
@@ -2693,74 +2703,53 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           ),
         ),
         const SizedBox(width: 24),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          alignment: WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            SizedBox(
-              width: buttonWidth,
-              child: OutlinedButton.icon(
-                onPressed: disabled ? null : _openAiMenuGenerator,
-                icon: Icon(Icons.auto_awesome_rounded, size: 18, color: purple),
-                label: Text(
-                  'Crear con IA',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w600,
-                    color: purple,
-                  ),
+            OutlinedButton.icon(
+              onPressed: disabled ? null : _openAiMenuGenerator,
+              icon: Icon(Icons.auto_awesome_rounded, size: 18, color: purple),
+              label: Text(
+                'Crear con IA',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600,
+                  color: purple,
                 ),
-                style: headerOutlinedStyle(
-                  foreground: purple,
-                  border: purple.withValues(alpha: 0.45),
-                ),
+              ),
+              style: headerOutlinedStyle(
+                foreground: purple,
+                border: purple.withValues(alpha: 0.45),
               ),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: buttonWidth,
-              child: OutlinedButton.icon(
-                onPressed: disabled ? null : _createCategory,
-                icon: Icon(Icons.add_rounded, size: 18, color: darkText),
-                label: Text(
-                  'Nueva categoría',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w600,
-                    color: darkText,
-                  ),
+            OutlinedButton.icon(
+              onPressed: disabled ? null : _createCategory,
+              icon: Icon(Icons.add_rounded, size: 18, color: darkText),
+              label: Text(
+                'Nueva categoría',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600,
+                  color: darkText,
                 ),
-                style: headerOutlinedStyle(
-                  foreground: darkText,
-                  border: const Color(0xFFE8EAF2),
-                ),
+              ),
+              style: headerOutlinedStyle(
+                foreground: darkText,
+                border: const Color(0xFFE8EAF2),
               ),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: buttonWidth,
-              child: FilledButton.icon(
-                onPressed: disabled ? null : _openProductFormDirect,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: Text(
-                  'Nuevo producto',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: purple,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(buttonWidth, 44),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  textStyle: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
+            FilledButton.icon(
+              onPressed: disabled ? null : _openProductFormDirect,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: Text(
+                'Nuevo producto',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
                 ),
               ),
+              style: filledHeaderStyle,
             ),
           ],
         ),
