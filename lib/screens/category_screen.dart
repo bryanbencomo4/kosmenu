@@ -227,7 +227,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   int _categoryVisibleCount = 20;
   int _productVisibleCount = 24;
   int _desktopProductPage = 0;
-  static const int _desktopPageSize = 10;
+  static const int _desktopPageSize = 5;
+  bool _desktopProductGridView = false;
   String _commerceCurrency = 'USD';
   double _commerceExchangeRate = 0;
   Timer? _aiImageRefreshTimer;
@@ -502,8 +503,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     final navigator = Navigator.of(context);
     final nameController = TextEditingController(text: category?.nombre ?? '');
     final emojiSearchController = TextEditingController();
-    var selectedIconValue = _normalizeStoredIconValue(category?.icono) ??
-      _suggestCategoryEmoji(category?.nombre ?? '');
+    var selectedIconValue = _resolveCategoryVisualIcon(
+      storedIcon: category?.icono,
+      categoryName: category?.nombre ?? '',
+    );
     var generatedWithAi = category?.creadoPorIa == true;
     var aiConfidence = category?.confianzaIa;
     var isGeneratingAi = false;
@@ -791,7 +794,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       ),
                                       child: Column(
                                         children: [
-                                          Text(option.emoji, style: const TextStyle(fontSize: 26)),
+                                          _buildCategoryEmojiGlyph(option.emoji, size: 26),
                                           const SizedBox(height: 6),
                                           Text(
                                             option.label,
@@ -875,10 +878,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                         mainAxisSize: MainAxisSize.min,
                                         mainAxisAlignment: MainAxisAlignment.center,
                                         children: [
-                                          Text(
-                                            option.emoji,
-                                            style: const TextStyle(fontSize: 26),
-                                          ),
+                                          _buildCategoryEmojiGlyph(option.emoji, size: 26),
                                           const SizedBox(height: 6),
                                           Text(
                                             option.label,
@@ -944,10 +944,13 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
                                   isSheetClosed = true;
                                   FocusManager.instance.primaryFocus?.unfocus();
+                                  final iconToSave = _isEmojiContent(selectedIconValue)
+                                      ? _canonicalCategoryEmoji(selectedIconValue)
+                                      : selectedIconValue;
                                   navigator.pop(
                                     _CategoryEditorResult(
                                       name: draft,
-                                      iconValue: selectedIconValue,
+                                      iconValue: iconToSave,
                                       generatedWithAi: generatedWithAi,
                                       aiConfidence: aiConfidence,
                                     ),
@@ -2506,6 +2509,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   void _ensureDesktopCategorySelected(List<CategoryModel> categories) {
     if (!mounted || categories.isEmpty) return;
     final current = _normalizedId(_selectedProductCategoryId);
+    if (current.isEmpty) return;
     final exists = categories.any((c) => _normalizedId(c.id) == current);
     if (!exists) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2526,7 +2530,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }
 
   Widget _buildDesktopMenuLayout({required double horizontalPadding}) {
-    const purple = Color(0xFF6D28D9);
+    const purple = Color(0xFF7C3AED);
     const darkText = Color(0xFF11183C);
     const mutedText = Color(0xFF6B6F92);
     const borderColor = Color(0xFFE8EAF2);
@@ -2545,8 +2549,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               mutedText: mutedText,
               disabled: disabled,
             ),
-            const SizedBox(height: 20),
-            _buildDesktopSearchField(borderColor: borderColor),
+            const SizedBox(height: 16),
+            _buildDesktopToolbar(
+              categories: const [],
+              borderColor: borderColor,
+              purple: purple,
+              mutedText: mutedText,
+              disabled: disabled,
+            ),
             const SizedBox(height: 24),
             Expanded(
               child: Center(
@@ -2586,9 +2596,15 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
             mutedText: mutedText,
             disabled: disabled,
           ),
-          const SizedBox(height: 20),
-          _buildDesktopSearchField(borderColor: borderColor),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+          _buildDesktopToolbar(
+            categories: categories,
+            borderColor: borderColor,
+            purple: purple,
+            mutedText: mutedText,
+            disabled: disabled,
+          ),
+          const SizedBox(height: 16),
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2627,73 +2643,273 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     required Color mutedText,
     required bool disabled,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    const buttonWidth = 220.0;
+
+    ButtonStyle headerOutlinedStyle({
+      required Color foreground,
+      required Color border,
+    }) {
+      return OutlinedButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: foreground,
+        side: BorderSide(color: border),
+        minimumSize: const Size(buttonWidth, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        textStyle: GoogleFonts.poppins(
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+        ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Menú Digital',
-          style: GoogleFonts.poppins(
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            color: darkText,
-            height: 1.15,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Menú',
+                style: GoogleFonts.poppins(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Gestiona las categorías y productos de tu menú.',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: mutedText,
+                  height: 1.45,
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Gestiona categorías y productos desde un solo lugar.',
-          style: GoogleFonts.poppins(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: mutedText,
-            height: 1.4,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
+        const SizedBox(width: 24),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            FilledButton.icon(
-              onPressed: disabled ? null : _openProductFormDirect,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Crear producto'),
-              style: FilledButton.styleFrom(
-                backgroundColor: purple,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            SizedBox(
+              width: buttonWidth,
+              child: OutlinedButton.icon(
+                onPressed: disabled ? null : _openAiMenuGenerator,
+                icon: Icon(Icons.auto_awesome_rounded, size: 18, color: purple),
+                label: Text(
+                  'Crear con IA',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    color: purple,
+                  ),
+                ),
+                style: headerOutlinedStyle(
+                  foreground: purple,
+                  border: purple.withValues(alpha: 0.45),
                 ),
               ),
             ),
-            OutlinedButton.icon(
-              onPressed: disabled ? null : _createCategory,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Crear categoría'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: darkText,
-                side: const BorderSide(color: Color(0xFFE8EAF2)),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: buttonWidth,
+              child: OutlinedButton.icon(
+                onPressed: disabled ? null : _createCategory,
+                icon: Icon(Icons.add_rounded, size: 18, color: darkText),
+                label: Text(
+                  'Nueva categoría',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    color: darkText,
+                  ),
+                ),
+                style: headerOutlinedStyle(
+                  foreground: darkText,
+                  border: const Color(0xFFE8EAF2),
                 ),
               ),
             ),
-            OutlinedButton.icon(
-              onPressed: disabled ? null : _openAiMenuGenerator,
-              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-              label: const Text('Crear con IA'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: purple,
-                side: BorderSide(color: purple.withValues(alpha: 0.35)),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: buttonWidth,
+              child: FilledButton.icon(
+                onPressed: disabled ? null : _openProductFormDirect,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: Text(
+                  'Nuevo producto',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: purple,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(buttonWidth, 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  textStyle: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
                 ),
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopToolbar({
+    required List<CategoryModel> categories,
+    required Color borderColor,
+    required Color purple,
+    required Color mutedText,
+    required bool disabled,
+  }) {
+    InputDecoration toolbarFieldDecoration(String hint) {
+      return InputDecoration(
+        hintText: hint,
+        isDense: true,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: purple, width: 1.4),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: TextField(
+            controller: _searchController,
+            onChanged: (value) {
+              if (!mounted) return;
+              setState(() {
+                _searchQuery = value;
+                _categoryVisibleCount = 20;
+                _productVisibleCount = 24;
+                _desktopProductPage = 0;
+              });
+            },
+            style: GoogleFonts.poppins(fontSize: 14, color: const Color(0xFF11183C)),
+            decoration: toolbarFieldDecoration('Buscar productos o categorías...').copyWith(
+              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6B6F92)),
+              suffixIcon: _searchQuery.trim().isEmpty
+                  ? null
+                  : IconButton(
+                      onPressed: () {
+                        if (!mounted) return;
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                          _desktopProductPage = 0;
+                        });
+                      },
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 200,
+          child: DropdownButtonFormField<String?>(
+            value: _selectedProductCategoryId,
+            isExpanded: true,
+            decoration: toolbarFieldDecoration('Todas las categorías'),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('Todas las categorías'),
+              ),
+              ...categories.map(
+                (category) => DropdownMenuItem<String?>(
+                  value: category.id,
+                  child: Text(category.nombre, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+            ],
+            onChanged: disabled
+                ? null
+                : (value) {
+                    setState(() {
+                      _selectedProductCategoryId = value;
+                      _desktopProductPage = 0;
+                    });
+                  },
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 160,
+          child: DropdownButtonFormField<_VisibilityFilterOption>(
+            value: _productVisibilityFilter,
+            isExpanded: true,
+            decoration: toolbarFieldDecoration('Estado'),
+            items: const [
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.all,
+                child: Text('Estado: Todos'),
+              ),
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.visible,
+                child: Text('Estado: Disponibles'),
+              ),
+              DropdownMenuItem(
+                value: _VisibilityFilterOption.hidden,
+                child: Text('Estado: Ocultos'),
+              ),
+            ],
+            onChanged: disabled
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    setState(() {
+                      _productVisibilityFilter = value;
+                      _desktopProductPage = 0;
+                    });
+                  },
+          ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton(
+          onPressed: disabled
+              ? null
+              : () {
+                  setState(() {
+                    _productSortOption = _ProductSortOption.nameAsc;
+                    _desktopProductPage = 0;
+                  });
+                },
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(44, 44),
+            padding: EdgeInsets.zero,
+            backgroundColor: Colors.white,
+            side: BorderSide(color: borderColor),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          child: const Icon(Icons.tune_rounded, color: Color(0xFF6B6F92), size: 20),
         ),
       ],
     );
@@ -2889,6 +3105,19 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                       ),
                     ),
                   ),
+                  const Spacer(),
+                  Material(
+                    color: purple.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    child: InkWell(
+                      onTap: disabled ? null : _createCategory,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(Icons.add_rounded, size: 18, color: purple),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2919,68 +3148,118 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                         final count =
                             _productCountByCategory[category.id] ?? 0;
                         return Material(
-                          color: isSelected
-                              ? purple.withValues(alpha: 0.08)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
+                          color: Colors.transparent,
                           child: InkWell(
                             onTap: () => _selectDesktopCategory(category.id),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(10),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 12,
-                              ),
+                              margin: const EdgeInsets.symmetric(vertical: 1),
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: isSelected ? purple : borderColor,
-                                ),
+                                color: isSelected
+                                    ? purple.withValues(alpha: 0.08)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                                border: isSelected
+                                    ? null
+                                    : Border.all(color: Colors.transparent),
                               ),
                               child: Row(
                                 children: [
                                   Container(
-                                    width: 36,
-                                    height: 36,
+                                    width: 4,
+                                    height: 52,
                                     decoration: BoxDecoration(
-                                      color: purple.withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Center(
-                                      child: _buildCategoryIconVisual(
-                                        iconValue: category.icono,
-                                        name: category.nombre,
-                                        size: 20,
+                                      color: isSelected
+                                          ? purple
+                                          : Colors.transparent,
+                                      borderRadius: const BorderRadius.horizontal(
+                                        left: Radius.circular(10),
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 10),
                                   Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          category.nombre,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: isSelected
-                                                ? purple
-                                                : darkText,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 10,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          SizedBox(
+                                            width: 28,
+                                            height: 28,
+                                            child: Center(
+                                              child: _buildCategoryIconVisual(
+                                                iconValue: category.icono,
+                                                name: category.nombre,
+                                                size: 22,
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                        Text(
-                                          '$count producto${count == 1 ? '' : 's'}',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w500,
-                                            color: mutedText,
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  category.nombre,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: isSelected
+                                                        ? purple
+                                                        : darkText,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  '$count producto${count == 1 ? '' : 's'}',
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w500,
+                                                    color: mutedText,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                           ),
-                                        ),
-                                      ],
+                                          PopupMenuButton<String>(
+                                            enabled: !disabled,
+                                            icon: Icon(
+                                              Icons.more_vert_rounded,
+                                              size: 20,
+                                              color: mutedText,
+                                            ),
+                                            padding: EdgeInsets.zero,
+                                            onSelected: (value) {
+                                              switch (value) {
+                                                case 'edit':
+                                                  unawaited(
+                                                    _editCategory(category),
+                                                  );
+                                                  break;
+                                                case 'delete':
+                                                  unawaited(
+                                                    _deleteCategory(category),
+                                                  );
+                                                  break;
+                                              }
+                                            },
+                                            itemBuilder: (_) => const [
+                                              PopupMenuItem(
+                                                value: 'edit',
+                                                child: Text('Editar'),
+                                              ),
+                                              PopupMenuItem(
+                                                value: 'delete',
+                                                child: Text('Eliminar'),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -2995,14 +3274,24 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: OutlinedButton.icon(
                 onPressed: disabled ? null : _createCategory,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Nueva categoría'),
+                icon: Icon(Icons.add_rounded, size: 18, color: purple),
+                label: Text(
+                  'Nueva categoría',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    color: purple,
+                  ),
+                ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: purple,
-                  side: BorderSide(color: purple.withValues(alpha: 0.35)),
+                  backgroundColor: Colors.white,
+                  side: BorderSide(
+                    color: purple.withValues(alpha: 0.45),
+                    width: 1.2,
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
               ),
@@ -3034,26 +3323,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     final start = totalProducts == 0 ? 0 : (_desktopProductPage * _desktopPageSize) + 1;
     final end = min((_desktopProductPage + 1) * _desktopPageSize, totalProducts);
     final title = selectedCategory == null
-        ? 'Todos los productos'
-        : 'Productos en ${selectedCategory.nombre}';
-
-    InputDecoration filterDecoration(String label) {
-      return InputDecoration(
-        labelText: label,
-        isDense: true,
-        filled: true,
-        fillColor: const Color(0xFFF9FAFB),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: borderColor),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: borderColor),
-        ),
-      );
-    }
+        ? 'Todos los productos ($totalProducts)'
+        : 'Productos en ${selectedCategory.nombre} ($totalProducts)';
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -3072,121 +3343,63 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                  child: Row(
                     children: [
-                      Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: darkText,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '$totalProducts producto${totalProducts == 1 ? '' : 's'}',
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: mutedText,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: OutlinedButton.icon(
-                          onPressed: disabled
-                              ? null
-                              : () => _openProductFormDirect(
-                                    initialCategoryId: _selectedProductCategoryId,
-                                  ),
-                          icon: const Icon(Icons.add_rounded, size: 18),
-                          label: const Text('Nuevo producto'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: purple,
-                            side: BorderSide(
-                              color: purple.withValues(alpha: 0.35),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: darkText,
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                  child: Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
+                      const SizedBox(width: 12),
                       SizedBox(
-                        width: 160,
-                        child: DropdownButtonFormField<_VisibilityFilterOption>(
-                    value: _productVisibilityFilter,
-                    isExpanded: true,
-                    decoration: filterDecoration('Estado'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: _VisibilityFilterOption.all,
-                        child: Text('Todos'),
-                      ),
-                      DropdownMenuItem(
-                        value: _VisibilityFilterOption.visible,
-                        child: Text('Visibles'),
-                      ),
-                      DropdownMenuItem(
-                        value: _VisibilityFilterOption.hidden,
-                        child: Text('Ocultos'),
-                      ),
-                    ],
-                    onChanged: disabled
-                        ? null
-                        : (value) {
-                            if (value == null) return;
-                            setState(() {
-                              _productVisibilityFilter = value;
-                              _desktopProductPage = 0;
-                            });
-                          },
-                        ),
-                      ),
-                      SizedBox(
-                        width: 220,
+                        width: 200,
                         child: DropdownButtonFormField<_ProductSortOption>(
                           value: _productSortOption,
                           isExpanded: true,
-                          decoration: filterDecoration('Ordenar'),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: true,
+                            fillColor: const Color(0xFFF9FAFB),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(color: borderColor),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(color: borderColor),
+                            ),
+                          ),
                           items: const [
                             DropdownMenuItem(
-                              value: _ProductSortOption.order,
-                              child: Text('Orden manual'),
-                            ),
-                            DropdownMenuItem(
                               value: _ProductSortOption.nameAsc,
-                              child: Text('Nombre A-Z'),
+                              child: Text('Ordenar: Nombre A-Z'),
                             ),
                             DropdownMenuItem(
                               value: _ProductSortOption.nameDesc,
-                              child: Text('Nombre Z-A'),
+                              child: Text('Ordenar: Nombre Z-A'),
                             ),
                             DropdownMenuItem(
                               value: _ProductSortOption.priceAsc,
-                              child: Text('Precio menor a mayor'),
+                              child: Text('Ordenar: Precio ↑'),
                             ),
                             DropdownMenuItem(
                               value: _ProductSortOption.priceDesc,
-                              child: Text('Precio mayor a menor'),
+                              child: Text('Ordenar: Precio ↓'),
+                            ),
+                            DropdownMenuItem(
+                              value: _ProductSortOption.order,
+                              child: Text('Ordenar: Manual'),
                             ),
                           ],
                           onChanged: disabled
@@ -3200,11 +3413,54 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                 },
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF9FAFB),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: borderColor),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              onPressed: disabled
+                                  ? null
+                                  : () => setState(
+                                        () => _desktopProductGridView = false,
+                                      ),
+                              icon: Icon(
+                                Icons.view_list_rounded,
+                                size: 20,
+                                color: !_desktopProductGridView
+                                    ? purple
+                                    : mutedText,
+                              ),
+                              tooltip: 'Vista lista',
+                            ),
+                            IconButton(
+                              onPressed: disabled
+                                  ? null
+                                  : () => setState(
+                                        () => _desktopProductGridView = true,
+                                      ),
+                              icon: Icon(
+                                Icons.grid_view_rounded,
+                                size: 20,
+                                color: _desktopProductGridView
+                                    ? purple
+                                    : mutedText,
+                              ),
+                              tooltip: 'Vista cuadrícula',
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
-                const Divider(height: 1, color: Color(0xFFE8EAF2)),
-                const _DesktopProductsTableHeader(),
+                if (!_desktopProductGridView) const Divider(height: 1, color: Color(0xFFE8EAF2)),
+                if (!_desktopProductGridView) const _DesktopProductsTableHeader(),
                 Expanded(
                   child: totalProducts == 0
                 ? Center(
@@ -3262,35 +3518,66 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                       ),
                     ),
                   )
-                : ListView.separated(
-                    padding: EdgeInsets.zero,
-                    itemCount: pagedProducts.length,
-                    separatorBuilder: (_, _) => const Divider(
-                      height: 1,
-                      color: Color(0xFFF3F4F6),
-                    ),
-                    itemBuilder: (context, index) {
-                      final product = pagedProducts[index];
-                      return _DesktopProductsTableRow(
-                        product: product,
-                        categoryName: _categoryNameFor(product.categoriaId),
-                        priceLabel: _formatProductPrice(product.precio),
-                        priceSecondaryLabel:
-                            _formatProductPriceSecondary(product.precio),
-                        disabled: disabled,
-                        onEdit: () => _openProductFormDirect(product: product),
-                        onToggleVisibility: () {
-                          if (product.disponible) {
-                            unawaited(_hideProduct(product));
-                          } else {
-                            unawaited(_showProduct(product));
-                          }
+                : _desktopProductGridView
+                    ? GridView.builder(
+                        padding: const EdgeInsets.all(16),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 1.35,
+                        ),
+                        itemCount: pagedProducts.length,
+                        itemBuilder: (context, index) {
+                          final product = pagedProducts[index];
+                          return _DashboardProductCard(
+                            key: ValueKey('desktop-grid-${product.id}'),
+                            product: product,
+                            categoryName: _categoryNameFor(product.categoriaId),
+                            priceLabel: _formatProductPrice(product.precio),
+                            priceSecondaryLabel:
+                                _formatProductPriceSecondary(product.precio),
+                            onEdit: () => _openProductFormDirect(product: product),
+                            onToggleVisible: () {
+                              if (product.disponible) {
+                                unawaited(_hideProduct(product));
+                              } else {
+                                unawaited(_showProduct(product));
+                              }
+                            },
+                            onImproveImage: () =>
+                                _generateAiImageForProduct(product),
+                          );
                         },
-                        onImproveImage: () =>
-                            _generateAiImageForProduct(product),
-                      );
-                    },
-                  ),
+                      )
+                    : ListView.separated(
+                        padding: EdgeInsets.zero,
+                        itemCount: pagedProducts.length,
+                        separatorBuilder: (_, _) => const Divider(
+                          height: 1,
+                          color: Color(0xFFF3F4F6),
+                        ),
+                        itemBuilder: (context, index) {
+                          final product = pagedProducts[index];
+                          return _DesktopProductsTableRow(
+                            product: product,
+                            priceLabel: _formatProductPrice(product.precio),
+                            priceSecondaryLabel:
+                                _formatProductPriceSecondary(product.precio),
+                            disabled: disabled,
+                            onEdit: () => _openProductFormDirect(product: product),
+                            onToggleVisibility: () {
+                              if (product.disponible) {
+                                unawaited(_hideProduct(product));
+                              } else {
+                                unawaited(_showProduct(product));
+                              }
+                            },
+                            onImproveImage: () =>
+                                _generateAiImageForProduct(product),
+                          );
+                        },
+                      ),
           ),
           const Divider(height: 1, color: Color(0xFFE8EAF2)),
           Padding(
@@ -3300,7 +3587,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 Text(
                   totalProducts == 0
                       ? 'Sin productos para mostrar'
-                      : 'Mostrando $start-$end de $totalProducts productos',
+                      : 'Mostrando $start a $end de $totalProducts productos',
                   style: GoogleFonts.poppins(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
@@ -3308,40 +3595,45 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   ),
                 ),
                 const Spacer(),
-                OutlinedButton.icon(
+                IconButton(
                   onPressed: _desktopProductPage > 0
                       ? () => setState(() => _desktopProductPage -= 1)
                       : null,
-                  icon: const Icon(Icons.chevron_left_rounded, size: 18),
-                  label: const Text('Anterior'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    side: BorderSide(color: borderColor),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  tooltip: 'Página anterior',
                 ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
+                ...List.generate(totalPages, (index) {
+                  final isActive = index == _desktopProductPage;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: TextButton(
+                      onPressed: () => setState(() => _desktopProductPage = index),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(36, 36),
+                        backgroundColor: isActive
+                            ? purple.withValues(alpha: 0.12)
+                            : Colors.transparent,
+                        foregroundColor: isActive ? purple : mutedText,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        '${index + 1}',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+                IconButton(
                   onPressed: _desktopProductPage < totalPages - 1
                       ? () => setState(() => _desktopProductPage += 1)
                       : null,
-                  icon: const Icon(Icons.chevron_right_rounded, size: 18),
-                  label: const Text('Siguiente'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    side: BorderSide(color: borderColor),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                  tooltip: 'Página siguiente',
                 ),
               ],
             ),
@@ -3695,31 +3987,9 @@ class _DesktopProductsTableHeader extends StatelessWidget {
       child: Row(
         children: [
           const Expanded(
-            flex: 4,
+            flex: 5,
             child: Text(
               'Producto',
-              style: TextStyle(
-                color: Color(0xFF6B7280),
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-              ),
-            ),
-          ),
-          const Expanded(
-            flex: 2,
-            child: Text(
-              'Categoría',
-              style: TextStyle(
-                color: Color(0xFF6B7280),
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-              ),
-            ),
-          ),
-          const SizedBox(
-            width: 96,
-            child: Text(
-              'Precio',
               style: TextStyle(
                 color: Color(0xFF6B7280),
                 fontWeight: FontWeight.w600,
@@ -3730,6 +4000,17 @@ class _DesktopProductsTableHeader extends StatelessWidget {
           const SizedBox(
             width: 100,
             child: Text(
+              'Precio',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(
+            width: 120,
+            child: Text(
               'Estado',
               style: TextStyle(
                 color: Color(0xFF6B7280),
@@ -3739,7 +4020,7 @@ class _DesktopProductsTableHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(
-            width: 220,
+            width: 140,
             child: Text(
               'Acciones',
               textAlign: TextAlign.end,
@@ -3759,7 +4040,6 @@ class _DesktopProductsTableHeader extends StatelessWidget {
 class _DesktopProductsTableRow extends StatelessWidget {
   const _DesktopProductsTableRow({
     required this.product,
-    required this.categoryName,
     required this.priceLabel,
     this.priceSecondaryLabel,
     required this.disabled,
@@ -3769,7 +4049,6 @@ class _DesktopProductsTableRow extends StatelessWidget {
   });
 
   final ProductModel product;
-  final String categoryName;
   final String priceLabel;
   final String? priceSecondaryLabel;
   final bool disabled;
@@ -3780,7 +4059,7 @@ class _DesktopProductsTableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final description = product.descripcion.trim();
-    final statusLabel = product.disponible ? 'Disponible' : 'Oculto';
+    final statusLabel = product.disponible ? 'Disponible' : 'Agotado';
     final statusColor =
         product.disponible ? const Color(0xFF16A34A) : const Color(0xFFF97316);
 
@@ -3813,7 +4092,7 @@ class _DesktopProductsTableRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            flex: 4,
+            flex: 5,
             child: Row(
               children: [
                 thumb(),
@@ -3849,21 +4128,8 @@ class _DesktopProductsTableRow extends StatelessWidget {
               ],
             ),
           ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              categoryName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: const Color(0xFF374151),
-              ),
-            ),
-          ),
           SizedBox(
-            width: 96,
+            width: 100,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -3888,43 +4154,54 @@ class _DesktopProductsTableRow extends StatelessWidget {
             ),
           ),
           SizedBox(
-            width: 100,
+            width: 120,
             child: _ProductStatusPill(label: statusLabel, color: statusColor),
           ),
           SizedBox(
-            width: 220,
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 4,
-              runSpacing: 4,
+            width: 140,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(
+                IconButton(
                   onPressed: disabled ? null : onEdit,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('Editar'),
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                  color: const Color(0xFF6B6F92),
+                  tooltip: 'Editar',
                 ),
-                TextButton(
-                  onPressed: disabled ? null : onToggleVisibility,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(product.disponible ? 'Ocultar' : 'Mostrar'),
+                Switch(
+                  value: product.disponible,
+                  onChanged: disabled ? null : (_) => onToggleVisibility(),
+                  activeColor: const Color(0xFF7C3AED),
                 ),
-                TextButton.icon(
-                  onPressed: disabled ? null : onImproveImage,
-                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                  label: const Text('IA'),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 32),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                PopupMenuButton<String>(
+                  enabled: !disabled,
+                  icon: const Icon(
+                    Icons.more_vert_rounded,
+                    size: 20,
+                    color: Color(0xFF6B6F92),
                   ),
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'image':
+                        onImproveImage();
+                        break;
+                      case 'toggle':
+                        onToggleVisibility();
+                        break;
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'image',
+                      child: Text('Generar imagen con IA'),
+                    ),
+                    PopupMenuItem(
+                      value: 'toggle',
+                      child: Text(
+                        product.disponible ? 'Marcar como agotado' : 'Marcar disponible',
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -5356,6 +5633,7 @@ const List<_CategoryEmojiOption> _categoryEmojiOptions = [
   _CategoryEmojiOption(emoji: '🎮', label: 'Juegos', keywords: ['juego', 'gaming']),
   _CategoryEmojiOption(emoji: '💎', label: 'Premium', keywords: ['premium', 'especial', 'destacado', 'deluxe']),
   _CategoryEmojiOption(emoji: '🏷️', label: 'General', keywords: ['general', 'otros']),
+  _CategoryEmojiOption(emoji: '🎬', label: 'Películas', keywords: ['pelicula', 'películas', 'peliculas', 'cine', 'movie', 'film']),
 ];
 
 const List<_CategoryIconOption> _categoryIconOptions = [
@@ -5488,17 +5766,26 @@ String _suggestCategoryIconKey(String name) {
   return 'restaurant';
 }
 
+String _normalizeEmojiGlyph(String emoji) {
+  return emoji.replaceAll('\uFE0F', '').replaceAll('\uFE0E', '').trim();
+}
+
 _CategoryEmojiOption? _categoryEmojiOptionByEmoji(String? emoji) {
   final normalized = _normalizeStoredIconValue(emoji);
   if (normalized == null) {
     return null;
   }
+  final comparable = _normalizeEmojiGlyph(normalized);
   for (final option in _categoryEmojiOptions) {
-    if (option.emoji == normalized) {
+    if (_normalizeEmojiGlyph(option.emoji) == comparable) {
       return option;
     }
   }
   return null;
+}
+
+String _canonicalCategoryEmoji(String emoji) {
+  return _categoryEmojiOptionByEmoji(emoji)?.emoji ?? emoji;
 }
 
 String _suggestCategoryEmoji(String name) {
@@ -5598,49 +5885,70 @@ IconData _resolveCategoryIcon({String? iconKey, String? name}) {
   return _categoryIconOptionByKey(suggestedKey)?.icon ?? Icons.restaurant_rounded;
 }
 
+/// Icono único para lista, preview y editor (ignora SVG/claves Material legadas).
+String _resolveCategoryVisualIcon({
+  required String? storedIcon,
+  required String categoryName,
+}) {
+  final normalized = _normalizeStoredIconValue(storedIcon);
+  if (_isImageUrlContent(normalized)) {
+    return normalized!;
+  }
+  if (_isEmojiContent(normalized)) {
+    return _canonicalCategoryEmoji(normalized!);
+  }
+  final name = categoryName.trim();
+  if (name.isNotEmpty) {
+    return _suggestCategoryEmoji(name);
+  }
+  return '🏷️';
+}
+
 Widget _buildCategoryIconVisual({
   required String? iconValue,
   String? name,
   double size = 28,
 }) {
-  final normalized = _normalizeStoredIconValue(iconValue);
-  if (_isImageUrlContent(normalized)) {
+  final resolved = _resolveCategoryVisualIcon(
+    storedIcon: iconValue,
+    categoryName: name ?? '',
+  );
+
+  if (_isImageUrlContent(resolved)) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(size * 0.35),
       child: Image.network(
-        normalized!,
+        resolved,
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => Icon(
-          _resolveCategoryIcon(name: name),
-          color: const Color(0xFF6D28D9),
+        errorBuilder: (_, _, _) => _buildCategoryEmojiGlyph(
+          _suggestCategoryEmoji(name ?? ''),
           size: size,
         ),
       ),
     );
   }
-  if (_isSvgIconContent(normalized)) {
-    return SvgPicture.string(
-      normalized!,
-      width: size,
-      height: size,
-      fit: BoxFit.contain,
-    );
-  }
-  if (_isEmojiContent(normalized)) {
-    return Text(
-      normalized!,
-      style: TextStyle(
-        fontSize: size,
-        height: 1,
-      ),
-    );
-  }
 
-  return Icon(
-    _resolveCategoryIcon(iconKey: normalized, name: name),
-    color: const Color(0xFF6D28D9),
-    size: size,
+  return _buildCategoryEmojiGlyph(resolved, size: size);
+}
+
+/// Emoji aislado para no heredar Poppins ni alterar el texto adyacente.
+Widget _buildCategoryEmojiGlyph(String emoji, {required double size}) {
+  return SizedBox(
+    width: size,
+    height: size,
+    child: Center(
+      child: Text(
+        emoji,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: size * 0.95,
+          height: 1,
+          inherit: false,
+          fontFamily: 'Noto Color Emoji, Apple Color Emoji, Segoe UI Emoji, sans-serif',
+        ),
+      ),
+    ),
   );
 }
