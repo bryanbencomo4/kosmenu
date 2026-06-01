@@ -9,7 +9,11 @@ import {
   recordAiImagesGenerated,
   recordGeminiUsage,
 } from '../_shared/ai-usage.ts';
-import { buildProductImagePrompt } from '../_shared/product-image-prompt.ts';
+import { applyBrandLogoOverlay } from '../_shared/brand-logo-overlay.ts';
+import {
+  buildProductImagePrompt,
+  detectKnownBrandRecord,
+} from '../_shared/product-image-prompt.ts';
 
 type JobRow = {
   id: string;
@@ -268,7 +272,16 @@ async function processJob(params: {
     });
 
     const objectPath = `${job.commerce_id}/ai_${job.product_id}_${job.id}.png`;
-    const uploadBytes = base64ToBytes(generated.base64);
+    let uploadBytes = base64ToBytes(generated.base64);
+
+    const knownBrand = detectKnownBrandRecord(
+      product.nombre,
+      product.descripcion,
+      category?.nombre,
+    );
+    if (knownBrand) {
+      uploadBytes = await applyBrandLogoOverlay(uploadBytes, knownBrand);
+    }
 
     const { error: uploadError } = await supabase.storage
       .from(IMAGE_BUCKET)

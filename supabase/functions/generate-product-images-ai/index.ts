@@ -11,12 +11,18 @@ import {
   enforceAiImageOnboardingLimit,
   hasEnoughCredits,
 } from '../_shared/ai-usage.ts';
-import { buildProductImagePrompt } from '../_shared/product-image-prompt.ts';
+import {
+  buildProductImagePrompt,
+  detectKnownBrandRecord,
+} from '../_shared/product-image-prompt.ts';
 
 type ImageGenerationItem = {
   type: 'product';
   id: string;
   name: string;
+  description?: string;
+  categoryName?: string;
+  imagePrompt?: string;
 };
 
 type ProductRow = {
@@ -152,22 +158,44 @@ Deno.serve(async (req: Request) => {
       );
       creditsCharged = true;
 
-      const jobRows = items.map((item) => ({
-        batch_id: batchId,
-        commerce_id: commerceId,
-        catalog_id: catalogId || null,
-        product_id: item.id,
-        prompt: buildProductImagePrompt({
+      const jobRows = items.map((item) => {
+        const basePrompt = buildProductImagePrompt({
           productName: item.name,
           description: item.description,
           categoryName: item.categoryName,
           businessName: commerce?.nombre ?? undefined,
           businessCategory: commerce?.categoria ?? undefined,
-        }),
-        status: 'pending',
-        provider: 'google',
-        credits_charged: COST_IMAGE,
-      }));
+        });
+        const promptOverride = normalizeString(item.imagePrompt);
+        const knownBrand = detectKnownBrandRecord(
+          item.name,
+          item.description,
+          item.categoryName,
+        );
+        const brandGuard = knownBrand
+          ? ` Marca detectada (${knownBrand.label}): NO dibujes logo ni texto de marca; el sistema superpone el logo oficial después.`
+          : '';
+        const prompt = promptOverride
+          ? [
+              'Sigue EXACTAMENTE la solicitud del cliente como instrucción principal.',
+              `Solicitud del cliente (obligatoria): ${promptOverride}`,
+              'Si hay conflicto, prioriza la solicitud del cliente sobre sugerencias automáticas.',
+              'Restricciones mínimas: composición 1:1, alta calidad, sin texto legible, sin logos inventados.',
+              brandGuard,
+            ].join(' ')
+          : basePrompt;
+
+        return {
+          batch_id: batchId,
+          commerce_id: commerceId,
+          catalog_id: catalogId || null,
+          product_id: item.id,
+          prompt,
+          status: 'pending',
+          provider: 'google',
+          credits_charged: COST_IMAGE,
+        };
+      });
 
       const { error: insertJobsError } = await supabase.from('ai_image_jobs').insert(jobRows);
       if (insertJobsError) {
@@ -363,12 +391,12 @@ async function loadCommerce(
   return (data as CommerceRow | null) ?? null;
 }
 
-function normalizeItems(value: unknown): Array<ImageGenerationItem & { description?: string; categoryName?: string }> {
+function normalizeItems(value: unknown): ImageGenerationItem[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  const items: Array<ImageGenerationItem & { description?: string; categoryName?: string }> = [];
+  const items: ImageGenerationItem[] = [];
   for (const rawItem of value) {
     if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) {
       continue;
@@ -389,6 +417,7 @@ function normalizeItems(value: unknown): Array<ImageGenerationItem & { descripti
       name,
       description: normalizeString(item.description),
       categoryName: normalizeString(item.category_name ?? item.categoryName),
+      imagePrompt: normalizeString(item.image_prompt ?? item.imagePrompt).slice(0, 500),
     });
   }
 

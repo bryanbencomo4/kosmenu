@@ -10,6 +10,7 @@ class AiImageService {
     required String productName,
     String? description,
     String? categoryName,
+    String? customPrompt,
   }) async {
     final supabase = Supabase.instance.client;
     final response = await supabase.functions.invoke(
@@ -23,6 +24,7 @@ class AiImageService {
             'name': productName.trim(),
             'description': (description ?? '').trim(),
             'category_name': (categoryName ?? '').trim(),
+            'image_prompt': (customPrompt ?? '').trim(),
           },
         ],
       },

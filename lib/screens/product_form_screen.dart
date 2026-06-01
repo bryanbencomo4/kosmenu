@@ -805,6 +805,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (confirmed != true) {
       return;
     }
+    final customPrompt = await _askAiImagePrompt(product.nombre);
+    if (!mounted || customPrompt == null) {
+      return;
+    }
 
     try {
       final categoryName = widget.categories
@@ -823,6 +827,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ? product.descripcion
             : _descriptionController.text.trim(),
         categoryName: categoryName,
+        customPrompt: customPrompt,
       );
 
       if (!mounted) return;
@@ -836,6 +841,68 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       if (!mounted) return;
       _showMessage('No se pudo generar la imagen IA: $error');
     }
+  }
+
+  Future<String?> _askAiImagePrompt(String productName) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          backgroundColor: colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            'Describe la imagen',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Describe el fondo o escena para "$productName". Si es marca conocida (Netflix, HBO Max, Spotify, etc.), el logo oficial se agrega automáticamente; no pidas el logo en el texto.',
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  maxLines: 4,
+                  minLines: 3,
+                  maxLength: 500,
+                  decoration: const InputDecoration(
+                    hintText:
+                        'Ej: Fondo oscuro premium, TV con ambiente de cine, sin audífonos, sin texto, estilo limpio.',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(null),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text.trim()),
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              label: const Text('Generar imagen'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    return result;
   }
 
   String? _validateCategory(String? value) {
