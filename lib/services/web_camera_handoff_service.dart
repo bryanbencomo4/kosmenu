@@ -103,6 +103,8 @@ class _DesktopCameraHandoffSession {
 
 enum _DesktopCameraHandoffDialogAction { cancel, regenerate }
 
+enum _DesktopImageSourceChoice { device, phone }
+
 class _DesktopCameraHandoffDialogResult {
   const _DesktopCameraHandoffDialogResult._({
     required this.action,
@@ -150,6 +152,16 @@ class WebCameraHandoffService {
     return '$userId/camera_handoff/${normalizedFeature.isEmpty ? 'capture' : normalizedFeature}';
   }
 
+  Future<_DesktopImageSourceChoice?> _promptDesktopImageSource(
+    BuildContext context,
+  ) {
+    return showDialog<_DesktopImageSourceChoice>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => const _DesktopImageSourceDialog(),
+    );
+  }
+
   Future<XFile?> pickCameraImage(
     BuildContext context, {
     required String feature,
@@ -161,6 +173,24 @@ class WebCameraHandoffService {
     int? maxHeight,
   }) async {
     if (isDesktopWebCameraBridgeRequired) {
+      if (!context.mounted) {
+        return null;
+      }
+
+      final source = await _promptDesktopImageSource(context);
+      if (!context.mounted || source == null) {
+        return null;
+      }
+
+      if (source == _DesktopImageSourceChoice.device) {
+        return ImagePicker().pickImage(
+          source: ImageSource.gallery,
+          imageQuality: imageQuality,
+          maxWidth: maxWidth.toDouble(),
+          maxHeight: maxHeight?.toDouble(),
+        );
+      }
+
       return pickImage(
         context,
         bucketName: bucketName,
@@ -923,6 +953,164 @@ class _DesktopCameraHandoffDialogState
               const SizedBox(height: 18),
               footerActions,
             ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopImageSourceDialog extends StatelessWidget {
+  const _DesktopImageSourceDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final titleStyle = GoogleFonts.manrope(
+      color: const Color(0xFF11183C),
+      fontSize: 20,
+      fontWeight: FontWeight.w800,
+      height: 1.2,
+    );
+    final bodyStyle = GoogleFonts.poppins(
+      color: const Color(0xFF6B6F92),
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+      height: 1.45,
+    );
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 22, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text('¿Cómo quieres subir la imagen?', style: titleStyle),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: 'Cerrar',
+                    icon: const Icon(Icons.close_rounded, color: Color(0xFF6B6F92)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Elige si la cargas desde este equipo o la tomas con tu teléfono.',
+                style: bodyStyle,
+              ),
+              const SizedBox(height: 20),
+              _DesktopImageSourceOptionCard(
+                icon: Icons.computer_rounded,
+                title: 'Subir desde el equipo',
+                subtitle: 'Selecciona una foto o imagen guardada en tu computadora.',
+                onTap: () => Navigator.of(context).pop(
+                  _DesktopImageSourceChoice.device,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _DesktopImageSourceOptionCard(
+                icon: Icons.smartphone_rounded,
+                title: 'Usar desde el teléfono',
+                subtitle: 'Escanea un código QR y toma la foto con tu celular.',
+                accent: true,
+                onTap: () => Navigator.of(context).pop(
+                  _DesktopImageSourceChoice.phone,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopImageSourceOptionCard extends StatelessWidget {
+  const _DesktopImageSourceOptionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.accent = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    const purple = Color(0xFF7C3AED);
+    final borderColor = accent ? purple.withValues(alpha: 0.45) : const Color(0xFFE8EAF2);
+    final iconBg = accent ? purple.withValues(alpha: 0.12) : const Color(0xFFF3F4F6);
+    final iconColor = accent ? purple : const Color(0xFF4B5563);
+
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor, width: accent ? 1.4 : 1),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: iconBg,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: iconColor, size: 26),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        title,
+                        style: GoogleFonts.poppins(
+                          color: const Color(0xFF11183C),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: GoogleFonts.poppins(
+                          color: const Color(0xFF6B6F92),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: accent ? purple : const Color(0xFF9CA3AF),
+                ),
+              ],
             ),
           ),
         ),
