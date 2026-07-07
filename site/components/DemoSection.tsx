@@ -34,14 +34,14 @@ const phoneScreens = [
       'border-violet-400/22 bg-violet-500/12 text-violet-100 shadow-[0_0_28px_rgba(167,139,250,0.24)]',
     footerClass:
       'border-violet-400/16 bg-[linear-gradient(180deg,rgba(55,25,117,0.38),rgba(35,18,74,0.56))] text-violet-50',
-    imageSrc: '/demo/Screenshot_1778340594.png',
-    imageAlt: 'Cliente explorando visualmente el menú digital con categorías y fotos de platos.',
-    imageClassName: 'object-cover object-[37%_0%] scale-[1.10]',
+    imageSrc: '/demo/Screenshot_1778339909.png',
+    imageAlt: 'Cliente explorando el menú digital con categorías, fotos de platos y precios.',
+    imageClassName: 'object-cover object-top scale-[1.02]',
     aspectClassName: 'aspect-[390/844]',
   },
   {
     title: 'Decisión',
-    subtitle: 'Eligen al instante',
+    subtitle: 'Ordenan al instante',
     icon: BadgeCheck,
     frame: 'phone' as const,
     shellClass:
@@ -51,9 +51,9 @@ const phoneScreens = [
       'border-cyan-400/25 bg-cyan-500/12 text-cyan-100 shadow-[0_0_30px_rgba(34,211,238,0.26)]',
     footerClass:
       'border-cyan-400/20 bg-[linear-gradient(180deg,rgba(8,88,109,0.34),rgba(8,53,71,0.56))] text-cyan-50',
-    imageSrc: '/demo/Screenshot_1778340734.png',
-    imageAlt: 'Cliente revisando platos y tomando una decisión rápida desde el menú digital.',
-    imageClassName: 'object-cover object-[50%_0%] scale-[1.12]',
+    imageSrc: '/demo/Screenshot_1778340594.png',
+    imageAlt: 'Cliente revisando su pedido y confirmando la orden desde el menú digital.',
+    imageClassName: 'object-cover object-top scale-[1.04]',
     aspectClassName: 'aspect-[390/844]',
   },
 ] as const;
