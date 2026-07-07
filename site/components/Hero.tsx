@@ -32,23 +32,14 @@ const avatarGradients = [
 function HeroProductVisual() {
   return (
     <div className="relative w-full">
-      <div className="relative overflow-hidden rounded-[1.65rem] border border-white/8 bg-[linear-gradient(180deg,#0c1224_0%,#090f1d_100%)] px-3 pb-2 pt-3 sm:rounded-[1.85rem] sm:px-4 sm:pb-3 sm:pt-4">
+      <div className="relative overflow-hidden rounded-[1.65rem] border border-white/8 bg-black sm:rounded-[1.85rem]">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 opacity-70"
-          style={{
-            backgroundImage:
-              'linear-gradient(rgba(148,163,184,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.07) 1px, transparent 1px)',
-            backgroundSize: '52px 52px',
-          }}
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_42%_68%,rgba(124,58,237,0.28),transparent_58%)]"
         />
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_38%_72%,rgba(124,58,237,0.34),transparent_52%)]"
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_24%,rgba(217,70,239,0.14),transparent_38%)]"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_22%,rgba(217,70,239,0.12),transparent_42%)]"
         />
 
         <div className="absolute left-3 top-3 z-20 max-w-[10.5rem] rounded-[1rem] border border-violet-300/18 bg-[#17102b]/92 p-2.5 shadow-[0_18px_40px_-24px_rgba(124,58,237,0.95)] backdrop-blur-md sm:left-4 sm:top-4 sm:max-w-[11.5rem] sm:p-3">
@@ -103,12 +94,12 @@ function HeroProductVisual() {
         </svg>
 
         <Image
-          src="/branding/hero-product.png"
+          src="/branding/hero-product-black.png"
           alt="Table Tent físico y menú digital de elmenuxfa en un smartphone"
           width={819}
           height={1024}
           priority
-          className="relative z-0 mx-auto h-auto w-full max-w-[94%] select-none drop-shadow-[0_28px_60px_-20px_rgba(0,0,0,0.75)]"
+          className="relative z-0 block h-auto w-full select-none"
         />
       </div>
     </div>
