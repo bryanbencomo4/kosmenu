@@ -44,9 +44,7 @@ export function Navbar({ whatsappHref, appHref }: NavbarProps) {
               <Link
                 key={item.label}
                 href={item.href}
-                className={`relative text-sm font-semibold transition-all duration-300 hover:text-white ${
-                  item.label === 'Inicio' ? 'text-[#FACC15]' : 'text-slate-100'
-                }`}
+                className="relative text-sm font-semibold text-slate-100 transition-all duration-300 hover:text-white"
               >
                 {item.label}
                 {item.label === 'Inicio' ? (
@@ -64,7 +62,7 @@ export function Navbar({ whatsappHref, appHref }: NavbarProps) {
               href={appHref}
               className="hidden items-center justify-center rounded-full border border-white/14 bg-white/6 px-4 py-3 text-sm font-semibold text-white transition-all duration-300 hover:border-violet-300/30 hover:bg-white/10 sm:inline-flex"
             >
-              Iniciar sesion
+              Iniciar sesión
             </Link>
             <Link
               href={whatsappHref}
