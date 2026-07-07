@@ -18,7 +18,7 @@ const navLinks = [
 export function Navbar({ whatsappHref, appHref }: NavbarProps) {
   return (
     <header className="sticky top-0 z-50 border-b border-white/8 bg-[#090D16]/88 backdrop-blur-xl">
-      <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 sm:py-4">
+      <div className="mx-auto max-w-[1240px] px-4 py-3 sm:px-6 sm:py-4">
         <div className="flex items-center justify-between gap-2.5 sm:gap-4">
           <Link
             href="#inicio"
