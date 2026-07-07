@@ -48,7 +48,7 @@ export function Navbar({ whatsappHref, appHref }: NavbarProps) {
               >
                 {item.label}
                 {item.label === 'Inicio' ? (
-                  <span className="absolute -bottom-5 left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-full bg-[linear-gradient(90deg,#f5d84b,#d946ef)] shadow-[0_0_18px_rgba(217,70,239,0.65)]" />
+                  <span className="absolute -bottom-5 left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-full bg-[#FACC15] shadow-[0_0_16px_rgba(250,204,21,0.55)]" />
                 ) : null}
               </Link>
             ))}
