@@ -1,33 +1,31 @@
 import {
   LayoutGrid,
-  Link2,
-  LockKeyhole,
+  Package,
   QrCode,
+  Rocket,
   Shield,
-  ShoppingBag,
   Sparkles,
-  Store,
   TrendingUp,
-  Truck,
+  UserPlus,
   Zap,
 } from 'lucide-react';
 
 const steps = [
   {
     number: 1,
-    title: 'Configura\ntu comercio',
-    description: 'Personaliza tu identidad\ny deja listo tu canal de venta.',
+    title: 'Regístrate',
+    description: 'Crea tu cuenta\nen segundos.',
     badgeClass: 'border-violet-300/22 bg-violet-500/14 text-violet-100 shadow-[0_0_28px_rgba(192,132,252,0.35)]',
     iconShellClass: 'border-violet-400/30 bg-violet-500/10 text-violet-200 shadow-[0_0_40px_rgba(168,85,247,0.34)]',
     dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.95)]',
     glowClass: 'shadow-[0_0_0_1px_rgba(192,132,252,0.2),0_0_42px_rgba(168,85,247,0.24)]',
     featured: false,
-    icon: <Store className="h-10 w-10" />,
+    icon: <UserPlus className="h-10 w-10" />,
   },
   {
     number: 2,
-    title: 'Carga\nproductos',
-    description: 'Organiza categorías,\nprecios y productos\ndestacados.',
+    title: 'Carga tu menú',
+    description: 'Sube categorías\ny fotos fácilmente.',
     badgeClass: 'border-violet-300/20 bg-violet-500/10 text-violet-100 shadow-[0_0_20px_rgba(167,139,250,0.22)]',
     iconShellClass: 'border-violet-400/28 bg-violet-500/10 text-violet-200 shadow-[0_0_34px_rgba(129,140,248,0.28)]',
     dotClass: 'bg-violet-200 shadow-[0_0_12px_rgba(196,181,253,0.95)]',
@@ -37,41 +35,36 @@ const steps = [
   },
   {
     number: 3,
-    title: 'Comparte\nlink o QR',
-    description: 'Llévalo a WhatsApp, redes,\nmesas y piezas impresas.',
+    title: 'Genera tu QR',
+    description: 'Obtén tu código\núnico al instante.',
     badgeClass: 'border-sky-300/24 bg-sky-500/12 text-sky-50 shadow-[0_0_26px_rgba(56,189,248,0.34)]',
     iconShellClass: 'border-sky-400/34 bg-sky-500/10 text-sky-100 shadow-[0_0_44px_rgba(56,189,248,0.38)]',
     dotClass: 'bg-sky-300 shadow-[0_0_14px_rgba(125,211,252,0.95)]',
     glowClass: 'border-sky-300/32 shadow-[0_0_0_1px_rgba(125,211,252,0.3),0_0_54px_rgba(59,130,246,0.3)]',
     featured: true,
-    icon: (
-      <div className="relative h-11 w-11">
-        <Link2 className="absolute left-0 top-0 h-9 w-9" />
-        <QrCode className="absolute bottom-0 right-0 h-5 w-5" />
-      </div>
-    ),
+    icon: <QrCode className="h-10 w-10" />,
   },
   {
     number: 4,
-    title: 'Cliente arma\npedido',
-    description: 'El cliente elige, confirma\ny entiende mejor su pedido.',
+    title: 'Recibe tus\nTable Tents',
+    description: 'Te enviamos los\nhabladores físicos.',
     badgeClass: 'border-cyan-300/24 bg-cyan-500/12 text-cyan-50 shadow-[0_0_24px_rgba(34,211,238,0.3)]',
     iconShellClass: 'border-cyan-400/30 bg-cyan-500/10 text-cyan-100 shadow-[0_0_38px_rgba(34,211,238,0.32)]',
     dotClass: 'bg-cyan-200 shadow-[0_0_14px_rgba(165,243,252,0.95)]',
     glowClass: 'shadow-[0_0_0_1px_rgba(34,211,238,0.16),0_0_40px_rgba(34,211,238,0.2)]',
     featured: false,
-    icon: <ShoppingBag className="h-10 w-10" />,
+    icon: <Package className="h-10 w-10" />,
   },
   {
     number: 5,
-    title: 'Gestionas\nentrega',
-    description: 'Coordina pickup o delivery\ncon menos fricción.',
+    title: '¡A vender!',
+    description: 'Tus clientes ya pueden\nescanear la oferta actualizada.',
     badgeClass: 'border-violet-300/22 bg-violet-500/12 text-violet-100 shadow-[0_0_22px_rgba(192,132,252,0.26)]',
     iconShellClass: 'border-violet-400/28 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.3)]',
     dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.9)]',
     glowClass: 'shadow-[0_0_0_1px_rgba(192,132,252,0.16),0_0_38px_rgba(168,85,247,0.22)]',
     featured: false,
-    icon: <Truck className="h-10 w-10" />,
+    icon: <Rocket className="h-10 w-10" />,
   },
 ] as const;
 
@@ -87,8 +80,8 @@ const trustItems = [
     iconClass: 'border-violet-400/18 bg-violet-500/10 text-violet-200',
   },
   {
-    label: 'Seguro y confiable',
-    icon: LockKeyhole,
+    label: 'Table Tents incluidos',
+    icon: Package,
     iconClass: 'border-cyan-400/18 bg-cyan-500/10 text-cyan-200',
   },
   {
@@ -114,13 +107,13 @@ export function Steps() {
             Cómo funciona
           </span>
           <h2 className="mt-4 font-[var(--font-display)] text-[1.9rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[3rem] lg:text-[3.8rem]">
-            <span className="block">Cinco pasos para empezar</span>
-            <span className="block">a vender con una experiencia más clara</span>
+            <span className="block">Cinco pasos para digitalizar</span>
+            <span className="block">tu menú en tiempo récord</span>
           </h2>
           <p className="mx-auto mt-4 max-w-3xl text-[0.95rem] leading-[1.55] text-slate-300/84 sm:text-[1.05rem] lg:text-[1.12rem]">
-            Todo lo que necesitas para recibir pedidos por WhatsApp
+            Del registro a los Table Tents en mesa:
             <br className="hidden sm:block" />
-            y digitalizar tu menú <span className="font-semibold text-[#FACC15]">en minutos.</span>
+            todo el proceso en menos de <span className="font-semibold text-[#FACC15]">5 minutos.</span>
           </p>
         </div>
 

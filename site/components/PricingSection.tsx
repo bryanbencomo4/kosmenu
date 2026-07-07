@@ -8,15 +8,15 @@ type PricingSectionProps = {
 };
 
 const includedFeatures = [
+  'Kit inicial de Table Tents en acrílico',
   'Menú digital personalizado',
   'Catálogo con productos, fotos y precios',
-  'Link y QR para compartir tu menú',
-  'Pedidos organizados por WhatsApp',
-  'Tracking del pedido',
+  'Código QR único para tu restaurante',
+  'Actualizaciones de precios en tiempo real',
   'Panel para administrar productos',
-  'Ideal para delivery y pickup',
-  'Soporte inicial para configurar tu negocio',
-  'Sin comisión por venta',
+  'Experiencia sin descargas para tus clientes',
+  'Soporte inicial para configurar tu menú',
+  'Sin costos de reimpresión',
 ] as const;
 
 export function PricingSection({ whatsappHref }: PricingSectionProps) {
@@ -34,10 +34,10 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
             Precio claro
           </span>
           <h2 className="mt-4 font-[var(--font-display)] text-[2rem] font-black leading-[1.02] tracking-[-0.03em] text-white sm:mt-5 sm:text-[2.55rem]">
-            Un solo plan, todo incluido
+            Un solo plan, todo lo que tu restaurante necesita.
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-[15px]">
-            Todo lo que necesitas para vender con un menú digital profesional y recibir pedidos organizados por WhatsApp.
+            Menú digital, actualizaciones en tiempo real y kit inicial de Table Tents en acrílico para tus mesas.
           </p>
         </div>
 
@@ -53,20 +53,20 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
 
               <div className="mt-5">
                 <p className="font-[var(--font-display)] text-[3.25rem] font-black leading-none tracking-[-0.06em] text-white sm:text-[4.15rem]">
-                  $20
+                  $10
                   <span className="ml-1.5 text-[1.15rem] font-bold tracking-[-0.02em] text-slate-300 sm:text-[1.35rem]">
                     /mes
                   </span>
                 </p>
                 <p className="mt-3 text-sm font-medium text-slate-300 sm:text-[15px]">
-                  Por negocio · Sin comisión por pedido
+                  Por restaurante · Incluye kit inicial de Table Tents
                 </p>
               </div>
 
               <div className="mt-6 rounded-[1.5rem] border border-white/8 bg-white/[0.03] p-4 text-sm leading-7 text-slate-300 sm:p-5 sm:text-[15px]">
                 <p className="font-semibold text-white">Empieza sin miedo.</p>
                 <p className="mt-2">
-                  Un solo precio mensual para tener tu menú digital listo, compartirlo con link o QR y recibir pedidos más claros por WhatsApp.
+                  Un solo precio mensual para digitalizar tu menú, actualizar precios al instante y recibir tus Table Tents listos para mesa.
                 </p>
               </div>
 
@@ -106,8 +106,8 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
                   <QrCode className="h-5 w-5" />
                 </span>
                 <div>
-                  <p className="text-base font-semibold text-white">Todo incluido desde el primer mes</p>
-                  <p className="text-sm text-slate-400">Sin cobros escondidos y sin comisión por pedido.</p>
+                  <p className="text-base font-semibold text-white">Kit inicial de Table Tents incluido</p>
+                  <p className="text-sm text-slate-400">Habladores en acrílico listos para colocar en tus mesas.</p>
                 </div>
               </div>
 

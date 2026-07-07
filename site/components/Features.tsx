@@ -1,86 +1,53 @@
 import {
   ArrowRight,
-  Bike,
-  ClipboardList,
-  LayoutGrid,
-  MapPin,
+  Layers,
   QrCode,
   Rocket,
+  Smartphone,
   Smile,
   Sparkles,
+  Zap,
 } from 'lucide-react';
-
-function WhatsAppLogo(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
-      <path d="M19.05 4.91A9.82 9.82 0 0 0 12.03 2c-5.46 0-9.9 4.44-9.9 9.9 0 1.74.45 3.43 1.31 4.92L2 22l5.33-1.39a9.83 9.83 0 0 0 4.7 1.2h.01c5.45 0 9.89-4.44 9.89-9.9 0-2.64-1.03-5.12-2.88-7ZM12.04 20.13h-.01a8.13 8.13 0 0 1-4.14-1.13l-.3-.18-3.16.82.84-3.08-.2-.32a8.1 8.1 0 0 1-1.25-4.33c0-4.48 3.65-8.13 8.14-8.13 2.17 0 4.2.84 5.74 2.38a8.06 8.06 0 0 1 2.38 5.75c0 4.49-3.65 8.13-8.04 8.22Zm4.46-6.1c-.24-.12-1.4-.69-1.62-.76-.22-.08-.38-.12-.54.12-.16.23-.62.76-.76.92-.14.15-.28.17-.52.06-.24-.12-1-.37-1.9-1.18-.7-.62-1.17-1.38-1.31-1.61-.14-.24-.01-.36.1-.48.11-.11.24-.28.36-.42.12-.14.16-.24.24-.4.08-.16.04-.3-.02-.42-.06-.12-.54-1.3-.74-1.78-.2-.47-.39-.41-.54-.42h-.46c-.16 0-.42.06-.64.3-.22.24-.84.82-.84 2 0 1.18.86 2.32.98 2.48.12.16 1.68 2.57 4.07 3.6.57.25 1.02.4 1.37.5.58.18 1.1.15 1.52.09.46-.07 1.4-.57 1.6-1.13.2-.55.2-1.03.14-1.13-.06-.1-.22-.16-.46-.28Z" />
-    </svg>
-  );
-}
 
 const features = [
   {
-    title: 'Menú digital',
-    description: 'Publica categorías, fotos, precios y productos destacados en un solo enlace profesional.',
-    icon: LayoutGrid,
+    title: 'Actualizaciones en tiempo real',
+    description: 'Cambia precios o esconde platos agotados al instante desde tu celular.',
+    icon: Zap,
     iconClass:
       'border-violet-400/25 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.24)]',
     arrowClass: 'border-violet-400/25 text-violet-200',
   },
   {
-    title: 'Pedidos organizados',
-    description: 'Centraliza las órdenes para evitar mensajes cruzados y errores al momento de preparar.',
-    icon: ClipboardList,
-    iconClass:
-      'border-violet-400/25 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.2)]',
-    arrowClass: 'border-violet-400/25 text-violet-200',
-  },
-  {
-    title: 'WhatsApp integrado',
-    description: 'Mantén el canal que tus clientes ya usan, pero con una experiencia mucho más ordenada.',
-    icon: WhatsAppLogo,
-    iconClass:
-      'border-emerald-400/25 bg-emerald-500/10 text-emerald-200 shadow-[0_0_35px_rgba(16,185,129,0.18)]',
-    arrowClass: 'border-emerald-400/20 text-emerald-200',
-  },
-  {
-    title: 'Tracking del pedido',
-    description: 'Permite que tus clientes sigan el estado de la orden con una vista simple y clara.',
-    icon: MapPin,
-    iconClass:
-      'border-blue-400/25 bg-blue-500/10 text-blue-200 shadow-[0_0_38px_rgba(59,130,246,0.2)]',
-    arrowClass: 'border-blue-400/25 text-blue-200',
-  },
-  {
-    title: 'Delivery delegado',
-    description: 'Comparte enlaces con repartidores y mejora la coordinación de entregas.',
-    icon: Bike,
+    title: 'Table Tents Acrílicos',
+    description: 'Te proveemos los habladores físicos impresos en alta calidad y listos para colocar en las mesas de tu local.',
+    icon: Layers,
     iconClass:
       'border-cyan-400/25 bg-cyan-500/10 text-cyan-200 shadow-[0_0_38px_rgba(34,211,238,0.2)]',
     arrowClass: 'border-cyan-400/25 text-cyan-200',
   },
   {
-    title: 'QR para compartir',
-    description: 'Lleva tu menú a mesa, vitrina, redes o flyers con un QR fácil de escanear.',
-    icon: QrCode,
+    title: 'Experiencia sin descargas',
+    description: 'Tus clientes solo escanean y visualizan tus platos al instante, sin instalar apps.',
+    icon: Smartphone,
     iconClass:
-      'border-cyan-400/25 bg-cyan-500/10 text-cyan-200 shadow-[0_0_35px_rgba(34,211,238,0.18)]',
-    arrowClass: 'border-cyan-400/20 text-cyan-200',
+      'border-emerald-400/25 bg-emerald-500/10 text-emerald-200 shadow-[0_0_35px_rgba(16,185,129,0.18)]',
+    arrowClass: 'border-emerald-400/20 text-emerald-200',
   },
 ] as const;
 
 const stats = [
   {
     value: '+1,500',
-    label: 'negocios impulsados',
+    label: 'restaurantes digitalizados',
     icon: Rocket,
     iconClass: 'border-violet-400/22 bg-violet-500/10 text-violet-300',
     valueClass: 'text-violet-300',
   },
   {
-    value: '+230K',
-    label: 'pedidos gestionados',
-    icon: ClipboardList,
+    value: '+5 min',
+    label: 'para publicar tu menú',
+    icon: QrCode,
     iconClass: 'border-blue-400/22 bg-blue-500/10 text-blue-300',
     valueClass: 'text-blue-300',
   },
@@ -120,17 +87,17 @@ export function Features() {
               ¿Qué es ElMenuxFA.com?
             </span>
             <h2 className="mt-6 max-w-[28rem] font-[var(--font-display)] text-[1.7rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[2.35rem] lg:max-w-[31rem] lg:text-[3.3rem]">
-              <span className="block">Vende mejor</span>
-              <span className="block">con un menú digital</span>
+              <span className="block">Digitaliza tu menú</span>
+              <span className="block">con velocidad</span>
               <span className="block">
                 y{' '}
                 <span className="bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                  pedidos claros
+                  Table Tents
                 </span>
               </span>
             </h2>
             <p className="mt-4 max-w-[27rem] text-[0.93rem] leading-[1.55] text-slate-300/88 lg:mt-5 lg:max-w-[29rem] lg:text-[1rem] lg:leading-[1.62]">
-              Publica tu menú, compártelo por link o QR y recibe pedidos organizados por WhatsApp sin perder tiempo entre mensajes.
+              Crea tu menú digital en minutos, actualiza precios al instante y lleva códigos QR en acrílico directo a las mesas de tu restaurante.
             </p>
 
             <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:mt-auto">

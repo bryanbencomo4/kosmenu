@@ -2,13 +2,13 @@
 
 import Image from 'next/image';
 import { useRef, useState, type TouchEvent } from 'react';
-import { ArrowLeft, ArrowRight, BadgeCheck, MapPinned, Menu as MenuIcon, ShoppingCart, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BadgeCheck, Menu as MenuIcon, QrCode, Sparkles } from 'lucide-react';
 
 const phoneScreens = [
   {
-    title: 'Menú',
-    subtitle: 'Explora productos',
-    icon: MenuIcon,
+    title: 'Escaneo',
+    subtitle: 'Table Tent en mesa',
+    icon: QrCode,
     shellClass:
       'border-violet-400/22 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.24)]',
     dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.95)]',
@@ -17,13 +17,13 @@ const phoneScreens = [
     footerClass:
       'border-violet-400/18 bg-[linear-gradient(180deg,rgba(76,29,149,0.42),rgba(44,18,92,0.6))] text-violet-50',
     imageSrc: '/demo/Screenshot_1778339909.png',
-    imageAlt: 'Vista del menú con la categoría de hamburguesas activa y productos destacados.',
+    imageAlt: 'Cliente escaneando el código QR del Table Tent en la mesa del restaurante.',
     imageClassName: 'object-cover object-[50%_0%] scale-[1.16]',
   },
   {
-    title: 'Pedido',
-    subtitle: 'Checkout inicial',
-    icon: ShoppingCart,
+    title: 'Menú',
+    subtitle: 'Exploración visual',
+    icon: MenuIcon,
     shellClass:
       'border-violet-400/18 bg-violet-500/8 text-violet-100 shadow-[0_0_32px_rgba(167,139,250,0.18)]',
     dotClass: 'bg-violet-200/90 shadow-[0_0_14px_rgba(196,181,253,0.9)]',
@@ -32,28 +32,13 @@ const phoneScreens = [
     footerClass:
       'border-violet-400/16 bg-[linear-gradient(180deg,rgba(55,25,117,0.38),rgba(35,18,74,0.56))] text-violet-50',
     imageSrc: '/demo/Screenshot_1778340594.png',
-    imageAlt: 'Pantalla de checkout en el paso de pedido con resumen y nota para el negocio.',
+    imageAlt: 'Cliente explorando visualmente el menú digital con categorías y fotos de platos.',
     imageClassName: 'object-cover object-[37%_0%] scale-[1.10]',
   },
   {
-    title: 'Pago',
-    subtitle: 'Cierre del pedido',
+    title: 'Decisión',
+    subtitle: 'Eligen al instante',
     icon: BadgeCheck,
-    shellClass:
-      'border-violet-400/18 bg-violet-500/8 text-violet-100 shadow-[0_0_30px_rgba(167,139,250,0.18)]',
-    dotClass: 'bg-violet-200/90 shadow-[0_0_14px_rgba(196,181,253,0.9)]',
-    connectorClass:
-      'border-violet-400/22 bg-violet-500/12 text-violet-100 shadow-[0_0_28px_rgba(167,139,250,0.24)]',
-    footerClass:
-      'border-violet-400/16 bg-[linear-gradient(180deg,rgba(55,25,117,0.38),rgba(35,18,74,0.56))] text-violet-50',
-    imageSrc: '/demo/Screenshot_1778340734.png',
-    imageAlt: 'Pantalla de checkout en el paso de pago con total final y botón de confirmar.',
-    imageClassName: 'object-cover object-[50%_0%] scale-[1.12]',
-  },
-  {
-    title: 'Tracking',
-    subtitle: 'Seguimiento en vivo',
-    icon: MapPinned,
     shellClass:
       'border-cyan-400/24 bg-cyan-500/10 text-cyan-100 shadow-[0_0_40px_rgba(34,211,238,0.26)]',
     dotClass: 'bg-cyan-200 shadow-[0_0_15px_rgba(165,243,252,0.95)]',
@@ -61,9 +46,9 @@ const phoneScreens = [
       'border-cyan-400/25 bg-cyan-500/12 text-cyan-100 shadow-[0_0_30px_rgba(34,211,238,0.26)]',
     footerClass:
       'border-cyan-400/20 bg-[linear-gradient(180deg,rgba(8,88,109,0.34),rgba(8,53,71,0.56))] text-cyan-50',
-    imageSrc: '/demo/Screenshot_1778340763.png',
-    imageAlt: 'Pantalla de seguimiento del pedido recibido con estado, mapa y contacto del comercio.',
-    imageClassName: 'object-cover object-[50%_0%] scale-[1.16]',
+    imageSrc: '/demo/Screenshot_1778340734.png',
+    imageAlt: 'Cliente revisando platos y tomando una decisión rápida desde el menú digital.',
+    imageClassName: 'object-cover object-[50%_0%] scale-[1.12]',
   },
 ] as const;
 
@@ -193,21 +178,15 @@ export function DemoSection() {
             </span>
 
             <h2 className="mt-4 max-w-[14rem] font-[var(--font-display)] text-[1.55rem] font-black leading-[0.92] tracking-[-0.05em] text-white sm:mt-5 sm:max-w-[21rem] sm:text-[2.75rem] lg:max-w-[29rem] lg:text-[3.55rem]">
-              <span className="block">Así vive tu</span>
-              <span className="block">cliente</span>
-              <span className="block sm:hidden bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                el pedido
-              </span>
-              <span className="block sm:hidden bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                real
-              </span>
-              <span className="hidden sm:block bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                el pedido real
+              <span className="block">Así de rápido</span>
+              <span className="block">escanean y eligen</span>
+              <span className="block bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
+                tus clientes.
               </span>
             </h2>
 
             <p className="mt-3 max-w-[16rem] text-[0.87rem] leading-[1.5] text-slate-300/84 sm:mt-5 sm:max-w-[22rem] sm:text-[1rem] lg:max-w-[24rem] lg:text-[1.08rem]">
-              Menú, checkout y tracking con capturas reales de una experiencia clara y lista para vender.
+              Escaneo del Table Tent en mesa, exploración visual del menú y decisión rápida sin descargar apps.
             </p>
 
             <div className="mt-4 h-1 w-16 rounded-full bg-[linear-gradient(90deg,#a855f7_0%,#7c3aed_58%,#22d3ee_100%)] shadow-[0_0_26px_rgba(168,85,247,0.42)] sm:mt-7 sm:w-24" />
@@ -221,14 +200,14 @@ export function DemoSection() {
               </span>
 
               <h2 className="mt-4 max-w-[14rem] font-[var(--font-display)] text-[1.45rem] font-black leading-[0.92] tracking-[-0.05em] text-white">
-                <span className="block">Así se ve</span>
+                <span className="block">Así de rápido</span>
                 <span className="block bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                  el flujo real
+                  escanean y eligen
                 </span>
               </h2>
 
               <p className="mt-3 max-w-[15rem] text-[0.85rem] leading-[1.48] text-slate-300/84">
-                Menú, checkout y tracking en capturas reales.
+                Table Tent en mesa, menú visual y decisión rápida.
               </p>
 
               <div className="mt-4 h-1 w-16 rounded-full bg-[linear-gradient(90deg,#a855f7_0%,#7c3aed_58%,#22d3ee_100%)] shadow-[0_0_26px_rgba(168,85,247,0.42)]" />
@@ -314,7 +293,7 @@ export function DemoSection() {
             </div>
 
             <div className="hidden lg:block">
-              <div className="grid grid-cols-4 gap-4 xl:gap-6">
+              <div className="grid grid-cols-3 gap-4 xl:gap-6">
                 {phoneScreens.map((screen, index) => (
                   <PhoneFlowCard
                     key={screen.title}

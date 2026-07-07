@@ -2,14 +2,14 @@ import Image from 'next/image';
 import Link from 'next/link';
 import {
   ChevronRight,
-  MessageCircle,
+  Layers,
   QrCode,
   Sparkles,
-  Boxes,
   CircleDollarSign,
   Headset,
   Rocket,
   TrendingUp,
+  Zap,
 } from 'lucide-react';
 
 type HeroProps = {
@@ -18,22 +18,22 @@ type HeroProps = {
 };
 
 const heroHighlights = [
-  { label: 'Menú digital', detail: 'con link y QR', icon: QrCode },
-  { label: 'Pedidos directos', detail: 'por WhatsApp', icon: MessageCircle },
-  { label: 'Tracking del pedido', detail: 'en tiempo real', icon: Boxes },
-  { label: 'Sin comisiones', detail: 'por cada pedido', icon: CircleDollarSign },
+  { label: 'Menú digital', detail: 'listo en minutos', icon: QrCode },
+  { label: 'Table Tents', detail: 'en acrílico para mesas', icon: Layers },
+  { label: 'Actualizaciones', detail: 'en tiempo real', icon: Zap },
+  { label: 'Sin reimpresión', detail: 'ni costos ocultos', icon: CircleDollarSign },
 ] as const;
 
 const supportCards = [
   {
-    title: 'Sin comisiones',
-    description: 'Tú te quedas con todo',
-    icon: CircleDollarSign,
+    title: 'Menú en 5 minutos',
+    description: 'Digitaliza sin complicaciones',
+    icon: Rocket,
   },
   {
-    title: 'Fácil y rápido',
-    description: 'Configura tu menú en minutos',
-    icon: Rocket,
+    title: 'Table Tents incluidos',
+    description: 'Habladores listos para mesa',
+    icon: Layers,
   },
   {
     title: 'Soporte 24/7',
@@ -42,7 +42,7 @@ const supportCards = [
   },
   {
     title: 'Hecho para crecer',
-    description: 'Escala tu negocio sin límites',
+    description: 'Escala tu restaurante sin límites',
     icon: TrendingUp,
   },
 ] as const;
@@ -82,30 +82,30 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
         <div className="mx-auto min-w-0 max-w-[36rem] text-center lg:mx-0 lg:max-w-[48rem] lg:text-left">
           <div className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl will-change-transform will-change-opacity sm:px-4 sm:py-2 sm:text-[13px]">
             <span className="text-sm">🚀</span>
-            Vende por WhatsApp sin apps de terceros
+            Digitaliza tu menú en menos de 5 minutos
           </div>
 
           <div className="animate-fade-up animation-delay-100 mt-4 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#FACC15] will-change-transform will-change-opacity sm:text-[13px] sm:tracking-[0.22em]">
             <Sparkles className="h-3 w-3 text-[#FACC15] sm:h-3.5 sm:w-3.5" />
-            Hecho para negocios de comida
+            Menú digital + Table Tents en acrílico
           </div>
 
           <h1 className="mx-auto mt-4 max-w-[18.5rem] font-[var(--font-display)] text-[2rem] font-black leading-[0.96] tracking-[-0.05em] text-white sm:max-w-[32rem] sm:text-[3rem] lg:mx-0 lg:max-w-[36rem] lg:text-[3.55rem] xl:text-[3.8rem]">
             <span className="animate-fade-up animation-delay-200 block will-change-transform will-change-opacity">
-              Menú digital para
+              Digitaliza el menú de tu
             </span>
             <span className="animate-fade-up animation-delay-300 block will-change-transform will-change-opacity">
-              vender por WhatsApp
+              restaurante en menos de
             </span>
             <span className="animate-fade-up animation-delay-500 block will-change-transform will-change-opacity">
               <span className="inline-block pr-[0.04em] bg-gradient-to-r from-[#d4b2ff] via-[#bf87ff] to-[#7C3AED] bg-clip-text text-transparent">
-                sin caos ni comisiones
+                5 minutos.
               </span>
             </span>
           </h1>
 
           <p className="animate-fade-up animation-delay-300 mx-auto mt-5 max-w-[31rem] text-[0.95rem] leading-6 text-slate-300/88 will-change-transform will-change-opacity sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[33rem] lg:text-[0.98rem] lg:leading-7">
-            Comparte tu menú por link o QR y recibe pedidos organizados en WhatsApp, sin depender de apps de terceros.
+            Olvídate de los costos de reimpresión. Crea tu menú digital al instante, actualiza precios en tiempo real y ofrece una experiencia sin contacto con nuestros códigos QR en acrílico listos para tus mesas.
           </p>
 
           <div className="mt-6 grid grid-cols-2 gap-3">
@@ -150,7 +150,7 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
           </div>
 
           <p className="animate-fade-up animation-delay-700 mt-3 text-center text-xs font-medium text-slate-300/85 sm:text-sm lg:text-left">
-            Sin app para tus clientes · Sin comisión por pedido · Listo en minutos
+            Sin apps para tus clientes · Table Tents incluidos · Listo en minutos
           </p>
 
           <div className="animate-fade-up animation-delay-500 mt-7 flex flex-col gap-5 will-change-transform will-change-opacity">
@@ -176,7 +176,7 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
                     <span className="text-[1.05rem] leading-none text-[#FACC15] sm:text-[1.5rem]">★★★★★</span>
                     <span className="text-[1.35rem] font-black tracking-[-0.04em] text-white sm:text-[2rem]">4.9/5</span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-300 sm:text-sm">Más de 100 negocios ya reciben pedidos con elmenuxfa</p>
+                  <p className="mt-1 text-xs text-slate-300 sm:text-sm">Más de 100 restaurantes ya digitalizaron su menú con elmenuxfa</p>
                 </div>
               </div>
             </div>
@@ -211,14 +211,14 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
               <div className="animate-fade-up animation-delay-500 rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(28,33,67,0.84),rgba(22,27,51,0.68))] px-5 py-4 text-sm font-semibold text-slate-100 shadow-[0_20px_48px_-26px_rgba(91,33,182,0.62)] backdrop-blur-2xl transition-transform duration-300 hover:-translate-y-1 will-change-transform will-change-opacity">
                 <p className="text-sm text-slate-200">Hoy</p>
                 <p className="mt-2 text-3xl font-black tracking-[-0.05em] text-white">+38%</p>
-                <p className="mt-2 text-sm leading-6 text-slate-200/90">más pedidos que ayer</p>
+                <p className="mt-2 text-sm leading-6 text-slate-200/90">menús digitalizados</p>
               </div>
             </div>
 
             <div className="relative mx-auto w-full lg:mr-0 lg:translate-x-0 xl:translate-x-2">
               <Image
                 src="/hero-app-header.png"
-                alt="Vista de la app de elmenuxfa en un iPhone mostrando el menú y el flujo de pedido"
+                alt="Vista de la app de elmenuxfa en un iPhone mostrando el menú digital del restaurante"
                 width={1024}
                 height={1536}
                 priority
@@ -232,9 +232,9 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
                 </div>
                 <p className="mt-2.5 text-[2.2rem] font-black tracking-[-0.06em] text-white">+38%</p>
                 <p className="mt-1.5 text-[1rem] leading-6 text-slate-200/92">
-                  más pedidos
+                  menús
                   <br />
-                  que ayer
+                  digitalizados
                 </p>
               </div>
             </div>

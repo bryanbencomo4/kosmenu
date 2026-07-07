@@ -20,9 +20,9 @@ const bodyFont = Roboto({
 
 export const metadata: Metadata = {
   metadataBase: new URL(publicSiteUrl),
-  title: 'ElMenúXFA | Menú digital y pedidos online para negocios de comida',
+  title: 'ElMenúXFA | Digitaliza el menú de tu restaurante en menos de 5 minutos',
   description:
-    'Crea tu menú digital, recibe pedidos por WhatsApp, comparte tu QR y permite a tus clientes seguir sus órdenes en tiempo real.',
+    'Crea tu menú digital al instante, actualiza precios en tiempo real y ofrece una experiencia sin contacto con Table Tents en acrílico listos para tus mesas.',
   icons: {
     icon: '/branding/isotipo.png',
     apple: '/branding/isotipo.png',
