@@ -4,7 +4,6 @@ import { DemoSection } from '../DemoSection';
 import { Features } from '../Features';
 import { Footer } from '../Footer';
 import { Hero } from '../Hero';
-import { HeroFeaturesReveal } from '../HeroFeaturesReveal';
 import { Navbar } from '../Navbar';
 import { PricingSection } from '../PricingSection';
 import { Steps } from '../Steps';
@@ -23,10 +22,8 @@ export function BusinessLandingPage() {
 
         <Navbar whatsappHref={whatsappHref} appHref={appHref} />
 
-        <HeroFeaturesReveal
-          features={<Features />}
-          hero={<Hero whatsappHref={whatsappHref} appHref={appHref} />}
-        />
+        <Hero whatsappHref={whatsappHref} appHref={appHref} />
+        <Features />
 
         <div className="hero-features-next">
           <Steps />
