@@ -13,8 +13,8 @@ import {
 const steps = [
   {
     number: 1,
-    title: 'Regístrate',
-    description: 'Crea tu cuenta\nen segundos.',
+    title: 'Solicita tu\nactivación',
+    description: 'Escríbenos por WhatsApp\ny arrancamos contigo.',
     badgeClass: 'border-violet-300/22 bg-violet-500/14 text-violet-100 shadow-[0_0_28px_rgba(192,132,252,0.35)]',
     iconShellClass: 'border-violet-400/30 bg-violet-500/10 text-violet-200 shadow-[0_0_40px_rgba(168,85,247,0.34)]',
     dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.95)]',
@@ -24,8 +24,8 @@ const steps = [
   },
   {
     number: 2,
-    title: 'Carga tu menú',
-    description: 'Sube categorías\ny fotos fácilmente.',
+    title: 'Cargamos\ntu menú',
+    description: 'Organizamos categorías,\nfotos y precios.',
     badgeClass: 'border-violet-300/20 bg-violet-500/10 text-violet-100 shadow-[0_0_20px_rgba(167,139,250,0.22)]',
     iconShellClass: 'border-violet-400/28 bg-violet-500/10 text-violet-200 shadow-[0_0_34px_rgba(129,140,248,0.28)]',
     dotClass: 'bg-violet-200 shadow-[0_0_12px_rgba(196,181,253,0.95)]',
@@ -35,8 +35,8 @@ const steps = [
   },
   {
     number: 3,
-    title: 'Genera tu QR',
-    description: 'Obtén tu código\núnico al instante.',
+    title: 'Generamos\ntu QR',
+    description: 'Código único listo\npara tus mesas.',
     badgeClass: 'border-sky-300/24 bg-sky-500/12 text-sky-50 shadow-[0_0_26px_rgba(56,189,248,0.34)]',
     iconShellClass: 'border-sky-400/34 bg-sky-500/10 text-sky-100 shadow-[0_0_44px_rgba(56,189,248,0.38)]',
     dotClass: 'bg-sky-300 shadow-[0_0_14px_rgba(125,211,252,0.95)]',
@@ -46,8 +46,8 @@ const steps = [
   },
   {
     number: 4,
-    title: 'Recibe tus\nTable Tents',
-    description: 'Te enviamos los\nhabladores físicos.',
+    title: 'Recibes tu\nTable Tent',
+    description: 'Hablador físico listo\npara colocar en mesa.',
     badgeClass: 'border-cyan-300/24 bg-cyan-500/12 text-cyan-50 shadow-[0_0_24px_rgba(34,211,238,0.3)]',
     iconShellClass: 'border-cyan-400/30 bg-cyan-500/10 text-cyan-100 shadow-[0_0_38px_rgba(34,211,238,0.32)]',
     dotClass: 'bg-cyan-200 shadow-[0_0_14px_rgba(165,243,252,0.95)]',
@@ -57,8 +57,8 @@ const steps = [
   },
   {
     number: 5,
-    title: '¡A vender!',
-    description: 'Tus clientes ya pueden\nescanear la oferta actualizada.',
+    title: 'Tus clientes\nescanean y ordenan',
+    description: 'Ven el menú, eligen\ny piden con claridad.',
     badgeClass: 'border-violet-300/22 bg-violet-500/12 text-violet-100 shadow-[0_0_22px_rgba(192,132,252,0.26)]',
     iconShellClass: 'border-violet-400/28 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.3)]',
     dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.9)]',
@@ -70,22 +70,22 @@ const steps = [
 
 const trustItems = [
   {
-    label: 'Listo en minutos',
+    label: 'Activación rápida',
     icon: Zap,
     iconClass: 'border-yellow-400/18 bg-yellow-500/12 text-[#FACC15]',
   },
   {
-    label: 'Sin tarjeta de crédito',
+    label: 'Desde $10/mes',
     icon: Shield,
     iconClass: 'border-violet-400/18 bg-violet-500/10 text-violet-200',
   },
   {
-    label: 'Table Tents incluidos',
+    label: 'Table Tent incluido',
     icon: Package,
     iconClass: 'border-cyan-400/18 bg-cyan-500/10 text-cyan-200',
   },
   {
-    label: 'Escala tu negocio',
+    label: 'Sin apps para clientes',
     icon: TrendingUp,
     iconClass: 'border-yellow-400/18 bg-yellow-500/10 text-yellow-300',
   },
@@ -107,13 +107,11 @@ export function Steps() {
             Cómo funciona
           </span>
           <h2 className="mt-4 font-[var(--font-display)] text-[1.9rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[3rem] lg:text-[3.8rem]">
-            <span className="block">Cinco pasos para digitalizar</span>
-            <span className="block">tu menú en tiempo récord</span>
+            <span className="block">Así de fácil empiezas a vender</span>
+            <span className="block">con tu menú digital</span>
           </h2>
           <p className="mx-auto mt-4 max-w-3xl text-[0.95rem] leading-[1.55] text-slate-300/84 sm:text-[1.05rem] lg:text-[1.12rem]">
-            Del registro a los Table Tents en mesa:
-            <br className="hidden sm:block" />
-            todo el proceso en menos de <span className="font-semibold text-[#FACC15]">5 minutos.</span>
+            Todo queda listo para que tu restaurante empiece a usar el menú digital sin complicaciones.
           </p>
         </div>
 

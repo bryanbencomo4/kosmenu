@@ -1,27 +1,34 @@
 import Image from 'next/image';
 import {
   ArrowRight,
+  ClipboardList,
   Layers,
   QrCode,
-  Rocket,
   Smartphone,
-  Smile,
   Sparkles,
   Zap,
 } from 'lucide-react';
 
 const features = [
   {
-    title: 'Actualizaciones en tiempo real',
-    description: 'Cambia precios o esconde platos agotados al instante desde tu celular.',
+    title: 'Tus clientes escanean y ordenan más rápido',
+    description: 'El menú está disponible desde el celular, sin instalar aplicaciones.',
+    icon: Smartphone,
+    iconClass:
+      'border-emerald-400/25 bg-emerald-500/10 text-emerald-200 shadow-[0_0_35px_rgba(16,185,129,0.18)]',
+    arrowClass: 'border-emerald-400/20 text-emerald-200',
+  },
+  {
+    title: 'Actualiza precios y productos sin reimprimir',
+    description: 'Cambia platos, precios o disponibilidad sin gastar en nuevos menús físicos.',
     icon: Zap,
     iconClass:
       'border-violet-400/25 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.24)]',
     arrowClass: 'border-violet-400/25 text-violet-200',
   },
   {
-    title: 'Table Tents Acrílicos',
-    description: 'Te proveemos los habladores físicos impresos en alta calidad y listos para colocar en las mesas de tu local.',
+    title: 'Table Tent físico incluido',
+    description: 'Recibe el hablador de mesa con QR listo para colocar en tu restaurante.',
     imageSrc: '/branding/table-tent.png',
     imageAlt: 'Table Tent en acrílico de elmenuxfa con QR para escanear el menú digital.',
     icon: Layers,
@@ -30,36 +37,44 @@ const features = [
     arrowClass: 'border-cyan-400/25 text-cyan-200',
   },
   {
-    title: 'Experiencia sin descargas',
-    description: 'Tus clientes solo escanean y visualizan tus platos al instante, sin instalar apps.',
-    icon: Smartphone,
+    title: 'Imagen más profesional',
+    description: 'Haz que tu negocio se vea moderno, ordenado y confiable desde la primera visita.',
+    icon: Sparkles,
     iconClass:
-      'border-emerald-400/25 bg-emerald-500/10 text-emerald-200 shadow-[0_0_35px_rgba(16,185,129,0.18)]',
-    arrowClass: 'border-emerald-400/20 text-emerald-200',
+      'border-yellow-400/25 bg-yellow-500/10 text-yellow-200 shadow-[0_0_35px_rgba(250,204,21,0.18)]',
+    arrowClass: 'border-yellow-400/20 text-yellow-200',
+  },
+  {
+    title: 'Menos errores en los pedidos',
+    description: 'Tus clientes ven opciones, precios y detalles con mayor claridad.',
+    icon: ClipboardList,
+    iconClass:
+      'border-blue-400/25 bg-blue-500/10 text-blue-200 shadow-[0_0_35px_rgba(59,130,246,0.18)]',
+    arrowClass: 'border-blue-400/20 text-blue-200',
   },
 ];
 
 const stats = [
   {
-    value: '+1,500',
-    label: 'restaurantes digitalizados',
-    icon: Rocket,
+    value: '$10/mes',
+    label: 'inversión clara para empezar',
+    icon: QrCode,
     iconClass: 'border-violet-400/22 bg-violet-500/10 text-violet-300',
     valueClass: 'text-violet-300',
   },
   {
-    value: '+5 min',
-    label: 'para publicar tu menú',
-    icon: QrCode,
-    iconClass: 'border-blue-400/22 bg-blue-500/10 text-blue-300',
-    valueClass: 'text-blue-300',
-  },
-  {
-    value: '98%',
-    label: 'satisfacción de clientes',
-    icon: Smile,
+    value: 'Table Tent',
+    label: 'físico incluido en tu kit',
+    icon: Layers,
     iconClass: 'border-cyan-400/22 bg-cyan-500/10 text-cyan-300',
     valueClass: 'text-cyan-300',
+  },
+  {
+    value: 'Sin apps',
+    label: 'para tus clientes',
+    icon: Smartphone,
+    iconClass: 'border-emerald-400/22 bg-emerald-500/10 text-emerald-300',
+    valueClass: 'text-emerald-300',
   },
 ] as const;
 
@@ -87,20 +102,20 @@ export function Features() {
           <div className="relative z-10 flex h-full flex-col">
             <span className="inline-flex w-fit items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.18em] text-violet-200">
               <Sparkles className="h-3.5 w-3.5 text-[#FACC15]" />
-              ¿Qué es ElMenuxFA.com?
+              Beneficios principales
             </span>
             <h2 className="mt-6 max-w-[28rem] font-[var(--font-display)] text-[1.7rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[2.35rem] lg:max-w-[31rem] lg:text-[3.3rem]">
-              <span className="block">Digitaliza tu menú</span>
-              <span className="block">con velocidad</span>
+              <span className="block">Todo lo que necesitas</span>
+              <span className="block">para vender mejor</span>
               <span className="block">
-                y{' '}
+                cada{' '}
                 <span className="bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                  Table Tents
+                  día
                 </span>
               </span>
             </h2>
             <p className="mt-4 max-w-[27rem] text-[0.93rem] leading-[1.55] text-slate-300/88 lg:mt-5 lg:max-w-[29rem] lg:text-[1rem] lg:leading-[1.62]">
-              Crea tu menú digital en minutos, actualiza precios al instante y lleva códigos QR en acrílico directo a las mesas de tu restaurante.
+              Menú digital, QR personalizado y Table Tent físico: menos errores, más claridad y una experiencia profesional para tus clientes.
             </p>
 
             <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:mt-auto">
@@ -129,7 +144,9 @@ export function Features() {
             <article
               key={title}
               className={`animate-fade-up group relative flex min-h-[14.5rem] flex-col overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(13,19,33,0.96),rgba(10,15,26,0.92))] px-5 py-6 shadow-[0_26px_80px_-48px_rgba(0,0,0,1)] transition-all duration-300 hover:-translate-y-1 hover:border-white/16 sm:min-h-[17.4rem] sm:px-6 sm:py-7 ${
-                index < 2 ? 'animation-delay-100' : index < 4 ? 'animation-delay-200' : 'animation-delay-300'
+                index === 4 ? 'sm:col-span-2 lg:col-span-1' : ''
+              } ${
+                index === 0 ? 'animation-delay-100' : index < 3 ? 'animation-delay-200' : 'animation-delay-300'
               }`}
             >
               <div aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.2),transparent)] opacity-80" />

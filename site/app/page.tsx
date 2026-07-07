@@ -5,17 +5,19 @@ import { BusinessLandingPage } from '../components/business/BusinessLandingPage'
 
 const canonicalUrl = publicSiteUrl;
 
+const seoTitle = 'ElMenúXFA | Menú digital con QR y Table Tent para restaurantes';
+const seoDescription =
+  'Tu menú digital listo para que tus clientes escaneen, elijan y ordenen. Incluye menú online, QR personalizado y Table Tent físico. Desde $10/mes.';
+
 export const metadata: Metadata = {
-  title: 'ElMenúXFA | Digitaliza el menú de tu restaurante en menos de 5 minutos',
-  description:
-    'Crea tu menú digital al instante, actualiza precios en tiempo real y ofrece una experiencia sin contacto con Table Tents en acrílico listos para tus mesas.',
+  title: seoTitle,
+  description: seoDescription,
   alternates: {
     canonical: canonicalUrl,
   },
   openGraph: {
-    title: 'ElMenúXFA | Digitaliza el menú de tu restaurante en menos de 5 minutos',
-    description:
-      'Crea tu menú digital al instante, actualiza precios en tiempo real y ofrece una experiencia sin contacto con Table Tents en acrílico listos para tus mesas.',
+    title: seoTitle,
+    description: seoDescription,
     url: canonicalUrl,
     siteName: 'ElMenúXFA',
     locale: 'es_CO',
@@ -31,9 +33,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'ElMenúXFA | Digitaliza el menú de tu restaurante en menos de 5 minutos',
-    description:
-      'Crea tu menú digital al instante, actualiza precios en tiempo real y ofrece una experiencia sin contacto con Table Tents en acrílico listos para tus mesas.',
+    title: seoTitle,
+    description: seoDescription,
     images: [`${canonicalUrl}/branding/full_logo.png`],
   },
 };

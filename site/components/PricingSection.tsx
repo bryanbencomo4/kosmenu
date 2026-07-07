@@ -9,15 +9,13 @@ type PricingSectionProps = {
 };
 
 const includedFeatures = [
-  'Kit inicial de Table Tents en acrílico',
   'Menú digital personalizado',
+  'QR único para tu restaurante',
+  'Table Tent físico incluido',
   'Catálogo con productos, fotos y precios',
-  'Código QR único para tu restaurante',
-  'Actualizaciones de precios en tiempo real',
-  'Panel para administrar productos',
-  'Experiencia sin descargas para tus clientes',
+  'Actualización de precios en tiempo real',
+  'Experiencia sin descarga para el cliente',
   'Soporte inicial para configurar tu menú',
-  'Sin costos de reimpresión',
 ] as const;
 
 export function PricingSection({ whatsappHref }: PricingSectionProps) {
@@ -35,10 +33,10 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
             Precio claro
           </span>
           <h2 className="mt-4 font-[var(--font-display)] text-[2rem] font-black leading-[1.02] tracking-[-0.03em] text-white sm:mt-5 sm:text-[2.55rem]">
-            Un solo plan, todo lo que tu restaurante necesita.
+            Un solo plan. Todo lo que necesitas para empezar.
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-[15px]">
-            Menú digital, actualizaciones en tiempo real y kit inicial de Table Tents en acrílico para tus mesas.
+            Con vender un plato adicional al mes, el servicio prácticamente se paga solo.
           </p>
         </div>
 
@@ -60,14 +58,14 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
                   </span>
                 </p>
                 <p className="mt-3 text-sm font-medium text-slate-300 sm:text-[15px]">
-                  Por restaurante · Incluye kit inicial de Table Tents
+                  Menú digital + QR + Table Tent físico incluido
                 </p>
               </div>
 
               <div className="mt-6 rounded-[1.5rem] border border-white/8 bg-white/[0.03] p-4 text-sm leading-7 text-slate-300 sm:p-5 sm:text-[15px]">
-                <p className="font-semibold text-white">Empieza sin miedo.</p>
+                <p className="font-semibold text-white">Inversión clara, resultado directo.</p>
                 <p className="mt-2">
-                  Un solo precio mensual para digitalizar tu menú, actualizar precios al instante y recibir tus Table Tents listos para mesa.
+                  Más facilidad para vender, menos errores al ordenar y menú siempre actualizado sin reimprimir.
                 </p>
               </div>
 
@@ -78,7 +76,7 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
                   rel="noopener noreferrer"
                   className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#FACC15] px-6 py-4 text-sm font-bold text-[#0B0F1A] shadow-[0_22px_50px_-24px_rgba(250,204,21,0.95)] transition-all duration-300 hover:scale-[1.02] hover:bg-[#fde047]"
                 >
-                  Solicitar activación gratis
+                  Solicitar activación ahora
                   <Rocket className="h-4 w-4" />
                 </Link>
                 <Link
@@ -93,7 +91,7 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
               </div>
 
               <p className="mt-4 text-center text-sm leading-6 text-slate-300 lg:text-left">
-                Te ayudamos a configurar tu menú inicial antes de activar el plan mensual.
+                Te ayudamos a configurar tu menú antes de activar el plan mensual.
               </p>
 
               <p className="mt-4 text-center text-xs font-medium text-slate-400 sm:text-sm lg:text-left">
@@ -113,8 +111,8 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
                   />
                 </div>
                 <div>
-                  <p className="text-base font-semibold text-white">Kit inicial de Table Tents incluido</p>
-                  <p className="mt-1 text-sm text-slate-400">Habladores en acrílico listos para colocar en tus mesas.</p>
+                  <p className="text-base font-semibold text-white">Table Tent físico incluido</p>
+                  <p className="mt-1 text-sm text-slate-400">Hablador con QR listo para colocar en tus mesas.</p>
                 </div>
               </div>
 

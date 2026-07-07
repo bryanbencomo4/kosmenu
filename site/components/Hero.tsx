@@ -4,11 +4,10 @@ import {
   ChevronRight,
   Layers,
   QrCode,
-  Sparkles,
   CircleDollarSign,
   Headset,
+  MessageCircle,
   Rocket,
-  TrendingUp,
   Zap,
 } from 'lucide-react';
 
@@ -18,32 +17,32 @@ type HeroProps = {
 };
 
 const heroHighlights = [
-  { label: 'Menú digital', detail: 'listo en minutos', icon: QrCode },
-  { label: 'Table Tents', detail: 'en acrílico para mesas', icon: Layers },
-  { label: 'Actualizaciones', detail: 'en tiempo real', icon: Zap },
-  { label: 'Sin reimpresión', detail: 'ni costos ocultos', icon: CircleDollarSign },
+  { label: 'Escaneo rápido', detail: 'sin apps para clientes', icon: QrCode },
+  { label: 'Table Tent incluido', detail: 'listo para tu mesa', icon: Layers },
+  { label: 'Menú actualizado', detail: 'sin reimprimir', icon: Zap },
+  { label: 'Más orden al vender', detail: 'menos errores', icon: CircleDollarSign },
 ] as const;
 
 const supportCards = [
   {
-    title: 'Menú en 5 minutos',
-    description: 'Digitaliza sin complicaciones',
-    icon: Rocket,
-  },
-  {
-    title: 'Table Tents incluidos',
-    description: 'Habladores listos para mesa',
+    title: 'Menú + QR + Table Tent',
+    description: 'Todo incluido para empezar',
     icon: Layers,
   },
   {
-    title: 'Soporte 24/7',
-    description: 'Siempre listos para ayudarte',
-    icon: Headset,
+    title: 'Desde $10/mes',
+    description: 'Inversión clara y simple',
+    icon: CircleDollarSign,
   },
   {
-    title: 'Hecho para crecer',
-    description: 'Escala tu restaurante sin límites',
-    icon: TrendingUp,
+    title: 'Activación rápida',
+    description: 'Te ayudamos a configurarlo',
+    icon: Rocket,
+  },
+  {
+    title: 'Soporte cercano',
+    description: 'Por WhatsApp cuando lo necesites',
+    icon: Headset,
   },
 ] as const;
 
@@ -67,7 +66,7 @@ const orbitParticles = [
   'left-[44%] bottom-[18%] h-1 w-1 opacity-50',
 ] as const;
 
-export function Hero({ whatsappHref, appHref }: HeroProps) {
+export function Hero({ whatsappHref }: HeroProps) {
   return (
     <section id="inicio" className="hero-shell relative isolate overflow-hidden px-0">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
@@ -82,30 +81,15 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
         <div className="mx-auto min-w-0 max-w-[36rem] text-center lg:mx-0 lg:max-w-[48rem] lg:text-left">
           <div className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl will-change-transform will-change-opacity sm:px-4 sm:py-2 sm:text-[13px]">
             <span className="text-sm">🚀</span>
-            Digitaliza tu menú en menos de 5 minutos
+            Menú digital + QR + Table Tent incluido
           </div>
 
-          <div className="animate-fade-up animation-delay-100 mt-4 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#FACC15] will-change-transform will-change-opacity sm:text-[13px] sm:tracking-[0.22em]">
-            <Sparkles className="h-3 w-3 text-[#FACC15] sm:h-3.5 sm:w-3.5" />
-            Menú digital + Table Tents en acrílico
-          </div>
-
-          <h1 className="mx-auto mt-4 max-w-[18.5rem] font-[var(--font-display)] text-[2rem] font-black leading-[0.96] tracking-[-0.05em] text-white sm:max-w-[32rem] sm:text-[3rem] lg:mx-0 lg:max-w-[36rem] lg:text-[3.55rem] xl:text-[3.8rem]">
-            <span className="animate-fade-up animation-delay-200 block will-change-transform will-change-opacity">
-              Digitaliza el menú de tu
-            </span>
-            <span className="animate-fade-up animation-delay-300 block will-change-transform will-change-opacity">
-              restaurante en menos de
-            </span>
-            <span className="animate-fade-up animation-delay-500 block will-change-transform will-change-opacity">
-              <span className="inline-block pr-[0.04em] bg-gradient-to-r from-[#d4b2ff] via-[#bf87ff] to-[#7C3AED] bg-clip-text text-transparent">
-                5 minutos.
-              </span>
-            </span>
+          <h1 className="mx-auto mt-4 max-w-[20rem] font-[var(--font-display)] text-[1.85rem] font-black leading-[1.02] tracking-[-0.04em] text-white sm:max-w-[34rem] sm:text-[2.65rem] lg:mx-0 lg:max-w-[38rem] lg:text-[3.2rem] xl:text-[3.45rem]">
+            Tu menú digital listo para que tus clientes escaneen, elijan y ordenen.
           </h1>
 
           <p className="animate-fade-up animation-delay-300 mx-auto mt-5 max-w-[31rem] text-[0.95rem] leading-6 text-slate-300/88 will-change-transform will-change-opacity sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[33rem] lg:text-[0.98rem] lg:leading-7">
-            Olvídate de los costos de reimpresión. Crea tu menú digital al instante, actualiza precios en tiempo real y ofrece una experiencia sin contacto con nuestros códigos QR en acrílico listos para tus mesas.
+            Incluye menú online, QR personalizado y Table Tent físico para colocar en tus mesas. Sin apps, sin complicaciones y listo para usar.
           </p>
 
           <div className="mt-6 grid grid-cols-2 gap-3">
@@ -134,23 +118,25 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
           <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row lg:items-start lg:justify-start">
             <Link
               href={whatsappHref}
+              target="_blank"
+              rel="noopener noreferrer"
               className="group animate-fade-up animation-delay-500 relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-full bg-[#FACC15] px-6 py-4 text-base font-bold text-[#0B0F1A] shadow-[0_34px_90px_-18px_rgba(250,204,21,1)] transition-all duration-300 hover:scale-[1.04] hover:bg-[#fde047] hover:shadow-[0_40px_100px_-16px_rgba(250,204,21,1)] active:scale-95 sm:w-auto sm:px-9"
             >
               <span className="animate-shine absolute inset-y-0 -left-1/3 w-1/3 -skew-x-12 bg-white/30 blur-md" />
-              Crear mi menú gratis
-              <Rocket className="h-4 w-4" />
+              Solicitar activación ahora
+              <MessageCircle className="h-4 w-4" />
             </Link>
             <Link
-              href={appHref}
+              href="#demo"
               className="animate-fade-up animation-delay-500 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/12 bg-[#11182a]/55 px-8 py-4 text-base font-medium text-white/84 transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-300/20 hover:bg-white/6 hover:text-white will-change-transform will-change-opacity sm:w-auto"
             >
-              Iniciar sesion o registrarte
+              Ver demo del menú
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>
 
           <p className="animate-fade-up animation-delay-700 mt-3 text-center text-xs font-medium text-slate-300/85 sm:text-sm lg:text-left">
-            Sin apps para tus clientes · Table Tents incluidos · Listo en minutos
+            Desde $10/mes · Activación rápida · Ideal para restaurantes, cafés y food trucks
           </p>
 
           <div className="animate-fade-up animation-delay-500 mt-7 flex flex-col gap-5 will-change-transform will-change-opacity">
@@ -176,7 +162,7 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
                     <span className="text-[1.05rem] leading-none text-[#FACC15] sm:text-[1.5rem]">★★★★★</span>
                     <span className="text-[1.35rem] font-black tracking-[-0.04em] text-white sm:text-[2rem]">4.9/5</span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-300 sm:text-sm">Más de 100 restaurantes ya digitalizaron su menú con elmenuxfa</p>
+                  <p className="mt-1 text-xs text-slate-300 sm:text-sm">Restaurantes y cafés ya venden mejor con su menú digital</p>
                 </div>
               </div>
             </div>
@@ -209,13 +195,25 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
           <div className="relative z-20 w-full max-w-[16.75rem] sm:max-w-[22.5rem] lg:max-w-[39rem]">
             <div className="hidden justify-center lg:hidden">
               <div className="animate-fade-up animation-delay-500 rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(28,33,67,0.84),rgba(22,27,51,0.68))] px-5 py-4 text-sm font-semibold text-slate-100 shadow-[0_20px_48px_-26px_rgba(91,33,182,0.62)] backdrop-blur-2xl transition-transform duration-300 hover:-translate-y-1 will-change-transform will-change-opacity">
-                <p className="text-sm text-slate-200">Hoy</p>
-                <p className="mt-2 text-3xl font-black tracking-[-0.05em] text-white">+38%</p>
-                <p className="mt-2 text-sm leading-6 text-slate-200/90">menús digitalizados</p>
+                <p className="text-sm text-slate-200">Incluye</p>
+                <p className="mt-2 text-2xl font-black tracking-[-0.05em] text-white">Table Tent</p>
+                <p className="mt-2 text-sm leading-6 text-slate-200/90">físico con QR para mesa</p>
               </div>
             </div>
 
             <div className="relative mx-auto w-full lg:mr-0 lg:translate-x-0 xl:translate-x-2">
+              <div className="animate-fade-up animation-delay-500 absolute -left-2 bottom-[4%] z-20 hidden w-[8.5rem] sm:block lg:-left-10 lg:bottom-[6%] lg:w-[11rem] xl:w-[12.5rem]">
+                <div className="relative aspect-[3/4] overflow-hidden rounded-[1.2rem] border border-white/10 bg-[#120a24] p-2 shadow-[0_28px_70px_-24px_rgba(124,58,237,0.85)]">
+                  <Image
+                    src="/branding/table-tent.png"
+                    alt="Table Tent en acrílico con QR de elmenuxfa"
+                    fill
+                    sizes="(max-width: 1023px) 136px, 200px"
+                    className="object-contain object-center p-1"
+                  />
+                </div>
+              </div>
+
               <Image
                 src="/hero-app-header.png"
                 alt="Vista de la app de elmenuxfa en un iPhone mostrando el menú digital del restaurante"
@@ -227,14 +225,18 @@ export function Hero({ whatsappHref, appHref }: HeroProps) {
 
               <div className="animate-fade-up animation-delay-500 absolute right-4 top-[18%] z-20 hidden w-[11.5rem] rounded-[1.9rem] border border-white/10 bg-[linear-gradient(180deg,rgba(34,39,78,0.84),rgba(20,25,49,0.72))] px-4 py-4 text-white shadow-[0_24px_64px_-28px_rgba(124,58,237,0.72)] backdrop-blur-2xl transition-transform duration-300 hover:-translate-y-1 lg:block will-change-transform will-change-opacity xl:right-6">
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-[0.95rem] font-medium text-slate-100">Hoy</p>
-                  <TrendingUp className="h-4.5 w-4.5 text-emerald-300" />
+                  <p className="text-[0.95rem] font-medium text-slate-100">Incluye</p>
+                  <Layers className="h-4.5 w-4.5 text-[#FACC15]" />
                 </div>
-                <p className="mt-2.5 text-[2.2rem] font-black tracking-[-0.06em] text-white">+38%</p>
-                <p className="mt-1.5 text-[1rem] leading-6 text-slate-200/92">
-                  menús
+                <p className="mt-2.5 text-[1.35rem] font-black leading-tight tracking-[-0.04em] text-white">
+                  Table Tent
                   <br />
-                  digitalizados
+                  físico
+                </p>
+                <p className="mt-1.5 text-[0.92rem] leading-6 text-slate-200/92">
+                  QR listo para
+                  <br />
+                  colocar en mesa
                 </p>
               </div>
             </div>

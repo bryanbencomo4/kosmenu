@@ -4,7 +4,7 @@ const DEFAULT_APP_SITE_URL = 'https://app.elmenuxfa.com';
 const DEFAULT_SUPPORT_EMAIL = 'hola@elmenuxfa.com';
 const DEFAULT_MARKETING_WHATSAPP_DIGITS = '584148216433';
 const DEFAULT_MARKETING_WHATSAPP_MESSAGE =
-  'Hola, quiero crear mi menú digital con elmenuxfa.com. Me gustaría recibir información del plan profesional.';
+  'Hola, quiero solicitar la activación de mi menú digital con elmenuxfa.com. Me interesa el plan de $10/mes con QR y Table Tent.';
 const DEVELOPMENT_PUBLIC_HOSTS = ['www.localhost', 'elmenuxfa.local', 'www.elmenuxfa.local'] as const;
 const DEVELOPMENT_ADMIN_HOSTS = ['admin.localhost', 'admin.elmenuxfa.local'] as const;
 

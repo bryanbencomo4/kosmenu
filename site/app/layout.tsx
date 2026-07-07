@@ -20,9 +20,9 @@ const bodyFont = Roboto({
 
 export const metadata: Metadata = {
   metadataBase: new URL(publicSiteUrl),
-  title: 'ElMenúXFA | Digitaliza el menú de tu restaurante en menos de 5 minutos',
+  title: 'ElMenúXFA | Menú digital con QR y Table Tent para restaurantes',
   description:
-    'Crea tu menú digital al instante, actualiza precios en tiempo real y ofrece una experiencia sin contacto con Table Tents en acrílico listos para tus mesas.',
+    'Tu menú digital listo para que tus clientes escaneen, elijan y ordenen. Incluye menú online, QR personalizado y Table Tent físico. Desde $10/mes.',
   icons: {
     icon: '/branding/isotipo.png',
     apple: '/branding/isotipo.png',

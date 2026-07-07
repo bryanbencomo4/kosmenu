@@ -202,7 +202,7 @@ export function DemoSection() {
             </h2>
 
             <p className="mt-3 max-w-[16rem] text-[0.87rem] leading-[1.5] text-slate-300/84 sm:mt-5 sm:max-w-[22rem] sm:text-[1rem] lg:max-w-[24rem] lg:text-[1.08rem]">
-              Escaneo del Table Tent en mesa, exploración visual del menú y decisión rápida sin descargar apps.
+              Tus clientes no quieren esperar. Escanean, ven el menú y eligen en segundos.
             </p>
 
             <div className="mt-4 h-1 w-16 rounded-full bg-[linear-gradient(90deg,#a855f7_0%,#7c3aed_58%,#22d3ee_100%)] shadow-[0_0_26px_rgba(168,85,247,0.42)] sm:mt-7 sm:w-24" />
@@ -223,7 +223,7 @@ export function DemoSection() {
               </h2>
 
               <p className="mt-3 max-w-[15rem] text-[0.85rem] leading-[1.48] text-slate-300/84">
-                Table Tent en mesa, menú visual y decisión rápida.
+                Tus clientes no quieren esperar. Escanean, ven el menú y eligen en segundos.
               </p>
 
               <div className="mt-4 h-1 w-16 rounded-full bg-[linear-gradient(90deg,#a855f7_0%,#7c3aed_58%,#22d3ee_100%)] shadow-[0_0_26px_rgba(168,85,247,0.42)]" />
