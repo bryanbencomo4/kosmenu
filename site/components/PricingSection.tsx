@@ -1,5 +1,6 @@
+import Image from 'next/image';
 import Link from 'next/link';
-import { BadgeCheck, CircleDollarSign, MessageCircle, QrCode, Rocket } from 'lucide-react';
+import { BadgeCheck, CircleDollarSign, MessageCircle, Rocket } from 'lucide-react';
 
 import { marketingWhatsappHref } from '../app/_lib/public-site-config';
 
@@ -101,13 +102,19 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
             </div>
 
             <div className="rounded-[1.6rem] border border-white/8 bg-[#0d1323]/86 p-4 sm:p-5 lg:p-6">
-              <div className="flex items-center gap-3 border-b border-white/8 pb-4">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-violet-400/18 bg-violet-500/10 text-violet-200">
-                  <QrCode className="h-5 w-5" />
-                </span>
+              <div className="flex flex-col gap-4 border-b border-white/8 pb-4 sm:flex-row sm:items-center">
+                <div className="relative mx-auto aspect-[3/4] w-full max-w-[8.5rem] shrink-0 overflow-hidden rounded-[1rem] border border-white/10 bg-[#120a24] shadow-[0_24px_60px_-34px_rgba(124,58,237,0.75)] sm:mx-0">
+                  <Image
+                    src="/branding/table-tent.png"
+                    alt="Table Tent en acrílico de elmenuxfa con QR para escanear el menú digital."
+                    fill
+                    sizes="136px"
+                    className="object-contain object-center p-2"
+                  />
+                </div>
                 <div>
                   <p className="text-base font-semibold text-white">Kit inicial de Table Tents incluido</p>
-                  <p className="text-sm text-slate-400">Habladores en acrílico listos para colocar en tus mesas.</p>
+                  <p className="mt-1 text-sm text-slate-400">Habladores en acrílico listos para colocar en tus mesas.</p>
                 </div>
               </div>
 

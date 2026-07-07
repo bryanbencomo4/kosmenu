@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import {
   ArrowRight,
   Layers,
@@ -21,6 +22,8 @@ const features = [
   {
     title: 'Table Tents Acrílicos',
     description: 'Te proveemos los habladores físicos impresos en alta calidad y listos para colocar en las mesas de tu local.',
+    imageSrc: '/branding/table-tent.png',
+    imageAlt: 'Table Tent en acrílico de elmenuxfa con QR para escanear el menú digital.',
     icon: Layers,
     iconClass:
       'border-cyan-400/25 bg-cyan-500/10 text-cyan-200 shadow-[0_0_38px_rgba(34,211,238,0.2)]',
@@ -34,7 +37,7 @@ const features = [
       'border-emerald-400/25 bg-emerald-500/10 text-emerald-200 shadow-[0_0_35px_rgba(16,185,129,0.18)]',
     arrowClass: 'border-emerald-400/20 text-emerald-200',
   },
-] as const;
+];
 
 const stats = [
   {
@@ -122,7 +125,7 @@ export function Features() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {features.map(({ title, description, icon: Icon, iconClass, arrowClass }, index) => (
+          {features.map(({ title, description, icon: Icon, iconClass, arrowClass, imageSrc, imageAlt }, index) => (
             <article
               key={title}
               className={`animate-fade-up group relative flex min-h-[14.5rem] flex-col overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(13,19,33,0.96),rgba(10,15,26,0.92))] px-5 py-6 shadow-[0_26px_80px_-48px_rgba(0,0,0,1)] transition-all duration-300 hover:-translate-y-1 hover:border-white/16 sm:min-h-[17.4rem] sm:px-6 sm:py-7 ${
@@ -131,10 +134,16 @@ export function Features() {
             >
               <div aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.2),transparent)] opacity-80" />
               <div className="relative z-10 flex h-full flex-col">
-                <span className={`inline-flex h-14 w-14 items-center justify-center rounded-[1rem] border ${iconClass} sm:h-16 sm:w-16 sm:rounded-[1.2rem]`}>
-                  <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
-                </span>
-                <h3 className="mt-5 max-w-none font-[var(--font-display)] text-[1.02rem] font-bold leading-[1.12] text-white sm:mt-7 sm:max-w-[13rem] sm:text-[1.12rem] lg:text-[1.22rem]">{title}</h3>
+                {imageSrc ? (
+                  <div className="relative mx-auto mb-4 aspect-[3/4] w-full max-w-[10.5rem] overflow-hidden rounded-[1.2rem] border border-white/10 bg-[#120a24] shadow-[0_24px_60px_-34px_rgba(124,58,237,0.75)]">
+                    <Image src={imageSrc} alt={imageAlt ?? title} fill sizes="168px" className="object-contain object-center p-2" />
+                  </div>
+                ) : (
+                  <span className={`inline-flex h-14 w-14 items-center justify-center rounded-[1rem] border ${iconClass} sm:h-16 sm:w-16 sm:rounded-[1.2rem]`}>
+                    <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
+                  </span>
+                )}
+                <h3 className={`max-w-none font-[var(--font-display)] text-[1.02rem] font-bold leading-[1.12] text-white sm:max-w-[13rem] sm:text-[1.12rem] lg:text-[1.22rem] ${imageSrc ? 'mt-1' : 'mt-5 sm:mt-7'}`}>{title}</h3>
                 <p className="mt-3 max-w-none text-[0.9rem] leading-[1.5] text-slate-300/78 sm:max-w-[15rem] sm:text-[0.98rem] sm:leading-[1.6]">{description}</p>
                 <span className={`mt-5 inline-flex h-10 w-10 items-center justify-center rounded-full border bg-white/[0.02] transition-transform duration-300 group-hover:translate-x-1 sm:mt-auto sm:h-11 sm:w-11 ${arrowClass}`}>
                   <ArrowRight className="h-4 w-4" />

@@ -9,6 +9,7 @@ const phoneScreens = [
     title: 'Escaneo',
     subtitle: 'Table Tent en mesa',
     icon: QrCode,
+    frame: 'product' as const,
     shellClass:
       'border-violet-400/22 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.24)]',
     dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.95)]',
@@ -16,14 +17,16 @@ const phoneScreens = [
       'border-violet-400/25 bg-violet-500/14 text-violet-100 shadow-[0_0_34px_rgba(168,85,247,0.28)]',
     footerClass:
       'border-violet-400/18 bg-[linear-gradient(180deg,rgba(76,29,149,0.42),rgba(44,18,92,0.6))] text-violet-50',
-    imageSrc: '/demo/Screenshot_1778339909.png',
-    imageAlt: 'Cliente escaneando el código QR del Table Tent en la mesa del restaurante.',
-    imageClassName: 'object-cover object-[50%_0%] scale-[1.16]',
+    imageSrc: '/branding/table-tent.png',
+    imageAlt: 'Table Tent en acrílico de elmenuxfa con QR para escanear el menú digital en la mesa.',
+    imageClassName: 'object-contain object-center p-3',
+    aspectClassName: 'aspect-[3/4]',
   },
   {
     title: 'Menú',
     subtitle: 'Exploración visual',
     icon: MenuIcon,
+    frame: 'phone' as const,
     shellClass:
       'border-violet-400/18 bg-violet-500/8 text-violet-100 shadow-[0_0_32px_rgba(167,139,250,0.18)]',
     dotClass: 'bg-violet-200/90 shadow-[0_0_14px_rgba(196,181,253,0.9)]',
@@ -34,11 +37,13 @@ const phoneScreens = [
     imageSrc: '/demo/Screenshot_1778340594.png',
     imageAlt: 'Cliente explorando visualmente el menú digital con categorías y fotos de platos.',
     imageClassName: 'object-cover object-[37%_0%] scale-[1.10]',
+    aspectClassName: 'aspect-[390/844]',
   },
   {
     title: 'Decisión',
     subtitle: 'Eligen al instante',
     icon: BadgeCheck,
+    frame: 'phone' as const,
     shellClass:
       'border-cyan-400/24 bg-cyan-500/10 text-cyan-100 shadow-[0_0_40px_rgba(34,211,238,0.26)]',
     dotClass: 'bg-cyan-200 shadow-[0_0_15px_rgba(165,243,252,0.95)]',
@@ -49,6 +54,7 @@ const phoneScreens = [
     imageSrc: '/demo/Screenshot_1778340734.png',
     imageAlt: 'Cliente revisando platos y tomando una decisión rápida desde el menú digital.',
     imageClassName: 'object-cover object-[50%_0%] scale-[1.12]',
+    aspectClassName: 'aspect-[390/844]',
   },
 ] as const;
 
@@ -106,10 +112,20 @@ function PhoneFlowCard({
 
       <div className="mt-2 flex flex-1 flex-col sm:mt-4">
         <div className="mx-auto flex h-full w-full items-center justify-center">
-          <div className="relative w-[84%] max-w-[11rem] sm:max-w-[13.6rem] lg:max-w-[14.1rem] xl:max-w-[15.2rem]">
-            <div className="relative aspect-[390/844] rounded-[1.85rem] border border-white/10 bg-[linear-gradient(180deg,rgba(15,20,34,0.98),rgba(6,10,20,1))] p-[0.34rem] shadow-[0_42px_80px_-38px_rgba(0,0,0,1)] sm:rounded-[2.1rem] sm:p-[0.38rem] lg:rounded-[2.25rem] lg:p-[0.42rem]">
-              <div className="pointer-events-none absolute left-1/2 top-[0.42rem] z-10 h-[0.34rem] w-[34%] -translate-x-1/2 rounded-full bg-white/10 sm:top-[0.5rem] sm:h-[0.38rem]" />
-              <div className="relative h-full w-full overflow-hidden rounded-[1.55rem] bg-[#04070f] sm:rounded-[1.82rem] lg:rounded-[1.98rem]">
+          <div className={`relative w-[84%] max-w-[11rem] sm:max-w-[13.6rem] lg:max-w-[14.1rem] xl:max-w-[15.2rem] ${screen.frame === 'product' ? 'max-w-[12rem] lg:max-w-[15rem]' : ''}`}>
+            <div
+              className={`relative ${screen.aspectClassName} rounded-[1.85rem] border border-white/10 bg-[linear-gradient(180deg,rgba(15,20,34,0.98),rgba(6,10,20,1))] shadow-[0_42px_80px_-38px_rgba(0,0,0,1)] sm:rounded-[2.1rem] lg:rounded-[2.25rem] ${
+                screen.frame === 'phone' ? 'p-[0.34rem] sm:p-[0.38rem] lg:p-[0.42rem]' : 'overflow-hidden bg-[#120a24] p-2 sm:p-3'
+              }`}
+            >
+              {screen.frame === 'phone' ? (
+                <div className="pointer-events-none absolute left-1/2 top-[0.42rem] z-10 h-[0.34rem] w-[34%] -translate-x-1/2 rounded-full bg-white/10 sm:top-[0.5rem] sm:h-[0.38rem]" />
+              ) : null}
+              <div
+                className={`relative h-full w-full overflow-hidden bg-[#04070f] ${
+                  screen.frame === 'phone' ? 'rounded-[1.55rem] sm:rounded-[1.82rem] lg:rounded-[1.98rem]' : 'rounded-[1.35rem] sm:rounded-[1.55rem]'
+                }`}
+              >
                 <Image
                   src={screen.imageSrc}
                   alt={screen.imageAlt}
