@@ -94,10 +94,10 @@ function HeroProductVisual() {
         </svg>
 
         <Image
-          src="/branding/hero-product-black.png"
+          src="/branding/phone-and-tent.png"
           alt="Table Tent físico y menú digital de elmenuxfa en un smartphone"
-          width={819}
-          height={1024}
+          width={1122}
+          height={1402}
           priority
           className="relative z-0 block h-auto w-full select-none"
         />
