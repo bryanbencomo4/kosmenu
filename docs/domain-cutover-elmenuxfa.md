@@ -10,6 +10,9 @@ Este proyecto ya quedo preparado en codigo para usar `https://elmenuxfa.com` com
 - iOS Universal Links configurado para `elmenuxfa.com` y `www.elmenuxfa.com`
 - `site/public/.well-known/apple-app-site-association` ampliado para `/orders/*` y `/v/*/orders/*`
 - Variables `SITE_URL` y `NEXT_PUBLIC_SITE_URL` soportadas por el sitio web
+- La landing de negocio que antes vivia en `business.elmenuxfa.com` ahora se sirve en `https://elmenuxfa.com`
+- El portal de consumidor anterior de `elmenuxfa.com` fue retirado del codigo
+- `business.elmenuxfa.com` y `www.elmenuxfa.com` redirigen a `https://elmenuxfa.com` desde el middleware
 
 ## Lo que falta hacer fuera del repo
 
@@ -24,6 +27,9 @@ En el proyecto que hoy responde en `kosmenu.vercel.app`:
 - Replica en Vercel las variables de entorno:
   - `SITE_URL=https://elmenuxfa.com`
   - `NEXT_PUBLIC_SITE_URL=https://elmenuxfa.com`
+  - `NEXT_PUBLIC_PUBLIC_SITE_URL=https://elmenuxfa.com`
+- Elimina `business.elmenuxfa.com` del proyecto en Vercel si todavia esta configurado como dominio
+- Elimina `NEXT_PUBLIC_BUSINESS_SITE_URL` de las variables de entorno si todavia existe
 
 ## 2. Spaceship DNS
 
@@ -74,6 +80,9 @@ en los origenes o dominios autorizados que correspondan.
 
 Pruebas minimas recomendadas:
 
+- Abrir `https://elmenuxfa.com` y confirmar que muestra la landing de negocio
+- Confirmar que `https://business.elmenuxfa.com` redirige a `https://elmenuxfa.com`
+- Confirmar que `https://www.elmenuxfa.com` redirige a `https://elmenuxfa.com`
 - Abrir `https://elmenuxfa.com/v/<slug>`
 - Crear un pedido y confirmar que el tracking llegue con `https://elmenuxfa.com/orders/...` o `https://elmenuxfa.com/v/<slug>/orders/...`
 - Confirmar correo de registro desde Supabase

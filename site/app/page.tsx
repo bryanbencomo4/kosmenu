@@ -1,24 +1,21 @@
 import type { Metadata } from 'next';
 
-import { getPublicConsumerHomeData } from './_lib/public-consumer-home';
 import { publicSiteUrl } from './_lib/public-site-config';
-import { ConsumerHomePage } from '../components/consumer/ConsumerHomePage';
+import { BusinessLandingPage } from '../components/business/BusinessLandingPage';
 
 const canonicalUrl = publicSiteUrl;
 
-export const revalidate = 60;
-
 export const metadata: Metadata = {
-  title: 'ElMenúXFA | Descubre negocios, menús y promociones cerca de ti',
+  title: 'ElMenúXFA | Menú digital y pedidos online para negocios de comida',
   description:
-    'Descubre restaurantes, cafés, pizzerías, promociones y negocios abiertos cerca de ti con el portal público de elmenuxfa.com.',
+    'Crea tu menú digital, recibe pedidos por WhatsApp, comparte tu QR y permite a tus clientes seguir sus órdenes en tiempo real.',
   alternates: {
     canonical: canonicalUrl,
   },
   openGraph: {
-    title: 'ElMenúXFA | Descubre negocios, menús y promociones cerca de ti',
+    title: 'ElMenúXFA | Menú digital y pedidos online para negocios de comida',
     description:
-      'Busca restaurantes, cafés, pizzerías, promociones y ubicaciones cercanas desde el portal público de elmenuxfa.com.',
+      'Crea tu menú digital, recibe pedidos por WhatsApp, comparte tu QR y permite a tus clientes seguir sus órdenes en tiempo real.',
     url: canonicalUrl,
     siteName: 'ElMenúXFA',
     locale: 'es_CO',
@@ -34,15 +31,13 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'ElMenúXFA | Descubre negocios, menús y promociones cerca de ti',
+    title: 'ElMenúXFA | Menú digital y pedidos online para negocios de comida',
     description:
-      'Descubre negocios de comida, menús, promociones y ubicaciones cercanas en el portal público de elmenuxfa.com.',
+      'Crea tu menú digital, recibe pedidos por WhatsApp, comparte tu QR y permite a tus clientes seguir sus órdenes en tiempo real.',
     images: [`${canonicalUrl}/branding/full_logo.png`],
   },
 };
 
-export default async function HomePage() {
-  const homeData = await getPublicConsumerHomeData();
-
-  return <ConsumerHomePage {...homeData} />;
+export default function HomePage() {
+  return <BusinessLandingPage />;
 }

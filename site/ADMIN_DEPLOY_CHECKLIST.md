@@ -2,7 +2,7 @@
 
 ## Scope
 
-This checklist hardens and activates `admin.elmenuxfa.com` inside the existing `site` project without changing the public site, business landing, or business modules.
+This checklist hardens and activates `admin.elmenuxfa.com` inside the existing `site` project without changing the public landing, menu routes, or business modules.
 
 ## A. Required Environment Variables
 
@@ -12,8 +12,8 @@ Configure these variables in Vercel for `Production` and `Preview`.
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY
-NEXT_PUBLIC_PUBLIC_SITE_URL=https://www.elmenuxfa.com
-NEXT_PUBLIC_BUSINESS_SITE_URL=https://business.elmenuxfa.com
+NEXT_PUBLIC_PUBLIC_SITE_URL=https://elmenuxfa.com
+NEXT_PUBLIC_SITE_URL=https://elmenuxfa.com
 NEXT_PUBLIC_ADMIN_SITE_URL=https://admin.elmenuxfa.com
 ADMIN_SITE_URL=https://admin.elmenuxfa.com
 ```
@@ -104,9 +104,9 @@ where email = lower('bryanppg@gmail.com');
 7. A user authenticated in Supabase but not allowed in `admin_users` lands on `/admin/unauthorized`.
 8. `bryanppg@gmail.com` as `super_admin` reaches the admin dashboard.
 9. `admin.elmenuxfa.com/admin/api/me` returns admin data with a valid session.
-10. `elmenuxfa.com` still works.
-11. `www.elmenuxfa.com` still works.
-12. `business.elmenuxfa.com` still works.
+10. `elmenuxfa.com` serves the business landing page.
+11. `www.elmenuxfa.com` redirects to `elmenuxfa.com`.
+12. `business.elmenuxfa.com` redirects to `elmenuxfa.com`.
 13. Admin traffic does not fall into `/v/...`.
 
 ## Password Recovery Notes
@@ -118,11 +118,11 @@ where email = lower('bryanppg@gmail.com');
 - `https://admin.elmenuxfa.com/forgot-password` is supported as an alias that lands on the same screen.
 - The admin recovery screen is `https://admin.elmenuxfa.com/admin/reset-password`.
 - `https://admin.elmenuxfa.com/reset-password` is supported as an alias that lands on the same screen.
-- The recovery link for admin accounts must never point to `https://elmenuxfa.com`, because that host serves the public portal and cannot complete the admin password reset flow.
+- The recovery link for admin accounts must never point to `https://elmenuxfa.com`, because that host serves the public landing and cannot complete the admin password reset flow.
 
 ## Recovery Fallback Publico
 
-- Si por error Supabase o un correo viejo redirige a `elmenuxfa.com` o `www.elmenuxfa.com` con `#access_token`, `#refresh_token` y `type=recovery`, el portal público redirige client-side a `https://admin.elmenuxfa.com/admin/reset-password` preservando el hash.
+- Si por error Supabase o un correo viejo redirige a `elmenuxfa.com` o `www.elmenuxfa.com` con `#access_token`, `#refresh_token` y `type=recovery`, la landing pública redirige client-side a `https://admin.elmenuxfa.com/admin/reset-password` preservando el hash.
 - Esto es necesario porque el fragmento `#...` no llega al middleware ni al servidor; solo se puede inspeccionar desde cliente.
 - No pegar enlaces de recovery en chats, tickets ni documentación operativa.
 

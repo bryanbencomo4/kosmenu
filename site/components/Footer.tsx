@@ -1,11 +1,10 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { Mail, MessageCircle, Store } from 'lucide-react';
+import { Mail, MessageCircle } from 'lucide-react';
 
 import {
   marketingWhatsappHref,
   privacyPagePath,
-  publicSiteUrl,
   supportEmailHref,
   termsPagePath,
 } from '../app/_lib/public-site-config';
@@ -32,7 +31,6 @@ const footerGroups = [
     links: [
       { label: 'Beneficios', href: '#beneficios' },
       { label: 'WhatsApp', href: marketingWhatsappHref },
-      { label: 'Portal público', href: publicSiteUrl },
     ],
   },
   {
@@ -48,7 +46,6 @@ const footerGroups = [
 const channelLinks = [
   { label: 'WhatsApp', href: marketingWhatsappHref, icon: MessageCircle },
   { label: 'Correo', href: supportEmailHref, icon: Mail },
-  { label: 'Portal público', href: publicSiteUrl, icon: Store },
 ] as const;
 
 export function Footer() {

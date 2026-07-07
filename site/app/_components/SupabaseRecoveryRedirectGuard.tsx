@@ -12,19 +12,12 @@ const LOCAL_PUBLIC_HOSTS = new Set([
   'elmenuxfa.local',
   'www.elmenuxfa.local',
 ]);
-const LOCAL_BUSINESS_HOSTS = new Set(['business.localhost', 'business.elmenuxfa.local']);
 const LOCAL_ADMIN_HOSTS = new Set(['admin.localhost', 'admin.elmenuxfa.local']);
 const PRODUCTION_PUBLIC_HOSTS = new Set(['elmenuxfa.com', 'www.elmenuxfa.com']);
-const PRODUCTION_BUSINESS_HOSTS = new Set(['business.elmenuxfa.com']);
 const PRODUCTION_ADMIN_HOSTS = new Set(['admin.elmenuxfa.com']);
 
-function isBusinessOrAdminHost(hostname: string) {
-  return (
-    PRODUCTION_ADMIN_HOSTS.has(hostname) ||
-    PRODUCTION_BUSINESS_HOSTS.has(hostname) ||
-    LOCAL_ADMIN_HOSTS.has(hostname) ||
-    LOCAL_BUSINESS_HOSTS.has(hostname)
-  );
+function isAdminHost(hostname: string) {
+  return PRODUCTION_ADMIN_HOSTS.has(hostname) || LOCAL_ADMIN_HOSTS.has(hostname);
 }
 
 function resolveLocalAdminOrigin(hostname: string, port: string) {
@@ -67,7 +60,7 @@ export function SupabaseRecoveryRedirectGuard() {
 
     const normalizedHostname = hostname.trim().toLowerCase();
 
-    if (isBusinessOrAdminHost(normalizedHostname)) {
+    if (isAdminHost(normalizedHostname)) {
       return;
     }
 

@@ -20,8 +20,9 @@ const bodyFont = Roboto({
 
 export const metadata: Metadata = {
   metadataBase: new URL(publicSiteUrl),
-  title: 'elmenuxfa.com',
-  description: 'Menu digital publico',
+  title: 'ElMenúXFA | Menú digital y pedidos online para negocios de comida',
+  description:
+    'Crea tu menú digital, recibe pedidos por WhatsApp, comparte tu QR y permite a tus clientes seguir sus órdenes en tiempo real.',
   icons: {
     icon: '/branding/isotipo.png',
     apple: '/branding/isotipo.png',

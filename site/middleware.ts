@@ -4,24 +4,24 @@ import type { NextRequest } from 'next/server';
 import {
   adminSiteHost,
   appSiteUrl,
-  businessSiteHost,
   developmentAdminHosts,
-  developmentBusinessHosts,
   developmentPublicHosts,
   legalPagePaths,
   publicSiteHost,
 } from './app/_lib/public-site-config';
 
-const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known', '/business'];
+const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known'];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml', ...legalPagePaths]);
 const CANONICAL_HOST = publicSiteHost;
-const CANONICAL_REDIRECT_HOSTS = new Set(['elmenuxfa.com', 'kosmenu.vercel.app']);
-const BUSINESS_HOSTS = new Set<string>([businessSiteHost, ...developmentBusinessHosts]);
+const CANONICAL_REDIRECT_HOSTS = new Set([
+  'www.elmenuxfa.com',
+  'business.elmenuxfa.com',
+  'kosmenu.vercel.app',
+]);
 const ADMIN_HOSTS = new Set<string>([adminSiteHost, ...developmentAdminHosts]);
 const LOCAL_DEVELOPMENT_HOSTS = new Set<string>(['localhost', '127.0.0.1', '0.0.0.0']);
 const LOCAL_DEVELOPMENT_ALIAS_HOSTS = new Set<string>([
   ...developmentPublicHosts,
-  ...developmentBusinessHosts,
   ...developmentAdminHosts,
 ]);
 const ADMIN_INTERNAL_PREFIX = '/admin';
@@ -254,13 +254,14 @@ export function middleware(request: NextRequest) {
     return applySecurityHeaders(NextResponse.next({ request: { headers: requestHeaders } }));
   }
 
-  if (pathname === '/') {
-    if (BUSINESS_HOSTS.has(hostname)) {
-      const rewriteUrl = request.nextUrl.clone();
-      rewriteUrl.pathname = '/business';
-      return applySecurityHeaders(NextResponse.rewrite(rewriteUrl));
-    }
+  if (pathname === '/business') {
+    const redirectUrl = cloneRedirectUrl(request);
+    redirectUrl.pathname = '/';
+    redirectUrl.search = '';
+    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308));
+  }
 
+  if (pathname === '/') {
     return applySecurityHeaders(NextResponse.next());
   }
 
