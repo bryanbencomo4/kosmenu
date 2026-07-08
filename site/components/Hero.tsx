@@ -32,76 +32,14 @@ const avatarGradients = [
 function HeroProductVisual() {
   return (
     <div className="relative w-full">
-      <div className="relative overflow-hidden rounded-[1.65rem] border border-white/8 bg-black sm:rounded-[1.85rem]">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_42%_68%,rgba(124,58,237,0.28),transparent_58%)]"
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_22%,rgba(217,70,239,0.12),transparent_42%)]"
-        />
-
-        <div className="absolute left-3 top-3 z-20 max-w-[10.5rem] rounded-[1rem] border border-violet-300/18 bg-[#17102b]/92 p-2.5 shadow-[0_18px_40px_-24px_rgba(124,58,237,0.95)] backdrop-blur-md sm:left-4 sm:top-4 sm:max-w-[11.5rem] sm:p-3">
-          <div className="flex items-start gap-2">
-            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.7rem] border border-[#FACC15]/35 bg-[#FACC15]/12 text-[#FACC15]">
-              <Layers className="h-4 w-4" />
-            </span>
-            <div className="min-w-0 pt-0.5">
-              <p className="text-[0.72rem] font-bold leading-tight text-white sm:text-[0.78rem]">
-                Incluye <span className="text-[#FACC15]">Table Tent físico</span>
-              </p>
-              <p className="mt-0.5 text-[0.62rem] leading-snug text-slate-300/88 sm:text-[0.68rem]">
-                QR listo para colocar en tu mesa
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 320 420"
-          className="pointer-events-none absolute inset-0 z-10 h-full w-full"
-          preserveAspectRatio="none"
-        >
-          <defs>
-            <filter id="hero-arrow-glow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="2.2" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          <path
-            d="M 104 86 C 98 108, 86 132, 72 158 C 62 178, 54 198, 48 218"
-            fill="none"
-            stroke="rgba(255,255,255,0.95)"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            filter="url(#hero-arrow-glow)"
-          />
-          <path
-            d="M 104 86 C 98 108, 86 132, 72 158 C 62 178, 54 198, 48 218"
-            fill="none"
-            stroke="rgba(196,181,253,0.7)"
-            strokeWidth="3.5"
-            strokeLinecap="round"
-            opacity="0.5"
-          />
-          <circle cx="48" cy="218" r="3" fill="#FACC15" />
-          <circle cx="48" cy="218" r="5.5" fill="rgba(250,204,21,0.2)" />
-        </svg>
-
-        <Image
-          src="/branding/phone-and-tent.png"
-          alt="Table Tent físico y menú digital de elmenuxfa en un smartphone"
-          width={1122}
-          height={1402}
-          priority
-          className="relative z-0 block h-auto w-full select-none"
-        />
-      </div>
+      <Image
+        src="/branding/phone-and-tent.png"
+        alt="Table Tent físico y menú digital de elmenuxfa en un smartphone"
+        width={1122}
+        height={1402}
+        priority
+        className="block h-auto w-full select-none"
+      />
     </div>
   );
 }
