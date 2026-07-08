@@ -29,16 +29,56 @@ const avatarGradients = [
   'linear-gradient(135deg,#f97316,#eab308)',
 ] as const;
 
+const orbitNodes = [
+  'left-[10%] top-[36%] h-2.5 w-2.5',
+  'left-[24%] top-[14%] h-2 w-2',
+  'left-[60%] top-[10%] h-2.5 w-2.5',
+  'right-[7%] top-[28%] h-3 w-3',
+  'right-[12%] bottom-[19%] h-2.5 w-2.5',
+  'left-[54%] bottom-[11%] h-2 w-2',
+] as const;
+
+const orbitParticles = [
+  'left-[17%] top-[24%] h-1 w-1 opacity-75',
+  'left-[30%] top-[58%] h-1.5 w-1.5 opacity-60',
+  'left-[72%] top-[22%] h-1 w-1 opacity-65',
+  'right-[16%] top-[16%] h-1 w-1 opacity-55',
+  'right-[22%] bottom-[30%] h-1.5 w-1.5 opacity-70',
+  'left-[44%] bottom-[18%] h-1 w-1 opacity-50',
+] as const;
+
 function HeroProductVisual() {
   return (
     <div className="relative w-full">
+      <div
+        aria-hidden="true"
+        className="hero-orbit-system pointer-events-none absolute left-1/2 top-1/2 h-[20rem] w-[20rem] -translate-x-1/2 -translate-y-1/2 opacity-55 sm:h-[26rem] sm:w-[26rem] sm:opacity-70 lg:h-[36rem] lg:w-[36rem] lg:opacity-100"
+      >
+        <div className="hero-glow-violet animate-glow-pulse absolute left-1/2 top-1/2 h-[11rem] w-[11rem] -translate-x-1/2 -translate-y-1/2 lg:h-[18rem] lg:w-[18rem]" />
+        <div className="hero-glow-violet hero-glow-secondary animate-glow-pulse animation-delay-200 absolute left-1/2 top-1/2 hidden h-[23rem] w-[23rem] -translate-x-1/2 -translate-y-1/2 sm:block lg:h-[27rem] lg:w-[27rem]" />
+        <div className="hero-glow-cyan animate-glow-pulse animation-delay-300 absolute left-[70%] top-[66%] h-[10rem] w-[10rem] -translate-x-1/2 -translate-y-1/2 sm:h-[13rem] sm:w-[13rem] lg:h-[19rem] lg:w-[19rem]" />
+
+        <div className="hero-orbit hero-orbit-1 absolute left-1/2 top-1/2 h-[14rem] w-[14rem] -translate-x-1/2 -translate-y-1/2 sm:h-[18rem] sm:w-[18rem] lg:h-[20rem] lg:w-[20rem]" />
+        <div className="hero-orbit hero-orbit-2 absolute left-1/2 top-1/2 h-[19rem] w-[19rem] -translate-x-1/2 -translate-y-1/2 sm:h-[24rem] sm:w-[24rem] lg:h-[28rem] lg:w-[28rem]" />
+        <div className="hero-orbit hero-orbit-3 absolute left-1/2 top-1/2 hidden h-[32rem] w-[32rem] -translate-x-1/2 -translate-y-1/2 lg:block" />
+        <div className="hero-orbit hero-orbit-4 absolute left-1/2 top-1/2 hidden h-[38rem] w-[38rem] -translate-x-1/2 -translate-y-1/2 lg:block" />
+
+        {orbitNodes.map((className) => (
+          <span key={className} className={`hero-node absolute hidden sm:block ${className}`} />
+        ))}
+
+        {orbitParticles.map((className) => (
+          <span key={className} className={`hero-particle absolute hidden sm:block ${className}`} />
+        ))}
+      </div>
+
       <Image
         src="/branding/phone-and-tent.png"
         alt="Table Tent físico y menú digital de elmenuxfa en un smartphone"
         width={1122}
         height={1402}
         priority
-        className="block h-auto w-full select-none"
+        className="animate-float-slow relative z-10 block h-auto w-full select-none drop-shadow-[0_40px_100px_rgba(0,0,0,0.55)]"
       />
     </div>
   );
