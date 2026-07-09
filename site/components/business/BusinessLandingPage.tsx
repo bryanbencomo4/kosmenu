@@ -23,9 +23,9 @@ export function BusinessLandingPage() {
         <Navbar whatsappHref={whatsappHref} appHref={appHref} />
 
         <Hero whatsappHref={whatsappHref} appHref={appHref} />
-        <Features />
 
         <div className="hero-features-next">
+          <Features whatsappHref={whatsappHref} />
           <Steps />
           <PricingSection whatsappHref={whatsappHref} />
           <DemoSection />
