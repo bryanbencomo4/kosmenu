@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import {
   LayoutGrid,
   Package,
@@ -10,7 +11,79 @@ import {
   Zap,
 } from 'lucide-react';
 
-const steps = [
+function StepQrPreview() {
+  return (
+    <div className="mx-auto mt-4 w-full max-w-[11.5rem] overflow-hidden rounded-[1.05rem] border border-slate-200/90 bg-white px-3 pb-3 pt-2.5 shadow-[0_16px_36px_-22px_rgba(15,23,42,0.55)]">
+      <p className="text-center text-[0.62rem] font-semibold tracking-[-0.01em] text-slate-700">
+        Tu menú está listo
+      </p>
+
+      <div className="mx-auto mt-2 flex aspect-square w-[6.6rem] items-center justify-center rounded-[0.7rem] border border-slate-200 bg-white p-1.5">
+        <svg viewBox="0 0 29 29" className="h-full w-full text-slate-950" aria-hidden="true">
+          <rect x="1" y="1" width="9" height="9" rx="1.2" fill="currentColor" />
+          <rect x="3" y="3" width="5" height="5" rx="0.6" fill="#fff" />
+          <rect x="4.5" y="4.5" width="2" height="2" fill="currentColor" />
+
+          <rect x="19" y="1" width="9" height="9" rx="1.2" fill="currentColor" />
+          <rect x="21" y="3" width="5" height="5" rx="0.6" fill="#fff" />
+          <rect x="22.5" y="4.5" width="2" height="2" fill="currentColor" />
+
+          <rect x="1" y="19" width="9" height="9" rx="1.2" fill="currentColor" />
+          <rect x="3" y="21" width="5" height="5" rx="0.6" fill="#fff" />
+          <rect x="4.5" y="22.5" width="2" height="2" fill="currentColor" />
+
+          <rect x="12" y="1" width="2" height="2" fill="currentColor" />
+          <rect x="15" y="1" width="2" height="2" fill="currentColor" />
+          <rect x="12" y="4" width="2" height="2" fill="currentColor" />
+          <rect x="15" y="4" width="2" height="2" fill="currentColor" />
+          <rect x="12" y="7" width="2" height="2" fill="currentColor" />
+          <rect x="15" y="7" width="2" height="2" fill="currentColor" />
+
+          <rect x="1" y="12" width="2" height="2" fill="currentColor" />
+          <rect x="4" y="12" width="2" height="2" fill="currentColor" />
+          <rect x="7" y="12" width="2" height="2" fill="currentColor" />
+          <rect x="1" y="15" width="2" height="2" fill="currentColor" />
+          <rect x="7" y="15" width="2" height="2" fill="currentColor" />
+
+          <rect x="12" y="12" width="5" height="5" fill="currentColor" />
+          <rect x="19" y="12" width="2" height="2" fill="currentColor" />
+          <rect x="22" y="12" width="2" height="2" fill="currentColor" />
+          <rect x="25" y="12" width="2" height="2" fill="currentColor" />
+          <rect x="19" y="15" width="2" height="2" fill="currentColor" />
+          <rect x="25" y="15" width="2" height="2" fill="currentColor" />
+
+          <rect x="12" y="19" width="2" height="2" fill="currentColor" />
+          <rect x="15" y="19" width="2" height="2" fill="currentColor" />
+          <rect x="12" y="22" width="2" height="2" fill="currentColor" />
+          <rect x="15" y="25" width="2" height="2" fill="currentColor" />
+          <rect x="19" y="19" width="4" height="4" fill="currentColor" />
+          <rect x="24" y="19" width="2" height="2" fill="currentColor" />
+          <rect x="19" y="24" width="2" height="2" fill="currentColor" />
+          <rect x="24" y="24" width="3" height="3" fill="currentColor" />
+        </svg>
+      </div>
+
+      <div className="mt-2.5 truncate rounded-full bg-[#7C3AED] px-2.5 py-1.5 text-center text-[0.58rem] font-bold leading-none tracking-[-0.02em] text-white shadow-[0_10px_24px_-14px_rgba(124,58,237,0.95)]">
+        elmenuxfa.com/tu-restaurante
+      </div>
+    </div>
+  );
+}
+
+type StepItem = {
+  number: number;
+  title: string;
+  description: string;
+  badgeClass: string;
+  iconShellClass: string;
+  dotClass: string;
+  glowClass: string;
+  featured: boolean;
+  icon: ReactNode;
+  preview?: ReactNode;
+};
+
+const steps: StepItem[] = [
   {
     number: 1,
     title: 'Solicita tu\nactivación',
@@ -36,13 +109,15 @@ const steps = [
   {
     number: 3,
     title: 'Generamos\ntu QR',
-    description: 'Código único listo\npara tus mesas.',
+    description: 'Recibes tu código QR único y tu enlace personalizado listo para compartir.',
     badgeClass: 'border-sky-300/24 bg-sky-500/12 text-sky-50 shadow-[0_0_26px_rgba(56,189,248,0.34)]',
     iconShellClass: 'border-sky-400/34 bg-sky-500/10 text-sky-100 shadow-[0_0_44px_rgba(56,189,248,0.38)]',
     dotClass: 'bg-sky-300 shadow-[0_0_14px_rgba(125,211,252,0.95)]',
-    glowClass: 'border-sky-300/32 shadow-[0_0_0_1px_rgba(125,211,252,0.3),0_0_54px_rgba(59,130,246,0.3)]',
+    glowClass:
+      'border-sky-300/35 shadow-[0_0_0_1px_rgba(125,211,252,0.34),0_-18px_42px_-18px_rgba(56,189,248,0.55),0_0_54px_rgba(59,130,246,0.3)]',
     featured: true,
     icon: <QrCode className="h-10 w-10" />,
+    preview: <StepQrPreview />,
   },
   {
     number: 4,
@@ -66,7 +141,7 @@ const steps = [
     featured: false,
     icon: <Rocket className="h-10 w-10" />,
   },
-] as const;
+];
 
 const trustItems = [
   {
@@ -169,8 +244,19 @@ export function Steps() {
             {steps.map((step, index) => (
               <article
                 key={step.title}
-                className={`relative flex min-h-[17rem] min-w-[16rem] max-w-[16rem] snap-center flex-col overflow-hidden rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(18,24,39,0.9),rgba(12,18,30,0.92))] px-4 pb-4 pt-5 text-center shadow-[0_28px_70px_-44px_rgba(0,0,0,1)] backdrop-blur-sm transition-transform duration-300 sm:min-w-[17rem] sm:max-w-[17rem] lg:min-h-[18.1rem] lg:min-w-0 lg:max-w-none lg:px-5 ${step.glowClass}`}
+                className={`relative flex min-w-[16rem] max-w-[16rem] snap-center flex-col overflow-hidden rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(18,24,39,0.9),rgba(12,18,30,0.92))] px-4 pb-4 pt-5 text-center shadow-[0_28px_70px_-44px_rgba(0,0,0,1)] backdrop-blur-sm transition-transform duration-300 sm:min-w-[17rem] sm:max-w-[17rem] lg:min-w-0 lg:max-w-none lg:px-5 ${
+                  step.preview ? 'min-h-[24.5rem] lg:min-h-[26rem]' : 'min-h-[17rem] lg:min-h-[18.1rem]'
+                } ${step.glowClass}`}
               >
+                <div
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute inset-x-4 top-0 h-px ${
+                    step.featured
+                      ? 'bg-[linear-gradient(90deg,transparent,rgba(125,211,252,0.9),transparent)]'
+                      : 'bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]'
+                  }`}
+                />
+
                 <div className={`absolute left-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full border text-[1.55rem] font-black leading-none ${step.badgeClass}`}>
                   <span className="translate-y-[-1px] text-[1.65rem]">{step.number}</span>
                 </div>
@@ -185,32 +271,32 @@ export function Steps() {
                   {step.title}
                 </h3>
 
-                <p className="mt-3 whitespace-pre-line text-[0.88rem] leading-[1.4] text-slate-300/80 sm:text-[0.92rem] sm:leading-[1.42]">
+                <p
+                  className={`mt-3 text-[0.88rem] leading-[1.4] text-slate-300/80 sm:text-[0.92rem] sm:leading-[1.42] ${
+                    step.preview ? '' : 'whitespace-pre-line'
+                  }`}
+                >
                   {step.description}
                 </p>
 
-                <div className="mt-auto pt-4">
-                  <div className="flex items-center justify-center gap-2">
-                    {steps.map((_, dotIndex) => (
-                      <span
-                        key={`${step.number}-${dotIndex}`}
-                        className={`h-2.5 w-2.5 rounded-full ${
-                          dotIndex === index
-                            ? step.dotClass
-                            : 'border border-white/10 bg-white/10'
-                        }`}
-                      />
-                    ))}
-                  </div>
+                {step.preview}
 
-                  {step.featured ? (
-                    <div className="mt-5 flex justify-center">
-                      <span className="inline-flex rounded-full border border-sky-400/24 bg-sky-500/14 px-4 py-1.5 text-[0.74rem] font-bold uppercase tracking-[0.14em] text-sky-300 shadow-[0_0_24px_rgba(59,130,246,0.24)]">
-                        Paso clave
-                      </span>
+                {!step.preview ? (
+                  <div className="mt-auto pt-4">
+                    <div className="flex items-center justify-center gap-2">
+                      {steps.map((_, dotIndex) => (
+                        <span
+                          key={`${step.number}-${dotIndex}`}
+                          className={`h-2.5 w-2.5 rounded-full ${
+                            dotIndex === index
+                              ? step.dotClass
+                              : 'border border-white/10 bg-white/10'
+                          }`}
+                        />
+                      ))}
                     </div>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </article>
             ))}
           </div>
