@@ -1,325 +1,292 @@
 'use client';
 
 import Image from 'next/image';
-import { useRef, useState, type TouchEvent } from 'react';
-import { ArrowLeft, ArrowRight, BadgeCheck, Menu as MenuIcon, QrCode, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import {
+  ArrowDown,
+  ArrowRight,
+  BookOpen,
+  CreditCard,
+  MapPin,
+  Play,
+  ShoppingCart,
+  Sparkles,
+} from 'lucide-react';
+import { publicSiteUrl } from '../app/_lib/public-site-config';
+import { DemoPhone } from './demo/DemoPhone';
+import { DEMO_FLOW_STEPS } from './demo/demo-data';
+import { DemoQrCard, OrderTrackingCard, PopularProductsCard } from './demo/DemoSideCards';
+import { useDemoFlow } from './demo/useDemoFlow';
 
-const phoneScreens = [
-  {
-    title: 'Escaneo',
-    subtitle: 'Table Tent en mesa',
-    icon: QrCode,
-    frame: 'product' as const,
-    shellClass:
-      'border-violet-400/22 bg-violet-500/10 text-violet-200 shadow-[0_0_38px_rgba(168,85,247,0.24)]',
-    dotClass: 'bg-violet-200 shadow-[0_0_14px_rgba(216,180,254,0.95)]',
-    connectorClass:
-      'border-violet-400/25 bg-violet-500/14 text-violet-100 shadow-[0_0_34px_rgba(168,85,247,0.28)]',
-    footerClass:
-      'border-violet-400/18 bg-[linear-gradient(180deg,rgba(76,29,149,0.42),rgba(44,18,92,0.6))] text-violet-50',
-    imageSrc: '/branding/table-tent.png',
-    imageAlt: 'Table Tent en acrílico de elmenuxfa con QR para escanear el menú digital en la mesa.',
-    imageClassName: 'object-contain object-center p-3',
-    aspectClassName: 'aspect-[3/4]',
-  },
-  {
-    title: 'Menú',
-    subtitle: 'Exploración visual',
-    icon: MenuIcon,
-    frame: 'phone' as const,
-    shellClass:
-      'border-violet-400/18 bg-violet-500/8 text-violet-100 shadow-[0_0_32px_rgba(167,139,250,0.18)]',
-    dotClass: 'bg-violet-200/90 shadow-[0_0_14px_rgba(196,181,253,0.9)]',
-    connectorClass:
-      'border-violet-400/22 bg-violet-500/12 text-violet-100 shadow-[0_0_28px_rgba(167,139,250,0.24)]',
-    footerClass:
-      'border-violet-400/16 bg-[linear-gradient(180deg,rgba(55,25,117,0.38),rgba(35,18,74,0.56))] text-violet-50',
-    imageSrc: '/demo/Screenshot_1778339909.png',
-    imageAlt: 'Cliente explorando el menú digital con categorías, fotos de platos y precios.',
-    imageClassName: 'object-cover object-top scale-[1.02]',
-    aspectClassName: 'aspect-[390/844]',
-  },
-  {
-    title: 'Decisión',
-    subtitle: 'Ordenan al instante',
-    icon: BadgeCheck,
-    frame: 'phone' as const,
-    shellClass:
-      'border-cyan-400/24 bg-cyan-500/10 text-cyan-100 shadow-[0_0_40px_rgba(34,211,238,0.26)]',
-    dotClass: 'bg-cyan-200 shadow-[0_0_15px_rgba(165,243,252,0.95)]',
-    connectorClass:
-      'border-cyan-400/25 bg-cyan-500/12 text-cyan-100 shadow-[0_0_30px_rgba(34,211,238,0.26)]',
-    footerClass:
-      'border-cyan-400/20 bg-[linear-gradient(180deg,rgba(8,88,109,0.34),rgba(8,53,71,0.56))] text-cyan-50',
-    imageSrc: '/demo/Screenshot_1778340594.png',
-    imageAlt: 'Cliente revisando su pedido y confirmando la orden desde el menú digital.',
-    imageClassName: 'object-cover object-top scale-[1.04]',
-    aspectClassName: 'aspect-[390/844]',
-  },
-] as const;
+const STEP_ICONS = {
+  menu: BookOpen,
+  cart: ShoppingCart,
+  payment: CreditCard,
+  tracking: MapPin,
+} as const;
 
-type PhoneScreen = (typeof phoneScreens)[number];
-
-type PhoneFlowCardProps = {
-  screen: PhoneScreen;
-  index: number;
-  articleClassName: string;
-  showConnector?: boolean;
-  showSubtitleOnMobile?: boolean;
-};
-
-function PhoneFlowCard({
-  screen,
-  index,
-  articleClassName,
-  showConnector = false,
-  showSubtitleOnMobile = false,
-}: PhoneFlowCardProps) {
-  const Icon = screen.icon;
-
-  return (
-    <article className={articleClassName}>
-      {showConnector && index > 0 ? (
-        <div className="absolute -left-[1.15rem] top-[46.5%] hidden -translate-y-1/2 lg:flex">
-          <span className={`inline-flex h-10 w-10 items-center justify-center rounded-full border ${screen.connectorClass}`}>
-            <ArrowRight className="h-4 w-4" />
-          </span>
-        </div>
-      ) : null}
-
-      <div className="mx-auto h-1.5 w-12 rounded-full bg-white/10 sm:h-2 sm:w-16" />
-
-      <div className="mt-1.5 flex items-center justify-between gap-2 px-1 sm:mt-4 sm:gap-3">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-2.5">
-          <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full border sm:h-9 sm:w-9 lg:h-10 lg:w-10 ${screen.shellClass}`}>
-            <Icon className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-[0.8rem] font-bold text-white sm:text-[0.94rem] lg:text-[0.98rem]">{screen.title}</p>
-            <p
-              className={
-                showSubtitleOnMobile
-                  ? 'truncate text-[0.58rem] uppercase tracking-[0.18em] text-white/42 sm:text-[0.64rem] lg:text-[0.68rem]'
-                  : 'hidden truncate text-[0.58rem] uppercase tracking-[0.18em] text-white/42 sm:block sm:text-[0.64rem] lg:text-[0.68rem]'
-              }
-            >
-              {screen.subtitle}
-            </p>
-          </div>
-        </div>
-        <span className={`h-1.5 w-1.5 rounded-full sm:h-2.5 sm:w-2.5 ${screen.dotClass}`} />
-      </div>
-
-      <div className="mt-2 flex flex-1 flex-col sm:mt-4">
-        <div className="mx-auto flex h-full w-full items-center justify-center">
-          <div className={`relative w-[84%] max-w-[11rem] sm:max-w-[13.6rem] lg:max-w-[14.1rem] xl:max-w-[15.2rem] ${screen.frame === 'product' ? 'max-w-[12rem] lg:max-w-[15rem]' : ''}`}>
-            <div
-              className={`relative ${screen.aspectClassName} rounded-[1.85rem] border border-white/10 bg-[linear-gradient(180deg,rgba(15,20,34,0.98),rgba(6,10,20,1))] shadow-[0_42px_80px_-38px_rgba(0,0,0,1)] sm:rounded-[2.1rem] lg:rounded-[2.25rem] ${
-                screen.frame === 'phone' ? 'p-[0.34rem] sm:p-[0.38rem] lg:p-[0.42rem]' : 'overflow-hidden bg-[#120a24] p-2 sm:p-3'
-              }`}
-            >
-              {screen.frame === 'phone' ? (
-                <div className="pointer-events-none absolute left-1/2 top-[0.42rem] z-10 h-[0.34rem] w-[34%] -translate-x-1/2 rounded-full bg-white/10 sm:top-[0.5rem] sm:h-[0.38rem]" />
-              ) : null}
-              <div
-                className={`relative h-full w-full overflow-hidden bg-[#04070f] ${
-                  screen.frame === 'phone' ? 'rounded-[1.55rem] sm:rounded-[1.82rem] lg:rounded-[1.98rem]' : 'rounded-[1.35rem] sm:rounded-[1.55rem]'
-                }`}
-              >
-                <Image
-                  src={screen.imageSrc}
-                  alt={screen.imageAlt}
-                  fill
-                  sizes="(max-width: 639px) 180px, (max-width: 1023px) 230px, 260px"
-                  className={`transform-gpu ${screen.imageClassName}`}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className={`mt-2 rounded-[0.8rem] border px-2.5 py-1.5 text-center text-[0.76rem] font-semibold shadow-[0_18px_34px_-28px_rgba(0,0,0,1)] sm:mt-4 sm:rounded-[1.05rem] sm:px-4 sm:py-2.5 sm:text-[0.94rem] lg:rounded-[1.15rem] lg:py-3 lg:text-[1rem] ${screen.footerClass}`}>
-        {index + 1}. {screen.title}
-      </div>
-    </article>
-  );
-}
+const PROBAR_DEMO_PATH = '/probar-demo';
 
 export function DemoSection() {
-  const [activeMobileScreen, setActiveMobileScreen] = useState(0);
-  const touchStartXRef = useRef<number | null>(null);
-  const touchDeltaXRef = useRef(0);
-  const lastMobileScreenIndex = phoneScreens.length - 1;
+  const {
+    step,
+    cart,
+    activeCategory,
+    stepMeta,
+    setActiveCategory,
+    addToCart,
+    removeFromCart,
+    selectStep,
+    playFullFlow,
+  } = useDemoFlow();
+  const [demoUrl, setDemoUrl] = useState(`${publicSiteUrl}${PROBAR_DEMO_PATH}`);
 
-  function goToMobileScreen(nextIndex: number) {
-    const boundedIndex = Math.max(0, Math.min(lastMobileScreenIndex, nextIndex));
-    setActiveMobileScreen(boundedIndex);
-  }
+  useEffect(() => {
+    setDemoUrl(`${window.location.origin}${PROBAR_DEMO_PATH}`);
+  }, []);
 
-  function handleSliderTouchStart(event: TouchEvent<HTMLDivElement>) {
-    touchStartXRef.current = event.touches[0]?.clientX ?? null;
-    touchDeltaXRef.current = 0;
-  }
+  const flowCards = (
+    <div className="grid grid-cols-2 gap-2.5">
+      {DEMO_FLOW_STEPS.map((item) => {
+        const Icon = STEP_ICONS[item.id];
+        const active = step === item.id;
+        const yellow = item.accent === 'yellow';
 
-  function handleSliderTouchMove(event: TouchEvent<HTMLDivElement>) {
-    if (touchStartXRef.current === null) return;
-    const currentX = event.touches[0]?.clientX ?? touchStartXRef.current;
-    touchDeltaXRef.current = currentX - touchStartXRef.current;
-  }
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => selectStep(item.id)}
+            aria-current={active ? 'true' : undefined}
+            className={`group relative rounded-[1.1rem] border p-3.5 text-left transition duration-300 hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-300 ${
+              active
+                ? yellow
+                  ? 'border-[#FACC15]/45 bg-[#FACC15]/10 shadow-[0_0_24px_rgba(250,204,21,0.12)]'
+                  : 'border-violet-300/45 bg-violet-500/12 shadow-[0_0_24px_rgba(168,85,247,0.16)]'
+                : 'border-white/10 bg-white/[0.03] hover:border-white/18'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[0.66rem] font-bold ${
+                  active
+                    ? yellow
+                      ? 'bg-[#FACC15] text-[#0B0F1A]'
+                      : 'bg-violet-300 text-[#1a102e]'
+                    : 'bg-white/10 text-white/60'
+                }`}
+              >
+                {item.number}
+              </span>
+              <span
+                className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${
+                  yellow
+                    ? 'border-[#FACC15]/30 bg-[#FACC15]/12 text-[#FACC15]'
+                    : 'border-violet-400/30 bg-violet-500/12 text-violet-200'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+            </div>
+            <p className="mt-2 text-[0.82rem] font-semibold leading-snug text-white">{item.title}</p>
+            <p className="mt-1 text-[0.7rem] leading-relaxed text-slate-400">{item.description}</p>
+            <span
+              className={`mt-2 block h-0.5 w-8 rounded-full ${
+                yellow ? 'bg-[#FACC15]/80' : 'bg-violet-400/70'
+              }`}
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
 
-  function handleSliderTouchEnd() {
-    if (Math.abs(touchDeltaXRef.current) > 42) {
-      goToMobileScreen(activeMobileScreen + (touchDeltaXRef.current < 0 ? 1 : -1));
-    }
-
-    touchStartXRef.current = null;
-    touchDeltaXRef.current = 0;
-  }
+  const ctaBlock = (
+    <div className="mx-auto flex w-full max-w-[38rem] flex-col items-center gap-3.5">
+      <div className="flex w-full flex-col gap-3 sm:flex-row sm:justify-center">
+        <Link
+          href={PROBAR_DEMO_PATH}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex w-full items-center justify-center gap-2.5 rounded-[0.9rem] bg-[#FACC15] px-6 text-[0.95rem] font-bold text-[#0B0F1A] shadow-[0_20px_45px_-22px_rgba(250,204,21,0.85)] transition hover:-translate-y-0.5 hover:bg-[#fde047] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FACC15] sm:w-auto sm:min-w-[12.5rem]"
+          style={{ height: '3.4rem' }}
+        >
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#0B0F1A]/12">
+            <Play className="h-3 w-3 fill-current" />
+          </span>
+          Probar demo
+        </Link>
+        <button
+          type="button"
+          onClick={playFullFlow}
+          style={{ height: '3.4rem' }}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-[0.9rem] border border-white/16 bg-white/[0.03] px-6 text-[0.92rem] font-semibold text-white transition hover:-translate-y-0.5 hover:border-violet-300/35 hover:bg-white/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-300 sm:w-auto sm:min-w-[12.5rem]"
+        >
+          Ver flujo completo
+          <ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
+      <p className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[0.75rem] text-slate-400">
+        <span>✓ Sin compromiso</span>
+        <span className="text-white/25">·</span>
+        <span>◉ Datos de prueba</span>
+        <span className="text-white/25">·</span>
+        <span>✓ Listo en segundos</span>
+      </p>
+    </div>
+  );
 
   return (
-    <section id="demo" className="perf-section relative overflow-hidden border-y border-white/8 bg-[#040a16]">
+    <section
+      id="demo"
+      className="perf-section relative scroll-mt-24 overflow-hidden border-y border-white/8"
+      style={{
+        background:
+          'radial-gradient(circle at 52% 44%, rgba(116, 70, 255, 0.12), transparent 33%), radial-gradient(circle at 88% 48%, rgba(55, 183, 255, 0.05), transparent 26%), #060b18',
+      }}
+    >
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,0.5)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.5)_1px,transparent_1px)] [background-size:56px_56px]" />
-        <div className="absolute left-[-8%] top-[18%] h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,rgba(124,58,237,0.24)_0%,rgba(124,58,237,0.1)_34%,transparent_72%)] blur-3xl" />
-        <div className="absolute right-[-9%] top-[10%] h-[30rem] w-[30rem] rounded-full bg-[radial-gradient(circle,rgba(34,211,238,0.18)_0%,rgba(34,211,238,0.08)_36%,transparent_72%)] blur-3xl" />
+        {Array.from({ length: 16 }).map((_, index) => (
+          <span
+            key={`dot-${index}`}
+            className="absolute h-1 w-1 rounded-full bg-white/25"
+            style={{
+              left: `${8 + ((index * 17) % 84)}%`,
+              top: `${12 + ((index * 23) % 76)}%`,
+              opacity: 0.16 + (index % 4) * 0.07,
+            }}
+          />
+        ))}
+        <div className="absolute -right-10 top-[24%] hidden h-60 w-60 overflow-hidden rounded-full opacity-30 xl:block">
+          <Image
+            src="/demo/products/hero-banner.png"
+            alt=""
+            fill
+            sizes="240px"
+            className="scale-125 object-cover blur-sm"
+          />
+          <div className="absolute inset-0 bg-[#060b18]/60" />
+        </div>
       </div>
 
-      <div className="mx-auto max-w-[1380px] px-4 py-6 sm:px-6 sm:py-11 lg:px-8 lg:py-16">
-        <div className="grid gap-4 sm:gap-8 lg:grid-cols-[minmax(0,0.32fr)_minmax(0,1fr)] lg:items-center lg:gap-8 xl:gap-10">
-          <div className="relative hidden max-w-[24rem] lg:block lg:max-w-[27rem] lg:pb-10">
-            <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em] text-violet-200 shadow-[0_0_0_1px_rgba(167,139,250,0.08)] sm:px-5 sm:py-2 sm:text-[11px]">
-              <Sparkles className="h-3.5 w-3.5 text-[#c4b5fd]" />
-              Flujo real
+      <div className="relative mx-auto max-w-[1480px] px-4 py-14 sm:px-6 sm:py-16 lg:px-8 xl:py-16">
+        {/* Mobile / tablet stack */}
+        <div className="xl:hidden">
+          <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em] text-violet-100 sm:text-[11px]">
+            <Sparkles className="h-3.5 w-3.5 text-[#c4b5fd]" />
+            Demo interactivo
+          </span>
+          <h2 className="mt-5 font-[var(--font-display)] text-[2.35rem] font-black leading-[0.95] tracking-[-0.04em] text-white sm:text-[2.9rem]">
+            <span className="block whitespace-nowrap">Mira tu menú</span>
+            <span className="mt-1 block whitespace-nowrap bg-[linear-gradient(180deg,#e9d5ff_0%,#c084fc_42%,#7c3aed_100%)] bg-clip-text text-transparent">
+              en acción
             </span>
+          </h2>
+          <p className="mt-4 max-w-[28rem] text-[1rem] leading-[1.6] text-slate-300/88 sm:text-[1.08rem]">
+            Tus clientes pueden explorar, pedir, pagar y seguir su orden desde el celular, sin descargar apps.
+          </p>
 
-            <h2 className="mt-4 max-w-[14rem] font-[var(--font-display)] text-[1.55rem] font-black leading-[0.92] tracking-[-0.05em] text-white sm:mt-5 sm:max-w-[21rem] sm:text-[2.75rem] lg:max-w-[29rem] lg:text-[3.55rem]">
-              <span className="block">Así de rápido</span>
-              <span className="block">escanean y eligen</span>
-              <span className="block bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                tus clientes.
-              </span>
-            </h2>
-
-            <p className="mt-3 max-w-[16rem] text-[0.87rem] leading-[1.5] text-slate-300/84 sm:mt-5 sm:max-w-[22rem] sm:text-[1rem] lg:max-w-[24rem] lg:text-[1.08rem]">
-              Tus clientes no quieren esperar. Escanean, ven el menú y eligen en segundos.
+          <div data-demo-phone className="mx-auto mt-8 w-[90%] max-w-[21rem]">
+            <DemoPhone
+              step={step}
+              cart={cart}
+              activeCategory={activeCategory}
+              onCategoryChange={setActiveCategory}
+              onAdd={addToCart}
+              onRemove={removeFromCart}
+              onGoToCart={() => selectStep('cart')}
+              onGoToPayment={() => selectStep('payment')}
+              onGoToTracking={() => selectStep('tracking')}
+              onGoToMenu={() => selectStep('menu')}
+            />
+            <p className="mt-4 text-center text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-white/40">
+              Paso {stepMeta.number}: {stepMeta.title}
             </p>
+          </div>
 
-            <div className="mt-4 h-1 w-16 rounded-full bg-[linear-gradient(90deg,#a855f7_0%,#7c3aed_58%,#22d3ee_100%)] shadow-[0_0_26px_rgba(168,85,247,0.42)] sm:mt-7 sm:w-24" />
+          <div className="mt-8">{ctaBlock}</div>
+          <div className="mt-8">{flowCards}</div>
+          <div className="mt-6 space-y-4">
+            <PopularProductsCard onAdd={addToCart} />
+            <OrderTrackingCard />
+            <DemoQrCard demoUrl={demoUrl} />
+          </div>
+        </div>
+
+        {/* Desktop three-column composition */}
+        <div className="hidden items-center gap-9 xl:grid xl:grid-cols-[minmax(0,0.86fr)_minmax(400px,1.22fr)_minmax(0,0.86fr)]">
+          <div className="relative">
+            <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.22em] text-violet-100">
+              <Sparkles className="h-3.5 w-3.5 text-[#c4b5fd]" />
+              Demo interactivo
+            </span>
+            <h2 className="relative mt-5 font-[var(--font-display)] text-[3.55rem] font-black leading-[0.95] tracking-[-0.04em] text-white">
+              <span className="block whitespace-nowrap">Mira tu menú</span>
+              <span className="mt-1 block whitespace-nowrap bg-[linear-gradient(180deg,#e9d5ff_0%,#c084fc_42%,#7c3aed_100%)] bg-clip-text text-transparent">
+                en acción
+              </span>
+              <span aria-hidden="true" className="absolute -right-2 top-3 h-2 w-2 rounded-full bg-violet-300 shadow-[0_0_16px_rgba(196,181,253,1)]" />
+              <span aria-hidden="true" className="absolute -right-6 top-[3.4rem] h-1.5 w-1.5 rounded-full bg-violet-200/80 shadow-[0_0_12px_rgba(196,181,253,0.9)]" />
+            </h2>
+            <p className="mt-4 max-w-[27rem] text-[1.02rem] leading-[1.6] text-slate-300/88">
+              Tus clientes pueden explorar, pedir, pagar y seguir su orden desde el celular, sin descargar apps.
+            </p>
+            <div className="mt-6">{flowCards}</div>
+          </div>
+
+          <div className="flex flex-col items-center">
+            <div data-demo-phone className="relative mx-auto w-full">
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute -left-14 top-[16%] hidden h-44 w-16 text-violet-300/45 2xl:block"
+                viewBox="0 0 64 176"
+                fill="none"
+              >
+                <path d="M56 8 C 14 42, 14 122, 46 168" stroke="currentColor" strokeWidth="1.6" strokeDasharray="3 6" />
+                <path d="M40 160 L46 168 L54 158" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute -right-12 top-[32%] hidden h-36 w-14 text-violet-300/40 2xl:block"
+                viewBox="0 0 56 144"
+                fill="none"
+              >
+                <path d="M6 16 C 42 44, 42 96, 14 132" stroke="currentColor" strokeWidth="1.6" strokeDasharray="3 6" />
+                <path d="M10 124 L14 132 L24 122" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+              <DemoPhone
+                step={step}
+                cart={cart}
+                activeCategory={activeCategory}
+                onCategoryChange={setActiveCategory}
+                onAdd={addToCart}
+                onRemove={removeFromCart}
+                onGoToCart={() => selectStep('cart')}
+                onGoToPayment={() => selectStep('payment')}
+                onGoToTracking={() => selectStep('tracking')}
+                onGoToMenu={() => selectStep('menu')}
+              />
+              <p className="mt-4 text-center text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-white/40">
+                Paso {stepMeta.number}: {stepMeta.title}
+              </p>
+            </div>
+            <div className="mt-6 w-full max-w-[23.5rem]">{ctaBlock}</div>
           </div>
 
           <div className="relative">
-            <div className="mb-4 max-w-[16rem] lg:hidden">
-              <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em] text-violet-200 shadow-[0_0_0_1px_rgba(167,139,250,0.08)]">
-                <Sparkles className="h-3.5 w-3.5 text-[#c4b5fd]" />
-                Flujo real
+            <PopularProductsCard onAdd={addToCart} />
+            <div className="my-3.5">
+              <OrderTrackingCard />
+            </div>
+            <div aria-hidden="true" className="relative flex h-4 items-center justify-center">
+              <span className="absolute left-1/2 top-1/2 h-px w-full -translate-x-1/2 -translate-y-1/2 bg-white/8" />
+              <span className="relative flex h-5 w-5 items-center justify-center rounded-full border border-violet-300/55 bg-[#100b1e]">
+                <ArrowDown className="h-2.5 w-2.5 text-violet-300" />
               </span>
-
-              <h2 className="mt-4 max-w-[14rem] font-[var(--font-display)] text-[1.45rem] font-black leading-[0.92] tracking-[-0.05em] text-white">
-                <span className="block">Así de rápido</span>
-                <span className="block bg-[linear-gradient(180deg,#d8b4fe_0%,#a855f7_48%,#9333ea_100%)] bg-clip-text text-transparent">
-                  escanean y eligen
-                </span>
-              </h2>
-
-              <p className="mt-3 max-w-[15rem] text-[0.85rem] leading-[1.48] text-slate-300/84">
-                Tus clientes no quieren esperar. Escanean, ven el menú y eligen en segundos.
-              </p>
-
-              <div className="mt-4 h-1 w-16 rounded-full bg-[linear-gradient(90deg,#a855f7_0%,#7c3aed_58%,#22d3ee_100%)] shadow-[0_0_26px_rgba(168,85,247,0.42)]" />
             </div>
-
-            <div aria-hidden="true" className="pointer-events-none absolute inset-0 hidden xl:block">
-              <div className="absolute left-[3%] right-[3%] top-[18%] h-[62%] rounded-[50%] border border-violet-400/12" />
-              <div className="absolute left-[10%] right-[10%] top-[25%] h-[48%] rounded-[50%] border border-violet-400/8" />
-              <div className="absolute left-[-4%] right-[-4%] top-[6%] h-[84%] rounded-[50%] border border-cyan-400/10" />
-              <div className="absolute left-[18%] top-[13%] h-3 w-3 rounded-full bg-violet-200 shadow-[0_0_20px_rgba(216,180,254,0.95)]" />
-              <div className="absolute right-[14%] top-[22%] h-2.5 w-2.5 rounded-full bg-violet-200/90 shadow-[0_0_18px_rgba(216,180,254,0.88)]" />
-              <div className="absolute right-[6%] top-[49%] h-2.5 w-2.5 rounded-full bg-cyan-200 shadow-[0_0_20px_rgba(165,243,252,0.92)]" />
-              <div className="absolute left-[12%] bottom-[7%] h-2 w-2 rounded-full bg-violet-200/90 shadow-[0_0_18px_rgba(216,180,254,0.82)]" />
-            </div>
-
-            <div className="lg:hidden">
-              <div
-                data-mobile-slider
-                className="relative h-[29.5rem] overflow-hidden [touch-action:pan-y]"
-                onTouchStart={handleSliderTouchStart}
-                onTouchMove={handleSliderTouchMove}
-                onTouchEnd={handleSliderTouchEnd}
-                onTouchCancel={handleSliderTouchEnd}
-              >
-                {phoneScreens.map((screen, index) => (
-                  <div
-                    key={screen.title}
-                    data-mobile-slide
-                    data-active={activeMobileScreen === index ? 'true' : 'false'}
-                    aria-hidden={activeMobileScreen !== index}
-                    className="absolute inset-0 px-1 transition-transform duration-300 ease-out"
-                    style={{ transform: `translate3d(${(index - activeMobileScreen) * 100}%, 0, 0)` }}
-                  >
-                    <PhoneFlowCard
-                      screen={screen}
-                      index={index}
-                      articleClassName="relative mx-auto flex min-h-[28.75rem] w-full max-w-[19rem] flex-col rounded-[1.55rem] border border-white/10 bg-[linear-gradient(180deg,rgba(13,18,31,0.56),rgba(8,12,22,0.62))] p-2.5 shadow-[0_34px_100px_-50px_rgba(0,0,0,1)]"
-                      showSubtitleOnMobile
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => goToMobileScreen(activeMobileScreen - 1)}
-                  disabled={activeMobileScreen === 0}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/6 text-white transition disabled:cursor-not-allowed disabled:opacity-35"
-                  aria-label="Ver paso anterior"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </button>
-
-                <div className="flex items-center gap-2">
-                  {phoneScreens.map((screen, index) => (
-                    <button
-                      key={`mobile-step-${screen.title}`}
-                      type="button"
-                      onClick={() => goToMobileScreen(index)}
-                      aria-label={`Ir al paso ${index + 1}: ${screen.title}`}
-                      className={`h-2.5 rounded-full transition-all ${
-                        activeMobileScreen === index ? 'w-8 bg-violet-300 shadow-[0_0_18px_rgba(196,181,253,0.9)]' : 'w-2.5 bg-white/22'
-                      }`}
-                    />
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => goToMobileScreen(activeMobileScreen + 1)}
-                  disabled={activeMobileScreen === lastMobileScreenIndex}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/6 text-white transition disabled:cursor-not-allowed disabled:opacity-35"
-                  aria-label="Ver siguiente paso"
-                >
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              </div>
-
-              <p className="mt-3 text-center text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-white/48">
-                Paso {activeMobileScreen + 1} de {phoneScreens.length}. Desliza o usa las flechas.
-              </p>
-            </div>
-
-            <div className="hidden lg:block">
-              <div className="grid grid-cols-3 gap-4 xl:gap-6">
-                {phoneScreens.map((screen, index) => (
-                  <PhoneFlowCard
-                    key={screen.title}
-                    screen={screen}
-                    index={index}
-                    articleClassName="group relative flex min-h-[34rem] min-w-0 max-w-none flex-col rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(13,18,31,0.56),rgba(8,12,22,0.62))] p-3 shadow-[0_34px_100px_-50px_rgba(0,0,0,1)] transition-all duration-300 hover:-translate-y-1.5 hover:border-white/16 xl:min-h-[40rem]"
-                    showConnector
-                  />
-                ))}
-              </div>
+            <div className="mt-3.5">
+              <DemoQrCard demoUrl={demoUrl} />
             </div>
           </div>
         </div>

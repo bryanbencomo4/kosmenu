@@ -10,7 +10,7 @@ import {
   publicSiteHost,
 } from './app/_lib/public-site-config';
 
-const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known'];
+const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known', '/probar-demo'];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml', ...legalPagePaths]);
 const CANONICAL_HOST = publicSiteHost;
 const CANONICAL_REDIRECT_HOSTS = new Set(['business.elmenuxfa.com', 'kosmenu.vercel.app']);
@@ -268,7 +268,9 @@ export function middleware(request: NextRequest) {
   const redirectUrl = cloneRedirectUrl(request);
   redirectUrl.pathname = `/v${pathname}`;
 
-  return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308));
+  const response = NextResponse.redirect(redirectUrl, 308);
+  response.headers.set('Cache-Control', 'no-store');
+  return applySecurityHeaders(response);
 }
 
 export const config = {
