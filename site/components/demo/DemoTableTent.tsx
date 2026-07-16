@@ -5,26 +5,11 @@ import Link from 'next/link';
 import { ExternalLink, Play } from 'lucide-react';
 
 type DemoTableTentProps = {
-  demoUrl: string;
   demoPath: string;
   className?: string;
 };
 
-/**
- * QR placeholder position inside `/branding/table-tent.png` (447x558px),
- * measured directly from the artwork so the real QR lines up with the
- * printed acrylic frame's yellow-bordered white square.
- */
-const QR_BOX = {
-  left: '34.7%',
-  top: '39.9%',
-  width: '26%',
-  height: '21%',
-};
-
-export function DemoTableTent({ demoUrl, demoPath, className = '' }: DemoTableTentProps) {
-  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=0&data=${encodeURIComponent(demoUrl)}`;
-
+export function DemoTableTent({ demoPath, className = '' }: DemoTableTentProps) {
   return (
     <div className={`flex flex-col items-center ${className}`}>
       <div className="relative w-full max-w-[19.5rem] sm:max-w-[21rem] lg:max-w-[23.5rem]">
@@ -33,29 +18,15 @@ export function DemoTableTent({ demoUrl, demoPath, className = '' }: DemoTableTe
           className="pointer-events-none absolute left-1/2 top-[18%] h-[70%] w-[92%] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(116,70,255,0.4)_0%,rgba(116,70,255,0.1)_45%,transparent_75%)] blur-2xl"
         />
 
-        <div className="relative mx-auto aspect-[447/558] w-full">
+        <div className="relative mx-auto aspect-[401/593] w-full">
           <Image
-            src="/branding/table-tent.png"
+            src="/demo/table-tent-demo.png"
             alt="Table Tent acrílico de ElMenúXFA con código QR para escanear y pedir"
             fill
             sizes="(min-width: 1024px) 23.5rem, (min-width: 640px) 21rem, 19.5rem"
             className="object-contain drop-shadow-[0_35px_70px_rgba(0,0,0,0.55)]"
             priority
           />
-
-          <div
-            className="absolute flex items-center justify-center overflow-hidden rounded-[0.6rem] bg-white"
-            style={QR_BOX}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={qrSrc}
-              alt="Código QR real que abre el demo del menú en /v/demo"
-              className="h-[88%] w-[88%] object-contain"
-              width={320}
-              height={320}
-            />
-          </div>
         </div>
       </div>
 

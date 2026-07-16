@@ -112,7 +112,7 @@ export function DemoSection() {
           {heading}
 
           <div className="mt-8">
-            <DemoTableTent demoUrl={demoUrl} demoPath={DEMO_PATH} />
+            <DemoTableTent demoPath={DEMO_PATH} />
           </div>
 
           <div className="mt-8">
@@ -134,7 +134,7 @@ export function DemoSection() {
             </div>
           </div>
 
-          <DemoTableTent demoUrl={demoUrl} demoPath={DEMO_PATH} />
+          <DemoTableTent demoPath={DEMO_PATH} />
 
           <div className="relative space-y-3.5">
             <ClientViewCard />
