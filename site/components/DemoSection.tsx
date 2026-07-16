@@ -26,7 +26,7 @@ const STEP_ICONS = {
   tracking: MapPin,
 } as const;
 
-const PROBAR_DEMO_PATH = '/probar-demo';
+const PROBAR_DEMO_PATH = '/v/demo';
 
 export function DemoSection() {
   const {

@@ -10,7 +10,7 @@ import {
   publicSiteHost,
 } from './app/_lib/public-site-config';
 
-const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known', '/probar-demo'];
+const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known'];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml', ...legalPagePaths]);
 const CANONICAL_HOST = publicSiteHost;
 const CANONICAL_REDIRECT_HOSTS = new Set(['business.elmenuxfa.com', 'kosmenu.vercel.app']);
