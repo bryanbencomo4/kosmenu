@@ -1,78 +1,66 @@
-const targets = [
-  'Restaurantes',
-  'Cafeterías',
-  'Food trucks',
-  'Dark kitchens',
-  'Reposterías',
-  'Emprendimientos gastronómicos',
-] as const;
-
-const benefits = [
-  'Menos errores al recibir pedidos',
-  'Catálogo siempre actualizado',
-  'Imagen más profesional',
-  'Experiencia rápida para tus clientes',
-  'Ideal para delivery y pickup',
-] as const;
-
-const testimonialPlaceholders = [
-  { role: 'Restaurante', quote: 'Espacio reservado para testimonio de cliente.' },
-  { role: 'Cafetería', quote: 'Espacio reservado para testimonio de cliente.' },
-  { role: 'Food truck', quote: 'Espacio reservado para testimonio de cliente.' },
-] as const;
+import { Users } from 'lucide-react';
+import { AudienceBenefitCard } from './audience/AudienceBenefitCard';
+import { AudienceChip } from './audience/AudienceChip';
+import { TestimonialCard } from './audience/TestimonialCard';
+import { audienceBenefits, audienceCategories, testimonials } from './audience/audience-data';
 
 export function TargetSection() {
   return (
-    <section className="perf-section border-y border-white/8 bg-[#0a0f1a]">
-      <div className="mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:py-18">
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,0.42fr)_minmax(0,1fr)] lg:items-center">
+    <section
+      id="testimonios"
+      className="perf-section relative scroll-mt-24 overflow-hidden border-y border-white/8 bg-[#060b18] py-20 lg:py-28"
+      style={{
+        background:
+          'radial-gradient(circle at 50% 65%, rgba(124, 58, 237, 0.10), transparent 32%), radial-gradient(circle at 8% 12%, rgba(124, 58, 237, 0.06), transparent 26%), #060b18',
+      }}
+    >
+      <div className="relative mx-auto w-full max-w-[1480px] px-5 sm:px-6 lg:px-8">
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-16">
           <div>
-            <span className="inline-flex rounded-full border border-violet-400/20 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-violet-200">
+            <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-violet-200">
+              <Users className="h-3.5 w-3.5 text-violet-300" aria-hidden="true" />
               Para quién es
             </span>
-            <h2 className="mt-4 font-[var(--font-display)] text-[2rem] font-black leading-[1.02] tracking-[-0.03em] text-white sm:mt-5 sm:text-[2.3rem]">
-              Pensado para negocios que necesitan vender mejor cada día
+            <h2 className="mt-5 max-w-full font-[var(--font-display)] text-[2.15rem] font-black leading-[1.1] tracking-[-0.03em] text-white sm:text-[2.5rem] lg:text-[2.55rem] xl:text-[3.25rem] xl:leading-[1.05] xl:tracking-[-0.04em] 2xl:text-[3.75rem] 2xl:leading-[1.02] 2xl:tracking-[-0.045em]">
+              <span className="block">Pensado para negocios</span>
+              <span className="block">
+                que quieren{' '}
+                <span className="bg-gradient-to-r from-violet-400 to-purple-500 bg-clip-text text-transparent">
+                  vender mejor
+                </span>
+              </span>
             </h2>
+            <p className="mt-5 max-w-[34rem] text-[1.05rem] leading-[1.7] text-slate-300/90">
+              Ideal para restaurantes, cafeterías, food trucks y emprendimientos gastronómicos que buscan una
+              experiencia más profesional y rápida para sus clientes.
+            </p>
           </div>
 
-          <div className="flex flex-wrap gap-2.5 sm:gap-3">
-            {targets.map((target) => (
-              <div
-                key={target}
-                className="rounded-full border border-white/10 bg-[#0f1522] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_20px_60px_-35px_rgba(0,0,0,1)] transition-all duration-300 hover:-translate-y-1 hover:border-violet-400/30 hover:bg-[#141c2c]"
-              >
-                {target}
-              </div>
-            ))}
+          <div>
+            <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-2 [scrollbar-width:none] sm:-mx-6 sm:flex-wrap sm:overflow-visible sm:px-6 sm:pb-1 lg:mx-0 lg:px-0 [&::-webkit-scrollbar]:hidden">
+              {audienceCategories.map((category) => (
+                <AudienceChip key={category.label} category={category} />
+              ))}
+            </div>
+
+            <div className="mt-8 grid grid-cols-1 gap-3.5 sm:grid-cols-2 sm:gap-4 lg:mt-12 lg:grid-cols-3">
+              {audienceBenefits.map((benefit) => (
+                <AudienceBenefitCard key={benefit.title} benefit={benefit} />
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {benefits.map((item) => (
-            <article
-              key={item}
-              className="rounded-2xl border border-white/10 bg-[#0d1420]/72 p-5 text-base font-semibold leading-7 text-white transition-all duration-300 hover:-translate-y-1 hover:border-emerald-400/30"
-            >
-              {item}
-            </article>
+        <div className="mt-16 flex items-center justify-center gap-4 lg:mt-20">
+          <span className="h-px w-12 bg-gradient-to-r from-transparent to-violet-500/50" />
+          <span className="text-xs font-semibold uppercase tracking-[0.45em] text-violet-400">Testimonios</span>
+          <span className="h-px w-12 bg-gradient-to-l from-transparent to-violet-500/50" />
+        </div>
+
+        <div className="mt-9 grid grid-cols-1 gap-7 lg:grid-cols-[0.9fr_1.15fr_0.9fr]">
+          {testimonials.map((testimonial) => (
+            <TestimonialCard key={testimonial.name} testimonial={testimonial} />
           ))}
-        </div>
-
-        <div className="mt-10">
-          <p className="text-center text-[11px] font-bold uppercase tracking-[0.24em] text-slate-400">
-            Testimonios
-          </p>
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            {testimonialPlaceholders.map((item) => (
-              <article
-                key={item.role}
-                className="rounded-2xl border border-dashed border-white/14 bg-[#0d1420]/40 p-5 text-slate-400"
-              >
-                <p className="text-sm italic leading-7 text-slate-400/90">&ldquo;{item.quote}&rdquo;</p>
-                <p className="mt-4 text-sm font-semibold text-slate-300">{item.role}</p>
-              </article>
-            ))}
-          </div>
         </div>
       </div>
     </section>
