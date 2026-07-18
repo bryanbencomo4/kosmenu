@@ -3,10 +3,19 @@ import 'package:kosmenu_app/models/comercio.dart';
 class SupabaseConfig {
   const SupabaseConfig._();
 
-  static const String url = 'https://qqhberaayhohxlbbhdyi.supabase.co';
-  static const String anonKey =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaGJlcmFheWhvaHhsYmJoZHlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzE4MTQsImV4cCI6MjA5MDIwNzgxNH0.lkNtqj0_xPekAGuFg_sNHq4uWJOcYnhSX-RNBwAKk8A';
-    static const String googleMapsApiKey =
+  /// Override in Preview/dev with:
+  /// `--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
+  /// Defaults keep production builds working without defines.
+  static const String url = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://qqhberaayhohxlbbhdyi.supabase.co',
+  );
+  static const String anonKey = String.fromEnvironment(
+    'SUPABASE_ANON_KEY',
+    defaultValue:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaGJlcmFheWhvaHhsYmJoZHlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzE4MTQsImV4cCI6MjA5MDIwNzgxNH0.lkNtqj0_xPekAGuFg_sNHq4uWJOcYnhSX-RNBwAKk8A',
+  );
+  static const String googleMapsApiKey =
       'AIzaSyB9WNMyQma0-n4sMXN_lWJwYNxxkWDEmyQ';
   static String _currentComercioId = '';
   static String _currentComercioSlug = '';

@@ -62,3 +62,7 @@ app.*.map.json
 *.env
 .vercel
 .env*.local
+
+# Local audit dumps / scratch (never commit)
+.tmp-*
+.tmp/

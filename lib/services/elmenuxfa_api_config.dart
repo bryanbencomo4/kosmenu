@@ -2,8 +2,12 @@ import 'package:kosmenu_app/core/constants.dart';
 
 /// Central API base URL for Next.js routes used by Flutter.
 ///
-/// Override in Preview/dev with:
-/// `--dart-define=API_BASE_URL=https://preview.example.com`
+/// Preview/dev defines (all required for full isolation from production):
+/// ```
+/// --dart-define=API_BASE_URL=https://<preview-host>
+/// --dart-define=SUPABASE_URL=https://<preview-ref>.supabase.co
+/// --dart-define=SUPABASE_ANON_KEY=<preview-anon-key>
+/// ```
 class ElmenuxfaApiConfig {
   const ElmenuxfaApiConfig._();
 
