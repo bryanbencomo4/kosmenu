@@ -45,6 +45,20 @@ class AppLinks {
   static const String productionUrl = 'https://elmenuxfa.com';
   static const String brandIsotipoUrl = '$productionUrl/branding/isotipo.png';
 
+  /// Next.js API origin. Override with `--dart-define=API_BASE_URL=...` in Preview/dev.
+  static String get apiBaseUrl {
+    const fromEnv = String.fromEnvironment('API_BASE_URL');
+    final trimmed = fromEnv.trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed.endsWith('/')
+          ? trimmed.substring(0, trimmed.length - 1)
+          : trimmed;
+    }
+    return productionUrl.endsWith('/')
+        ? productionUrl.substring(0, productionUrl.length - 1)
+        : productionUrl;
+  }
+
   static String brandAsset(String assetPath) {
     final base = productionUrl.endsWith('/')
         ? productionUrl.substring(0, productionUrl.length - 1)

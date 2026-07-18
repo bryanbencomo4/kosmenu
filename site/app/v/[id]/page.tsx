@@ -1,7 +1,6 @@
 'use client';
 
 import Head from 'next/head';
-import { createClient } from '@supabase/supabase-js';
 import { ArrowRight, ArrowUp, ChevronDown, Flame, Info, Mail, MapPin, Menu, MessageCircle, Phone, Share2, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -3044,31 +3043,33 @@ export default function PublicMenuPage() {
       throw new Error('Faltan variables de entorno para guardar tu pedido.');
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-    });
-
     const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : 'No especificado';
     let paymentProofUrl = '';
 
     if (paymentMeta.proofFile) {
-      const sanitizedFileName = paymentMeta.proofFile.name
-        .replace(/\s+/g, '-')
-        .replace(/[^a-zA-Z0-9._-]/g, '')
-        .toLowerCase();
-      const proofUploadKey = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      const storagePath = `${resolvedComercioId}/${proofUploadKey}-${sanitizedFileName || 'comprobante.jpg'}`;
-      const { error: uploadError } = await supabase.storage
-        .from('comprobantes')
-        .upload(storagePath, paymentMeta.proofFile, {
-          upsert: false,
-          contentType: paymentMeta.proofFile.type || undefined,
-        });
-      if (uploadError) {
-        throw new Error(uploadError.message || 'No se pudo subir el comprobante de pago.');
+      const form = new FormData();
+      form.append('comercioId', resolvedComercioId);
+      form.append('file', paymentMeta.proofFile);
+      const uploadResponse = await fetch('/api/orders/comprobantes', {
+        method: 'POST',
+        body: form,
+      });
+      const uploadPayload = await uploadResponse.json().catch(() => ({}));
+      if (!uploadResponse.ok) {
+        const code = (uploadPayload?.error ?? '').toString();
+        throw new Error(
+          code === 'File too large.'
+            ? 'El comprobante supera el tamano maximo (5 MB).'
+            : 'No se pudo subir el comprobante de pago.',
+        );
       }
-      const { data: proofPublicData } = supabase.storage.from('comprobantes').getPublicUrl(storagePath);
-      paymentProofUrl = proofPublicData?.publicUrl ?? '';
+      // Opaque storage ref (storage://comprobantes/...). Not a permanent public URL.
+      paymentProofUrl = (uploadPayload?.data?.storageRef ?? uploadPayload?.data?.paymentProofUrl ?? '')
+        .toString()
+        .trim();
+      if (!paymentProofUrl) {
+        throw new Error('No se pudo subir el comprobante de pago.');
+      }
     }
 
     const subtotalConverted = convertFromBaseCurrency(

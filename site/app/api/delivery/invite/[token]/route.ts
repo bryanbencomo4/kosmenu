@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { NextResponse } from 'next/server';
 
-import { getServerSupabaseClient } from '../../../_lib/supabase-server';
+import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{24,160}$/;
 
@@ -128,7 +128,7 @@ function invitedStatePayload(message: string, code: string, status = 410) {
 }
 
 async function updatePedidoDelegateSnapshot(
-  supabase: ReturnType<typeof getServerSupabaseClient>,
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
   pedido: PedidoRow,
   invitation: DeliveryInvitationRow,
   patch: Record<string, unknown>,
@@ -164,7 +164,7 @@ async function updatePedidoDelegateSnapshot(
   await supabase.from('pedidos').update({ detalles: nextDetalles }).eq('id', pedido.id);
 }
 
-async function loadInvitationContext(supabase: ReturnType<typeof getServerSupabaseClient>, token: string) {
+async function loadInvitationContext(supabase: ReturnType<typeof getServiceSupabaseClient>, token: string) {
   const tokenHash = sha256Hex(token);
   let { data: invitation, error } = await supabase
     .from('delivery_invitations')
@@ -310,7 +310,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ token: str
       return invitedStatePayload('El enlace de delivery no es valido.', 'INVALID_TOKEN', 400);
     }
 
-    const supabase = getServerSupabaseClient();
+    const supabase = getServiceSupabaseClient();
     const context = await loadInvitationContext(supabase, token);
 
     if (!context) {
@@ -382,7 +382,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
       return NextResponse.json({ ok: false, error: 'Accion no soportada.' }, { status: 400 });
     }
 
-    const supabase = getServerSupabaseClient();
+    const supabase = getServiceSupabaseClient();
     const context = await loadInvitationContext(supabase, token);
 
     if (!context || !context.pedido) {

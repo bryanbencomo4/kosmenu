@@ -1,0 +1,50 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  assertNoSensitivePublicComercioFields,
+  toPublicComercioDto,
+  toPublicMetodoPagoDto,
+} from '../../app/api/_lib/public-menu-dto';
+
+describe('public menu DTO', () => {
+  it('strips owner_id and other sensitive comercio fields', () => {
+    const dto = toPublicComercioDto({
+      id: 'c1',
+      slug: 'demo',
+      nombre: 'Demo',
+      logo_url: 'https://example.com/logo.png',
+      owner_id: 'user-secret',
+      email: 'owner@example.com',
+      branding_ia: { secret: true },
+      en_linea: true,
+    });
+
+    expect(dto).toBeTruthy();
+    expect(dto!.id).toBe('c1');
+    expect(dto!.nombre).toBe('Demo');
+    expect(dto).not.toHaveProperty('owner_id');
+    expect(dto).not.toHaveProperty('email');
+    expect(dto).not.toHaveProperty('branding_ia');
+    assertNoSensitivePublicComercioFields(dto!);
+  });
+
+  it('keeps public payment fields and drops private ones', () => {
+    const dto = toPublicMetodoPagoDto({
+      id: 'm1',
+      comercio_id: 'c1',
+      nombre: 'Pago Movil',
+      tipo: 'pago_movil__usd',
+      descripcion: 'Visible',
+      detalles: '{"banco":"X"}',
+      notas_internas: 'nunca',
+      verificado: true,
+      metadata: { admin: true },
+    });
+
+    expect(dto).toBeTruthy();
+    expect(dto!.nombre).toBe('Pago Movil');
+    expect(dto).not.toHaveProperty('notas_internas');
+    expect(dto).not.toHaveProperty('verificado');
+    expect(dto).not.toHaveProperty('metadata');
+  });
+});

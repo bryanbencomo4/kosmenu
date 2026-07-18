@@ -2,11 +2,22 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import {
+  hashOrderIdempotencyPayload,
+  lookupOrderIdempotency,
+  normalizeIdempotencyKey,
+  storeOrderIdempotency,
+} from '../_lib/order-idempotency';
+import {
   createOrderId,
 } from '../_lib/order-utils';
 import { publicSiteUrl } from '../_lib/public-site-url';
+import {
+  generatePublicTrackingToken,
+  hashPublicTrackingToken,
+} from '../_lib/order-tracking-token';
+import { consumeRateLimit, getClientIp } from '../_lib/rate-limit';
 import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
-import { getServerSupabaseClient } from '../_lib/supabase-server';
+import { getServiceSupabaseClient } from '../_lib/supabase-server';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -189,14 +200,6 @@ function normalizeCurrencyCode(value: string | null | undefined) {
   return code;
 }
 
-function normalizeExchangeRate(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
-  const raw = (value ?? '').toString().trim().replace(',', '.');
-  if (!raw) return 1;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
 function convertFromCop(amountInCop: number, currency: string, exchangeRate: number) {
   if (currency === 'COP') return amountInCop;
   return amountInCop / exchangeRate;
@@ -204,6 +207,18 @@ function convertFromCop(amountInCop: number, currency: string, exchangeRate: num
 
 export async function POST(request: Request) {
   try {
+    const ip = getClientIp(request);
+    const rate = consumeRateLimit(`orders:ip:${ip}`, 20, 60_000);
+    if (rate.ok === false) {
+      return NextResponse.json(
+        { ok: false, error: 'rate_limited' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(rate.retryAfterSec) },
+        },
+      );
+    }
+
     const body = (await request.json()) as CreateOrderPayload;
 
     const incomingDetalles = (body.detalles ?? {}) as Record<string, unknown>;
@@ -249,6 +264,45 @@ export async function POST(request: Request) {
     }
 
     const validated = validationResult.data;
+    const rawIdempotencyHeader = request.headers.get('x-idempotency-key');
+    const idempotencyKey = normalizeIdempotencyKey(rawIdempotencyHeader);
+    if (rawIdempotencyHeader && rawIdempotencyHeader.trim() && !idempotencyKey) {
+      return NextResponse.json(
+        { ok: false, error: 'invalid_idempotency_key' },
+        { status: 400 },
+      );
+    }
+
+    const idempotencyPayload = {
+      comercioId: validated.comercioId,
+      cliente_nombre: validated.cliente_nombre,
+      telefono_cliente: validated.telefono_cliente,
+      moneda_checkout: validated.moneda_checkout,
+      tasa_cambio_snapshot: validated.tasa_cambio_snapshot,
+      costo_delivery: validated.costo_delivery,
+      items: validated.items,
+      delivery: validated.delivery,
+      paymentMethod: normalizePaymentMethod(body.paymentMethod ?? incomingDetalles.metodo_pago),
+      paymentProofUrl: normalizeText(body.paymentProofUrl ?? incomingDetalles.comprobante_url),
+      orderNotes: normalizeText(body.orderNotes ?? incomingDetalles.order_notes),
+    };
+    const requestHash = hashOrderIdempotencyPayload(idempotencyPayload);
+
+    if (idempotencyKey) {
+      const existing = await lookupOrderIdempotency({
+        key: idempotencyKey,
+        requestHash,
+      });
+      if (existing.status === 'conflict') {
+        return NextResponse.json(
+          { ok: false, error: 'idempotency_key_reuse_with_different_payload' },
+          { status: 409 },
+        );
+      }
+      if (existing.status === 'hit') {
+        return NextResponse.json(existing.response, { status: 200 });
+      }
+    }
 
     const comercioId = validated.comercioId;
     const clientEmail = rawClientEmail;
@@ -284,7 +338,7 @@ export async function POST(request: Request) {
       exchangeRate,
     );
     const totalCheckout = convertFromCop(total, currency, exchangeRate);
-    const supabase = getServerSupabaseClient();
+    const supabase = getServiceSupabaseClient();
 
     const comercioQuery = supabase
       .from('comercios')
@@ -305,9 +359,12 @@ export async function POST(request: Request) {
     }
 
     const orderId = createOrderId(resolvedComercioId);
+    const publicTrackingToken = generatePublicTrackingToken();
+    const publicTrackingTokenHash = hashPublicTrackingToken(publicTrackingToken);
 
     const detalles = {
       order_id: orderId,
+      public_tracking_token_hash: publicTrackingTokenHash,
       cliente_nombre: clientName,
       cliente_email: clientEmail || null,
       telefono_cliente: clientWhatsapp,
@@ -342,18 +399,32 @@ export async function POST(request: Request) {
       telefono_cliente: clientWhatsapp,
       detalles,
       cliente_email: clientEmail,
+      public_tracking_token_hash: publicTrackingTokenHash,
     };
 
     const insertResult = await supabase.from('pedidos').insert(payload);
     const insertError = insertResult.error;
 
     if (insertError) {
-      throw new Error(insertError.message ?? 'Failed to create order.');
+      // If the column migration is not applied yet, retry without the dedicated column.
+      const missingColumn =
+        (insertError.message ?? '').toLowerCase().includes('public_tracking_token_hash');
+      if (!missingColumn) {
+        throw new Error(insertError.message ?? 'Failed to create order.');
+      }
+
+      const legacyPayload = { ...payload };
+      delete (legacyPayload as { public_tracking_token_hash?: string }).public_tracking_token_hash;
+      const retry = await supabase.from('pedidos').insert(legacyPayload);
+      if (retry.error) {
+        throw new Error(retry.error.message ?? 'Failed to create order.');
+      }
     }
 
-    const trackingUrl = resolvedComercioSlug
+    const trackingPath = resolvedComercioSlug
       ? `${publicSiteUrl}/v/${encodeURIComponent(resolvedComercioSlug)}/orders/${encodeURIComponent(orderId)}`
       : `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
+    const trackingUrl = `${trackingPath}?t=${encodeURIComponent(publicTrackingToken)}`;
     let emailStatus: 'queued' | 'skipped' = 'skipped';
     let whatsappStatus: 'queued' | 'skipped' = 'skipped';
 
@@ -364,6 +435,7 @@ export async function POST(request: Request) {
         comercioNombre,
         orderId,
         orderTrackingUrl: trackingUrl,
+        comercioSlug: resolvedComercioSlug,
       }).catch(() => {
         // Keep response fast; email failures are handled asynchronously.
       });
@@ -373,24 +445,38 @@ export async function POST(request: Request) {
       whatsappStatus = 'queued';
     }
 
-    return NextResponse.json(
-      {
-        ok: true,
-        data: {
-          orderId,
-          comercioId: resolvedComercioId,
-          subtotal,
-          costoDelivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
-          total,
-          trackingUrl,
-          emailStatus,
-          whatsappStatus,
-        },
+    const responseBody = {
+      ok: true as const,
+      data: {
+        orderId,
+        comercioId: resolvedComercioId,
+        estado: 'pendiente' as const,
+        confirmation: 'Pedido confirmado' as const,
+        subtotal,
+        costoDelivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
+        total,
+        trackingUrl,
+        emailStatus,
+        whatsappStatus,
       },
-      { status: 201 },
-    );
+    };
+
+    if (idempotencyKey) {
+      await storeOrderIdempotency({
+        key: idempotencyKey,
+        requestHash,
+        orderId,
+        response: responseBody,
+      });
+    }
+
+    return NextResponse.json(responseBody, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create order.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (message.includes('Missing environment variable: SUPABASE_SERVICE_ROLE_KEY')) {
+      console.error('[orders] privileged supabase client unavailable');
+      return NextResponse.json({ ok: false, error: 'unavailable' }, { status: 503 });
+    }
+    return NextResponse.json({ error: 'Failed to create order.' }, { status: 500 });
   }
 }

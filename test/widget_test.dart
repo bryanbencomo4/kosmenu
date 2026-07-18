@@ -1,24 +1,29 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
-  testWidgets('Kosmenu app shows initial login loading UI', (
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    await Supabase.initialize(
+      url: SupabaseConfig.url,
+      anonKey: SupabaseConfig.anonKey,
+    );
+  });
+
+  testWidgets('Kosmenu app shows initial auth welcome UI', (
     WidgetTester tester,
   ) async {
-    // Build our app and trigger a frame.
     await tester.pumpWidget(const KosmenuApp());
+    // Branded entry transitions into AuthScreen after ~1.46s.
+    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.pump(const Duration(milliseconds: 500));
 
-    // Verify the initial login shell renders.
-    expect(find.text('Kosmenú'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    // Brand copy on AuthScreen (replaces legacy "Kosmenú" expectation).
+    expect(find.textContaining('elmenuxfa.com'), findsWidgets);
   });
 }

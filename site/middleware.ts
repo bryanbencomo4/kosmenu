@@ -30,7 +30,13 @@ const ADMIN_HOST_HEADER = 'x-admin-host';
 const ADMIN_INTERNAL_PATH_HEADER = 'x-admin-internal-path';
 const PUBLIC_ADMIN_API_PATHS = new Set(['/admin/api/auth/recover']);
 
-function applySecurityHeaders(response: NextResponse) {
+function isOrderTrackingPath(pathname: string) {
+  if (pathname.startsWith('/orders/')) return true;
+  // /v/{slug}/orders/{orderId}
+  return /^\/v\/[^/]+\/orders\/[^/]+/.test(pathname);
+}
+
+function applySecurityHeaders(response: NextResponse, pathname?: string) {
   if (process.env.NODE_ENV === 'production') {
     response.headers.set(
       'Strict-Transport-Security',
@@ -38,7 +44,11 @@ function applySecurityHeaders(response: NextResponse) {
     );
   }
   response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // Tracking URLs carry a secret token query param — never leak via Referer.
+  response.headers.set(
+    'Referrer-Policy',
+    pathname && isOrderTrackingPath(pathname) ? 'no-referrer' : 'strict-origin-when-cross-origin',
+  );
   response.headers.set('X-Frame-Options', 'DENY');
   return response;
 }
@@ -186,18 +196,19 @@ export function middleware(request: NextRequest) {
     const redirectUrl = cloneRedirectUrl(request);
     redirectUrl.protocol = 'https';
     redirectUrl.host = CANONICAL_HOST;
-    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308));
+    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308), pathname);
   }
 
   if (needsHttps) {
     const redirectUrl = cloneRedirectUrl(request);
     redirectUrl.protocol = 'https';
-    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308));
+    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308), pathname);
   }
 
   if (isPublicAuthCodeCallback(request, hostname)) {
     return applySecurityHeaders(
       NextResponse.redirect(buildAppAuthCallbackRedirect(request), 307),
+      pathname,
     );
   }
 
@@ -205,7 +216,7 @@ export function middleware(request: NextRequest) {
     const redirectUrl = cloneRedirectUrl(request);
     redirectUrl.pathname = '/';
     redirectUrl.search = '';
-    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 307));
+    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 307), pathname);
   }
 
   if (isAdminHost || isLocalAdminPath) {
@@ -224,18 +235,23 @@ export function middleware(request: NextRequest) {
     requestHeaders.set(ADMIN_INTERNAL_PATH_HEADER, internalAdminPath);
 
     if (isAssetRequest(pathname)) {
-      return applySecurityHeaders(NextResponse.next({ request: { headers: requestHeaders } }));
+      return applySecurityHeaders(
+        NextResponse.next({ request: { headers: requestHeaders } }),
+        pathname,
+      );
     }
 
     if (!hasAdminSession && !isAdminPublicPath && !isAdminPublicApiPath) {
       if (isAdminApiPath) {
         return applySecurityHeaders(
           NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+          pathname,
         );
       }
 
       return applySecurityHeaders(
         NextResponse.redirect(adminLoginUrl(request, pathname), 307),
+        pathname,
       );
     }
 
@@ -244,25 +260,29 @@ export function middleware(request: NextRequest) {
       rewriteUrl.pathname = internalAdminPath;
       return applySecurityHeaders(
         NextResponse.rewrite(rewriteUrl, { request: { headers: requestHeaders } }),
+        pathname,
       );
     }
 
-    return applySecurityHeaders(NextResponse.next({ request: { headers: requestHeaders } }));
+    return applySecurityHeaders(
+      NextResponse.next({ request: { headers: requestHeaders } }),
+      pathname,
+    );
   }
 
   if (pathname === '/business') {
     const redirectUrl = cloneRedirectUrl(request);
     redirectUrl.pathname = '/';
     redirectUrl.search = '';
-    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308));
+    return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308), pathname);
   }
 
   if (pathname === '/') {
-    return applySecurityHeaders(NextResponse.next());
+    return applySecurityHeaders(NextResponse.next(), pathname);
   }
 
   if (isExcludedPath(pathname) || hasFileExtension(pathname)) {
-    return applySecurityHeaders(NextResponse.next());
+    return applySecurityHeaders(NextResponse.next(), pathname);
   }
 
   const redirectUrl = cloneRedirectUrl(request);
@@ -270,7 +290,7 @@ export function middleware(request: NextRequest) {
 
   const response = NextResponse.redirect(redirectUrl, 308);
   response.headers.set('Cache-Control', 'no-store');
-  return applySecurityHeaders(response);
+  return applySecurityHeaders(response, pathname);
 }
 
 export const config = {

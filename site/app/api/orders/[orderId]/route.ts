@@ -1,7 +1,21 @@
 import { NextResponse } from 'next/server';
 
+import {
+  assertCustomerStatusTransition,
+  customerOrderActionSchema,
+  isPedidoEstadoEnumError,
+} from '../../_lib/order-customer-actions';
 import { extractComercioId } from '../../_lib/order-utils';
-import { getServerSupabaseClient } from '../../_lib/supabase-server';
+import { verifyPublicTrackingToken } from '../../_lib/order-tracking-token';
+import {
+  CONFIRM_RECEIVED_ALLOWED_STATUSES,
+  CONFIRMATION_TIMEOUT_MS,
+  extractTokenHashFromPedido,
+  normalizePublicStatus,
+  toPublicOrderTrackingResponse,
+} from '../../_lib/public-order';
+import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
+import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 
 type Params = {
   params: Promise<{ orderId: string }>;
@@ -12,8 +26,12 @@ type PedidoRow = {
   comercio_id?: string | null;
   estado?: string | null;
   created_at?: string | null;
+  total?: number | null;
+  costo_delivery?: number | null;
+  public_tracking_token_hash?: string | null;
   detalles?: {
     order_id?: string | null;
+    public_tracking_token_hash?: string | null;
     notifications?: Record<string, unknown> | null;
     delivery_delegate?: Record<string, unknown> | null;
     cancellation?: Record<string, unknown> | null;
@@ -22,38 +40,45 @@ type PedidoRow = {
 };
 
 type ComercioSummary = {
-  id?: string | null;
   nombre?: string | null;
+  slug?: string | null;
   direccion?: string | null;
   latitud?: number | string | null;
   longitud?: number | string | null;
   whatsapp?: string | null;
   telefono?: string | null;
-  telefonos?: string | null;
-  celular?: string | null;
+  branding_ia?: Record<string, unknown> | null;
 };
 
-const CONFIRMATION_TIMEOUT_MS = 15 * 60 * 1000;
+const GENERIC_DENIED = { error: 'Pedido no disponible.' } as const;
 
-function normalizeStatus(value: unknown) {
-  const raw = (value ?? '').toString().trim().toLowerCase();
-  if (!raw) return 'pendiente';
-  if (raw === 'cancelado' || raw === 'rechazado' || raw === 'anulado') return 'cancelado';
-  if (raw === 'confirmado' || raw === 'preparando' || raw === 'en_camino' || raw === 'entregado') return raw;
-  return 'pendiente';
+function extractTrackingToken(request: Request): string {
+  const url = new URL(request.url);
+  const fromQuery = (url.searchParams.get('t') ?? url.searchParams.get('token') ?? '').trim();
+  if (fromQuery) return fromQuery;
+
+  const header = (request.headers.get('x-order-tracking-token') ?? '').trim();
+  if (header) return header;
+
+  return '';
 }
 
-function isPedidoEstadoEnumError(message: string) {
-  const normalized = (message ?? '').toLowerCase();
-  return normalized.includes('invalid input value for enum') && normalized.includes('pedido_estado');
+function denyUnauthorized() {
+  // 404 avoids confirming orderId existence without a valid token.
+  return NextResponse.json(GENERIC_DENIED, { status: 404 });
 }
 
-async function findOrderByOrderId(supabase: ReturnType<typeof getServerSupabaseClient>, orderId: string) {
+async function findOrderByOrderId(
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
+  orderId: string,
+) {
   const derivedComercioId = extractComercioId(orderId);
 
   let query = supabase
     .from('pedidos')
-    .select('*')
+    .select(
+      'id,comercio_id,estado,created_at,total,costo_delivery,public_tracking_token_hash,detalles',
+    )
     .order('created_at', { ascending: false })
     .limit(200);
 
@@ -69,88 +94,99 @@ async function findOrderByOrderId(supabase: ReturnType<typeof getServerSupabaseC
   return ((rows ?? []) as PedidoRow[]).find((row) => row?.detalles?.order_id === orderId) ?? null;
 }
 
-export async function GET(_: Request, { params }: Params) {
+async function loadComercio(
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
+  comercioId: string | null | undefined,
+): Promise<ComercioSummary | null> {
+  if (!comercioId) return null;
+  const result = await supabase
+    .from('comercios')
+    .select('nombre,slug,direccion,whatsapp,telefono,branding_ia')
+    .eq('id', comercioId)
+    .maybeSingle();
+  if (result.error) return null;
+  return (result.data as ComercioSummary | null) ?? null;
+}
+
+function authorizeOrder(order: PedidoRow | null, token: string): order is PedidoRow {
+  if (!order || !token) return false;
+  const expectedHash = extractTokenHashFromPedido(order);
+  if (!expectedHash) return false;
+  return verifyPublicTrackingToken(token, expectedHash);
+}
+
+export async function GET(request: Request, { params }: Params) {
   try {
+    const ip = getClientIp(request);
+    const limit = consumeRateLimit(`orders:get:${ip}`, 60, 60_000);
+    if (limit.ok === false) {
+      return NextResponse.json(
+        { error: 'Too many requests.' },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
+      );
+    }
+
     const { orderId: rawOrderId } = await params;
     const orderId = decodeURIComponent(rawOrderId ?? '').trim();
+    const token = extractTrackingToken(request);
 
-    if (!orderId) {
-      return NextResponse.json({ error: 'Invalid orderId.' }, { status: 400 });
+    if (!orderId || !token) {
+      return denyUnauthorized();
     }
 
-    const supabase = getServerSupabaseClient();
+    const supabase = getServiceSupabaseClient();
     const order = await findOrderByOrderId(supabase, orderId);
 
-    if (!order) {
-      return NextResponse.json({ ok: true, data: null }, { status: 200 });
+    if (!authorizeOrder(order, token)) {
+      return denyUnauthorized();
     }
 
-    let comercio: ComercioSummary | null = null;
-    if (order.comercio_id) {
-      const comercioResult = await supabase
-        .from('comercios')
-        .select('id,nombre,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular')
-        .eq('id', order.comercio_id)
-        .maybeSingle();
+    const comercio = await loadComercio(supabase, order.comercio_id);
+    const publicOrder = toPublicOrderTrackingResponse(order, orderId, comercio);
 
-      if (!comercioResult.error) {
-        comercio = comercioResult.data ?? null;
-      }
-    }
-
-    return NextResponse.json(
-      {
-        ok: true,
-        data: {
-          order,
-          comercio,
-        },
-      },
-      { status: 200 },
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to load order.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ ok: true, data: publicOrder }, { status: 200 });
+  } catch {
+    return NextResponse.json({ error: 'Failed to load order.' }, { status: 500 });
   }
 }
 
 export async function PATCH(request: Request, { params }: Params) {
   try {
+    const ip = getClientIp(request);
+    const limit = consumeRateLimit(`orders:patch:${ip}`, 30, 60_000);
+    if (limit.ok === false) {
+      return NextResponse.json(
+        { error: 'Too many requests.' },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
+      );
+    }
+
     const { orderId: rawOrderId } = await params;
     const orderId = decodeURIComponent(rawOrderId ?? '').trim();
-    if (!orderId) {
-      return NextResponse.json({ error: 'Invalid orderId.' }, { status: 400 });
+    const token = extractTrackingToken(request);
+
+    if (!orderId || !token) {
+      return denyUnauthorized();
     }
 
-    const body = await request.json().catch(() => ({}));
-    const action = (body?.action ?? '').toString().trim().toLowerCase();
-
-    if (
-      action !== 'cancel' &&
-      action !== 'set_whatsapp_notifications' &&
-      action !== 'confirm_received'
-    ) {
-      return NextResponse.json({ error: 'Unsupported action.' }, { status: 400 });
+    const body = await request.json().catch(() => null);
+    const parsed = customerOrderActionSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
     }
 
-    const supabase = getServerSupabaseClient();
+    const supabase = getServiceSupabaseClient();
     const order = await findOrderByOrderId(supabase, orderId);
 
-    if (!order) {
-      return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
+    if (!authorizeOrder(order, token)) {
+      return denyUnauthorized();
     }
 
-    if (action === 'set_whatsapp_notifications') {
-      const enabled = body?.enabled;
-      if (typeof enabled !== 'boolean') {
-        return NextResponse.json(
-          { error: 'Invalid enabled value for whatsapp notifications.' },
-          { status: 400 },
-        );
-      }
+    const action = parsed.data;
 
+    if (action.action === 'set_whatsapp_notifications') {
       const currentDetalles =
-        order?.detalles && typeof order.detalles === 'object'
+        order.detalles && typeof order.detalles === 'object'
           ? { ...(order.detalles as Record<string, unknown>) }
           : {};
       const currentNotifications =
@@ -162,37 +198,32 @@ export async function PATCH(request: Request, { params }: Params) {
         ...currentDetalles,
         notifications: {
           ...currentNotifications,
-          whatsapp_enabled: enabled,
+          whatsapp_enabled: action.enabled,
           updated_at: new Date().toISOString(),
         },
       };
 
       const attempt = await supabase
         .from('pedidos')
-        .update({
-          detalles: nextDetalles,
-        })
+        .update({ detalles: nextDetalles })
         .eq('id', order.id)
-        .select('*')
+        .select('id,comercio_id,estado,created_at,total,costo_delivery,public_tracking_token_hash,detalles')
         .maybeSingle();
 
       if (attempt.error) {
         throw new Error(attempt.error.message);
       }
 
+      const updated = (attempt.data as PedidoRow | null) ?? order;
+      const comercio = await loadComercio(supabase, updated.comercio_id);
       return NextResponse.json(
-        {
-          ok: true,
-          data: {
-            order: attempt.data ?? order,
-          },
-        },
+        { ok: true, data: toPublicOrderTrackingResponse(updated, orderId, comercio) },
         { status: 200 },
       );
     }
 
-    if (action === 'confirm_received') {
-      const currentStatus = normalizeStatus(order?.estado);
+    if (action.action === 'confirm_received') {
+      const currentStatus = normalizePublicStatus(order.estado);
       if (currentStatus === 'cancelado') {
         return NextResponse.json(
           { error: 'Este pedido esta cancelado y no puede confirmarse.' },
@@ -201,23 +232,48 @@ export async function PATCH(request: Request, { params }: Params) {
       }
 
       if (currentStatus === 'entregado') {
+        const comercio = await loadComercio(supabase, order.comercio_id);
         return NextResponse.json(
-          { ok: true, data: { order, alreadyDelivered: true } },
+          {
+            ok: true,
+            data: toPublicOrderTrackingResponse(order, orderId, comercio),
+            alreadyDelivered: true,
+          },
           { status: 200 },
         );
       }
 
+      // Customer confirmation is a narrow handoff: must be en_camino + driver arrived.
+      // Does not replace merchant or delivery controls for earlier statuses.
+      if (!CONFIRM_RECEIVED_ALLOWED_STATUSES.has(currentStatus)) {
+        return NextResponse.json(
+          { error: 'La confirmacion del cliente no esta disponible en este estado.' },
+          { status: 409 },
+        );
+      }
+
       const detalles =
-        order?.detalles && typeof order.detalles === 'object'
+        order.detalles && typeof order.detalles === 'object'
           ? { ...(order.detalles as Record<string, unknown>) }
           : {};
+      const delivery =
+        detalles.delivery && typeof detalles.delivery === 'object'
+          ? (detalles.delivery as Record<string, unknown>)
+          : {};
+      if (delivery.mode !== 'delivery') {
+        return NextResponse.json(
+          { error: 'La confirmacion de entrega solo aplica a pedidos delivery.' },
+          { status: 409 },
+        );
+      }
+
       const delegate =
         detalles.delivery_delegate && typeof detalles.delivery_delegate === 'object'
           ? { ...(detalles.delivery_delegate as Record<string, unknown>) }
           : {};
 
       const delegateStatus = (delegate.status ?? '').toString().trim().toLowerCase();
-      if (delegateStatus !== 'arrived' && delegateStatus !== 'completed') {
+      if (delegateStatus !== 'arrived') {
         return NextResponse.json(
           {
             error:
@@ -230,6 +286,7 @@ export async function PATCH(request: Request, { params }: Params) {
       const nowIso = new Date().toISOString();
       const invitationId = (delegate.invitation_id ?? '').toString().trim();
 
+      // Allowlist-only mutation: status + audit metadata. No totals/items/contact changes.
       const nextDetalles = {
         ...detalles,
         delivery_delegate: {
@@ -242,6 +299,8 @@ export async function PATCH(request: Request, { params }: Params) {
         delivery_confirmation: {
           source: 'cliente',
           confirmed_at: nowIso,
+          from_status: currentStatus,
+          actor: 'customer_tracking_token',
         },
       };
 
@@ -252,12 +311,19 @@ export async function PATCH(request: Request, { params }: Params) {
           detalles: nextDetalles,
         })
         .eq('id', order.id)
-        .neq('estado', 'cancelado')
-        .select('*')
+        .eq('estado', 'en_camino')
+        .select('id,comercio_id,estado,created_at,total,costo_delivery,public_tracking_token_hash,detalles')
         .maybeSingle();
 
       if (attempt.error) {
         throw new Error(attempt.error.message);
+      }
+
+      if (!attempt.data) {
+        return NextResponse.json(
+          { error: 'No se pudo confirmar: el estado del pedido cambio.' },
+          { status: 409 },
+        );
       }
 
       if (invitationId) {
@@ -279,43 +345,55 @@ export async function PATCH(request: Request, { params }: Params) {
           p_invitation_id: invitationId,
           p_pedido_id: order.id,
           p_order_id: orderId,
-          p_event_type: 'completed',
-          p_actor: 'customer_confirmation',
-          p_payload: { confirmed_at: nowIso },
+          p_event_type: 'customer_confirmed_received',
+          p_actor: 'customer_tracking_token',
+          p_payload: {
+            confirmed_at: nowIso,
+            from_status: currentStatus,
+          },
         });
       }
 
+      const updated = attempt.data as PedidoRow;
+      const comercio = await loadComercio(supabase, updated.comercio_id);
+      return NextResponse.json(
+        { ok: true, data: toPublicOrderTrackingResponse(updated, orderId, comercio) },
+        { status: 200 },
+      );
+    }
+
+    // cancel
+    const source = action.source;
+    const currentStatus = normalizePublicStatus(order.estado);
+    if (currentStatus === 'cancelado') {
+      const comercio = await loadComercio(supabase, order.comercio_id);
       return NextResponse.json(
         {
           ok: true,
-          data: {
-            order: attempt.data ?? order,
-          },
+          data: toPublicOrderTrackingResponse(order, orderId, comercio),
+          alreadyCancelled: true,
         },
         { status: 200 },
       );
     }
 
-    const source = (body?.source ?? '').toString().trim().toLowerCase();
-
-    if (source !== 'cliente' && source !== 'timeout') {
-      return NextResponse.json({ error: 'Invalid cancel source.' }, { status: 400 });
-    }
-
-    const currentStatus = normalizeStatus(order?.estado);
-    if (currentStatus === 'cancelado') {
-      return NextResponse.json({ ok: true, data: { order, alreadyCancelled: true } }, { status: 200 });
-    }
-
     if (currentStatus === 'entregado') {
-      return NextResponse.json({ error: 'El pedido ya fue entregado y no puede cancelarse.' }, { status: 409 });
+      return NextResponse.json(
+        { error: 'El pedido ya fue entregado y no puede cancelarse.' },
+        { status: 409 },
+      );
     }
 
-    const createdAtMs = Date.parse((order?.created_at ?? '').toString());
+    const transition = assertCustomerStatusTransition(currentStatus, 'cancelado');
+    if (transition.ok === false) {
+      return NextResponse.json({ error: transition.error }, { status: 409 });
+    }
+
+    const createdAtMs = Date.parse((order.created_at ?? '').toString());
     const pendingExpired =
       currentStatus === 'pendiente' &&
       Number.isFinite(createdAtMs) &&
-      (Date.now() - createdAtMs) >= CONFIRMATION_TIMEOUT_MS;
+      Date.now() - createdAtMs >= CONFIRMATION_TIMEOUT_MS;
 
     if (source === 'cliente') {
       if (currentStatus !== 'pendiente') {
@@ -342,7 +420,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
     const reason = source === 'timeout' ? 'timeout_no_confirmacion' : 'cancelado_por_cliente';
     const nextDetalles = {
-      ...(order?.detalles ?? {}),
+      ...(order.detalles ?? {}),
       cancellation: {
         source,
         reason,
@@ -357,7 +435,7 @@ export async function PATCH(request: Request, { params }: Params) {
         detalles: nextDetalles,
       })
       .eq('id', order.id)
-      .select('*')
+      .select('id,comercio_id,estado,created_at,total,costo_delivery,public_tracking_token_hash,detalles')
       .maybeSingle();
 
     if (attempt.error && isPedidoEstadoEnumError(attempt.error.message)) {
@@ -374,17 +452,17 @@ export async function PATCH(request: Request, { params }: Params) {
       throw new Error(attempt.error.message);
     }
 
+    const updated = (attempt.data as PedidoRow | null) ?? {
+      ...order,
+      estado: 'cancelado',
+      detalles: nextDetalles,
+    };
+    const comercio = await loadComercio(supabase, updated.comercio_id);
     return NextResponse.json(
-      {
-        ok: true,
-        data: {
-          order: attempt.data ?? order,
-        },
-      },
+      { ok: true, data: toPublicOrderTrackingResponse(updated, orderId, comercio) },
       { status: 200 },
     );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update order.';
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: 'Failed to update order.' }, { status: 500 });
   }
 }

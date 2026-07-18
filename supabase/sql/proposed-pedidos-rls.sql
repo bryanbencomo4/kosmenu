@@ -1,0 +1,41 @@
+-- PROPOSAL ONLY — review before applying. Not executed by the agent.
+-- Goal: anon cannot enumerate or mutate pedidos; authenticated owners manage own comercio.
+
+-- Expected end state:
+-- alter table public.pedidos enable row level security;
+-- alter table public.pedidos force row level security;
+
+-- anon: no direct table access (tracking goes through Next API + token)
+-- revoke all on table public.pedidos from anon, authenticated;
+-- grant select, insert, update on table public.pedidos to authenticated; -- only if Flutter needs it under RLS
+-- grant all on table public.pedidos to service_role;
+
+-- Example owner policy (Flutter merchant panel):
+-- create policy pedidos_owner_select on public.pedidos
+--   for select to authenticated
+--   using (
+--     exists (
+--       select 1 from public.comercios c
+--       where c.id = pedidos.comercio_id
+--         and c.owner_id = auth.uid()
+--     )
+--   );
+--
+-- create policy pedidos_owner_update on public.pedidos
+--   for update to authenticated
+--   using (
+--     exists (
+--       select 1 from public.comercios c
+--       where c.id = pedidos.comercio_id
+--         and c.owner_id = auth.uid()
+--     )
+--   )
+--   with check (
+--     exists (
+--       select 1 from public.comercios c
+--       where c.id = pedidos.comercio_id
+--         and c.owner_id = auth.uid()
+--     )
+--   );
+--
+-- Do NOT add: using (true) for anon/authenticated on pedidos.

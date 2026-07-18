@@ -1,11 +1,9 @@
 'use client';
 
-import { createClient, REALTIME_POSTGRES_CHANGES_LISTEN_EVENT } from '@supabase/supabase-js';
-import type { RealtimePostgresChangesFilter, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { CreditCard, MapPin, MessageCircle, Package, Phone, Store } from 'lucide-react';
 import Link from 'next/link';
-import { useParams, usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 type OrderStatus =
@@ -105,42 +103,6 @@ type PedidoRow = {
   } | null;
 };
 
-type GoogleMapPoint = { lat: number; lng: number };
-
-type GoogleMapLayer = {
-  setMap(map: GoogleMapInstance | null): void;
-};
-
-type GoogleLatLngBounds = {
-  extend(point: GoogleMapPoint): void;
-};
-
-type GoogleMapInstance = {
-  panTo(point: GoogleMapPoint): void;
-  setZoom(zoom: number): void;
-  fitBounds(bounds: GoogleLatLngBounds, padding?: number): void;
-};
-
-type GoogleMapsApi = {
-  maps?: {
-    Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMapInstance;
-    Marker: new (options: Record<string, unknown>) => GoogleMapLayer;
-    Polyline: new (options: Record<string, unknown>) => GoogleMapLayer;
-    LatLngBounds: new () => GoogleLatLngBounds;
-    SymbolPath: {
-      CIRCLE: unknown;
-    };
-  };
-};
-
-type WindowWithGoogleMaps = Window & typeof globalThis & Record<string, unknown> & {
-  google?: GoogleMapsApi;
-};
-
-function getWindowWithGoogleMaps() {
-  return window as WindowWithGoogleMaps;
-}
-
 type ComercioRow = {
   id: string;
   nombre?: string | null;
@@ -165,85 +127,6 @@ type ComercioRow = {
     } | null;
   } | null;
 };
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
-
-let googleMapsScriptPromise: Promise<GoogleMapsApi | null> | null = null;
-
-function waitForGoogleMapsReady(timeoutMs = 10000) {
-  return new Promise<GoogleMapsApi | null>((resolve, reject) => {
-    if (typeof window === 'undefined') {
-      resolve(null);
-      return;
-    }
-
-    const startedAt = Date.now();
-    const tick = () => {
-      const windowWithMaps = getWindowWithGoogleMaps();
-      if (windowWithMaps.google?.maps) {
-        resolve(windowWithMaps.google);
-        return;
-      }
-
-      if (Date.now() - startedAt >= timeoutMs) {
-        reject(new Error('Google Maps API no termino de cargar.'));
-        return;
-      }
-
-      window.setTimeout(tick, 60);
-    };
-
-    tick();
-  });
-}
-
-function loadGoogleMapsApi() {
-  if (typeof window === 'undefined') return Promise.resolve(null);
-  const windowWithMaps = getWindowWithGoogleMaps();
-  if (windowWithMaps.google?.maps) return Promise.resolve(windowWithMaps.google);
-  if (!googleMapsJsApiKey) return Promise.resolve(null);
-  if (googleMapsScriptPromise) return googleMapsScriptPromise;
-
-  googleMapsScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-kosmenu-google-maps="1"]') as HTMLScriptElement | null;
-    if (existing) {
-      waitForGoogleMapsReady().then(resolve).catch(reject);
-      existing.addEventListener('load', () => {
-        waitForGoogleMapsReady().then(resolve).catch(reject);
-      });
-      existing.addEventListener('error', reject);
-      return;
-    }
-
-    const callbackName = '__kosmenuOrderTrackingGoogleMapsReady';
-    windowWithMaps[callbackName] = () => {
-      waitForGoogleMapsReady()
-        .then((google) => {
-          delete windowWithMaps[callbackName];
-          resolve(google);
-        })
-        .catch((error) => {
-          delete windowWithMaps[callbackName];
-          reject(error);
-        });
-    };
-
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsJsApiKey)}&loading=async&callback=${callbackName}`;
-    script.async = true;
-    script.defer = true;
-    script.dataset.kosmenuGoogleMaps = '1';
-    script.onerror = (error) => {
-      delete windowWithMaps[callbackName];
-      reject(error);
-    };
-    document.head.appendChild(script);
-  });
-
-  return googleMapsScriptPromise;
-}
 
 const ORDER_FLOW: Array<{ key: OrderStatus; label: string; short: string }> = [
   { key: 'pendiente', label: 'Pedido recibido', short: 'Pendiente' },
@@ -274,6 +157,88 @@ function normalizeStatus(value: unknown): OrderStatus {
   if (status === 'entregado') return 'entregado';
   if (status === 'cancelado' || status === 'rechazado' || status === 'anulado') return 'cancelado';
   return 'pendiente';
+}
+
+type PublicTrackingPayload = {
+  orderId: string;
+  status: OrderStatus | string;
+  createdAt: string;
+  items: Array<{ name: string; quantity: number; unitPrice?: number }>;
+  subtotal?: number;
+  deliveryCost?: number;
+  total?: number;
+  currency?: string;
+  deliveryType?: 'pickup' | 'delivery';
+  locationHint?: string | null;
+  deliveryProgress?: {
+    delegateStatus: string | null;
+    customerCanConfirm: boolean;
+  };
+  notifications: {
+    whatsappEnabled: boolean;
+  };
+  permissions?: {
+    canCancelAsCustomer: boolean;
+    canConfirmReceived: boolean;
+  };
+  comercio: {
+    nombre: string;
+    slug?: string | null;
+    whatsapp?: string | null;
+    pickupAddress?: string | null;
+    branding?: ComercioRow['branding_ia'] | null;
+  };
+};
+
+function mapPublicTracking(pub: PublicTrackingPayload): {
+  order: PedidoRow;
+  comercio: ComercioRow;
+  locationHint: string;
+} {
+  const isDelivery = pub.deliveryType === 'delivery';
+  return {
+    order: {
+      id: `public:${pub.orderId}`,
+      estado: normalizeStatus(pub.status),
+      created_at: pub.createdAt,
+      total: pub.total ?? null,
+      costo_delivery: pub.deliveryCost ?? null,
+      detalles: {
+        order_id: pub.orderId,
+        moneda_checkout: pub.currency,
+        subtotal: pub.subtotal,
+        total: pub.total,
+        costo_delivery: pub.deliveryCost,
+        items: (pub.items ?? []).map((item) => ({
+          nombre: item.name,
+          cantidad: item.quantity,
+          precio: item.unitPrice,
+        })),
+        delivery: isDelivery ? { mode: 'delivery' } : { mode: 'pickup' },
+        notifications: {
+          whatsapp_enabled: pub.notifications?.whatsappEnabled !== false,
+        },
+        delivery_delegate: {
+          status: pub.deliveryProgress?.delegateStatus ?? undefined,
+        },
+      },
+    },
+    comercio: {
+      id: 'public',
+      nombre: pub.comercio?.nombre ?? 'Comercio',
+      slug: pub.comercio?.slug ?? null,
+      direccion: pub.comercio?.pickupAddress ?? null,
+      whatsapp: pub.comercio?.whatsapp ?? null,
+      branding_ia: pub.comercio?.branding ?? null,
+    },
+    locationHint: (pub.locationHint ?? '').toString().trim(),
+  };
+}
+
+function buildOrdersApiUrl(orderId: string, token: string) {
+  const url = new URL(`/api/orders/${encodeURIComponent(orderId)}`, window.location.origin);
+  url.searchParams.set('t', token);
+  return `${url.pathname}${url.search}`;
 }
 
 function statusIndex(status: OrderStatus) {
@@ -342,65 +307,6 @@ function convertFromCop(amountInCop: number, currency: string, exchangeRate: num
   return safeAmount / safeRate;
 }
 
-function resolveOrderIdFromRow(row: PedidoRow | null | undefined) {
-  if (!row) return '';
-  return (row.detalles?.order_id ?? row.id ?? '').toString().trim();
-}
-
-function buildPerpendicularArcControlPoint(
-  origin: { lat: number; lng: number },
-  destination: { lat: number; lng: number },
-  lateralOffset = 0.02,
-) {
-  const midLat = (origin.lat + destination.lat) / 2;
-  const midLng = (origin.lng + destination.lng) / 2;
-  const deltaLng = destination.lng - origin.lng;
-  const deltaLat = destination.lat - origin.lat;
-  const length = Math.sqrt((deltaLng * deltaLng) + (deltaLat * deltaLat));
-
-  if (!length) {
-    return { lat: midLat, lng: midLng };
-  }
-
-  const unitPerpLat = deltaLng / length;
-  const unitPerpLng = -deltaLat / length;
-
-  return {
-    lat: midLat + (unitPerpLat * lateralOffset),
-    lng: midLng + (unitPerpLng * lateralOffset),
-  };
-}
-
-function generateArcPath(
-  origin: { lat: number; lng: number },
-  destination: { lat: number; lng: number },
-  pointCount = 100,
-  lateralOffset = 0.02,
-) {
-  if (pointCount < 2) {
-    return [origin, destination];
-  }
-
-  const control = buildPerpendicularArcControlPoint(origin, destination, lateralOffset);
-  const points: Array<{ lat: number; lng: number }> = [];
-
-  for (let i = 0; i < pointCount; i += 1) {
-    const t = i / (pointCount - 1);
-    const oneMinusT = 1 - t;
-    const lat =
-      (oneMinusT * oneMinusT * origin.lat) +
-      (2 * oneMinusT * t * control.lat) +
-      (t * t * destination.lat);
-    const lng =
-      (oneMinusT * oneMinusT * origin.lng) +
-      (2 * oneMinusT * t * control.lng) +
-      (t * t * destination.lng);
-    points.push({ lat, lng });
-  }
-
-  return points;
-}
-
 function buildWhatsAppLink(orderId: string, status: OrderStatus, comercio: ComercioRow | null) {
   const phone = normalizePhone(
     comercio?.whatsapp ?? comercio?.telefono ?? comercio?.telefonos ?? comercio?.celular,
@@ -418,18 +324,13 @@ function resolveWhatsappNotificationsEnabled(order: PedidoRow | null | undefined
   return value !== false;
 }
 
-export default function OrderTrackingPage() {
+function OrderTrackingPageInner() {
   const params = useParams<{ orderId: string }>();
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const orderId = decodeURIComponent(params?.orderId ?? '').trim();
-  const comercioSlugHint = useMemo(() => {
-    const segments = (pathname ?? '').split('/').filter(Boolean);
-    if (segments.length >= 4 && segments[0] === 'v' && segments[2] === 'orders') {
-      return decodeURIComponent(segments[1] ?? '').trim();
-    }
-    return '';
-  }, [pathname]);
+  const trackingToken = (searchParams.get('t') ?? searchParams.get('token') ?? '').trim();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -446,17 +347,22 @@ export default function OrderTrackingPage() {
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [syncMode, setSyncMode] = useState<'conectando' | 'realtime' | 'polling' | 'sin-senal'>('conectando');
   const [lastSyncAt, setLastSyncAt] = useState(0);
+  const [locationHint, setLocationHint] = useState('');
   const lastStatusRef = useRef<OrderStatus | null>(null);
-  const trackedRowIdRef = useRef('');
-  const realtimeConnectedRef = useRef(false);
   const autoCancelAttemptedRef = useRef(false);
-  const deliveryMapRef = useRef<HTMLDivElement | null>(null);
-  const deliveryMapInstanceRef = useRef<GoogleMapInstance | null>(null);
-  const deliveryMapMarkersRef = useRef<GoogleMapLayer[]>([]);
-  const deliveryMapPolylinesRef = useRef<GoogleMapLayer[]>([]);
-  const [deliveryMapError, setDeliveryMapError] = useState('');
 
   const resolvedStatus = useMemo(() => normalizeStatus(order?.estado), [order?.estado]);
+
+  useEffect(() => {
+    // Defense in depth alongside middleware Referrer-Policy: no-referrer.
+    const meta = document.createElement('meta');
+    meta.name = 'referrer';
+    meta.content = 'no-referrer';
+    document.head.appendChild(meta);
+    return () => {
+      meta.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -480,13 +386,13 @@ export default function OrderTrackingPage() {
   }, [orderId]);
 
   async function cancelOrder(source: 'cliente' | 'timeout') {
-    if (!orderId || cancelLoading) return;
+    if (!orderId || !trackingToken || cancelLoading) return;
 
     setCancelLoading(true);
     setCancelMessage('');
 
     try {
-      const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -503,16 +409,13 @@ export default function OrderTrackingPage() {
         throw new Error(message || 'No se pudo cancelar el pedido.');
       }
 
-      const updatedOrder = (payload?.data?.order ?? null) as PedidoRow | null;
-      if (updatedOrder) {
-        setOrder((prev) => {
-          if (!prev) return updatedOrder;
-          return {
-            ...prev,
-            ...updatedOrder,
-            detalles: updatedOrder.detalles ?? prev.detalles,
-          };
-        });
+      const publicOrder = (payload?.data ?? null) as PublicTrackingPayload | null;
+      if (publicOrder?.orderId) {
+        const mapped = mapPublicTracking(publicOrder);
+        setOrder(mapped.order);
+        setComercio(mapped.comercio);
+        setLocationHint(mapped.locationHint);
+        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
       }
 
       setCancelMessage(
@@ -529,13 +432,13 @@ export default function OrderTrackingPage() {
   }
 
   async function confirmDeliveryReceived() {
-    if (!orderId || deliveryConfirmationLoading) return;
+    if (!orderId || !trackingToken || deliveryConfirmationLoading) return;
 
     setDeliveryConfirmationLoading(true);
     setDeliveryConfirmationMessage('');
 
     try {
-      const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -551,16 +454,12 @@ export default function OrderTrackingPage() {
         throw new Error(message || 'No se pudo confirmar la entrega.');
       }
 
-      const updatedOrder = (payload?.data?.order ?? null) as PedidoRow | null;
-      if (updatedOrder) {
-        setOrder((prev) => {
-          if (!prev) return updatedOrder;
-          return {
-            ...prev,
-            ...updatedOrder,
-            detalles: updatedOrder.detalles ?? prev.detalles,
-          };
-        });
+      const publicOrder = (payload?.data ?? null) as PublicTrackingPayload | null;
+      if (publicOrder?.orderId) {
+        const mapped = mapPublicTracking(publicOrder);
+        setOrder(mapped.order);
+        setComercio(mapped.comercio);
+        setLocationHint(mapped.locationHint);
       }
 
       setDeliveryConfirmationMessage('Gracias por confirmar. El pedido fue completado.');
@@ -576,7 +475,7 @@ export default function OrderTrackingPage() {
   }
 
   async function updateWhatsappNotificationsPreference(enabled: boolean) {
-    if (!orderId || whatsappPreferenceSaving) return;
+    if (!orderId || !trackingToken || whatsappPreferenceSaving) return;
 
     const previous = whatsappNotificationsEnabled;
     setWhatsappNotificationsEnabled(enabled);
@@ -584,7 +483,7 @@ export default function OrderTrackingPage() {
     setNotificationMessage('');
 
     try {
-      const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -601,17 +500,13 @@ export default function OrderTrackingPage() {
         throw new Error(message || 'No se pudo actualizar la preferencia de WhatsApp.');
       }
 
-      const updatedOrder = (payload?.data?.order ?? null) as PedidoRow | null;
-      if (updatedOrder) {
-        setOrder((prev) => {
-          if (!prev) return updatedOrder;
-          return {
-            ...prev,
-            ...updatedOrder,
-            detalles: updatedOrder.detalles ?? prev.detalles,
-          };
-        });
-        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(updatedOrder));
+      const publicOrder = (payload?.data ?? null) as PublicTrackingPayload | null;
+      if (publicOrder?.orderId) {
+        const mapped = mapPublicTracking(publicOrder);
+        setOrder(mapped.order);
+        setComercio(mapped.comercio);
+        setLocationHint(mapped.locationHint);
+        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
       }
     } catch (preferenceError) {
       setWhatsappNotificationsEnabled(previous);
@@ -631,282 +526,89 @@ export default function OrderTrackingPage() {
       return;
     }
 
-    if (!supabaseUrl || !supabaseAnonKey) {
+    if (!trackingToken) {
       setLoading(false);
-      setError('Faltan variables de entorno de Supabase.');
+      setOrder(null);
+      setError('Este enlace de seguimiento no es valido o ha expirado.');
       return;
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-    });
-
     let active = true;
-    let currentComercioId = '';
 
-    const applyIncomingOrder = async (
-      incoming: PedidoRow | null | undefined,
-      source: 'realtime' | 'polling' | 'hydrate' = 'realtime',
-    ) => {
-      if (!active || !incoming) return;
-
-      const incomingRowId = (incoming.id ?? '').toString().trim();
-      const incomingOrderId = resolveOrderIdFromRow(incoming);
-      const trackedRowId = trackedRowIdRef.current;
-      const matchesTrackedOrder = incomingOrderId === orderId || (trackedRowId && incomingRowId === trackedRowId);
-      if (!matchesTrackedOrder) return;
-
-      if (incomingRowId) {
-        trackedRowIdRef.current = incomingRowId;
-      }
-
-      const now = Date.now();
-      if (source === 'realtime') {
-        realtimeConnectedRef.current = true;
-        setSyncMode('realtime');
-      } else if (source === 'polling') {
-        if (!realtimeConnectedRef.current) {
-          setSyncMode('polling');
-        }
-      }
-      setLastSyncAt(now);
-
-      setOrder((prev) => {
-        if (!prev) return incoming;
-        return {
-          ...prev,
-          ...incoming,
-          detalles: incoming.detalles ?? prev.detalles,
-        };
-      });
-      setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(incoming));
-
-      const nextStatus = normalizeStatus(incoming.estado);
-      const previousStatus = lastStatusRef.current;
-      lastStatusRef.current = nextStatus;
-
-      const comercioId = (incoming.comercio_id ?? '').toString().trim();
-      if (comercioId && comercioId !== currentComercioId) {
-        currentComercioId = comercioId;
-        const { data: comercioRow } = await supabase
-          .from('comercios')
-          .select('id,nombre,slug,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular,logo_url,branding_ia')
-          .eq('id', comercioId)
-          .maybeSingle<ComercioRow>();
-
-        if (active) {
-          setComercio(comercioRow ?? null);
-        }
-      }
+    const applyPublic = (publicOrder: PublicTrackingPayload) => {
+      const mapped = mapPublicTracking(publicOrder);
+      setOrder(mapped.order);
+      setComercio(mapped.comercio);
+      setLocationHint(mapped.locationHint);
+      setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
+      lastStatusRef.current = normalizeStatus(mapped.order.estado);
+      setLastSyncAt(Date.now());
+      setSyncMode('polling');
     };
 
-    const loadComercioBySlug = async (slug: string) => {
-      const safeSlug = slug.trim();
-      if (!safeSlug) return null;
-
+    const fetchOrder = async (mode: 'initial' | 'poll') => {
       try {
-        const response = await fetch(`/api/menu/${encodeURIComponent(safeSlug)}`, { cache: 'no-store' });
-        if (response.ok) {
-          const payload = await response.json();
-          const apiComercio = (payload?.data?.comercio ?? null) as ComercioRow | null;
-          if (apiComercio) return apiComercio;
+        if (mode === 'initial') {
+          setLoading(true);
+          setError(null);
         }
-      } catch {
-        // Keep fallback chain going if menu API is unavailable.
-      }
 
-      const { data } = await supabase
-        .from('comercios')
-        .select('id,nombre,slug,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular,logo_url,branding_ia')
-        .eq('slug', safeSlug)
-        .maybeSingle<ComercioRow>();
-
-      return data ?? null;
-    };
-
-    const hydrateFromApi = async () => {
-      try {
-        const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, { cache: 'no-store' });
-        if (!response.ok) return;
-
-        const payload = await response.json();
-        const apiOrder = (payload?.data?.order ?? null) as PedidoRow | null;
-        const apiComercio = (payload?.data?.comercio ?? null) as ComercioRow | null;
+        const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
 
         if (!active) return;
 
-        if (apiOrder) {
-          const apiRowId = (apiOrder.id ?? '').toString().trim();
-          if (apiRowId) {
-            trackedRowIdRef.current = apiRowId;
-          }
-          await applyIncomingOrder(apiOrder, 'hydrate');
-          if (!lastStatusRef.current) {
-            lastStatusRef.current = normalizeStatus(apiOrder.estado);
-          }
-        }
-
-        if (apiComercio) {
-          setComercio(apiComercio);
-        }
-      } catch {
-        // Silent fallback: Supabase client query remains the primary source.
-      }
-    };
-
-    const loadInitial = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const derivedComercioId = orderId.includes('-') ? orderId.slice(0, orderId.lastIndexOf('-')).trim() : '';
-        let pedidosQuery = supabase
-          .from('pedidos')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(200);
-
-        if (derivedComercioId) {
-          pedidosQuery = pedidosQuery.eq('comercio_id', derivedComercioId);
-        }
-
-        const { data: rows, error: pedidosError } = await pedidosQuery;
-        if (pedidosError) throw new Error(pedidosError.message);
-
-        const found = (rows ?? []).find((row) => resolveOrderIdFromRow(row as PedidoRow) === orderId) as PedidoRow | undefined;
-        if (!active) return;
-
-        if (!found) {
+        if (!response.ok) {
           setOrder(null);
           setComercio(null);
-          setLoading(false);
+          if (mode === 'initial') {
+            setError('Este enlace de seguimiento no es valido o ha expirado.');
+          } else {
+            setSyncMode('sin-senal');
+          }
           return;
         }
 
-        currentComercioId = (found.comercio_id ?? '').toString().trim();
-        trackedRowIdRef.current = (found.id ?? '').toString().trim();
-        setOrder(found);
-        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(found));
-        lastStatusRef.current = normalizeStatus(found.estado);
-
-        let resolvedComercio: ComercioRow | null = null;
-        if (currentComercioId) {
-          const { data: comercioRow } = await supabase
-            .from('comercios')
-            .select('id,nombre,slug,direccion,latitud,longitud,whatsapp,telefono,telefonos,celular,logo_url,branding_ia')
-            .eq('id', currentComercioId)
-            .maybeSingle<ComercioRow>();
-
-          if (!active) return;
-          resolvedComercio = comercioRow ?? null;
+        const publicOrder = (payload?.data ?? null) as PublicTrackingPayload | null;
+        if (!publicOrder?.orderId) {
+          setOrder(null);
+          if (mode === 'initial') {
+            setError('Pedido no encontrado.');
+          }
+          return;
         }
 
-        if (!resolvedComercio && comercioSlugHint) {
-          resolvedComercio = await loadComercioBySlug(comercioSlugHint);
-          if (!active) return;
-        }
-
-        setComercio(resolvedComercio);
-        void hydrateFromApi();
-
-        setLoading(false);
-      } catch (loadError) {
+        applyPublic(publicOrder);
+      } catch {
         if (!active) return;
-        setError(loadError instanceof Error ? loadError.message : 'No se pudo cargar el pedido.');
-        setLoading(false);
+        if (mode === 'initial') {
+          setError('No se pudo cargar el pedido.');
+        } else {
+          setSyncMode('sin-senal');
+        }
+      } finally {
+        if (active && mode === 'initial') {
+          setLoading(false);
+        }
       }
     };
 
-    void loadInitial();
+    void fetchOrder('initial');
 
-    const derivedComercioId = orderId.includes('-') ? orderId.slice(0, orderId.lastIndexOf('-')).trim() : '';
-    const realtimeConfig: RealtimePostgresChangesFilter<`${REALTIME_POSTGRES_CHANGES_LISTEN_EVENT.ALL}`> = {
-      event: REALTIME_POSTGRES_CHANGES_LISTEN_EVENT.ALL,
-      schema: 'public',
-      table: 'pedidos',
-      ...(derivedComercioId ? { filter: `comercio_id=eq.${derivedComercioId}` } : {}),
-    };
-
-    const channel = supabase
-      .channel(`order-tracking-${orderId}`)
-      .on('postgres_changes', realtimeConfig, async (payload: RealtimePostgresChangesPayload<PedidoRow>) => {
-        if (!active) return;
-        const candidate =
-          payload.eventType === REALTIME_POSTGRES_CHANGES_LISTEN_EVENT.DELETE ? null : payload.new;
-        await applyIncomingOrder(candidate, 'realtime');
-      })
-      .subscribe((status: string) => {
-        if (!active) return;
-        if (status === 'SUBSCRIBED') {
-          realtimeConnectedRef.current = true;
-          setSyncMode('realtime');
-          return;
-        }
-
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          realtimeConnectedRef.current = false;
-          setSyncMode('sin-senal');
-        }
-      });
-
-    const pollingIntervalId = window.setInterval(async () => {
+    const pollingIntervalId = window.setInterval(() => {
       if (!active) return;
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-
-      const trackedRowId = trackedRowIdRef.current;
-      if (!trackedRowId) return;
-
-      const { data: polledOrder } = await supabase
-        .from('pedidos')
-        .select('*')
-        .eq('id', trackedRowId)
-        .maybeSingle<PedidoRow>();
-
-      if (!active || !polledOrder) return;
-      await applyIncomingOrder(polledOrder, 'polling');
+      void fetchOrder('poll');
     }, 8000);
 
     return () => {
       active = false;
       window.clearInterval(pollingIntervalId);
-      supabase.removeChannel(channel);
     };
-  }, [comercioSlugHint, orderId]);
+  }, [orderId, trackingToken]);
 
   const delivery = order?.detalles?.delivery ?? null;
   const isDelivery = (delivery?.mode ?? 'pickup') === 'delivery';
-  const deliveryAddress = (delivery?.address ?? '').toString().trim();
-  const deliveryLat =
-    toNumberOrNull(delivery?.coordinates?.lat) ??
-    toNumberOrNull(delivery?.lat) ??
-    toNumberOrNull(delivery?.latitude) ??
-    toNumberOrNull(delivery?.latitud);
-  const deliveryLng =
-    toNumberOrNull(delivery?.coordinates?.lng) ??
-    toNumberOrNull(delivery?.lng) ??
-    toNumberOrNull(delivery?.longitude) ??
-    toNumberOrNull(delivery?.longitud);
-  const hasDeliveryCoords = deliveryLat !== null && deliveryLng !== null;
-
-  const businessLat =
-    toNumberOrNull(comercio?.latitud) ??
-    toNumberOrNull(order?.detalles?.comercio_latitud) ??
-    toNumberOrNull(order?.detalles?.latitud_comercio) ??
-    toNumberOrNull(order?.detalles?.business_latitude);
-  const businessLng =
-    toNumberOrNull(comercio?.longitud) ??
-    toNumberOrNull(order?.detalles?.comercio_longitud) ??
-    toNumberOrNull(order?.detalles?.longitud_comercio) ??
-    toNumberOrNull(order?.detalles?.business_longitude);
-  const hasBusinessCoords = businessLat !== null && businessLng !== null;
-
-  const businessMapSrc = hasBusinessCoords
-    ? `https://www.google.com/maps?q=${encodeURIComponent(`${businessLat},${businessLng}`)}&z=15&output=embed`
-    : `https://www.google.com/maps?q=${encodeURIComponent((comercio?.direccion ?? order?.detalles?.comercio_direccion ?? comercio?.nombre ?? order?.detalles?.comercio_nombre ?? 'elmenuxfa.com').toString())}&z=15&output=embed`;
-
-  const deliveryMapSrc = hasDeliveryCoords
-    ? `https://www.google.com/maps?q=${encodeURIComponent(`${deliveryLat},${deliveryLng}`)}&z=15&output=embed`
-    : `https://www.google.com/maps?q=${encodeURIComponent(deliveryAddress || 'direccion de entrega')}&z=15&output=embed`;
 
   const subtotal = toNumberOrNull(order?.detalles?.subtotal) ?? toNumberOrNull(order?.total) ?? 0;
   const costoDelivery = toNumberOrNull(order?.costo_delivery) ?? toNumberOrNull(order?.detalles?.costo_delivery) ?? 0;
@@ -924,8 +626,6 @@ export default function OrderTrackingPage() {
     convertFromCop(total, checkoutCurrency, exchangeRate);
 
   const paymentReference = (order?.detalles?.referencia_pago ?? '').toString().trim();
-  const paymentProofUrl = (order?.detalles?.comprobante_url ?? '').toString().trim();
-  const cashPaymentAmount = toNumberOrNull(order?.detalles?.pago_con);
   const cashChangeAmount = toNumberOrNull(order?.detalles?.cambio_de) ?? 0;
   const orderNotes = (order?.detalles?.order_notes ?? '').toString().trim();
   const deliveryDelegate = order?.detalles?.delivery_delegate ?? null;
@@ -964,8 +664,6 @@ export default function OrderTrackingPage() {
       subtotal: subtotalCheckoutValue,
     };
   }).filter((item) => item.cantidad > 0);
-  const deliveryReference = (delivery?.reference ?? '').toString().trim();
-  const deliveryInstructions = (delivery?.instructions ?? '').toString().trim();
 
   const contactName = (order?.nombre_cliente ?? order?.detalles?.cliente_nombre ?? '').toString().trim();
   const contactPhone = (order?.telefono_cliente ?? order?.detalles?.telefono_cliente ?? '').toString().trim();
@@ -978,21 +676,12 @@ export default function OrderTrackingPage() {
     order?.detalles?.nombre_negocio ??
     ''
   ).toString().trim();
-  const businessAddress = (
-    comercio?.direccion ??
-    order?.detalles?.comercio_direccion ??
-    order?.detalles?.direccion_comercio ??
-    order?.detalles?.business_address ??
-    ''
-  ).toString().trim();
+  const businessAddress = (comercio?.direccion ?? '').toString().trim();
   const businessPhoneRaw = (
     comercio?.whatsapp ??
     comercio?.telefono ??
     comercio?.telefonos ??
     comercio?.celular ??
-    order?.detalles?.telefono_comercio ??
-    order?.detalles?.comercio_telefono ??
-    order?.detalles?.business_phone ??
     ''
   ).toString().trim();
 
@@ -1011,158 +700,11 @@ export default function OrderTrackingPage() {
   const bodyFontFamily = fontFamilyCssValue(branding?.fuente_cuerpo, 'Roboto, sans-serif');
 
   useEffect(() => {
-    const clearMapLayers = () => {
-      for (const marker of deliveryMapMarkersRef.current) {
-        marker.setMap(null);
-      }
-      for (const polyline of deliveryMapPolylinesRef.current) {
-        polyline.setMap(null);
-      }
-      deliveryMapMarkersRef.current = [];
-      deliveryMapPolylinesRef.current = [];
-    };
-
-    if (!isDelivery) {
-      clearMapLayers();
-      deliveryMapInstanceRef.current = null;
-      setDeliveryMapError('');
-      return;
-    }
-
-    if (!hasDeliveryCoords) {
-      clearMapLayers();
-      deliveryMapInstanceRef.current = null;
-      setDeliveryMapError('Coordenadas de entrega no disponibles para mostrar la ruta.');
-      return;
-    }
-
-    let disposed = false;
-
-    const mountMap = async () => {
-      try {
-        setDeliveryMapError('');
-        const google = await loadGoogleMapsApi();
-        if (disposed || !deliveryMapRef.current) return;
-
-        if (!google?.maps) {
-          setDeliveryMapError('No fue posible cargar Google Maps en este dispositivo.');
-          return;
-        }
-
-        const deliveryPoint = { lat: deliveryLat as number, lng: deliveryLng as number };
-        const businessPoint = (businessLat !== null && businessLng !== null)
-          ? { lat: businessLat, lng: businessLng }
-          : null;
-
-        const map = new google.maps.Map(deliveryMapRef.current, {
-          center: businessPoint
-            ? { lat: (businessPoint.lat + deliveryPoint.lat) / 2, lng: (businessPoint.lng + deliveryPoint.lng) / 2 }
-            : deliveryPoint,
-          zoom: businessPoint ? 13.8 : 15.2,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: false,
-          rotateControl: false,
-          gestureHandling: 'cooperative',
-        });
-
-        clearMapLayers();
-        deliveryMapInstanceRef.current = map;
-
-        const deliveryMarker = new google.maps.Marker({
-          map,
-          position: deliveryPoint,
-          title: 'Destino de entrega',
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 8,
-            fillColor: '#7C3AED',
-            fillOpacity: 1,
-            strokeColor: '#FFFFFF',
-            strokeWeight: 2,
-          },
-        });
-        deliveryMapMarkersRef.current.push(deliveryMarker);
-
-        const cameraPoints = [deliveryPoint];
-
-        if (businessPoint) {
-          const businessMarker = new google.maps.Marker({
-            map,
-            position: businessPoint,
-            title: businessName || 'Comercio',
-            icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: '#F59E0B',
-              fillOpacity: 1,
-              strokeColor: '#FFFFFF',
-              strokeWeight: 2,
-            },
-          });
-          deliveryMapMarkersRef.current.push(businessMarker);
-
-          const arcPoints = generateArcPath(businessPoint, deliveryPoint);
-          const arcPeak = arcPoints[Math.floor(arcPoints.length / 2)] ?? null;
-
-          const shadowLine = new google.maps.Polyline({
-            map,
-            path: [businessPoint, deliveryPoint],
-            strokeColor: '#9CA3AF',
-            strokeOpacity: 0.4,
-            strokeWeight: 2,
-            zIndex: 1,
-          });
-
-          const arcLine = new google.maps.Polyline({
-            map,
-            path: arcPoints,
-            strokeColor: '#7C3AED',
-            strokeOpacity: 1,
-            strokeWeight: 4,
-            zIndex: 2,
-          });
-
-          deliveryMapPolylinesRef.current.push(shadowLine, arcLine);
-          cameraPoints.push(businessPoint);
-          if (arcPeak) cameraPoints.push(arcPeak);
-        }
-
-        const bounds = new google.maps.LatLngBounds();
-        for (const point of cameraPoints) {
-          bounds.extend(point);
-        }
-        if (cameraPoints.length > 1) {
-          map.fitBounds(bounds, 60);
-        }
-      } catch {
-        if (!disposed) {
-          setDeliveryMapError('No fue posible renderizar el mapa de ruta.');
-        }
-      }
-    };
-
-    void mountMap();
-
-    return () => {
-      disposed = true;
-      clearMapLayers();
-    };
-  }, [
-    businessLat,
-    businessLng,
-    businessName,
-    deliveryLat,
-    deliveryLng,
-    hasDeliveryCoords,
-    isDelivery,
-  ]);
-
-  useEffect(() => {
     const slug = (comercio?.slug ?? '').trim();
-    if (!slug || !orderId || !pathname?.startsWith('/orders/')) return;
-    router.replace(`/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}`);
-  }, [comercio?.slug, orderId, pathname, router]);
+    if (!slug || !orderId || !trackingToken || !pathname?.startsWith('/orders/')) return;
+    const next = `/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}?t=${encodeURIComponent(trackingToken)}`;
+    router.replace(next);
+  }, [comercio?.slug, orderId, pathname, router, trackingToken]);
 
   const displayStatus: OrderStatus = (!isDelivery && resolvedStatus === 'en_camino')
     ? 'preparando'
@@ -1260,26 +802,18 @@ export default function OrderTrackingPage() {
             : 'RECIBIDO';
   const callPhone = normalizePhone(businessPhoneRaw);
   const callHref = callPhone ? `tel:+${callPhone}` : '';
-  const activeMapLat = isDelivery ? deliveryLat : businessLat;
-  const activeMapLng = isDelivery ? deliveryLng : businessLng;
-  const hasActiveMapCoords = activeMapLat !== null && activeMapLng !== null;
-  const activeCoordsLabel = hasActiveMapCoords ? `${activeMapLat.toFixed(6)}, ${activeMapLng.toFixed(6)}` : '';
   const syncLabel =
-    syncMode === 'realtime'
-      ? 'Realtime activo'
-      : syncMode === 'polling'
-        ? 'Fallback por polling'
-        : syncMode === 'sin-senal'
-          ? 'Sin senal realtime'
-          : 'Conectando...';
+    syncMode === 'polling' || syncMode === 'realtime'
+      ? 'Actualizacion activa'
+      : syncMode === 'sin-senal'
+        ? 'Sin senal'
+        : 'Conectando...';
   const syncColor =
-    syncMode === 'realtime'
+    syncMode === 'polling' || syncMode === 'realtime'
       ? '#16A34A'
-      : syncMode === 'polling'
-        ? '#D97706'
-        : syncMode === 'sin-senal'
-          ? '#DC2626'
-          : '#64748B';
+      : syncMode === 'sin-senal'
+        ? '#DC2626'
+        : '#64748B';
   const lastSyncLabel = lastSyncAt
     ? new Intl.DateTimeFormat('es-CO', {
         hour: '2-digit',
@@ -1383,18 +917,11 @@ export default function OrderTrackingPage() {
               </div>
             </div>
 
-            {isDelivery ? (
-              <>
-                <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                  {deliveryMapError ? (
-                    <div className="grid h-56 place-items-center px-4 text-center text-sm text-slate-600">
-                      {deliveryMapError}
-                    </div>
-                  ) : (
-                    <div ref={deliveryMapRef} className="h-56 w-full" />
-                  )}
-                </div>
-              </>
+            {locationHint ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Ubicacion</p>
+                <p className="mt-2 text-sm text-slate-700">{locationHint}</p>
+              </div>
             ) : null}
 
             <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1416,7 +943,7 @@ export default function OrderTrackingPage() {
                   </a>
                 ) : null}
                 {finalWaLink ? (
-                  <a href={finalWaLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black" style={{ backgroundColor: '#D97706', color: '#FFFFFF' }}>
+                  <a href={finalWaLink} target="_blank" rel="noopener noreferrer nofollow" referrerPolicy="no-referrer" className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black" style={{ backgroundColor: '#D97706', color: '#FFFFFF' }}>
                     <MessageCircle className="h-4 w-4" strokeWidth={2.2} />
                     Chat/WhatsApp
                   </a>
@@ -1446,19 +973,14 @@ export default function OrderTrackingPage() {
               <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Metodo de pago</p>
               <p className="mt-2 text-sm text-slate-700">{paymentMethodName || 'No especificado'} · {paymentReference ? `****${paymentReference.slice(-4)}` : 'Sin referencia'}</p>
               {paymentMethodDetails.length > 0 ? <p className="mt-1 text-xs text-slate-500">{paymentMethodDetails.slice(0, 2).join(' · ')}</p> : null}
-              {paymentProofUrl ? (
-                <a href={paymentProofUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex rounded-lg px-3 py-2 text-xs font-bold" style={{ backgroundColor: softTone, color: trackingPrimary }}>
-                  Ver comprobante
-                </a>
-              ) : null}
             </div>
 
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">{isDelivery ? 'Direccion de entrega' : 'Direccion del comercio'}</p>
-              <p className="mt-2 text-sm text-slate-700">{isDelivery ? (deliveryAddress || 'Direccion no disponible') : (businessAddress || 'Direccion no disponible')}</p>
-              {deliveryReference ? <p className="mt-1 text-sm text-slate-600">Referencia: {deliveryReference}</p> : null}
-              {deliveryInstructions ? <p className="mt-1 text-sm text-slate-600">Notas: {deliveryInstructions}</p> : null}
-            </div>
+            {!isDelivery && businessAddress ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Direccion del comercio</p>
+                <p className="mt-2 text-sm text-slate-700">{businessAddress}</p>
+              </div>
+            ) : null}
 
             {deliveryDelegateLabel ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1581,5 +1103,19 @@ export default function OrderTrackingPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function OrderTrackingPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="grid min-h-screen place-items-center px-6 text-slate-900">
+          <p className="text-sm text-slate-500">Cargando seguimiento...</p>
+        </main>
+      }
+    >
+      <OrderTrackingPageInner />
+    </Suspense>
   );
 }

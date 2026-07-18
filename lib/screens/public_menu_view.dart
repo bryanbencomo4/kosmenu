@@ -1,17 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/services/public_menu_api_service.dart';
+import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class PublicMenuView extends StatefulWidget {
@@ -74,47 +76,21 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   }
 
   Future<_PublicMenuData> _fetchMenuData() async {
-    final client = Supabase.instance.client;
-
-    final comercioFuture = client
-        .from('comercios')
-        .select()
-        .eq('id', widget.comercioId)
-        .limit(1)
-        .maybeSingle();
-
-    final categoriesFuture = client
-        .from('categorias')
-        .select()
-        .eq('comercio_id', widget.comercioId)
-        .order('orden', ascending: true)
-        .order('nombre', ascending: true);
-
-    final productsFuture = client
-        .from('productos')
-        .select()
-        .eq('comercio_id', widget.comercioId)
-        .eq('disponible', true)
-        .order('nombre', ascending: true);
-
-    final results = await Future.wait<dynamic>([
-      comercioFuture,
-      categoriesFuture,
-      productsFuture,
-    ]);
-
+    final payload = await PublicMenuApiService().fetchMenu(widget.comercioId);
     final comercioMap = Map<String, dynamic>.from(
-      (results[0] as Map?) ?? const <String, dynamic>{},
+      (payload['comercio'] as Map?) ?? const <String, dynamic>{},
     );
+    final resolvedComercioId =
+        (comercioMap['id']?.toString() ?? widget.comercioId).trim();
 
-    final categories = (results[1] as List<dynamic>)
+    final categories = ((payload['categorias'] as List<dynamic>?) ?? const [])
         .map(
           (row) =>
               _PublicCategory.fromMap(Map<String, dynamic>.from(row as Map)),
         )
         .toList();
 
-    final products = (results[2] as List<dynamic>)
+    final products = ((payload['productos'] as List<dynamic>?) ?? const [])
         .map(
           (row) =>
               _PublicProduct.fromMap(Map<String, dynamic>.from(row as Map)),
@@ -124,6 +100,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     _syncAiImageRefresh(products);
 
     return _PublicMenuData(
+      comercioId: resolvedComercioId,
       comercioNombre: comercioMap['nombre']?.toString() ?? 'Kosmenu',
       comercioLogoUrl: _resolveComercioLogoUrl(comercioMap),
       whatsappNumber: _normalizePhone(comercioMap['whatsapp']?.toString()),
@@ -412,15 +389,13 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     );
   }
 
-  String _generateTrackingCode() {
-    final code = 100 + Random().nextInt(900);
-    return '#KOS-$code';
-  }
-
-  Future<void> _registerShadowOrder({
-    required String orderCode,
+  Future<PublicOrderCreateResult> _createOrderViaApi({
+    required String comercioId,
+    required String comercioNombre,
+    required String clientName,
+    required String clientWhatsapp,
+    required String idempotencyKey,
     required List<_CartLine> items,
-    required double totalUsd,
     required double tasaAplicada,
     required String selectedPaymentMethod,
     required String deliveryMode,
@@ -430,73 +405,51 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     required double? deliveryLatitude,
     required double? deliveryLongitude,
     required String orderNotes,
-  }) async {
-    final carritoItems = items
-        .map(
-          (item) => <String, dynamic>{
-            'nombre': item.product.nombre,
-            'cantidad': item.quantity,
-            'precio': item.product.precio,
-            'imagen_url': item.product.imageUrl,
-          },
-        )
-        .toList();
-
-    final details = <String, dynamic>{
-      'items': carritoItems,
-      'tasa_aplicada': tasaAplicada,
-      'tasa_cambio_snapshot': tasaAplicada,
-      'codigo_orden': orderCode,
-      'metodo_pago': selectedPaymentMethod,
-      'order_notes': orderNotes,
-      'delivery': <String, dynamic>{
-        'mode': deliveryMode,
-        'address': deliveryAddress,
-        'reference': deliveryReference,
-        'instructions': deliveryInstructions,
-        'lat': deliveryLatitude,
-        'lng': deliveryLongitude,
-        'latitude': deliveryLatitude,
-        'longitude': deliveryLongitude,
-        'latitud': deliveryLatitude,
-        'longitud': deliveryLongitude,
-        'coordinates': <String, dynamic>{
-          'lat': deliveryLatitude,
-          'lng': deliveryLongitude,
-        },
-      },
-    };
-
-    debugPrint(
-      'DEBUG: Checkout payload coords -> lat=$deliveryLatitude, lng=$deliveryLongitude, mode=$deliveryMode',
+    String? paymentProofStorageRef,
+  }) {
+    final exchangeRate = tasaAplicada > 0 ? tasaAplicada : 1.0;
+    final isDelivery = deliveryMode == _deliveryModeDelivery;
+    final request = PublicOrderCreateRequest(
+      comercioId: comercioId,
+      comercioNombre: comercioNombre,
+      clientName: clientName,
+      clientWhatsapp: clientWhatsapp,
+      currency: 'USD',
+      exchangeRate: exchangeRate,
+      costoDelivery: 0,
+      items: items
+          .map(
+            (item) => PublicOrderItemDto(
+              productId: item.product.id,
+              nombre: item.product.nombre,
+              cantidad: item.quantity,
+              precio: item.product.precio,
+            ),
+          )
+          .toList(),
+      delivery: PublicOrderDeliveryDto(
+        mode: isDelivery ? 'delivery' : 'pickup',
+        address: isDelivery ? deliveryAddress : null,
+        reference: isDelivery ? deliveryReference : null,
+        instructions: isDelivery ? deliveryInstructions : null,
+        lat: isDelivery ? deliveryLatitude : null,
+        lng: isDelivery ? deliveryLongitude : null,
+      ),
+      paymentMethod: PublicOrderPaymentMethodDto(nombre: selectedPaymentMethod),
+      paymentProofUrl: paymentProofStorageRef,
+      orderNotes: orderNotes,
     );
 
-    final insertedRows = await Supabase.instance.client
-        .from('pedidos')
-        .insert({
-          'comercio_id': widget.comercioId,
-          'detalles': details,
-          'delivery_latitude': deliveryLatitude,
-          'delivery_longitude': deliveryLongitude,
-          'total': totalUsd,
-          'estado': 'pendiente',
-        })
-        .select('id, detalles, delivery_latitude, delivery_longitude');
-
-    final inserted = (insertedRows as List<dynamic>).isNotEmpty
-        ? Map<String, dynamic>.from(insertedRows.first as Map)
-        : <String, dynamic>{};
-    final insertedDelivery = inserted['detalles'] is Map
-        ? (inserted['detalles'] as Map)['delivery']
-        : null;
-    debugPrint(
-      'DEBUG: Inserted pedido -> id=${inserted['id']}, topLat=${inserted['delivery_latitude']}, topLng=${inserted['delivery_longitude']}, nestedDelivery=$insertedDelivery',
+    return PublicOrderApiService().createOrder(
+      request: request,
+      idempotencyKey: idempotencyKey,
     );
   }
 
   String _buildWhatsAppMessage({
     required String comercioNombre,
-    required String trackingCode,
+    required String orderId,
+    required String trackingUrl,
     required List<_CartLine> items,
     required double totalUsd,
     required double totalCop,
@@ -509,7 +462,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     required String orderNotes,
   }) {
     final buffer = StringBuffer(
-      '$trackingCode\nHola $comercioNombre, quiero pedir:\n',
+      'Pedido $orderId\nHola $comercioNombre, quiero pedir:\n',
     );
 
     for (final item in items) {
@@ -538,7 +491,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
       buffer.writeln('Notas del pedido: ${orderNotes.trim()}');
     }
     buffer.writeln('Metodo de pago: $paymentMethod');
-    buffer.write('Total: ${_formatUsd(totalUsd)}$copSection');
+    buffer.writeln('Total: ${_formatUsd(totalUsd)}$copSection');
+    buffer.write('Seguimiento: $trackingUrl');
 
     return buffer.toString();
   }
@@ -870,7 +824,15 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     var selectedDeliveryMode = _deliveryModePickup;
     var deliveryLatitude = data.businessLatitude;
     var deliveryLongitude = data.businessLongitude;
+    var uploadProgress = 0.0;
+    var proofFileName = '';
+    Uint8List? proofBytes;
+    String? proofMimeType;
+    // One key per checkout attempt; reused on controlled retries of the same attempt.
+    final idempotencyKey = generateCheckoutIdempotencyKey();
 
+    final clientNameController = TextEditingController();
+    final clientWhatsappController = TextEditingController();
     final deliveryAddressController = TextEditingController();
     final deliveryReferenceController = TextEditingController();
     final deliveryInstructionsController = TextEditingController();
@@ -924,6 +886,51 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: palette.onSurfaceMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Tus datos',
+                        style: GoogleFonts.manrope(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: palette.onSurfaceMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: clientNameController,
+                        enabled: !isSubmittingOrder,
+                        textCapitalization: TextCapitalization.words,
+                        style: GoogleFonts.manrope(
+                          color: palette.onSurface,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Nombre completo',
+                          filled: true,
+                          fillColor: palette.surface,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: clientWhatsappController,
+                        enabled: !isSubmittingOrder,
+                        keyboardType: TextInputType.phone,
+                        style: GoogleFonts.manrope(
+                          color: palette.onSurface,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'WhatsApp (solo numeros)',
+                          filled: true,
+                          fillColor: palette.surface,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -1226,6 +1233,82 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           ),
                         ),
                       const SizedBox(height: 12),
+                      Text(
+                        'Comprobante (opcional)',
+                        style: GoogleFonts.manrope(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: palette.onSurfaceMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: isSubmittingOrder
+                            ? null
+                            : () async {
+                                final picked = await FilePicker.platform
+                                    .pickFiles(
+                                      type: FileType.custom,
+                                      allowedExtensions: const <String>[
+                                        'jpg',
+                                        'jpeg',
+                                        'png',
+                                        'webp',
+                                        'pdf',
+                                      ],
+                                      withData: true,
+                                    );
+                                if (picked == null || picked.files.isEmpty) {
+                                  return;
+                                }
+                                final file = picked.files.first;
+                                final bytes = file.bytes;
+                                if (bytes == null) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'No se pudo leer el archivo seleccionado.',
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                final name = file.name;
+                                final mime = _guessComprobanteMime(name);
+                                final error = ComprobanteClientValidator.validate(
+                                  fileName: name,
+                                  mimeType: mime,
+                                  sizeBytes: bytes.length,
+                                );
+                                if (error != null) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(error)),
+                                  );
+                                  return;
+                                }
+                                setModalState(() {
+                                  proofBytes = Uint8List.fromList(bytes);
+                                  proofFileName = name;
+                                  proofMimeType = mime;
+                                });
+                              },
+                        icon: const Icon(Icons.attach_file_rounded, size: 18),
+                        label: Text(
+                          proofFileName.isEmpty
+                              ? 'Adjuntar JPEG/PNG/WebP/PDF'
+                              : proofFileName,
+                          style: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (isSubmittingOrder && uploadProgress > 0) ...[
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(value: uploadProgress),
+                      ],
+                      const SizedBox(height: 12),
                       TextFormField(
                         controller: orderNotesController,
                         minLines: 2,
@@ -1268,9 +1351,36 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     return;
                                   }
 
-                                  setModalState(() => isSubmittingOrder = true);
                                   final localScaffoldMessenger =
                                       ScaffoldMessenger.of(context);
+                                  final clientName =
+                                      clientNameController.text.trim();
+                                  final clientWhatsapp =
+                                      clientWhatsappController.text
+                                          .replaceAll(RegExp(r'\D'), '');
+
+                                  if (clientName.length < 3) {
+                                    localScaffoldMessenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Ingresa tu nombre (minimo 3 caracteres).',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  if (clientWhatsapp.length < 10) {
+                                    localScaffoldMessenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Ingresa un WhatsApp valido.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  setModalState(() => isSubmittingOrder = true);
 
                                   final isDeliveryOrder =
                                       selectedDeliveryMode ==
@@ -1318,12 +1428,38 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     return;
                                   }
 
-                                  final orderCode = _generateTrackingCode();
                                   try {
-                                    await _registerShadowOrder(
-                                      orderCode: orderCode,
+                                    final api = PublicOrderApiService();
+                                    String? storageRef;
+                                    final pendingBytes = proofBytes;
+                                    final pendingName = proofFileName;
+                                    final pendingMime = proofMimeType;
+                                    if (pendingBytes != null &&
+                                        pendingName.isNotEmpty &&
+                                        pendingMime != null) {
+                                      final uploaded = await api
+                                          .uploadComprobante(
+                                            comercioId: data.comercioId,
+                                            fileName: pendingName,
+                                            mimeType: pendingMime,
+                                            bytes: pendingBytes,
+                                            onProgress: (value) {
+                                              if (!mounted) return;
+                                              setModalState(
+                                                () => uploadProgress = value,
+                                              );
+                                            },
+                                          );
+                                      storageRef = uploaded.storageRef;
+                                    }
+
+                                    final created = await _createOrderViaApi(
+                                      comercioId: data.comercioId,
+                                      comercioNombre: data.comercioNombre,
+                                      clientName: clientName,
+                                      clientWhatsapp: clientWhatsapp,
+                                      idempotencyKey: idempotencyKey,
                                       items: cartItems,
-                                      totalUsd: totalUsd,
                                       tasaAplicada: data.tasaCambioPesos,
                                       selectedPaymentMethod:
                                           selectedPaymentMethod,
@@ -1344,11 +1480,13 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                           ? deliveryLongitude
                                           : null,
                                       orderNotes: normalizedOrderNotes,
+                                      paymentProofStorageRef: storageRef,
                                     );
 
                                     final message = _buildWhatsAppMessage(
                                       comercioNombre: data.comercioNombre,
-                                      trackingCode: orderCode,
+                                      orderId: created.orderId,
+                                      trackingUrl: created.trackingUrl,
                                       items: cartItems,
                                       totalUsd: totalUsd,
                                       totalCop: totalCop,
@@ -1380,27 +1518,33 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                       }
                                     } else {
                                       localScaffoldMessenger.showSnackBar(
-                                        const SnackBar(
+                                        SnackBar(
                                           content: Text(
-                                            'Pedido registrado, pero no se pudo abrir WhatsApp.',
+                                            'Pedido ${created.orderId} confirmado. No se pudo abrir WhatsApp.',
                                           ),
                                         ),
                                       );
                                     }
-                                  } catch (error) {
+                                  } on PublicOrderApiException catch (error) {
                                     if (!mounted) return;
                                     localScaffoldMessenger.showSnackBar(
-                                      SnackBar(
+                                      SnackBar(content: Text(error.message)),
+                                    );
+                                  } catch (_) {
+                                    if (!mounted) return;
+                                    localScaffoldMessenger.showSnackBar(
+                                      const SnackBar(
                                         content: Text(
-                                          'No se pudo registrar el pedido: $error',
+                                          'No se pudo registrar el pedido. Intentalo de nuevo.',
                                         ),
                                       ),
                                     );
                                   } finally {
                                     if (mounted) {
-                                      setModalState(
-                                        () => isSubmittingOrder = false,
-                                      );
+                                      setModalState(() {
+                                        isSubmittingOrder = false;
+                                        uploadProgress = 0;
+                                      });
                                     }
                                   }
                                 },
@@ -1448,11 +1592,21 @@ class _PublicMenuViewState extends State<PublicMenuView> {
         },
       );
     } finally {
+      clientNameController.dispose();
+      clientWhatsappController.dispose();
       deliveryAddressController.dispose();
       deliveryReferenceController.dispose();
       deliveryInstructionsController.dispose();
       orderNotesController.dispose();
     }
+  }
+
+  String _guessComprobanteMime(String fileName) {
+    final lower = fileName.trim().toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    return 'image/jpeg';
   }
 
   String _formatUsd(double amount) => '\$${amount.toStringAsFixed(2)}';
@@ -2197,6 +2351,7 @@ class _ModernProductTile extends StatelessWidget {
 
 class _PublicMenuData {
   const _PublicMenuData({
+    required this.comercioId,
     required this.comercioNombre,
     required this.comercioLogoUrl,
     required this.whatsappNumber,
@@ -2210,6 +2365,7 @@ class _PublicMenuData {
     required this.products,
   });
 
+  final String comercioId;
   final String comercioNombre;
   final String? comercioLogoUrl;
   final String? whatsappNumber;

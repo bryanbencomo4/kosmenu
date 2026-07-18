@@ -26,6 +26,14 @@ class PedidoModel {
   final bool hasParseError;
   final String? parseErrorMessage;
 
+  /// Opaque storage ref (`storage://comprobantes/...`) or legacy URL from detalles.
+  String? get comprobanteRef {
+    final raw = detalles['comprobante_url']?.toString().trim() ?? '';
+    return raw.isEmpty ? null : raw;
+  }
+
+  bool get hasComprobante => comprobanteRef != null;
+
   const PedidoModel({
     required this.id,
     required this.comercioId,

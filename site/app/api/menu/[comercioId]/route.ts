@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 
-import { getServerSupabaseClient } from '../../_lib/supabase-server';
+import {
+  toPublicComercioDto,
+  toPublicMetodosPagoDto,
+} from '../../_lib/public-menu-dto';
+import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,7 +22,7 @@ type ProductoRow = {
 };
 
 async function isOwnerEmailVerified(
-  supabase: ReturnType<typeof getServerSupabaseClient>,
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
   ownerId: string,
 ) {
   const safeOwnerId = ownerId.trim();
@@ -43,9 +47,37 @@ export async function GET(_: Request, { params }: Params) {
       return NextResponse.json({ error: 'Invalid comercioId.' }, { status: 400 });
     }
 
-    const supabase = getServerSupabaseClient();
+    const supabase = getServiceSupabaseClient();
 
-    const comercioQuery = supabase.from('comercios').select('*').limit(1);
+    // owner_id is used server-side for verification only — stripped by toPublicComercioDto.
+    const comercioQuery = supabase
+      .from('comercios')
+      .select(
+        [
+          'id',
+          'slug',
+          'nombre',
+          'logo_url',
+          'whatsapp',
+          'direccion',
+          'latitud',
+          'longitud',
+          'permite_delivery',
+          'en_linea',
+          'owner_id',
+          'menu_palette',
+          'menu_palette_primary',
+          'menu_palette_accent',
+          'menu_palette_surface',
+          'menu_palette_text',
+          'menu_layout',
+          'menu_footer',
+          'moneda',
+          'tasa_cambio_pesos',
+          'exchange_rate_value',
+        ].join(','),
+      )
+      .limit(1);
     const { data: comercios, error: comercioError } = isUuid(comercioId)
       ? await comercioQuery.eq('id', comercioId)
       : await comercioQuery.eq('slug', comercioId);
@@ -54,14 +86,18 @@ export async function GET(_: Request, { params }: Params) {
       throw new Error(comercioError.message);
     }
 
-    const comercio = (comercios ?? [])[0] ?? null;
-    if (!comercio) {
+    const comercioRow = ((comercios ?? [])[0] ?? null) as unknown as Record<
+      string,
+      unknown
+    > | null;
+    if (!comercioRow) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
 
-    const resolvedComercioId = comercio.id;
-    const ownerId = (comercio.owner_id ?? '').toString().trim();
-    const isOnline = comercio.en_linea !== false;
+    const resolvedComercioId = (comercioRow.id ?? '').toString();
+    const ownerId = (comercioRow.owner_id ?? '').toString().trim();
+    const isOnline = comercioRow.en_linea !== false;
+    const comercio = toPublicComercioDto(comercioRow);
 
     if (!isOnline) {
       return NextResponse.json(
@@ -103,7 +139,7 @@ export async function GET(_: Request, { params }: Params) {
         .order('nombre', { ascending: true }),
       supabase
         .from('metodos_pago')
-        .select('*')
+        .select('id,comercio_id,nombre,tipo,descripcion,detalles')
         .eq('comercio_id', resolvedComercioId),
       supabase
         .from('global_market_rates')
@@ -143,7 +179,7 @@ export async function GET(_: Request, { params }: Params) {
           comercio,
           categorias: categoriasResult.data ?? [],
           productos,
-          metodosPago: metodosPagoResult.data ?? [],
+          metodosPago: toPublicMetodosPagoDto(metodosPagoResult.data ?? []),
           marketRates: marketRatesResult.data ?? null,
         },
       },

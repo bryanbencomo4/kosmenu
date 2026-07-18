@@ -15,6 +15,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/delivery_courier_service.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
+import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -75,6 +76,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   String? _lastKnownStatus;
   _OrderViewData? _cachedOrderData;
   final Map<String, String> _delegatedCourierAliasCache = <String, String>{};
+  bool _isLoadingComprobante = false;
+  String? _ephemeralComprobanteUrl;
+  DateTime? _comprobanteUrlExpiresAt;
 
   @override
   void initState() {
@@ -225,7 +229,122 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     _countdownTicker?.cancel();
     _emailController.dispose();
     _successController.dispose();
+    _ephemeralComprobanteUrl = null;
+    _comprobanteUrlExpiresAt = null;
     super.dispose();
+  }
+
+  Future<void> _openComprobanteViewer(PedidoModel pedido) async {
+    final publicOrderId = (pedido.orderId ?? widget.orderId).trim();
+    if (publicOrderId.isEmpty || !pedido.hasComprobante) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Comprobante no disponible.')),
+      );
+      return;
+    }
+
+    setState(() => _isLoadingComprobante = true);
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      final accessToken = session?.accessToken.trim() ?? '';
+      if (accessToken.isEmpty) {
+        throw const PublicOrderApiException(
+          message: 'Sesion expirada. Vuelve a iniciar sesion.',
+          statusCode: 401,
+        );
+      }
+
+      final needsRefresh =
+          _ephemeralComprobanteUrl == null ||
+          _comprobanteUrlExpiresAt == null ||
+          DateTime.now().isAfter(
+            _comprobanteUrlExpiresAt!.subtract(const Duration(seconds: 30)),
+          );
+
+      if (needsRefresh) {
+        final signed = await PublicOrderApiService().fetchComprobanteSignedUrl(
+          orderId: publicOrderId,
+          accessToken: accessToken,
+        );
+        _ephemeralComprobanteUrl = signed.url;
+        _comprobanteUrlExpiresAt = DateTime.now().add(
+          Duration(seconds: signed.expiresInSec),
+        );
+      }
+
+      final url = _ephemeralComprobanteUrl;
+      if (!mounted || url == null || url.isEmpty) {
+        return;
+      }
+
+      final ref = (pedido.comprobanteRef ?? '').toLowerCase();
+      final isPdf = ref.endsWith('.pdf') || ref.contains('.pdf?');
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text(
+              'Comprobante',
+              style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+            ),
+            content: SizedBox(
+              width: 360,
+              child: isPdf
+                  ? Text(
+                      'Este comprobante es un PDF. Se abrira de forma segura en el visor del sistema.',
+                      style: GoogleFonts.manrope(),
+                    )
+                  : InteractiveViewer(
+                      child: Image.network(
+                        url,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => Text(
+                          'No se pudo mostrar la imagen.',
+                          style: GoogleFonts.manrope(),
+                        ),
+                      ),
+                    ),
+            ),
+            actions: [
+              if (isPdf)
+                TextButton(
+                  onPressed: () async {
+                    final uri = Uri.tryParse(url);
+                    if (uri != null) {
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
+                    }
+                  },
+                  child: const Text('Abrir PDF'),
+                ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cerrar'),
+              ),
+            ],
+          );
+        },
+      );
+    } on PublicOrderApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Comprobante no disponible.')),
+      );
+    } finally {
+      _ephemeralComprobanteUrl = null;
+      _comprobanteUrlExpiresAt = null;
+      if (mounted) {
+        setState(() => _isLoadingComprobante = false);
+      }
+    }
   }
 
   Future<_OrderViewData?> _fetchOrder() async {
@@ -3411,6 +3530,39 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     fontSize: 13,
                                   ),
                                 ),
+                                if (pedido.hasComprobante) ...[
+                                  const SizedBox(height: 12),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      onPressed: _isLoadingComprobante
+                                          ? null
+                                          : () => _openComprobanteViewer(
+                                              pedido,
+                                            ),
+                                      icon: _isLoadingComprobante
+                                          ? const SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.receipt_long_rounded,
+                                              size: 18,
+                                            ),
+                                      label: Text(
+                                        _isLoadingComprobante
+                                            ? 'Cargando comprobante...'
+                                            : 'Ver comprobante',
+                                        style: GoogleFonts.manrope(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),

@@ -39,6 +39,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   app_links: ^7.0.0
   supabase_flutter: ^2.9.1
+  http: ^1.2.2
   google_fonts: ^6.3.0
   share_plus: ^11.0.0
   shared_preferences: ^2.5.5
