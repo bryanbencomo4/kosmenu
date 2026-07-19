@@ -66,3 +66,7 @@ app.*.map.json
 # Local audit dumps / scratch (never commit)
 .tmp-*
 .tmp/
+
+# Preview bootstrap metadata pulled from remote (schema introspection only)
+supabase/preview-bootstrap/_meta_*.json
+supabase/preview-bootstrap/_raw_*
