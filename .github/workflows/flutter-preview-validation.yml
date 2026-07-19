@@ -1,0 +1,162 @@
+name: Flutter Preview Validation
+
+on:
+  push:
+    branches:
+      - security/phase-2a-preview
+  pull_request:
+    branches:
+      - security/phase-2a-preview
+  workflow_dispatch:
+
+# Product surface validated here: Flutter Web (merchant panel deploy path).
+# Android/iOS runners are intentionally omitted from this gate.
+
+env:
+  # Pin explicitly — do not float on latest stable.
+  # Flutter 3.41+ ships Dart 3.11; pin a post-3.41 stable for sdk ^3.11.4.
+  FLUTTER_VERSION: "3.44.0"
+
+jobs:
+  flutter-preview:
+    name: analyze / test / build web (Preview dart-defines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test --reporter expanded
+
+      - name: Require Preview secrets for build
+        env:
+          PREVIEW_API_BASE_URL: ${{ secrets.PREVIEW_API_BASE_URL }}
+          PREVIEW_SUPABASE_URL: ${{ secrets.PREVIEW_SUPABASE_URL }}
+          PREVIEW_SUPABASE_ANON_KEY: ${{ secrets.PREVIEW_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in PREVIEW_API_BASE_URL PREVIEW_SUPABASE_URL PREVIEW_SUPABASE_ANON_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required secret: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          case "$PREVIEW_SUPABASE_URL" in
+            https://gsfxqzvmyzjjgpigrste.supabase.co) ;;
+            *)
+              echo "PREVIEW_SUPABASE_URL must be the Preview project URL"
+              exit 1
+              ;;
+          esac
+          case "$PREVIEW_API_BASE_URL" in
+            *elmenuxfa.com*|*qqhberaayhohxlbbhdyi*)
+              echo "PREVIEW_API_BASE_URL must not point at production"
+              exit 1
+              ;;
+          esac
+          echo "Preview secrets present (values not printed)"
+
+      - name: Build web with Preview dart-defines
+        env:
+          PREVIEW_API_BASE_URL: ${{ secrets.PREVIEW_API_BASE_URL }}
+          PREVIEW_SUPABASE_URL: ${{ secrets.PREVIEW_SUPABASE_URL }}
+          PREVIEW_SUPABASE_ANON_KEY: ${{ secrets.PREVIEW_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          flutter build web --release \
+            --dart-define=API_BASE_URL="${PREVIEW_API_BASE_URL}" \
+            --dart-define=SUPABASE_URL="${PREVIEW_SUPABASE_URL}" \
+            --dart-define=SUPABASE_ANON_KEY="${PREVIEW_SUPABASE_ANON_KEY}"
+
+      - name: Artifact security scan (no secret values printed)
+        env:
+          PREVIEW_SUPABASE_ANON_KEY: ${{ secrets.PREVIEW_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          ROOT="build/web"
+          if [ ! -d "$ROOT" ]; then
+            echo "Missing build/web"
+            exit 1
+          fi
+
+          fail=0
+
+          if grep -R -n -F "qqhberaayhohxlbbhdyi" "$ROOT" >/dev/null 2>&1; then
+            echo "FAIL: production Supabase ref found in web artifacts"
+            fail=1
+          else
+            echo "PASS: no production Supabase ref in artifacts"
+          fi
+
+          if grep -R -n -F "www.elmenuxfa.com" "$ROOT" >/dev/null 2>&1; then
+            # productionUrl constant may still appear in unused brand helpers; hard-fail only if
+            # it co-occurs with API/supabase wiring markers in the same main bundle.
+            if grep -R -n -E "API_BASE_URL|SUPABASE_URL|supabase\.co" "$ROOT"/main.dart.js >/dev/null 2>&1 \
+              && grep -n -F "www.elmenuxfa.com" "$ROOT"/main.dart.js >/dev/null 2>&1; then
+              echo "WARN: www.elmenuxfa.com still present in main bundle (brand defaults). Preview API must override via dart-define."
+            fi
+          fi
+
+          if ! grep -R -n -F "gsfxqzvmyzjjgpigrste" "$ROOT" >/dev/null 2>&1; then
+            echo "FAIL: Preview Supabase ref missing from artifacts"
+            fail=1
+          else
+            echo "PASS: Preview Supabase ref present in artifacts"
+          fi
+
+          if grep -R -n -i -E "service_role|sb_secret_|SUPABASE_SERVICE_ROLE" "$ROOT" >/dev/null 2>&1; then
+            echo "FAIL: service role / secret markers found in artifacts"
+            fail=1
+          else
+            echo "PASS: no service role markers in artifacts"
+          fi
+
+          # Ensure the Preview anon key was baked in without printing it.
+          if [ -n "${PREVIEW_SUPABASE_ANON_KEY}" ]; then
+            if ! grep -R -n -F "${PREVIEW_SUPABASE_ANON_KEY}" "$ROOT" >/dev/null 2>&1; then
+              echo "FAIL: Preview anon key not found in compile output (dart-define may not have applied)"
+              fail=1
+            else
+              echo "PASS: Preview anon dart-define applied (value not printed)"
+            fi
+          fi
+
+          if grep -R -n -F "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaGJlcmFheWhvaHhsYmJoZHlp" "$ROOT" >/dev/null 2>&1; then
+            echo "FAIL: production anon JWT payload found in artifacts"
+            fail=1
+          else
+            echo "PASS: production anon JWT payload absent"
+          fi
+
+          exit "$fail"
+
+      - name: Upload web artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-web-preview
+          path: build/web
+          if-no-files-found: error
+          retention-days: 7

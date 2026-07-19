@@ -11,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/services/checkout_attempt_state.dart';
 import 'package:kosmenu_app/services/public_menu_api_service.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
@@ -820,7 +821,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     final palette = data.palette;
 
     var selectedPaymentMethod = _paymentMethods.first;
-    var isSubmittingOrder = false;
+    final checkoutAttempt = CheckoutAttemptState();
     var selectedDeliveryMode = _deliveryModePickup;
     var deliveryLatitude = data.businessLatitude;
     var deliveryLongitude = data.businessLongitude;
@@ -828,8 +829,6 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     var proofFileName = '';
     Uint8List? proofBytes;
     String? proofMimeType;
-    // One key per checkout attempt; reused on controlled retries of the same attempt.
-    final idempotencyKey = generateCheckoutIdempotencyKey();
 
     final clientNameController = TextEditingController();
     final clientWhatsappController = TextEditingController();
@@ -900,7 +899,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: clientNameController,
-                        enabled: !isSubmittingOrder,
+                        enabled: !checkoutAttempt.isSubmitting,
                         textCapitalization: TextCapitalization.words,
                         style: GoogleFonts.manrope(
                           color: palette.onSurface,
@@ -918,7 +917,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: clientWhatsappController,
-                        enabled: !isSubmittingOrder,
+                        enabled: !checkoutAttempt.isSubmitting,
                         keyboardType: TextInputType.phone,
                         style: GoogleFonts.manrope(
                           color: palette.onSurface,
@@ -996,7 +995,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                             label: const Text('Retiro'),
                             selected:
                                 selectedDeliveryMode == _deliveryModePickup,
-                            onSelected: isSubmittingOrder
+                            onSelected: checkoutAttempt.isSubmitting
                                 ? null
                                 : (_) {
                                     setModalState(
@@ -1019,7 +1018,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                             selected:
                                 selectedDeliveryMode == _deliveryModeDelivery,
                             onSelected:
-                                isSubmittingOrder || !data.allowsDelivery
+                                checkoutAttempt.isSubmitting || !data.allowsDelivery
                                 ? null
                                 : (_) {
                                     setModalState(
@@ -1079,7 +1078,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton(
-                                  onPressed: isSubmittingOrder
+                                  onPressed: checkoutAttempt.isSubmitting
                                       ? null
                                       : () async {
                                           final picked =
@@ -1206,7 +1205,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                               ),
                             )
                             .toList(),
-                        onChanged: isSubmittingOrder
+                        onChanged: checkoutAttempt.isSubmitting
                             ? null
                             : (value) {
                                 if (value == null) return;
@@ -1243,7 +1242,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       ),
                       const SizedBox(height: 8),
                       OutlinedButton.icon(
-                        onPressed: isSubmittingOrder
+                        onPressed: checkoutAttempt.isSubmitting
                             ? null
                             : () async {
                                 final picked = await FilePicker.platform
@@ -1304,7 +1303,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           ),
                         ),
                       ),
-                      if (isSubmittingOrder && uploadProgress > 0) ...[
+                      if (checkoutAttempt.isSubmitting && uploadProgress > 0) ...[
                         const SizedBox(height: 8),
                         LinearProgressIndicator(value: uploadProgress),
                       ],
@@ -1331,12 +1330,18 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton(
-                          onPressed: isSubmittingOrder
+                          onPressed: checkoutAttempt.isSubmitting
                               ? null
                               : () async {
+                                  if (!checkoutAttempt.tryBeginSubmit()) {
+                                    return;
+                                  }
+                                  setModalState(() {});
+
                                   final whatsappNumber = data.whatsappNumber;
                                   if (whatsappNumber == null ||
                                       whatsappNumber.isEmpty) {
+                                    checkoutAttempt.endSubmit();
                                     if (!mounted || !sheetContext.mounted) {
                                       return;
                                     }
@@ -1360,6 +1365,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                           .replaceAll(RegExp(r'\D'), '');
 
                                   if (clientName.length < 3) {
+                                    checkoutAttempt.endSubmit();
+                                    setModalState(() {});
                                     localScaffoldMessenger.showSnackBar(
                                       const SnackBar(
                                         content: Text(
@@ -1370,6 +1377,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     return;
                                   }
                                   if (clientWhatsapp.length < 10) {
+                                    checkoutAttempt.endSubmit();
+                                    setModalState(() {});
                                     localScaffoldMessenger.showSnackBar(
                                       const SnackBar(
                                         content: Text(
@@ -1379,8 +1388,6 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     );
                                     return;
                                   }
-
-                                  setModalState(() => isSubmittingOrder = true);
 
                                   final isDeliveryOrder =
                                       selectedDeliveryMode ==
@@ -1397,10 +1404,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
                                   if (isDeliveryOrder &&
                                       normalizedAddress.length < 6) {
+                                    checkoutAttempt.endSubmit();
                                     if (!mounted) return;
-                                    setModalState(
-                                      () => isSubmittingOrder = false,
-                                    );
+                                    setModalState(() {});
                                     localScaffoldMessenger.showSnackBar(
                                       const SnackBar(
                                         content: Text(
@@ -1414,10 +1420,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                   if (isDeliveryOrder &&
                                       (deliveryLatitude == null ||
                                           deliveryLongitude == null)) {
+                                    checkoutAttempt.endSubmit();
                                     if (!mounted) return;
-                                    setModalState(
-                                      () => isSubmittingOrder = false,
-                                    );
+                                    setModalState(() {});
                                     localScaffoldMessenger.showSnackBar(
                                       const SnackBar(
                                         content: Text(
@@ -1458,7 +1463,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                       comercioNombre: data.comercioNombre,
                                       clientName: clientName,
                                       clientWhatsapp: clientWhatsapp,
-                                      idempotencyKey: idempotencyKey,
+                                      idempotencyKey:
+                                          checkoutAttempt.idempotencyKey,
                                       items: cartItems,
                                       tasaAplicada: data.tasaCambioPesos,
                                       selectedPaymentMethod:
@@ -1540,9 +1546,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                       ),
                                     );
                                   } finally {
+                                    checkoutAttempt.endSubmit();
                                     if (mounted) {
                                       setModalState(() {
-                                        isSubmittingOrder = false;
                                         uploadProgress = 0;
                                       });
                                     }
@@ -1559,7 +1565,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              if (isSubmittingOrder) ...[
+                              if (checkoutAttempt.isSubmitting) ...[
                                 SizedBox(
                                   width: 18,
                                   height: 18,
@@ -1571,7 +1577,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                 const SizedBox(width: 10),
                               ],
                               Text(
-                                isSubmittingOrder
+                                checkoutAttempt.isSubmitting
                                     ? 'Registrando pedido...'
                                     : 'Confirmar por WhatsApp',
                                 style: GoogleFonts.manrope(
