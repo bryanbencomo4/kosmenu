@@ -9,7 +9,7 @@ void main() {
     expect(source.contains('.insert('), isFalse);
     expect(source.contains('getPublicUrl'), isFalse);
     expect(source.contains('PublicOrderApiService'), isTrue);
-    expect(source.contains('generateCheckoutIdempotencyKey'), isTrue);
+    expect(source.contains('CheckoutAttemptState'), isTrue);
   });
 
   test('order detail uses signed URL service, not getPublicUrl for proofs', () {

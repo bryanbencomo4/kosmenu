@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -3626,7 +3625,7 @@ class _CompactBusinessInfoCard extends StatelessWidget {
       final whatsappCard = detailCard(
         label: 'WhatsApp',
         value: whatsappLabel,
-        icon: FontAwesomeIcons.whatsapp,
+        icon: Icons.chat_rounded,
         accent: const Color(0xFF16A34A),
         stretchVertically: canUseTwoColumns,
       );

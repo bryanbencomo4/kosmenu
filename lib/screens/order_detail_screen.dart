@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -2925,8 +2924,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                     );
                                                   }
                                                 },
-                                          icon: const FaIcon(
-                                            FontAwesomeIcons.whatsapp,
+                                          icon: const Icon(
+                                            Icons.chat_rounded,
                                             size: 15,
                                           ),
                                           label: const Text('WhatsApp'),
@@ -3195,10 +3194,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   data.comercioNombre,
                                                 )
                                               : null,
-                                          icon: const FaIcon(
-                                            FontAwesomeIcons.whatsapp,
-                                            size: 17,
-                                          ),
+                                          icon: const Icon(Icons.chat_rounded, size: 17),
                                           label: Text(
                                             whatsappNotificationsEnabled
                                                 ? 'Enviar WhatsApp'
