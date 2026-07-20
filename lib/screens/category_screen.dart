@@ -5628,32 +5628,6 @@ bool _categoryIconOptionByKeyInternal(String iconKey) {
   return false;
 }
 
-String _suggestCategoryIconKey(String name) {
-  final normalized = name.trim().toLowerCase();
-  if (normalized.contains('bebida') || normalized.contains('cafe')) {
-    return 'local_cafe';
-  }
-  if (normalized.contains('perro') || normalized.contains('hot dog')) {
-    return 'fastfood';
-  }
-  if (normalized.contains('hamburg')) {
-    return 'lunch_dining';
-  }
-  if (normalized.contains('pizza')) {
-    return 'local_pizza';
-  }
-  if (normalized.contains('postre') || normalized.contains('helado')) {
-    return 'icecream';
-  }
-  if (normalized.contains('desayuno')) {
-    return 'breakfast_dining';
-  }
-  if (normalized.contains('ensalada') || normalized.contains('veg')) {
-    return 'eco';
-  }
-  return 'restaurant';
-}
-
 String _normalizeEmojiGlyph(String emoji) {
   return emoji.replaceAll('\uFE0F', '').replaceAll('\uFE0E', '').trim();
 }
