@@ -5,13 +5,13 @@ import { ArrowLeft } from 'lucide-react';
 import { privacyPagePath, publicSiteUrl, supportEmail, supportEmailHref } from '../_lib/public-site-config';
 
 const canonicalUrl = `${publicSiteUrl}${privacyPagePath}`;
-const lastUpdatedLabel = '12 de mayo de 2026';
+const lastUpdatedLabel = '20 de julio de 2026';
 const cardClassName = 'rounded-[1.35rem] border border-white/10 bg-[#09111e]/78 p-5 sm:p-6';
 
 export const metadata: Metadata = {
   title: 'Política de privacidad | ElMenúXFA',
   description:
-    'Conoce cómo ElMenúXFA recopila y usa información del portal público, formularios de contacto y suscripciones al boletín.',
+    'Conoce cómo ElMenúXFA recopila y usa información del sitio público, menús digitales, pedidos y formularios de contacto.',
   alternates: {
     canonical: canonicalUrl,
   },
@@ -40,7 +40,8 @@ export default function PrivacyPage() {
             Política de privacidad de ElMenúXFA
           </h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300 sm:text-[15px]">
-            Esta política aplica al portal público de ElMenúXFA, al sitio para negocios y a los formularios de contacto o suscripción que uses dentro de la plataforma.
+            Esta política aplica al sitio público de ElMenúXFA, a los menús digitales de negocios, al flujo de pedidos y a
+            los formularios de contacto o soporte que uses dentro de la plataforma.
           </p>
           <p className="mt-3 text-sm text-slate-400">Última actualización: {lastUpdatedLabel}</p>
         </section>
@@ -49,47 +50,70 @@ export default function PrivacyPage() {
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">1. Datos que podemos recopilar</h2>
             <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              <li>Información de contacto que compartes de forma voluntaria, como tu correo al suscribirte al boletín o escribirnos.</li>
-              <li>Datos técnicos básicos de navegación, como dispositivo, navegador, páginas visitadas, origen de la visita y hora de acceso.</li>
-              <li>Ubicación aproximada o precisa cuando aceptas usar geolocalización para mostrar negocios cercanos en el mapa.</li>
+              <li>
+                Información de contacto que compartes de forma voluntaria, como tu correo o WhatsApp al escribirnos para
+                activación o soporte.
+              </li>
+              <li>
+                Datos necesarios para operar pedidos cuando usas un menú digital (por ejemplo nombre, teléfono, dirección
+                de entrega u observaciones), según lo configure cada negocio.
+              </li>
+              <li>
+                Datos técnicos básicos de navegación, como dispositivo, navegador, páginas visitadas y hora de acceso,
+                necesarios para seguridad y operación del servicio.
+              </li>
             </ul>
           </section>
 
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">2. Cómo usamos esa información</h2>
             <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              <li>Mostrar menús, promociones y negocios relevantes según tu búsqueda o ubicación.</li>
+              <li>Mostrar menús digitales y procesar pedidos según la configuración de cada negocio.</li>
               <li>Atender solicitudes comerciales o de soporte enviadas por correo o WhatsApp.</li>
-              <li>Enviar novedades, promociones o recordatorios del portal cuando te suscribes al boletín.</li>
-              <li>Medir uso del sitio, detectar fallas y mejorar la experiencia de navegación.</li>
+              <li>Operar, asegurar y mejorar la plataforma (disponibilidad, prevención de abuso y corrección de fallas).</li>
             </ul>
           </section>
 
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">3. Con quién compartimos datos</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              No vendemos tu información personal. Podemos apoyarnos en proveedores de infraestructura, analítica, mensajería o base de datos para operar ElMenúXFA. También podemos compartir información cuando una autoridad competente lo exija o cuando sea necesario para prevenir fraude, abuso o riesgos de seguridad.
+              No vendemos tu información personal. Podemos apoyarnos en proveedores de infraestructura, mensajería o base
+              de datos para operar ElMenúXFA. Los datos de un pedido se ponen a disposición del negocio correspondiente
+              para atenderlo. También podemos compartir información cuando una autoridad competente lo exija o cuando sea
+              necesario para prevenir fraude, abuso o riesgos de seguridad.
             </p>
           </section>
 
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">4. Conservación y control</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              Conservamos la información solo durante el tiempo necesario para prestar el servicio, responder solicitudes o cumplir obligaciones legales. Si deseas corregir o eliminar tus datos de contacto, escríbenos a <a href={supportEmailHref} className="font-semibold text-[#FACC15] transition-colors duration-300 hover:text-[#fde047]">{supportEmail}</a>.
+              Conservamos la información solo durante el tiempo necesario para prestar el servicio, responder solicitudes o
+              cumplir obligaciones legales. Si deseas corregir o eliminar tus datos de contacto, escríbenos a{' '}
+              <a
+                href={supportEmailHref}
+                className="font-semibold text-[#FACC15] transition-colors duration-300 hover:text-[#fde047]"
+              >
+                {supportEmail}
+              </a>
+              .
             </p>
           </section>
 
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">5. Cambios a esta política</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              Podemos actualizar esta política cuando cambien las funcionalidades, los proveedores o la normativa aplicable. Publicaremos aquí la versión vigente junto con su fecha de actualización.
+              Podemos actualizar esta política cuando cambien las funcionalidades, los proveedores o la normativa
+              aplicable. Publicaremos aquí la versión vigente junto con su fecha de actualización.
             </p>
           </section>
 
           <section id="cookies" className={`${cardClassName} scroll-mt-28`}>
             <h2 className="text-xl font-bold text-white">6. Cookies y preferencias</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              El banner del portal te permite aceptar todas las cookies, rechazarlas o cerrarlo sin aceptar. Cuando eliges una opción, guardamos únicamente esa preferencia para no interrumpirte en cada visita. Si deseas cambiarla más adelante, puedes borrar las cookies del navegador y volver a cargar el sitio.
+              El banner del sitio te permite aceptar o rechazar la preferencia de cookies. Guardamos únicamente esa
+              preferencia en tu dispositivo para no interrumpirte en cada visita. Hoy no usamos cookies de analítica ni de
+              publicidad. Si deseas cambiar la preferencia más adelante, puedes borrar las cookies del navegador y volver a
+              cargar el sitio.
             </p>
           </section>
         </div>

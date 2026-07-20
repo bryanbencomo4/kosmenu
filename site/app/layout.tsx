@@ -22,7 +22,11 @@ export const metadata: Metadata = {
   metadataBase: new URL(publicSiteUrl),
   title: 'ElMenúXFA | Menú digital con QR y Table Tent para restaurantes',
   description:
-    'Tu menú digital listo para que tus clientes escaneen, elijan y ordenen. Incluye menú online, QR personalizado y Table Tent físico. Desde $10/mes.',
+    'Tu menú digital listo para que tus clientes escaneen, elijan y ordenen. Incluye menú online, QR personalizado y Table Tent físico. $10/mes.',
+  robots:
+    process.env.VERCEL_ENV === 'preview'
+      ? { index: false, follow: false, nocache: true }
+      : { index: true, follow: true },
   icons: {
     icon: '/branding/isotipo.png',
     apple: '/branding/isotipo.png',

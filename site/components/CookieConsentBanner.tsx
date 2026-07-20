@@ -101,12 +101,12 @@ export function CookieConsentBanner() {
               </div>
 
               <p className="mt-3 font-[var(--font-display)] text-[1.05rem] font-extrabold leading-[1.05] tracking-[-0.03em] text-white sm:text-[1.22rem]">
-                Usamos cookies para mejorar tu experiencia
+                Preferencia de cookies
               </p>
 
               <p className="mt-2 max-w-[36rem] text-[13px] leading-6 text-slate-300 sm:text-sm">
-                Utilizamos cookies para personalizar tu experiencia, analizar el tráfico y mostrar contenido más relevante.
-                Puedes aceptar o rechazar su uso.
+                Guardamos únicamente tu preferencia de cookies en este dispositivo. Hoy no usamos cookies de analítica ni
+                publicidad. Puedes aceptar o rechazar esta preferencia.
               </p>
 
               <Link

@@ -1546,7 +1546,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         builder: (context, constraints) {
                           final viewportWidth = constraints.maxWidth;
                           final isDesktop = viewportWidth >= 1024;
-                          final isTablet = viewportWidth >= 720 && viewportWidth < 1024;
                           final contentMaxWidth = viewportWidth >= 1200 ? 1320.0 : double.infinity;
                           final horizontalPadding = viewportWidth >= 1200
                               ? 28.0
@@ -2160,22 +2159,6 @@ enum _KpiTrendSemantics {
   growthIsPositive,
   growthIsNegativeWarning,
   growthIsNegativeBad,
-}
-
-class _CompactKpiScroller extends StatelessWidget {
-  const _CompactKpiScroller({required this.cards});
-
-  final List<_CompactKpiCardData> cards;
-
-  @override
-  Widget build(BuildContext context) {
-    // Legacy horizontal scroller — replaced by _DashboardKpiGrid on mobile.
-    return _DashboardKpiGrid(
-      cards: cards,
-      columns: 2,
-      useVerticalLayout: true,
-    );
-  }
 }
 
 class _DashboardKpiGrid extends StatelessWidget {

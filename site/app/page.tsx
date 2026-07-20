@@ -7,7 +7,7 @@ const canonicalUrl = publicSiteUrl;
 
 const seoTitle = 'ElMenúXFA | Menú digital con QR y Table Tent para restaurantes';
 const seoDescription =
-  'Tu menú digital listo para que tus clientes escaneen, elijan y ordenen. Incluye menú online, QR personalizado y Table Tent físico. Desde $10/mes.';
+  'Tu menú digital listo para que tus clientes escaneen, elijan y ordenen. Incluye menú online, QR personalizado y Table Tent físico. $10/mes.';
 
 export const metadata: Metadata = {
   title: seoTitle,

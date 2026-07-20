@@ -4,7 +4,6 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/catalog.dart';
@@ -1921,45 +1920,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
   }
 
-  Widget _buildDesktopPrimaryAction() {
-    final disabled = _loading || _isMutating;
-    switch (_selectedTabIndex) {
-      case 1:
-        return FilledButton.icon(
-          onPressed: disabled ? null : _createCategory,
-          icon: const Icon(Icons.add_rounded, size: 18),
-          label: const Text('Crear categoría'),
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF6D28D9),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          ),
-        );
-      case 2:
-        return FilledButton.icon(
-          onPressed: disabled ? null : _openProductFormDirect,
-          icon: const Icon(Icons.add_rounded, size: 18),
-          label: const Text('Crear producto'),
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF6D28D9),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          ),
-        );
-      default:
-        return FilledButton.icon(
-          onPressed: disabled ? null : _openQuickCreateSheet,
-          icon: const Icon(Icons.add_rounded, size: 18),
-          label: const Text('Crear'),
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF6D28D9),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          ),
-        );
-    }
-  }
-
   Widget _buildContextualFab() {
     switch (_selectedTabIndex) {
       case 1:
@@ -2901,65 +2861,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           child: const Icon(Icons.tune_rounded, color: Color(0xFF6B6F92), size: 20),
         ),
       ],
-    );
-  }
-
-  Widget _buildDesktopSearchField({required Color borderColor}) {
-    return TextField(
-      controller: _searchController,
-      onChanged: (value) {
-        if (!mounted) return;
-        setState(() {
-          _searchQuery = value;
-          _categoryVisibleCount = 20;
-          _productVisibleCount = 24;
-          _desktopProductPage = 0;
-        });
-      },
-      style: GoogleFonts.poppins(
-        color: const Color(0xFF11183C),
-        fontSize: 14,
-      ),
-      decoration: InputDecoration(
-        hintText: 'Buscar productos o categorías...',
-        hintStyle: GoogleFonts.poppins(
-          color: const Color(0xFF6B6F92),
-          fontSize: 14,
-        ),
-        prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6B6F92)),
-        suffixIcon: _searchQuery.trim().isEmpty
-            ? null
-            : IconButton(
-                onPressed: () {
-                  if (!mounted) return;
-                  _searchController.clear();
-                  setState(() {
-                    _searchQuery = '';
-                    _categoryVisibleCount = 20;
-                    _productVisibleCount = 24;
-                    _desktopProductPage = 0;
-                  });
-                },
-                icon: const Icon(Icons.close_rounded),
-                tooltip: 'Limpiar búsqueda',
-              ),
-        filled: true,
-        fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: borderColor),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: borderColor),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF6D28D9), width: 1.4),
-        ),
-        isDense: true,
-      ),
     );
   }
 
@@ -4591,7 +4492,6 @@ class _CategoryCard extends StatelessWidget {
     required this.onDelete,
     required this.onToggleActive,
     this.dragHandle,
-    this.useOuterMargin = true,
   });
 
   final CategoryModel category;
@@ -4602,12 +4502,11 @@ class _CategoryCard extends StatelessWidget {
   final VoidCallback onDelete;
   final ValueChanged<bool> onToggleActive;
   final Widget? dragHandle;
-  final bool useOuterMargin;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: useOuterMargin ? const EdgeInsets.only(bottom: 16) : null,
+      margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -5863,15 +5762,6 @@ String _normalizeEmojiSearchText(String? value) {
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
-}
-
-IconData _resolveCategoryIcon({String? iconKey, String? name}) {
-  final option = _categoryIconOptionByKey(iconKey);
-  if (option != null) {
-    return option.icon;
-  }
-  final suggestedKey = _suggestCategoryIconKey(name ?? '');
-  return _categoryIconOptionByKey(suggestedKey)?.icon ?? Icons.restaurant_rounded;
 }
 
 /// Icono único para lista, preview y editor (ignora SVG/claves Material legadas).

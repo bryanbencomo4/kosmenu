@@ -64,25 +64,6 @@ export function DemoSection() {
     setDemoUrl(`${window.location.origin}${DEMO_PATH}`);
   }, []);
 
-  const heading = (
-    <>
-      <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.22em] text-violet-100">
-        <Sparkles className="h-3.5 w-3.5 text-[#c4b5fd]" />
-        Demo real
-      </span>
-      <h2 className="relative mt-5 font-[var(--font-display)] text-[2.35rem] font-black leading-[0.95] tracking-[-0.04em] text-white sm:text-[2.9rem] xl:text-[3.2rem]">
-        <span className="block whitespace-nowrap">Escanea y vive</span>
-        <span className="mt-1 block whitespace-nowrap bg-[linear-gradient(180deg,#e9d5ff_0%,#c084fc_42%,#7c3aed_100%)] bg-clip-text text-transparent">
-          la experiencia
-        </span>
-      </h2>
-      <p className="mt-4 max-w-[27rem] text-[1rem] leading-[1.6] text-slate-300/88 sm:text-[1.05rem]">
-        Muestra a tus clientes cómo funciona tu menú digital: escanean el Table Tent, abren el demo al instante y
-        exploran la experiencia real desde su celular.
-      </p>
-    </>
-  );
-
   return (
     <section
       id="demo"
@@ -107,38 +88,40 @@ export function DemoSection() {
       </div>
 
       <div className="relative mx-auto max-w-[1480px] px-4 py-14 sm:px-6 sm:py-16 lg:px-8 xl:py-16">
-        {/* Mobile / tablet stack */}
-        <div className="xl:hidden">
-          {heading}
-
-          <div className="mt-8">
-            <DemoTableTent demoPath={DEMO_PATH} />
-          </div>
-
-          <div className="mt-8">
-            <StepsList />
-          </div>
-
-          <div className="mt-6 space-y-4">
-            <ClientViewCard />
-            <NoCameraCard demoUrl={demoUrl} demoPath={DEMO_PATH} displayUrl={DEMO_DISPLAY_URL} />
-          </div>
-        </div>
-
-        {/* Desktop three-column composition */}
-        <div className="hidden items-center gap-9 xl:grid xl:grid-cols-[minmax(330px,0.85fr)_minmax(500px,1.35fr)_minmax(330px,0.85fr)]">
+        <div className="grid items-start gap-8 xl:grid-cols-[minmax(330px,0.85fr)_minmax(500px,1.35fr)_minmax(330px,0.85fr)] xl:items-center xl:gap-9">
           <div className="relative">
-            {heading}
-            <div className="mt-6">
+            <span className="inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.22em] text-violet-100">
+              <Sparkles className="h-3.5 w-3.5 text-[#c4b5fd]" />
+              Demo real
+            </span>
+            <h2 className="relative mt-5 font-[var(--font-display)] text-[2.35rem] font-black leading-[0.95] tracking-[-0.04em] text-white sm:text-[2.9rem] xl:text-[3.2rem]">
+              <span className="block whitespace-nowrap">Escanea y vive</span>
+              <span className="mt-1 block whitespace-nowrap bg-[linear-gradient(180deg,#e9d5ff_0%,#c084fc_42%,#7c3aed_100%)] bg-clip-text text-transparent">
+                la experiencia
+              </span>
+            </h2>
+            <p className="mt-4 max-w-[27rem] text-[1rem] leading-[1.6] text-slate-300/88 sm:text-[1.05rem]">
+              Muestra a tus clientes cómo funciona tu menú digital: escanean el Table Tent, abren el demo al instante y
+              exploran la experiencia real desde su celular.
+            </p>
+
+            <div className="mt-6 hidden xl:block">
               <StepsList />
             </div>
           </div>
 
-          <DemoTableTent demoPath={DEMO_PATH} />
+          <div className="w-full">
+            <DemoTableTent demoPath={DEMO_PATH} />
+          </div>
 
           <div className="relative space-y-3.5">
-            <ClientViewCard />
-            <NoCameraCard demoUrl={demoUrl} demoPath={DEMO_PATH} displayUrl={DEMO_DISPLAY_URL} />
+            <div className="xl:hidden">
+              <StepsList />
+            </div>
+            <div className="mt-6 space-y-4 xl:mt-0 xl:space-y-3.5">
+              <ClientViewCard />
+              <NoCameraCard demoUrl={demoUrl} demoPath={DEMO_PATH} displayUrl={DEMO_DISPLAY_URL} />
+            </div>
           </div>
         </div>
       </div>

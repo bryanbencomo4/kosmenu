@@ -76,7 +76,7 @@ const trustItems = [
     iconClass: 'border-yellow-400/18 bg-yellow-500/12 text-[#FACC15]',
   },
   {
-    label: 'Desde $10/mes',
+    label: '$10/mes',
     icon: CircleDollarSign,
     iconClass: 'border-violet-400/18 bg-violet-500/10 text-violet-200',
   },

@@ -21,14 +21,6 @@ const heroHighlights = [
   { label: 'Más orden al vender', detail: 'menos errores', icon: Rocket },
 ] as const;
 
-const avatarGradients = [
-  'linear-gradient(135deg,#f59e0b,#ef4444)',
-  'linear-gradient(135deg,#8b5cf6,#ec4899)',
-  'linear-gradient(135deg,#06b6d4,#3b82f6)',
-  'linear-gradient(135deg,#22c55e,#14b8a6)',
-  'linear-gradient(135deg,#f97316,#eab308)',
-] as const;
-
 const orbitNodes = [
   'left-[10%] top-[36%] h-2.5 w-2.5',
   'left-[24%] top-[14%] h-2 w-2',
@@ -157,32 +149,8 @@ export function Hero({ whatsappHref }: HeroProps) {
             </div>
 
             <p className="animate-fade-up animation-delay-700 mt-3 text-center text-xs font-medium text-slate-300/85 sm:text-sm lg:text-left">
-              Desde <span className="text-[#FACC15]">$10/mes</span> · Activación rápida · Ideal para restaurantes, cafés y food trucks
+              <span className="text-[#FACC15]">$10/mes</span> · Activación rápida · Ideal para restaurantes, cafés y food trucks
             </p>
-
-            <div className="animate-fade-up animation-delay-500 mt-7 rounded-[1.45rem] border border-white/8 bg-[#0d1323]/74 px-4 py-4 backdrop-blur-xl sm:px-6">
-              <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
-                <div className="flex -space-x-2.5 sm:-space-x-3">
-                  {avatarGradients.map((gradient, index) => (
-                    <span
-                      key={gradient}
-                      className="inline-flex h-8 w-8 rounded-full border-2 border-[#0d1323] sm:h-11 sm:w-11"
-                      style={{ background: gradient, zIndex: 10 - index }}
-                    />
-                  ))}
-                </div>
-
-                <div className="text-center sm:text-left">
-                  <div className="flex items-center justify-center gap-2 sm:justify-start sm:gap-3">
-                    <span className="text-[1.05rem] leading-none text-[#FACC15] sm:text-[1.5rem]">★★★★★</span>
-                    <span className="text-[1.35rem] font-black tracking-[-0.04em] text-white sm:text-[2rem]">4.9/5</span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-300 sm:text-sm">
-                    Restaurantes y cafés ya venden mejor con su menú digital
-                  </p>
-                </div>
-              </div>
-            </div>
           </div>
 
           <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full min-w-0 justify-center lg:mx-0 lg:justify-end">

@@ -13,7 +13,11 @@ import {
 const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known'];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml', ...legalPagePaths]);
 const CANONICAL_HOST = publicSiteHost;
-const CANONICAL_REDIRECT_HOSTS = new Set(['business.elmenuxfa.com', 'kosmenu.vercel.app']);
+const CANONICAL_REDIRECT_HOSTS = new Set([
+  'www.elmenuxfa.com',
+  'business.elmenuxfa.com',
+  'kosmenu.vercel.app',
+]);
 const ADMIN_HOSTS = new Set<string>([adminSiteHost, ...developmentAdminHosts]);
 const LOCAL_DEVELOPMENT_HOSTS = new Set<string>(['localhost', '127.0.0.1', '0.0.0.0']);
 const LOCAL_DEVELOPMENT_ALIAS_HOSTS = new Set<string>([
@@ -42,6 +46,9 @@ function applySecurityHeaders(response: NextResponse, pathname?: string) {
       'Strict-Transport-Security',
       'max-age=31536000; includeSubDomains; preload',
     );
+  }
+  if (process.env.VERCEL_ENV === 'preview') {
+    response.headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
   }
   response.headers.set('X-Content-Type-Options', 'nosniff');
   // Tracking URLs carry a secret token query param — never leak via Referer.

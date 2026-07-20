@@ -3,13 +3,13 @@ import type { Metadata } from 'next';
 import { publicSiteUrl, supportEmail, supportEmailHref, termsPagePath } from '../_lib/public-site-config';
 
 const canonicalUrl = `${publicSiteUrl}${termsPagePath}`;
-const lastUpdatedLabel = '12 de mayo de 2026';
+const lastUpdatedLabel = '20 de julio de 2026';
 const cardClassName = 'rounded-[1.35rem] border border-white/10 bg-[#09111e]/78 p-5 sm:p-6';
 
 export const metadata: Metadata = {
   title: 'Términos y condiciones | ElMenúXFA',
   description:
-    'Consulta las condiciones de uso del portal público de ElMenúXFA y del sitio comercial para negocios de comida.',
+    'Consulta las condiciones de uso de ElMenúXFA: sitio público, menús digitales y servicio para negocios de comida.',
   alternates: {
     canonical: canonicalUrl,
   },
@@ -27,7 +27,8 @@ export default function TermsPage() {
             Términos y condiciones de uso
           </h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300 sm:text-[15px]">
-            Al navegar por ElMenúXFA aceptas estas condiciones para el uso del portal público y del sitio comercial dirigido a negocios de comida.
+            Al usar ElMenúXFA aceptas estas condiciones para el sitio público, los menús digitales y el servicio dirigido
+            a negocios de comida.
           </p>
           <p className="mt-3 text-sm text-slate-400">Última actualización: {lastUpdatedLabel}</p>
         </section>
@@ -36,35 +37,57 @@ export default function TermsPage() {
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">1. Uso permitido</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              Puedes usar ElMenúXFA para descubrir negocios, revisar menús, explorar promociones, contactar comercios y conocer la propuesta comercial del servicio. No está permitido usar la plataforma para actividades fraudulentas, scraping abusivo, interferencia técnica o cualquier conducta que afecte a otros usuarios o comercios.
+              Puedes usar ElMenúXFA para conocer el servicio, abrir menús digitales de negocios, realizar pedidos según la
+              configuración de cada comercio y contactar al equipo comercial o de soporte. No está permitido usar la
+              plataforma para actividades fraudulentas, scraping abusivo, interferencia técnica o cualquier conducta que
+              afecte a otros usuarios o comercios.
             </p>
           </section>
 
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">2. Información publicada por negocios</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              Los menús, precios, horarios, ubicaciones y promociones son administrados por cada negocio. Hacemos esfuerzos razonables para mostrar información actualizada, pero cada comercio es responsable de la exactitud y disponibilidad de su oferta.
+              Los menús, precios, horarios, métodos de pago, cobertura de entrega y disponibilidad son administrados por
+              cada negocio. Hacemos esfuerzos razonables para mantener el servicio disponible, pero cada comercio es
+              responsable de la exactitud y cumplimiento de su oferta frente a sus clientes.
             </p>
           </section>
 
           <section className={cardClassName}>
-            <h2 className="text-xl font-bold text-white">3. Pedidos, pagos y entregas</h2>
+            <h2 className="text-xl font-bold text-white">3. Pedidos y relación comercial</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              ElMenúXFA facilita la visualización del menú, el flujo de pedido y el seguimiento cuando el negocio lo tenga habilitado. La preparación, disponibilidad, cobro, despacho, tiempos de entrega, reembolsos y atención final del pedido corresponden al comercio que ofrece el producto.
+              ElMenúXFA facilita la publicación del menú y la recepción de pedidos. La relación de compra, entrega,
+              cobro y atención al cliente se establece entre el diner y el negocio. Ante incidencias de un pedido,
+              contacta primero al comercio; si el problema es técnico de la plataforma, escríbenos a{' '}
+              <a
+                href={supportEmailHref}
+                className="font-semibold text-[#FACC15] transition-colors duration-300 hover:text-[#fde047]"
+              >
+                {supportEmail}
+              </a>
+              .
             </p>
           </section>
 
           <section className={cardClassName}>
-            <h2 className="text-xl font-bold text-white">4. Propiedad intelectual</h2>
+            <h2 className="text-xl font-bold text-white">4. Disponibilidad del servicio</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              El diseño de la plataforma, la marca ElMenúXFA y sus componentes visuales están protegidos por derechos de propiedad intelectual. Los logos, fotos y nombres comerciales de terceros pertenecen a sus respectivos titulares.
+              Podemos modificar, suspender o interrumpir temporalmente partes del servicio por mantenimiento, seguridad o
+              mejoras. No garantizamos disponibilidad ininterrumpida ni la ausencia total de errores.
             </p>
           </section>
 
           <section className={cardClassName}>
-            <h2 className="text-xl font-bold text-white">5. Contacto y cambios</h2>
+            <h2 className="text-xl font-bold text-white">5. Contacto</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              Podemos actualizar estos términos cuando el producto evolucione o cambie la normativa aplicable. Si tienes dudas sobre el uso del servicio, escríbenos a <a href={supportEmailHref} className="font-semibold text-[#FACC15] transition-colors duration-300 hover:text-[#fde047]">{supportEmail}</a>.
+              Para dudas sobre estos términos, escribe a{' '}
+              <a
+                href={supportEmailHref}
+                className="font-semibold text-[#FACC15] transition-colors duration-300 hover:text-[#fde047]"
+              >
+                {supportEmail}
+              </a>
+              .
             </p>
           </section>
         </div>

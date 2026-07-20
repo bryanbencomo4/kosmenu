@@ -1,13 +1,12 @@
 import { Users } from 'lucide-react';
 import { AudienceBenefitCard } from './audience/AudienceBenefitCard';
 import { AudienceChip } from './audience/AudienceChip';
-import { TestimonialCard } from './audience/TestimonialCard';
-import { audienceBenefits, audienceCategories, testimonials } from './audience/audience-data';
+import { audienceBenefits, audienceCategories } from './audience/audience-data';
 
 export function TargetSection() {
   return (
     <section
-      id="testimonios"
+      id="audiencia"
       className="perf-section relative scroll-mt-24 overflow-hidden border-y border-white/8 bg-[#060b18] py-20 lg:py-28"
       style={{
         background:
@@ -49,18 +48,6 @@ export function TargetSection() {
               ))}
             </div>
           </div>
-        </div>
-
-        <div className="mt-16 flex items-center justify-center gap-4 lg:mt-20">
-          <span className="h-px w-12 bg-gradient-to-r from-transparent to-violet-500/50" />
-          <span className="text-xs font-semibold uppercase tracking-[0.45em] text-violet-400">Testimonios</span>
-          <span className="h-px w-12 bg-gradient-to-l from-transparent to-violet-500/50" />
-        </div>
-
-        <div className="mt-9 grid grid-cols-1 gap-7 lg:grid-cols-[0.9fr_1.15fr_0.9fr]">
-          {testimonials.map((testimonial) => (
-            <TestimonialCard key={testimonial.name} testimonial={testimonial} />
-          ))}
         </div>
       </div>
     </section>
