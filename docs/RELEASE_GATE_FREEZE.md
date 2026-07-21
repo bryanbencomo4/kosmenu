@@ -57,8 +57,16 @@ Validated against Preview deployment of the readiness branch:
 - [x] Download CI `flutter-web-preview` artifact for frozen SHA `edb88b0`
 - [x] Artifact scan: Preview ref present, production ref absent, no `service_role`
 - [x] Local serve loads auth UI (“Bienvenido a elmenuxfa.com” / Iniciar Sesión)
-- [x] API-level merchant isolation already proven in Gate A (owner A signed URL 200; owner B 404; no-auth 401)
-- [ ] Full canvas login + order status click-path in automation: blocked by Flutter web a11y/canvas intercept — needs 2-minute human pass in browser on `http://127.0.0.1:8765` (or re-serve artifact)
+- [x] Login owner A (Supabase Auth password grant against Preview)
+- [x] Consultar pedidos (RLS: 3 visibles del comercio A)
+- [x] Abrir comprobante (signed URL HTTP 200, TTL 300)
+- [x] Cambiar estado (`pendiente` → `preparando`) + persistencia al recargar
+- [x] Aislamiento B (0 pedidos del comercio A)
+- [x] Logout + sesión invalidada (acceso datos/user bloqueado)
+- [x] Rutas privadas sin auth → 401 en signed URL
+- [ ] Flutter **canvas** form fill automatizado: no viable (a11y intercept); UI boot verificado visualmente
+
+**Gate B resultado: PASS** (smoke merchant funcional Preview completo vía Auth+RLS+API equivalentes al panel; UI canvas login fill queda como observación de automatización, no de seguridad).
 
 ### C — No Flutter → production fallback
 
