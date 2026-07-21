@@ -3,18 +3,13 @@ import 'package:kosmenu_app/models/comercio.dart';
 class SupabaseConfig {
   const SupabaseConfig._();
 
-  /// Override in Preview/dev with:
+  /// Required for every build (Preview, QA, Production).
+  /// Example:
   /// `--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
-  /// Defaults keep production builds working without defines.
-  static const String url = String.fromEnvironment(
-    'SUPABASE_URL',
-    defaultValue: 'https://qqhberaayhohxlbbhdyi.supabase.co',
-  );
-  static const String anonKey = String.fromEnvironment(
-    'SUPABASE_ANON_KEY',
-    defaultValue:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxaGJlcmFheWhvaHhsYmJoZHlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MzE4MTQsImV4cCI6MjA5MDIwNzgxNH0.lkNtqj0_xPekAGuFg_sNHq4uWJOcYnhSX-RNBwAKk8A',
-  );
+  ///
+  /// No silent production defaults — missing defines must fail fast.
+  static const String url = String.fromEnvironment('SUPABASE_URL');
+  static const String anonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
   static const String googleMapsApiKey =
       'AIzaSyB9WNMyQma0-n4sMXN_lWJwYNxxkWDEmyQ';
   static String _currentComercioId = '';
@@ -39,6 +34,23 @@ class SupabaseConfig {
     _currentComercioId = '';
     _currentComercioSlug = '';
   }
+
+  /// Throws when dart-defines are missing or point at an invalid URL/key.
+  static void assertRuntimeConfig() {
+    final parsedUrl = Uri.tryParse(url);
+    if (url.trim().isEmpty || parsedUrl == null || !parsedUrl.hasAuthority) {
+      throw StateError(
+        'Missing or invalid --dart-define=SUPABASE_URL. '
+        'Production fallback is disabled; pass an explicit Supabase URL.',
+      );
+    }
+    if (anonKey.trim().isEmpty || !anonKey.startsWith('eyJ')) {
+      throw StateError(
+        'Missing or invalid --dart-define=SUPABASE_ANON_KEY. '
+        'Production fallback is disabled; pass an explicit anon key.',
+      );
+    }
+  }
 }
 
 String getPublicMenuUrl(ComercioModel comercio) {
@@ -54,18 +66,20 @@ class AppLinks {
   static const String productionUrl = 'https://elmenuxfa.com';
   static const String brandIsotipoUrl = '$productionUrl/branding/isotipo.png';
 
-  /// Next.js API origin. Override with `--dart-define=API_BASE_URL=...` in Preview/dev.
+  /// Next.js API origin. Required via `--dart-define=API_BASE_URL=...`.
+  /// No silent fallback to production — missing define fails at first use.
   static String get apiBaseUrl {
     const fromEnv = String.fromEnvironment('API_BASE_URL');
     final trimmed = fromEnv.trim();
-    if (trimmed.isNotEmpty) {
-      return trimmed.endsWith('/')
-          ? trimmed.substring(0, trimmed.length - 1)
-          : trimmed;
+    if (trimmed.isEmpty) {
+      throw StateError(
+        'Missing --dart-define=API_BASE_URL. '
+        'Production fallback is disabled; pass an explicit API origin.',
+      );
     }
-    return productionUrl.endsWith('/')
-        ? productionUrl.substring(0, productionUrl.length - 1)
-        : productionUrl;
+    return trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
   }
 
   static String brandAsset(String assetPath) {

@@ -2,31 +2,19 @@ import 'package:kosmenu_app/core/constants.dart';
 
 /// Central API base URL for Next.js routes used by Flutter.
 ///
-/// Preview/dev defines (all required for full isolation from production):
+/// Required dart-defines for every environment (no silent production fallback):
 /// ```
-/// --dart-define=API_BASE_URL=https://<preview-host>
-/// --dart-define=SUPABASE_URL=https://<preview-ref>.supabase.co
-/// --dart-define=SUPABASE_ANON_KEY=<preview-anon-key>
+/// --dart-define=API_BASE_URL=https://<host>
+/// --dart-define=SUPABASE_URL=https://<ref>.supabase.co
+/// --dart-define=SUPABASE_ANON_KEY=<anon-key>
 /// ```
 class ElmenuxfaApiConfig {
   const ElmenuxfaApiConfig._();
 
-  static const String _envBase = String.fromEnvironment('API_BASE_URL');
-
-  static String get baseUrl {
-    final fromEnv = _envBase.trim();
-    if (fromEnv.isNotEmpty) {
-      return _stripTrailingSlash(fromEnv);
-    }
-    return _stripTrailingSlash(AppLinks.productionUrl);
-  }
+  static String get baseUrl => AppLinks.apiBaseUrl;
 
   static Uri uri(String path) {
     final normalized = path.startsWith('/') ? path : '/$path';
     return Uri.parse('$baseUrl$normalized');
-  }
-
-  static String _stripTrailingSlash(String value) {
-    return value.endsWith('/') ? value.substring(0, value.length - 1) : value;
   }
 }

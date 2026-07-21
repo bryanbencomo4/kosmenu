@@ -33,17 +33,7 @@ Future<void> main() async {
 }
 
 Future<void> _initializeSupabase() {
-  final parsedUrl = Uri.tryParse(SupabaseConfig.url);
-  if (parsedUrl == null || !parsedUrl.hasAuthority) {
-    throw StateError('Supabase URL is invalid: ${SupabaseConfig.url}');
-  }
-
-  if (SupabaseConfig.anonKey.isEmpty ||
-      !SupabaseConfig.anonKey.startsWith('eyJ')) {
-    throw StateError(
-      'SUPABASE_ANON_KEY is empty or invalid. Paste the full anon key from Supabase dashboard.',
-    );
-  }
+  SupabaseConfig.assertRuntimeConfig();
 
   return Supabase.initialize(
     url: SupabaseConfig.url,
