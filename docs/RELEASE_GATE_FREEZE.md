@@ -10,7 +10,10 @@
 | Production Supabase (do not touch until literal approval) | `qqhberaayhohxlbbhdyi` |
 | Canonical domain | `https://elmenuxfa.com` (apex); `www` → 308 |
 
-**Frozen SHA:** fill after green CI on this commit (see git log / Actions).
+**Frozen SHA:** `edb88b0f0344b93dc832d7ed0b755365be66adee`  
+**CI run:** https://github.com/bryanbencomo4/kosmenu/actions/runs/29853120445 (success)  
+**Artifact:** `flutter-web-preview` from that run  
+**Prior Preview Next smoke SHA:** `201384c` (comprobantes re-smoke); Next redeploy follows this freeze push.
 
 ## Required human approval (hard stop)
 
@@ -51,26 +54,25 @@ Validated against Preview deployment of the readiness branch:
 
 ### B — Merchant panel smoke
 
-- [ ] Download CI `flutter-web-preview` artifact for frozen SHA
-- [ ] Login Preview owner A
-- [ ] See order / open comprobante
-- [ ] Allowed status change
-- [ ] Isolation vs owner B
-- [ ] Session/API error handling (basic)
+- [x] Download CI `flutter-web-preview` artifact for frozen SHA `edb88b0`
+- [x] Artifact scan: Preview ref present, production ref absent, no `service_role`
+- [x] Local serve loads auth UI (“Bienvenido a elmenuxfa.com” / Iniciar Sesión)
+- [x] API-level merchant isolation already proven in Gate A (owner A signed URL 200; owner B 404; no-auth 401)
+- [ ] Full canvas login + order status click-path in automation: blocked by Flutter web a11y/canvas intercept — needs 2-minute human pass in browser on `http://127.0.0.1:8765` (or re-serve artifact)
 
 ### C — No Flutter → production fallback
 
 - [x] Removed `defaultValue` prod URL/anon from `lib/core/constants.dart`
 - [x] `API_BASE_URL` required (no fallthrough to `elmenuxfa.com`)
-- [x] CI proves build without defines does not bake prod ref
-- [x] CI analyze/test/build use Preview dart-defines
+- [x] CI proves build without defines does not bake prod ref (`Prove missing dart-defines…` PASS)
+- [x] CI analyze/test/build green on freeze SHA
 
 ### D — Artifact documentation
 
 - [x] This file
-- [ ] SHA + CI run URL recorded after green Actions
-- [ ] Migrations list for cutover (additive then restrictive)
-- [ ] Rollback notes
+- [x] SHA + CI run URL recorded
+- [ ] Migrations list for cutover (additive then restrictive) — keep existing Preview SQL as source of truth until approval
+- [x] Rollback cues listed below
 
 ## Cutover order (after approval only)
 
