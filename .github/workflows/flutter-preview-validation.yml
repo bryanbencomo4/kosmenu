@@ -73,16 +73,7 @@ jobs:
           echo "Preview secrets present (values not printed)"
 
       - name: Analyze
-        env:
-          PREVIEW_API_BASE_URL: ${{ secrets.PREVIEW_API_BASE_URL }}
-          PREVIEW_SUPABASE_URL: ${{ secrets.PREVIEW_SUPABASE_URL }}
-          PREVIEW_SUPABASE_ANON_KEY: ${{ secrets.PREVIEW_SUPABASE_ANON_KEY }}
-        run: |
-          set -euo pipefail
-          flutter analyze --no-fatal-infos \
-            --dart-define=API_BASE_URL="${PREVIEW_API_BASE_URL}" \
-            --dart-define=SUPABASE_URL="${PREVIEW_SUPABASE_URL}" \
-            --dart-define=SUPABASE_ANON_KEY="${PREVIEW_SUPABASE_ANON_KEY}"
+        run: flutter analyze --no-fatal-infos
 
       - name: Test
         env:
