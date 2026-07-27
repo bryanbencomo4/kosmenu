@@ -5,13 +5,11 @@ import {
   Layers,
   PencilLine,
   QrCode,
-  MessageCircle,
   Rocket,
 } from 'lucide-react';
 
 type HeroProps = {
-  whatsappHref: string;
-  appHref: string;
+  signupHref: string;
 };
 
 const heroHighlights = [
@@ -76,7 +74,7 @@ function HeroProductVisual() {
   );
 }
 
-export function Hero({ whatsappHref }: HeroProps) {
+export function Hero({ signupHref }: HeroProps) {
   return (
     <section id="inicio" className="hero-shell relative isolate overflow-hidden px-0">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
@@ -130,14 +128,12 @@ export function Hero({ whatsappHref }: HeroProps) {
 
             <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row lg:items-start lg:justify-start">
               <Link
-                href={whatsappHref}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={signupHref}
                 className="group animate-fade-up animation-delay-500 relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-full bg-[#FACC15] px-6 py-4 text-base font-bold text-[#0B0F1A] shadow-[0_34px_90px_-18px_rgba(250,204,21,1)] transition-all duration-300 hover:scale-[1.04] hover:bg-[#fde047] sm:min-w-[18.5rem] sm:w-auto sm:px-9"
               >
                 <span className="animate-shine absolute inset-y-0 -left-1/3 w-1/3 -skew-x-12 bg-white/30 blur-md" />
-                Solicitar activación ahora
-                <MessageCircle className="h-4 w-4" />
+                Crear mi menú ahora
+                <ChevronRight className="h-4 w-4" />
               </Link>
               <Link
                 href="#demo"
@@ -149,7 +145,7 @@ export function Hero({ whatsappHref }: HeroProps) {
             </div>
 
             <p className="animate-fade-up animation-delay-700 mt-3 text-center text-xs font-medium text-slate-300/85 sm:text-sm lg:text-left">
-              <span className="text-[#FACC15]">$10/mes</span> · Activación rápida · Ideal para restaurantes, cafés y food trucks
+              <span className="text-[#FACC15]">$10/mes</span> · Crea tu cuenta y publica tu menú en pocos minutos.
             </p>
           </div>
 

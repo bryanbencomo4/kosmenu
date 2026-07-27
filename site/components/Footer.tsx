@@ -30,7 +30,7 @@ const footerGroups = [
     title: 'Recursos',
     links: [
       { label: 'Beneficios', href: '#beneficios' },
-      { label: 'WhatsApp', href: marketingWhatsappHref },
+      { label: 'Soporte', href: marketingWhatsappHref },
     ],
   },
   {
@@ -44,7 +44,7 @@ const footerGroups = [
 ] as const;
 
 const channelLinks = [
-  { label: 'WhatsApp', href: marketingWhatsappHref, icon: MessageCircle },
+  { label: 'Soporte', href: marketingWhatsappHref, icon: MessageCircle },
   { label: 'Correo', href: supportEmailHref, icon: Mail },
 ] as const;
 

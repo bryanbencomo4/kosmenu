@@ -77,3 +77,8 @@ supabase/preview-bootstrap/_raw_*
 
 # local zeno preview secrets
 supabase/functions/.env.zeno.preview.local
+
+# local smoke/tmp artifacts
+tmp-*.txt
+tmp-*.json
+tmp-*.log

@@ -1,9 +1,9 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { Check, MessageCircle, Zap } from 'lucide-react';
+import { ArrowRight, Check, Zap } from 'lucide-react';
 
 type FeaturesProps = {
-  whatsappHref: string;
+  signupHref: string;
 };
 
 const benefits = [
@@ -14,7 +14,7 @@ const benefits = [
   'Puedes compartir tu menú a través de redes sociales',
 ] as const;
 
-export function Features({ whatsappHref }: FeaturesProps) {
+export function Features({ signupHref }: FeaturesProps) {
   return (
     <section id="beneficios" className="relative isolate overflow-hidden border-t border-white/8 bg-black">
       <div className="grid items-center lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
@@ -52,13 +52,11 @@ export function Features({ whatsappHref }: FeaturesProps) {
 
           <div className="mt-7">
             <Link
-              href={whatsappHref}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={signupHref}
               className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#FACC15] px-6 py-4 text-base font-bold text-[#0B0F1A] shadow-[0_28px_70px_-18px_rgba(250,204,21,0.95)] transition-all duration-300 hover:scale-[1.02] hover:bg-[#fde047] sm:w-auto sm:min-w-[16.5rem]"
             >
-              Solicitar activación
-              <MessageCircle className="h-4 w-4" />
+              Crear mi menú
+              <ArrowRight className="h-4 w-4" />
             </Link>
 
             <p className="mt-4 flex items-start gap-2 text-sm leading-6 text-slate-300/85">

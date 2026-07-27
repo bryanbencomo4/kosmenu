@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Link2, QrCode, Sparkles, UtensilsCrossed } from 'lucide-react';
+import { ArrowRight, Link2, QrCode, Sparkles, UtensilsCrossed } from 'lucide-react';
+import Link from 'next/link';
 import { publicSiteUrl } from '../app/_lib/public-site-config';
 import { DemoTableTent } from './demo/DemoTableTent';
 import { ClientViewCard, NoCameraCard } from './demo/DemoSideCards';
@@ -57,7 +58,11 @@ function StepsList() {
   );
 }
 
-export function DemoSection() {
+type DemoSectionProps = {
+  signupHref: string;
+};
+
+export function DemoSection({ signupHref }: DemoSectionProps) {
   const [demoUrl, setDemoUrl] = useState(`${publicSiteUrl}${DEMO_PATH}`);
 
   useEffect(() => {
@@ -121,6 +126,13 @@ export function DemoSection() {
             <div className="mt-6 space-y-4 xl:mt-0 xl:space-y-3.5">
               <ClientViewCard />
               <NoCameraCard demoUrl={demoUrl} demoPath={DEMO_PATH} displayUrl={DEMO_DISPLAY_URL} />
+              <Link
+                href={signupHref}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-[1.1rem] border border-[#FACC15]/35 bg-[#FACC15]/12 px-5 py-3.5 text-[0.92rem] font-bold text-[#FACC15] transition-all duration-300 hover:bg-[#FACC15]/18 hover:text-[#fde047]"
+              >
+                Crear mi propio menú
+                <ArrowRight className="h-4 w-4" />
+              </Link>
             </div>
           </div>
         </div>

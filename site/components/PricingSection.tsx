@@ -13,10 +13,9 @@ import {
   Wrench,
 } from 'lucide-react';
 
-import { marketingWhatsappHref } from '../app/_lib/public-site-config';
-
 type PricingSectionProps = {
-  whatsappHref: string;
+  signupHref: string;
+  supportHref: string;
 };
 
 const freeIncludes = [
@@ -61,11 +60,7 @@ function AcrylicLStandIcon({ className }: { className?: string }) {
   );
 }
 
-export function PricingSection({ whatsappHref }: PricingSectionProps) {
-  const resolvedWhatsappHref =
-    whatsappHref && whatsappHref !== '#' && whatsappHref !== '#cta' && whatsappHref !== 'javascript:void(0)'
-      ? whatsappHref
-      : marketingWhatsappHref;
+export function PricingSection({ signupHref, supportHref }: PricingSectionProps) {
 
   return (
     <section id="pricing" className="perf-section relative overflow-hidden border-b border-white/8 bg-[#050916]">
@@ -120,22 +115,20 @@ export function PricingSection({ whatsappHref }: PricingSectionProps) {
 
               <div className="mt-6 flex flex-col gap-3">
                 <Link
-                  href={resolvedWhatsappHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={signupHref}
                   className="inline-flex h-[3.25rem] w-full items-center justify-center gap-2 rounded-[0.9rem] bg-[#FACC15] px-5 text-[0.98rem] font-bold text-[#0B0F1A] shadow-[0_22px_50px_-24px_rgba(250,204,21,0.9)] transition-all duration-300 hover:bg-[#fde047]"
                 >
-                  Solicitar activación
+                  Comenzar ahora
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
-                  href={resolvedWhatsappHref}
+                  href={supportHref}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex h-[3.25rem] w-full items-center justify-center gap-2 rounded-[0.9rem] border border-white/14 bg-transparent px-5 text-[0.98rem] font-semibold text-white transition-all duration-300 hover:border-violet-300/30 hover:bg-white/[0.04]"
                 >
                   <MessageCircle className="h-4 w-4" />
-                  Hablar por WhatsApp
+                  Contactar soporte
                 </Link>
               </div>
 

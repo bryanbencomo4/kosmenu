@@ -777,6 +777,14 @@ class _AuthScreenState extends State<AuthScreen> {
       ),
       child: DefaultTabController(
         length: 2,
+        initialIndex: () {
+          if (!kIsWeb) return 0;
+          final tab = Uri.base.queryParameters['tab']?.trim().toLowerCase();
+          if (tab == 'register' || tab == 'signup' || tab == 'registrarse') {
+            return 1;
+          }
+          return 0;
+        }(),
         child: Scaffold(
           resizeToAvoidBottomInset: true,
           body: Container(

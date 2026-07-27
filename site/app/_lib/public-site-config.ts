@@ -4,7 +4,7 @@ const DEFAULT_APP_SITE_URL = 'https://app.elmenuxfa.com';
 const DEFAULT_SUPPORT_EMAIL = 'hola@elmenuxfa.com';
 const DEFAULT_MARKETING_WHATSAPP_DIGITS = '584148216433';
 const DEFAULT_MARKETING_WHATSAPP_MESSAGE =
-  'Hola, quiero solicitar la activación de mi menú digital con elmenuxfa.com. Me interesa el plan de $10/mes con QR y Table Tent.';
+  'Hola, necesito ayuda con elmenuxfa.com (soporte).';
 const DEVELOPMENT_PUBLIC_HOSTS = ['www.localhost', 'elmenuxfa.local', 'www.elmenuxfa.local'] as const;
 const DEVELOPMENT_ADMIN_HOSTS = ['admin.localhost', 'admin.elmenuxfa.local'] as const;
 
@@ -78,6 +78,12 @@ export const marketingWhatsappMessage = resolveText(
 export const marketingWhatsappHref = marketingWhatsappDigits
   ? `https://wa.me/${marketingWhatsappDigits}?text=${encodeURIComponent(marketingWhatsappMessage)}`
   : supportEmailHref;
+
+/** Flutter web app — login (default). */
+export const appLoginHref = appSiteUrl;
+
+/** Flutter web app — open the Registrarse tab. */
+export const appSignupHref = `${appSiteUrl.replace(/\/$/, '')}/?tab=register`;
 
 export const termsPagePath = '/terminos';
 export const privacyPagePath = '/privacidad';
