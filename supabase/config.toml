@@ -2,3 +2,11 @@ project_id = "qqhberaayhohxlbbhdyi"
 
 [functions.process-ai-image-jobs]
 verify_jwt = false
+
+# Zeno Bank signed webhooks (Svix). JWT must be off — Zeno cannot send Supabase JWTs.
+[functions.zeno-webhook]
+verify_jwt = false
+
+# Authenticated merchants create checkouts; JWT verified inside the function.
+[functions.create-zeno-checkout]
+verify_jwt = true

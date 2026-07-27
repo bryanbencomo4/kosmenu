@@ -8,6 +8,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
@@ -1592,6 +1593,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 case _DashboardAction.manageMenu:
                                   await _openCurrentMenuManager();
                                   break;
+                                case _DashboardAction.billing:
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => const BillingPlanScreen(),
+                                    ),
+                                  );
+                                  break;
                               }
                             },
                           ),
@@ -2024,6 +2032,14 @@ class _DashboardHeader extends StatelessWidget {
               child: _MenuActionRow(
                 icon: Icons.open_in_browser_rounded,
                 label: 'Abrir menú web',
+              ),
+            ),
+            PopupMenuDivider(),
+            PopupMenuItem(
+              value: _DashboardAction.billing,
+              child: _MenuActionRow(
+                icon: Icons.payments_outlined,
+                label: 'Plan y facturación',
               ),
             ),
           ],
@@ -4123,6 +4139,7 @@ enum _DashboardAction {
   shareMenu,
   copyLink,
   openWeb,
+  billing,
 }
 
 enum _SalesRange {

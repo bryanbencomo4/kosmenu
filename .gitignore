@@ -70,3 +70,10 @@ app.*.map.json
 # Preview bootstrap metadata pulled from remote (schema introspection only)
 supabase/preview-bootstrap/_meta_*.json
 supabase/preview-bootstrap/_raw_*
+
+# Production cutover dumps (never commit)
+/backups/
+
+
+# local zeno preview secrets
+supabase/functions/.env.zeno.preview.local

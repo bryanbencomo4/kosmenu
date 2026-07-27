@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/mobile_camera_capture_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
@@ -252,6 +253,22 @@ class _KosmenuAppState extends State<KosmenuApp> {
       return MaterialPageRoute(
         settings: settings,
         builder: (_) => OrderDetailScreen(orderId: orderId, readOnlyView: true),
+      );
+    }
+
+    if (uri.path == '/payment/success' || uri.path == '/billing') {
+      return MaterialPageRoute(
+        settings: settings,
+        builder: (_) => uri.path == '/payment/success'
+            ? const BillingPaymentSuccessScreen()
+            : const BillingPlanScreen(),
+      );
+    }
+
+    if (uri.path == '/payment/pending') {
+      return MaterialPageRoute(
+        settings: settings,
+        builder: (_) => const BillingPlanScreen(),
       );
     }
 

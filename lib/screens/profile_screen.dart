@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -264,6 +265,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const BillingPlanScreen(),
+                      ),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.payments_outlined),
+                  label: Text(
+                    'Plan y facturación',
+                    style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 FilledButton.icon(
                   onPressed: _signingOut ? null : _signOut,
                   style: FilledButton.styleFrom(
