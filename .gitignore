@@ -82,3 +82,10 @@ supabase/functions/.env.zeno.preview.local
 tmp-*.txt
 tmp-*.json
 tmp-*.log
+
+# Zeno prod smoke local meta
+.tmp-zeno-prod-smoke.json
+.tmp-zeno-prod-backup.mjs
+
+supabase/functions/deno.lock
+

@@ -152,6 +152,30 @@ class BillingSnapshot {
   /// Legacy menus stay usable without a Zeno subscription.
   bool get isGrandfathered =>
       billingExempt && !hasActiveSubscription && businessOnline;
+
+  /// May publish / set en_linea=true (legacy exempt or paid).
+  bool get canPublish => billingExempt || hasActiveSubscription;
+
+  /// New commerce that still needs Zeno checkout to go public.
+  bool get requiresPaymentToPublish => !canPublish;
+}
+
+/// Post-auth / post-email-confirm destination (pure; unit-tested).
+enum PostAuthDestination { setup, billing, dashboard }
+
+PostAuthDestination resolvePostAuthDestination({
+  required bool hasCommerce,
+  required bool hasCatalog,
+  required bool billingExempt,
+  required bool hasActiveSubscription,
+}) {
+  if (!hasCommerce || !hasCatalog) {
+    return PostAuthDestination.setup;
+  }
+  if (billingExempt || hasActiveSubscription) {
+    return PostAuthDestination.dashboard;
+  }
+  return PostAuthDestination.billing;
 }
 
 class CreateCheckoutResult {
@@ -288,6 +312,41 @@ class BillingService {
     }
     // Hosted Zeno page only — never embed API keys in the app.
     return launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// Asks the server to verify open checkouts with Zeno and activate if paid.
+  /// Returns true when subscription is active (or already was).
+  Future<BillingSnapshot> reconcileCheckout({String? comercioId}) async {
+    final client = Supabase.instance.client;
+    final session = client.auth.currentSession;
+    if (session == null) {
+      throw StateError('Debes iniciar sesión para confirmar el pago.');
+    }
+
+    final businessId = (comercioId ?? SupabaseConfig.currentComercioId).trim();
+    if (businessId.isEmpty) {
+      throw StateError('No hay comercio activo.');
+    }
+
+    final response = await client.functions.invoke(
+      'reconcile-zeno-checkout',
+      body: {'comercio_id': businessId},
+      headers: {
+        'Authorization': 'Bearer ${session.accessToken}',
+        'apikey': SupabaseConfig.anonKey,
+        'x-comercio-id': businessId,
+      },
+    );
+
+    final data = _asMap(response.data);
+    if (response.status < 200 || response.status >= 300) {
+      throw StateError(
+        '${data['message'] ?? data['error'] ?? 'No se pudo confirmar el pago'} '
+        '(${response.status})',
+      );
+    }
+
+    return loadSnapshot(comercioId: businessId);
   }
 }
 

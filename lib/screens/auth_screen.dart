@@ -5,13 +5,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
+import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-
-enum _PostAuthTarget { dashboard, setup }
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -22,28 +22,39 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   static const String _setupDraftKeyPrefix = 'business_setup_draft_v2';
-  Future<_PostAuthTarget>? _targetFuture;
+  Future<PostAuthDestination>? _targetFuture;
   String _targetUserId = '';
 
-  Future<_PostAuthTarget> _resolveTargetForUser(String userId) async {
-    Future<_PostAuthTarget> resolveOnce() async {
+  Future<PostAuthDestination> _resolveTargetForUser(String userId) async {
+    Future<PostAuthDestination> resolveOnce() async {
       final row = await Supabase.instance.client
           .from('comercios')
-          .select('id, slug')
+          .select('id, slug, billing_exempt')
           .eq('owner_id', userId)
           .limit(1)
           .maybeSingle();
 
       if (row == null) {
         SupabaseConfig.clearCurrentComercioId();
-        return _PostAuthTarget.setup;
+        return resolvePostAuthDestination(
+          hasCommerce: false,
+          hasCatalog: false,
+          billingExempt: false,
+          hasActiveSubscription: false,
+        );
       }
 
       final comercioId = row['id']?.toString().trim() ?? '';
       final comercioSlug = row['slug']?.toString().trim();
+      final billingExempt = row['billing_exempt'] == true;
       if (comercioId.isEmpty) {
         SupabaseConfig.clearCurrentComercioId();
-        return _PostAuthTarget.setup;
+        return resolvePostAuthDestination(
+          hasCommerce: false,
+          hasCatalog: false,
+          billingExempt: false,
+          hasActiveSubscription: false,
+        );
       }
 
       final firstCatalog = await Supabase.instance.client
@@ -54,14 +65,49 @@ class _AuthGateState extends State<AuthGate> {
           .maybeSingle();
       if (firstCatalog == null) {
         SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
-        return _PostAuthTarget.setup;
+        return resolvePostAuthDestination(
+          hasCommerce: true,
+          hasCatalog: false,
+          billingExempt: billingExempt,
+          hasActiveSubscription: false,
+        );
       }
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('$_setupDraftKeyPrefix:$userId');
 
       SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
-      return _PostAuthTarget.dashboard;
+
+      var hasActiveSubscription = false;
+      if (!billingExempt) {
+        final sub = await Supabase.instance.client
+            .from('subscriptions')
+            .select('id, status')
+            .eq('business_id', comercioId)
+            .eq('status', 'active')
+            .limit(1)
+            .maybeSingle();
+        hasActiveSubscription = sub != null;
+
+        // If still unpaid locally, ask server to reconcile with Zeno (missing webhooks).
+        if (!hasActiveSubscription) {
+          try {
+            final snap = await const BillingService().reconcileCheckout(
+              comercioId: comercioId,
+            );
+            hasActiveSubscription = snap.hasActiveSubscription;
+          } catch (_) {
+            // Continue with local state.
+          }
+        }
+      }
+
+      return resolvePostAuthDestination(
+        hasCommerce: true,
+        hasCatalog: true,
+        billingExempt: billingExempt,
+        hasActiveSubscription: hasActiveSubscription,
+      );
     }
 
     try {
@@ -72,7 +118,7 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  Future<_PostAuthTarget> _targetFutureFor(String userId) {
+  Future<PostAuthDestination> _targetFutureFor(String userId) {
     if (_targetFuture != null && _targetUserId == userId) {
       return _targetFuture!;
     }
@@ -106,7 +152,7 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         final userId = session.user.id;
-        return FutureBuilder<_PostAuthTarget>(
+        return FutureBuilder<PostAuthDestination>(
           future: _targetFutureFor(userId),
           builder: (context, targetSnapshot) {
             if (targetSnapshot.connectionState == ConnectionState.waiting) {
@@ -127,11 +173,15 @@ class _AuthGateState extends State<AuthGate> {
               );
             }
 
-            if (targetSnapshot.data == _PostAuthTarget.dashboard) {
-              return const AdminDashboardScreen();
+            switch (targetSnapshot.data) {
+              case PostAuthDestination.dashboard:
+                return const AdminDashboardScreen();
+              case PostAuthDestination.billing:
+                return const BillingPlanScreen();
+              case PostAuthDestination.setup:
+              case null:
+                return const BusinessSetupScreen();
             }
-
-            return const BusinessSetupScreen();
           },
         );
       },

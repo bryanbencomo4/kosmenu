@@ -17,7 +17,7 @@ import 'package:intl_phone_field/phone_number.dart' as intl_phone_number;
 import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
-import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
@@ -7539,6 +7539,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       ..._paletteFieldsPayload(),
       'menu_footer': _selectedFooter,
       if (!widget.businessConfigOnly) 'onboarding_completed': true,
+      // New commercios: never self-exempt; stay offline until Zeno payment.
+      if (_editingComercioId == null) ...<String, dynamic>{
+        'billing_exempt': false,
+        'en_linea': false,
+      },
     };
 
     final removable = <String>{
@@ -7802,8 +7807,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
+    // Self-serve: after first menu save, go straight to Zeno billing.
     await Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+      MaterialPageRoute(builder: (_) => const BillingPlanScreen()),
       (route) => false,
     );
   }
@@ -7933,15 +7939,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               backgroundColor: _palette.primary,
                               minimumSize: const Size.fromHeight(50),
                             ),
-                            child: Text(
+                              child: Text(
                               _saving
                                   ? 'Guardando...'
                                   : _isLastStepInFlow
                                   ? (widget.businessConfigOnly
                                         ? 'Guardar cambios'
                                         : (_isEditing
-                                              ? 'Guardar'
-                                              : 'Crear menu'))
+                                              ? 'Guardar y continuar al pago'
+                                              : 'Publicar mi menú — USD 10/mes'))
                                   : 'Continuar',
                             ),
                           ),

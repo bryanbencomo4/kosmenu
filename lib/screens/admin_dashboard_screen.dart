@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
@@ -46,6 +47,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _isUpdatingBusinessOnline = false;
   bool _businessOnline = true;
   bool _didPrimeOnlineSwitch = false;
+  bool _requiresPaymentToPublish = false;
+  bool _didLoadBillingGate = false;
 
   bool _didPrimeOrderAlert = false;
   Set<String> _seenOrderIds = <String>{};
@@ -71,6 +74,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _bindAuthStateRecovery();
     _subscribeToOrders();
     _startPendingAutoCancelTicker();
+    unawaited(_refreshBillingGate());
   }
 
   void _bindAuthStateRecovery() {
@@ -448,6 +452,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       _ordersStream = _buildOrdersStream();
     });
     _subscribeToOrders();
+    await _refreshBillingGate();
   }
 
   Future<void> _openProfile() async {
@@ -891,6 +896,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
+    if (value && _requiresPaymentToPublish) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            'Tu menú está listo. Activa tu plan para publicarlo.',
+          ),
+        ),
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BillingPlanScreen()),
+      );
+      if (mounted) await _refreshBillingGate();
+      return;
+    }
+
     final previous = _businessOnline;
     setState(() {
       _businessOnline = value;
@@ -919,21 +941,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final message = error.message.toLowerCase();
       final missingOnlineColumn =
           code == 'PGRST204' || message.contains('en_linea');
+      final paymentRequired = message.contains('payment_required') ||
+          message.contains('active subscription required');
 
       if (mounted) {
         setState(() => _businessOnline = previous);
       }
 
-      if (missingOnlineColumn) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              'No se pudo guardar el estado porque falta la columna en_linea en comercios.',
+      if (paymentRequired) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text(
+                'Tu menú está listo. Activa tu plan para publicarlo.',
+              ),
             ),
-          ),
-        );
-      } else {
+          );
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const BillingPlanScreen()),
+          );
+          await _refreshBillingGate();
+        }
+      } else if (missingOnlineColumn) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text(
+                'No se pudo guardar el estado porque falta la columna en_linea en comercios.',
+              ),
+            ),
+          );
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             behavior: SnackBarBehavior.floating,
@@ -960,6 +1001,37 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         setState(() => _isUpdatingBusinessOnline = false);
       }
     }
+  }
+
+  Future<void> _refreshBillingGate() async {
+    try {
+      // If payment completed on Zeno but webhook never arrived, activate now.
+      var snap = await const BillingService().loadSnapshot();
+      if (snap.requiresPaymentToPublish) {
+        try {
+          snap = await const BillingService().reconcileCheckout();
+        } catch (_) {
+          // Keep prior snapshot if reconcile fails (e.g. function not deployed).
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _requiresPaymentToPublish = snap.requiresPaymentToPublish;
+        _didLoadBillingGate = true;
+        if (snap.businessOnline != _businessOnline && !_isUpdatingBusinessOnline) {
+          _businessOnline = snap.businessOnline;
+        }
+      });
+    } catch (_) {
+      // Keep prior gate state on transient errors.
+    }
+  }
+
+  Future<void> _openBilling() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const BillingPlanScreen()),
+    );
+    if (mounted) await _refreshBillingGate();
   }
 
   DateTime _startOfDay(DateTime date) =>
@@ -1594,11 +1666,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   await _openCurrentMenuManager();
                                   break;
                                 case _DashboardAction.billing:
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => const BillingPlanScreen(),
-                                    ),
-                                  );
+                                  await _openBilling();
                                   break;
                               }
                             },
@@ -1606,6 +1674,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           const SizedBox(height: 16),
                           if (_recentCatalogResult != null)
                             _CatalogUpdateBanner(result: _recentCatalogResult!),
+                          if (_didLoadBillingGate && _requiresPaymentToPublish) ...[
+                            _PublishPaywallBanner(onActivate: _openBilling),
+                            const SizedBox(height: 16),
+                          ],
                           _DashboardKpiGrid(
                             cards: kpiCards,
                             columns: isDesktop ? 4 : 2,
@@ -4461,6 +4533,46 @@ class _EmptyStateCard extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PublishPaywallBanner extends StatelessWidget {
+  const _PublishPaywallBanner({required this.onActivate});
+
+  final VoidCallback onActivate;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xFFFFF7ED),
+        border: Border.all(color: const Color(0xFFFDBA74)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Tu menú está listo. Activa tu plan para publicarlo.',
+            style: GoogleFonts.manrope(
+              fontWeight: FontWeight.w800,
+              color: const Color(0xFF9A3412),
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: onActivate,
+            icon: const Icon(Icons.payments_outlined, size: 18),
+            label: Text(
+              'Activar plan — USD 10/mes',
+              style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
       ),
     );
   }

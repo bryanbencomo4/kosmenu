@@ -66,9 +66,21 @@ void main() {
       });
       expect(payment.isOpenReusable, isFalse);
     });
+
+    test('pending open payment does not imply published', () {
+      final payment = BillingPayment.fromRow({
+        'id': 'pay3',
+        'order_id': 'o3',
+        'status': 'open',
+        'amount': 10,
+        'currency': 'USD',
+      });
+      expect(payment.status, 'open');
+      expect(payment.status == 'completed', isFalse);
+    });
   });
 
-  group('BillingSnapshot grandfathering', () {
+  group('BillingSnapshot grandfathering + paywall', () {
     test('legacy online commerce without subscription is grandfathered', () {
       const snap = BillingSnapshot(
         plan: null,
@@ -79,9 +91,11 @@ void main() {
       );
       expect(snap.isGrandfathered, isTrue);
       expect(snap.hasActiveSubscription, isFalse);
+      expect(snap.canPublish, isTrue);
+      expect(snap.requiresPaymentToPublish, isFalse);
     });
 
-    test('non-exempt without subscription is not grandfathered', () {
+    test('non-exempt without subscription cannot publish', () {
       const snap = BillingSnapshot(
         plan: null,
         subscription: null,
@@ -90,6 +104,110 @@ void main() {
         businessOnline: false,
       );
       expect(snap.isGrandfathered, isFalse);
+      expect(snap.canPublish, isFalse);
+      expect(snap.requiresPaymentToPublish, isTrue);
+    });
+
+    test('active subscription can publish without exemption', () {
+      final snap = BillingSnapshot(
+        plan: null,
+        subscription: BillingSubscription.fromRow({
+          'id': 's1',
+          'status': 'active',
+          'plan_id': 'p1',
+          'cancel_at_period_end': false,
+        }),
+        latestPayment: null,
+        billingExempt: false,
+        businessOnline: true,
+      );
+      expect(snap.canPublish, isTrue);
+      expect(snap.requiresPaymentToPublish, isFalse);
+    });
+
+    test('pending subscription cannot publish', () {
+      final snap = BillingSnapshot(
+        plan: null,
+        subscription: BillingSubscription.fromRow({
+          'id': 's2',
+          'status': 'pending',
+          'plan_id': 'p1',
+          'cancel_at_period_end': false,
+        }),
+        latestPayment: BillingPayment.fromRow({
+          'id': 'pay',
+          'order_id': 'o',
+          'status': 'open',
+          'amount': 10,
+          'currency': 'USD',
+        }),
+        billingExempt: false,
+        businessOnline: false,
+      );
+      expect(snap.canPublish, isFalse);
+      expect(snap.requiresPaymentToPublish, isTrue);
+    });
+  });
+
+  group('resolvePostAuthDestination', () {
+    test('no commerce goes to setup', () {
+      expect(
+        resolvePostAuthDestination(
+          hasCommerce: false,
+          hasCatalog: false,
+          billingExempt: false,
+          hasActiveSubscription: false,
+        ),
+        PostAuthDestination.setup,
+      );
+    });
+
+    test('commerce without catalog continues onboarding', () {
+      expect(
+        resolvePostAuthDestination(
+          hasCommerce: true,
+          hasCatalog: false,
+          billingExempt: false,
+          hasActiveSubscription: false,
+        ),
+        PostAuthDestination.setup,
+      );
+    });
+
+    test('new commerce with menu but unpaid goes to billing', () {
+      expect(
+        resolvePostAuthDestination(
+          hasCommerce: true,
+          hasCatalog: true,
+          billingExempt: false,
+          hasActiveSubscription: false,
+        ),
+        PostAuthDestination.billing,
+      );
+    });
+
+    test('active subscriber goes to dashboard not billing', () {
+      expect(
+        resolvePostAuthDestination(
+          hasCommerce: true,
+          hasCatalog: true,
+          billingExempt: false,
+          hasActiveSubscription: true,
+        ),
+        PostAuthDestination.dashboard,
+      );
+    });
+
+    test('legacy billing_exempt goes to dashboard', () {
+      expect(
+        resolvePostAuthDestination(
+          hasCommerce: true,
+          hasCatalog: true,
+          billingExempt: true,
+          hasActiveSubscription: false,
+        ),
+        PostAuthDestination.dashboard,
+      );
     });
   });
 
