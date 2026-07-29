@@ -149,14 +149,10 @@ class BillingSnapshot {
 
   bool get hasActiveSubscription => subscription?.isActive == true;
 
-  /// Legacy menus stay usable without a Zeno subscription.
-  bool get isGrandfathered =>
-      billingExempt && !hasActiveSubscription && businessOnline;
+  /// Publish / go online only with an active paid subscription.
+  bool get canPublish => hasActiveSubscription;
 
-  /// May publish / set en_linea=true (legacy exempt or paid).
-  bool get canPublish => billingExempt || hasActiveSubscription;
-
-  /// New commerce that still needs Zeno checkout to go public.
+  /// Needs Zeno checkout before the menu can be public.
   bool get requiresPaymentToPublish => !canPublish;
 }
 
@@ -166,13 +162,12 @@ enum PostAuthDestination { setup, billing, dashboard }
 PostAuthDestination resolvePostAuthDestination({
   required bool hasCommerce,
   required bool hasCatalog,
-  required bool billingExempt,
   required bool hasActiveSubscription,
 }) {
   if (!hasCommerce || !hasCatalog) {
     return PostAuthDestination.setup;
   }
-  if (billingExempt || hasActiveSubscription) {
+  if (hasActiveSubscription) {
     return PostAuthDestination.dashboard;
   }
   return PostAuthDestination.billing;

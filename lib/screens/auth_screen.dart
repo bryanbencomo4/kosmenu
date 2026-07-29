@@ -29,7 +29,7 @@ class _AuthGateState extends State<AuthGate> {
     Future<PostAuthDestination> resolveOnce() async {
       final row = await Supabase.instance.client
           .from('comercios')
-          .select('id, slug, billing_exempt')
+          .select('id, slug')
           .eq('owner_id', userId)
           .limit(1)
           .maybeSingle();
@@ -39,20 +39,17 @@ class _AuthGateState extends State<AuthGate> {
         return resolvePostAuthDestination(
           hasCommerce: false,
           hasCatalog: false,
-          billingExempt: false,
           hasActiveSubscription: false,
         );
       }
 
       final comercioId = row['id']?.toString().trim() ?? '';
       final comercioSlug = row['slug']?.toString().trim();
-      final billingExempt = row['billing_exempt'] == true;
       if (comercioId.isEmpty) {
         SupabaseConfig.clearCurrentComercioId();
         return resolvePostAuthDestination(
           hasCommerce: false,
           hasCatalog: false,
-          billingExempt: false,
           hasActiveSubscription: false,
         );
       }
@@ -68,7 +65,6 @@ class _AuthGateState extends State<AuthGate> {
         return resolvePostAuthDestination(
           hasCommerce: true,
           hasCatalog: false,
-          billingExempt: billingExempt,
           hasActiveSubscription: false,
         );
       }
@@ -79,33 +75,30 @@ class _AuthGateState extends State<AuthGate> {
       SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
 
       var hasActiveSubscription = false;
-      if (!billingExempt) {
-        final sub = await Supabase.instance.client
-            .from('subscriptions')
-            .select('id, status')
-            .eq('business_id', comercioId)
-            .eq('status', 'active')
-            .limit(1)
-            .maybeSingle();
-        hasActiveSubscription = sub != null;
+      final sub = await Supabase.instance.client
+          .from('subscriptions')
+          .select('id, status')
+          .eq('business_id', comercioId)
+          .eq('status', 'active')
+          .limit(1)
+          .maybeSingle();
+      hasActiveSubscription = sub != null;
 
-        // If still unpaid locally, ask server to reconcile with Zeno (missing webhooks).
-        if (!hasActiveSubscription) {
-          try {
-            final snap = await const BillingService().reconcileCheckout(
-              comercioId: comercioId,
-            );
-            hasActiveSubscription = snap.hasActiveSubscription;
-          } catch (_) {
-            // Continue with local state.
-          }
+      // If still unpaid locally, ask server to reconcile with Zeno (missing webhooks).
+      if (!hasActiveSubscription) {
+        try {
+          final snap = await const BillingService().reconcileCheckout(
+            comercioId: comercioId,
+          );
+          hasActiveSubscription = snap.hasActiveSubscription;
+        } catch (_) {
+          // Continue with local state.
         }
       }
 
       return resolvePostAuthDestination(
         hasCommerce: true,
         hasCatalog: true,
-        billingExempt: billingExempt,
         hasActiveSubscription: hasActiveSubscription,
       );
     }

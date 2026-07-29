@@ -188,11 +188,11 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
                               ),
                             ),
                           ],
-                          if (data.isGrandfathered) ...[
+                          if (data.requiresPaymentToPublish) ...[
                             const SizedBox(height: 10),
                             Text(
-                              'Tu menú actual sigue activo (plan legacy). '
-                              'Puedes suscribirte cuando quieras para renovaciones automáticas.',
+                              'Tu menú está deshabilitado hasta que actives el plan. '
+                              'Paga con criptomonedas para publicarlo.',
                               style: GoogleFonts.manrope(
                                 color: AppColors.textSoft,
                                 height: 1.35,
@@ -248,7 +248,7 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
                               ),
                             ),
                     ),
-                    if (data.hasActiveSubscription || data.isGrandfathered) ...[
+                    if (data.hasActiveSubscription) ...[
                       FilledButton(
                         onPressed: () {
                           Navigator.of(context).pushAndRemoveUntil(
@@ -838,7 +838,6 @@ class _ErrorState extends StatelessWidget {
 
 String _statusLabel(BillingSnapshot data) {
   if (data.hasActiveSubscription) return 'Activa';
-  if (data.isGrandfathered) return 'Legacy (sin suscripción Zeno)';
   switch (data.subscription?.status) {
     case 'pending':
       return 'Pendiente de pago';
@@ -855,7 +854,6 @@ String _statusLabel(BillingSnapshot data) {
 
 Color _statusTone(BillingSnapshot data) {
   if (data.hasActiveSubscription) return AppColors.success;
-  if (data.isGrandfathered) return AppColors.accent;
   switch (data.subscription?.status) {
     case 'past_due':
       return AppColors.warning;

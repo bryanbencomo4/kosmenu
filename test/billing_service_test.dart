@@ -80,8 +80,8 @@ void main() {
     });
   });
 
-  group('BillingSnapshot grandfathering + paywall', () {
-    test('legacy online commerce without subscription is grandfathered', () {
+  group('BillingSnapshot paywall', () {
+    test('exempt flag alone cannot publish', () {
       const snap = BillingSnapshot(
         plan: null,
         subscription: null,
@@ -89,10 +89,9 @@ void main() {
         billingExempt: true,
         businessOnline: true,
       );
-      expect(snap.isGrandfathered, isTrue);
       expect(snap.hasActiveSubscription, isFalse);
-      expect(snap.canPublish, isTrue);
-      expect(snap.requiresPaymentToPublish, isFalse);
+      expect(snap.canPublish, isFalse);
+      expect(snap.requiresPaymentToPublish, isTrue);
     });
 
     test('non-exempt without subscription cannot publish', () {
@@ -103,12 +102,11 @@ void main() {
         billingExempt: false,
         businessOnline: false,
       );
-      expect(snap.isGrandfathered, isFalse);
       expect(snap.canPublish, isFalse);
       expect(snap.requiresPaymentToPublish, isTrue);
     });
 
-    test('active subscription can publish without exemption', () {
+    test('active subscription can publish', () {
       final snap = BillingSnapshot(
         plan: null,
         subscription: BillingSubscription.fromRow({
@@ -155,7 +153,6 @@ void main() {
         resolvePostAuthDestination(
           hasCommerce: false,
           hasCatalog: false,
-          billingExempt: false,
           hasActiveSubscription: false,
         ),
         PostAuthDestination.setup,
@@ -167,19 +164,17 @@ void main() {
         resolvePostAuthDestination(
           hasCommerce: true,
           hasCatalog: false,
-          billingExempt: false,
           hasActiveSubscription: false,
         ),
         PostAuthDestination.setup,
       );
     });
 
-    test('new commerce with menu but unpaid goes to billing', () {
+    test('unpaid commerce with menu goes to billing', () {
       expect(
         resolvePostAuthDestination(
           hasCommerce: true,
           hasCatalog: true,
-          billingExempt: false,
           hasActiveSubscription: false,
         ),
         PostAuthDestination.billing,
@@ -191,20 +186,7 @@ void main() {
         resolvePostAuthDestination(
           hasCommerce: true,
           hasCatalog: true,
-          billingExempt: false,
           hasActiveSubscription: true,
-        ),
-        PostAuthDestination.dashboard,
-      );
-    });
-
-    test('legacy billing_exempt goes to dashboard', () {
-      expect(
-        resolvePostAuthDestination(
-          hasCommerce: true,
-          hasCatalog: true,
-          billingExempt: true,
-          hasActiveSubscription: false,
         ),
         PostAuthDestination.dashboard,
       );
