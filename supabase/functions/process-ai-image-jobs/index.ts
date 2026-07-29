@@ -51,7 +51,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-ai-image-worker-secret',
 };
 
-const IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
+const IMAGE_MODEL_FALLBACKS = [
+  'gemini-2.5-flash-image',
+  'gemini-2.0-flash-preview-image-generation',
+  'gemini-3.1-flash-image-preview',
+];
 const IMAGE_BUCKET = 'product-images';
 
 Deno.serve(async (req: Request) => {
@@ -442,57 +447,69 @@ async function generateImageWithGemini(params: {
   supabase: ReturnType<typeof createClient>;
   commerceId: string;
 }): Promise<{ base64: string; mimeType: string }> {
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent` +
-    `?key=${encodeURIComponent(params.apiKey)}`;
+  let lastError = 'Gemini no devolvio una imagen valida.';
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: params.prompt,
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseModalities: ['IMAGE'],
-        imageConfig: {
-          aspectRatio: '1:1',
-          imageSize: '1K',
-        },
+  for (const model of IMAGE_MODEL_FALLBACKS) {
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent` +
+      `?key=${encodeURIComponent(params.apiKey)}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-    }),
-  });
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: params.prompt,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ['TEXT', 'IMAGE'],
+          imageConfig: {
+            aspectRatio: '1:1',
+            imageSize: '1K',
+          },
+        },
+      }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini image generation failed (${response.status}): ${errorText}`);
-  }
-
-  const completion = await response.json();
-  await recordGeminiUsage(params.supabase, params.commerceId, completion?.usageMetadata);
-
-  const parts = completion?.candidates?.[0]?.content?.parts ?? [];
-  for (const part of parts) {
-    const inlineData = part?.inlineData ?? part?.inline_data;
-    const base64 = normalizeString(inlineData?.data);
-    const mimeType = normalizeString(inlineData?.mimeType ?? inlineData?.mime_type) || 'image/png';
-    if (base64.length > 0) {
-      return {
-        base64,
-        mimeType,
-      };
+    if (!response.ok) {
+      const errorText = await response.text();
+      lastError = `Gemini image generation failed (${model}, ${response.status}): ${errorText.slice(0, 240)}`;
+      console.warn('Gemini image model failed, trying next', {
+        model,
+        status: response.status,
+      });
+      continue;
     }
+
+    const completion = await response.json();
+    await recordGeminiUsage(params.supabase, params.commerceId, completion?.usageMetadata);
+
+    const parts = completion?.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      const inlineData = part?.inlineData ?? part?.inline_data;
+      const base64 = normalizeString(inlineData?.data);
+      const mimeType =
+        normalizeString(inlineData?.mimeType ?? inlineData?.mime_type) || 'image/png';
+      if (base64.length > 0) {
+        return {
+          base64,
+          mimeType,
+        };
+      }
+    }
+
+    lastError = `Gemini no devolvio una imagen valida (${model}).`;
   }
 
-  throw new Error('Gemini no devolvio una imagen valida.');
+  throw new Error(lastError);
 }
 
 function base64ToBytes(base64: string): Uint8Array {

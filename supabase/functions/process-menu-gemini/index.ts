@@ -68,6 +68,34 @@ const GEMINI_MODEL = 'gemini-2.5-flash';
 const DEFAULT_CATALOG_NAME = 'Menú Principal';
 const GEMINI_MAX_ATTEMPTS = 3;
 const GEMINI_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const MENU_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    categorias: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          nombre: { type: 'STRING' },
+          productos: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                nombre: { type: 'STRING' },
+                descripcion: { type: 'STRING' },
+                precio: { type: 'NUMBER' },
+              },
+              required: ['nombre', 'descripcion', 'precio'],
+            },
+          },
+        },
+        required: ['nombre', 'productos'],
+      },
+    },
+  },
+  required: ['categorias'],
+};
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -303,11 +331,17 @@ async function generateStructuredMenu(
 
   const completion = await response.json();
   await recordGeminiUsage(supabase, comercioId, completion?.usageMetadata);
-  const text = completion?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const text = extractGeminiText(completion);
 
-  if (!text || typeof text !== 'string') {
+  if (!text) {
+    const blockReason = completion?.promptFeedback?.blockReason;
+    const finishReason = completion?.candidates?.[0]?.finishReason;
     throw new HttpResponseError(
-      'La IA no devolvio una respuesta valida para estructurar el menu.',
+      blockReason
+        ? `La IA bloqueó el archivo (${blockReason}). Prueba con otra foto más clara (JPG/PNG).`
+        : finishReason
+        ? `La IA no devolvió el menú (${finishReason}). Prueba con otra imagen JPG/PNG.`
+        : 'La IA no devolvio una respuesta valida para estructurar el menu.',
       502,
     );
   }
@@ -331,6 +365,11 @@ async function fetchGeminiWithRetry(
         generationConfig: {
           temperature: 0,
           responseMimeType: 'application/json',
+          responseSchema: MENU_RESPONSE_SCHEMA,
+          // Gemini 2.5 thinks by default; keep budget low for structured JSON.
+          thinkingConfig: {
+            thinkingBudget: 0,
+          },
         },
       }),
     });
@@ -369,8 +408,11 @@ async function fetchGeminiWithRetry(
       status: response.status,
       body: lastErrorText,
     });
+    const detail = summarizeGeminiError(lastErrorText);
     throw new HttpResponseError(
-      'La IA no pudo procesar el menu en este momento.',
+      detail
+        ? `La IA no pudo procesar el menu (${detail}).`
+        : 'La IA no pudo procesar el menu en este momento.',
       502,
     );
   }
@@ -446,7 +488,53 @@ function normalizeContentType(value: string | null): string {
   if (normalized === 'application/vnd.ms-excel') {
     return 'text/csv';
   }
+  if (normalized === 'image/jpg') {
+    return 'image/jpeg';
+  }
+  if (normalized === 'image/heic' || normalized === 'image/heif') {
+    // Gemini often rejects HEIC from iPhones; force a clear client-facing error.
+    throw new HttpResponseError(
+      'El formato HEIC no es compatible. Guarda o exporta la foto como JPG o PNG e inténtalo de nuevo.',
+      400,
+    );
+  }
   return normalized;
+}
+
+function extractGeminiText(completion: Record<string, unknown> | null | undefined): string {
+  const candidates = Array.isArray(completion?.candidates) ? completion!.candidates : [];
+  const texts: string[] = [];
+
+  for (const candidate of candidates) {
+    const content = (candidate as { content?: { parts?: unknown[] } })?.content;
+    const parts = Array.isArray(content?.parts) ? content!.parts! : [];
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      const record = part as Record<string, unknown>;
+      // Skip thought/thinking parts from Gemini 2.5.
+      if (record.thought === true) continue;
+      const text = record.text;
+      if (typeof text === 'string' && text.trim()) {
+        texts.push(text.trim());
+      }
+    }
+  }
+
+  return texts.join('\n').trim();
+}
+
+function summarizeGeminiError(raw: string): string {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: string; status?: string };
+    };
+    const message = parsed.error?.message ?? parsed.error?.status ?? '';
+    return String(message).slice(0, 180);
+  } catch {
+    return trimmed.slice(0, 180);
+  }
 }
 
 async function ensureCatalogForComercio(

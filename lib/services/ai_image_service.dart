@@ -49,8 +49,10 @@ class AiImageService {
   }
 
   Map<String, String> _functionHeaders(String comercioId) {
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken ?? SupabaseConfig.anonKey;
     return {
-      'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+      'Authorization': 'Bearer $token',
       'apikey': SupabaseConfig.anonKey,
       'x-comercio-id': comercioId.trim(),
     };

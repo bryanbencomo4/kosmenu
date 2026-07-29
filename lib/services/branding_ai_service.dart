@@ -10,8 +10,10 @@ class BrandingAiService {
     String? imageUrl,
   }) async {
     final supabase = Supabase.instance.client;
+    final token =
+        supabase.auth.currentSession?.accessToken ?? SupabaseConfig.anonKey;
     final functionHeaders = {
-      'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+      'Authorization': 'Bearer $token',
       'apikey': SupabaseConfig.anonKey,
       'x-comercio-id': comercioId,
     };
@@ -42,8 +44,10 @@ class BrandingAiService {
     required String promptUsuario,
   }) async {
     final supabase = Supabase.instance.client;
+    final token =
+        supabase.auth.currentSession?.accessToken ?? SupabaseConfig.anonKey;
     final functionHeaders = {
-      'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+      'Authorization': 'Bearer $token',
       'apikey': SupabaseConfig.anonKey,
     };
 

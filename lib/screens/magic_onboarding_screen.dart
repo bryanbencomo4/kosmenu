@@ -421,6 +421,23 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
         return;
       }
 
+      final unsupported = reviewedAssets
+          .where(
+            (asset) =>
+                asset.mimeType == 'image/heic' || asset.mimeType == 'image/heif',
+          )
+          .toList(growable: false);
+      if (unsupported.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'El formato HEIC no es compatible. Usa JPG o PNG (en iPhone: Ajustes → Cámara → Formatos → Más compatible).',
+            ),
+          ),
+        );
+        return;
+      }
+
       setState(() {
         _isLaunchingScan = true;
         _selectedAssetCount = reviewedAssets.length;
@@ -490,6 +507,13 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
           ),
         );
 
+        final session = supabase.auth.currentSession;
+        if (session == null) {
+          throw const _AiFlowException(
+            'Tu sesión expiró. Vuelve a iniciar sesión e intenta de nuevo.',
+          );
+        }
+
         final response = await supabase.functions.invoke(
           'process-menu-gemini',
           body: {
@@ -499,7 +523,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
             'catalog_name': catalogName,
           },
           headers: {
-            'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+            'Authorization': 'Bearer ${session.accessToken}',
             'apikey': SupabaseConfig.anonKey,
           },
         );
@@ -652,6 +676,13 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
             'IA estructurando categorias, productos y precios desde tu descripcion...',
       );
 
+      final session = supabase.auth.currentSession;
+      if (session == null) {
+        throw const _AiFlowException(
+          'Tu sesión expiró. Vuelve a iniciar sesión e intenta de nuevo.',
+        );
+      }
+
       final response = await supabase.functions.invoke(
         'process-menu-gemini',
         body: {
@@ -660,7 +691,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
           'catalog_name': catalogName,
         },
         headers: {
-          'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+          'Authorization': 'Bearer ${session.accessToken}',
           'apikey': SupabaseConfig.anonKey,
         },
       );
@@ -1263,6 +1294,8 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
     final normalized = fileName.trim().toLowerCase();
     if (normalized.endsWith('.png')) return 'image/png';
     if (normalized.endsWith('.webp')) return 'image/webp';
+    if (normalized.endsWith('.heic')) return 'image/heic';
+    if (normalized.endsWith('.heif')) return 'image/heif';
     if (normalized.endsWith('.pdf')) return 'application/pdf';
     if (normalized.endsWith('.csv')) return 'text/csv';
     if (normalized.endsWith('.txt')) return 'text/plain';
