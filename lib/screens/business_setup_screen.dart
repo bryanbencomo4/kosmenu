@@ -23,6 +23,7 @@ import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:kosmenu_app/services/business_sectors_service.dart';
+import 'package:kosmenu_app/services/logo_image_guard.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:geolocator/geolocator.dart';
@@ -1900,17 +1901,34 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             return;
           }
 
-          final selectedPath = await _openManualLogoEditor(currentPath);
-          if (!mounted || selectedPath == null) {
-            return;
-          }
-
-          final persistedPath = await _persistLogoToLocalStorage(selectedPath);
+          final editOutcome = await _openManualLogoEditor(currentPath);
           if (!mounted) {
             return;
           }
 
-          await _applySelectedLogoFile(XFile(persistedPath));
+          switch (editOutcome) {
+            case LogoEditCancelled():
+              return;
+            case LogoEditFailure():
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Esta imagen no pudo procesarse. Intenta con una imagen JPG o PNG diferente.',
+                  ),
+                ),
+              );
+              return;
+            case LogoEditSuccess(:final path):
+              final persistedPath = await _persistLogoToLocalStorage(path);
+              if (!mounted) {
+                return;
+              }
+              await _applySelectedLogoFile(XFile(persistedPath));
+              return;
+          }
+        }
+
+        if (!mounted) {
           return;
         }
 
@@ -1918,23 +1936,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             ? ImageSource.camera
             : ImageSource.gallery;
 
-        final picked = source == ImageSource.camera
-            ? await _webCameraHandoffService.pickCameraImage(
-                context,
-                feature: 'logo',
-                waitingTitle: 'Toma la foto del logo desde tu celular',
-                waitingSubtitle:
-                    'Escanea el código con tu teléfono y conectaremos la imagen con este panel en cuanto la subas.',
-                imageQuality: 92,
-                maxWidth: 2200,
-                maxHeight: 2200,
-              )
-            : await ImagePicker().pickImage(
-                source: source,
-                imageQuality: 92,
-                maxWidth: 2200,
-                maxHeight: 2200,
-              );
+        final picked = await _pickGalleryOrCameraImage(context, source);
         if (!mounted || picked == null) {
           return;
         }
@@ -1945,21 +1947,56 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           return;
         }
 
-        final selectedPath = await _openManualLogoEditor(picked.path);
-        if (!mounted) {
-          return;
-        }
-        if (selectedPath == null) {
+        final sizeBytes = await _safeXFileLength(picked);
+        debugPrint(
+          'Logo selected: name=${picked.name}, mime=${picked.mimeType}, '
+          'size=$sizeBytes, source=${source.name}, web=$kIsWeb',
+        );
+
+        if (isHeicOrHeifLogo(
+          fileName: picked.name,
+          mimeType: picked.mimeType,
+          onFormatMismatch: debugPrint,
+        )) {
+          if (!mounted) {
+            return;
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'El formato HEIC/HEIF no es compatible para el logo. '
+                'Convierte la imagen a JPG o PNG, o toma una nueva foto.',
+              ),
+            ),
+          );
           return;
         }
 
-        final persistedPath = await _persistLogoToLocalStorage(selectedPath);
+        final editOutcome = await _openManualLogoEditor(picked.path);
         if (!mounted) {
           return;
         }
 
-        await _applySelectedLogoFile(XFile(persistedPath));
-        return;
+        switch (editOutcome) {
+          case LogoEditCancelled():
+            return;
+          case LogoEditFailure():
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Esta imagen no pudo procesarse. Intenta con una imagen JPG o PNG diferente.',
+                ),
+              ),
+            );
+            return;
+          case LogoEditSuccess(:final path):
+            final persistedPath = await _persistLogoToLocalStorage(path);
+            if (!mounted) {
+              return;
+            }
+            await _applySelectedLogoFile(XFile(persistedPath));
+            return;
+        }
       }
     } on PlatformException catch (error) {
       if (!mounted) {
@@ -1980,6 +2017,41 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         const SnackBar(content: Text('No se pudo seleccionar la imagen.')),
       );
     }
+  }
+
+  /// Picks an image for [source] (gallery or camera), isolated in its own
+  /// method so the `context` used by the camera/QR handoff is checked for
+  /// `mounted` immediately before its only use, right after the `await`
+  /// that produces it. Keeping this logic inline inside a ternary previously
+  /// tripped `use_build_context_synchronously` because the analyzer could
+  /// not correlate the guard with a `context` usage nested inside a
+  /// conditional expression.
+  Future<XFile?> _pickGalleryOrCameraImage(
+    BuildContext context,
+    ImageSource source,
+  ) async {
+    if (source != ImageSource.camera) {
+      return ImagePicker().pickImage(
+        source: source,
+        imageQuality: 92,
+        maxWidth: 2200,
+        maxHeight: 2200,
+      );
+    }
+
+    if (!context.mounted) {
+      return null;
+    }
+    return _webCameraHandoffService.pickCameraImage(
+      context,
+      feature: 'logo',
+      waitingTitle: 'Toma la foto del logo desde tu celular',
+      waitingSubtitle:
+          'Escanea el código con tu teléfono y conectaremos la imagen con este panel en cuanto la subas.',
+      imageQuality: 92,
+      maxWidth: 2200,
+      maxHeight: 2200,
+    );
   }
 
   Future<void> _openSectorPicker() async {
@@ -2104,12 +2176,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     unawaited(_openMenuPromptSetup());
   }
 
-  Future<String?> _openManualLogoEditor(String sourcePath) async {
+  Future<LogoEditOutcome> _openManualLogoEditor(String sourcePath) async {
     try {
       if (!kIsWeb) {
         final sourceFile = File(sourcePath);
         if (!await sourceFile.exists()) {
-          return null;
+          debugPrint('Logo crop error: source file missing before cropping.');
+          return LogoEditFailure(
+            StateError('Source logo file not found before cropping.'),
+            StackTrace.current,
+          );
         }
       }
 
@@ -2136,8 +2212,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         ],
       );
 
-      final croppedPath = (cropped?.path ?? '').trim();
-      return croppedPath.isEmpty ? null : croppedPath;
+      final outcome = classifyCroppedPath(cropped?.path);
+      if (outcome case LogoEditFailure(:final error)) {
+        debugPrint('Logo crop error: ${error.runtimeType}: $error');
+      }
+      return outcome;
+    } catch (error, stackTrace) {
+      debugPrint('Logo crop error: ${error.runtimeType}: $error\n$stackTrace');
+      return LogoEditFailure(error, stackTrace);
+    }
+  }
+
+  /// Returns the file size in bytes for debug logging, or `null` if it
+  /// cannot be determined. Never throws.
+  Future<int?> _safeXFileLength(XFile file) async {
+    try {
+      return await file.length();
     } catch (_) {
       return null;
     }
