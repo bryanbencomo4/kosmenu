@@ -68,12 +68,28 @@ function applySecurityHeaders(response: NextResponse, pathname?: string) {
     'Referrer-Policy',
     pathname && isOrderTrackingPath(pathname) ? 'no-referrer' : 'strict-origin-when-cross-origin',
   );
-  // Allow Flutter app (app.elmenuxfa.com) to embed owner preview only.
   if (isOwnerMenuPreviewPath(pathname)) {
+    // Override catch-all next.config headers so the Flutter app can iframe preview.
     response.headers.delete('X-Frame-Options');
     response.headers.set(
       'Content-Security-Policy',
-      "frame-ancestors 'self' https://app.elmenuxfa.com http://localhost:* http://127.0.0.1:*",
+      [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https:",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://maps.gstatic.com",
+        "frame-src 'self' https://*.supabase.co https://maps.googleapis.com https://maps.gstatic.com",
+        "frame-ancestors 'self' https://app.elmenuxfa.com http://localhost:3000 http://localhost:5000 http://localhost:8080 http://127.0.0.1:3000 http://127.0.0.1:5000 http://127.0.0.1:8080",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "object-src 'none'",
+        "manifest-src 'self'",
+        "media-src 'self' data: blob: https:",
+        "worker-src 'self' blob:",
+        'upgrade-insecure-requests',
+      ].join('; '),
     );
   } else {
     response.headers.set('X-Frame-Options', 'DENY');
