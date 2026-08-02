@@ -17,11 +17,19 @@ describe('public menu DTO', () => {
       email: 'owner@example.com',
       branding_ia: { secret: true },
       en_linea: true,
+      menu_palette_primary: -65536,
+      menu_palette_accent: 0xff0ea5e9,
+      menu_theme_mode: 'dark',
+      color_principal: '#DC2626',
     });
 
     expect(dto).toBeTruthy();
     expect(dto!.id).toBe('c1');
     expect(dto!.nombre).toBe('Demo');
+    expect(dto!.menu_palette_primary).toBe(-65536);
+    expect(dto!.menu_palette_accent).toBe(0xff0ea5e9);
+    expect(dto!.menu_theme_mode).toBe('dark');
+    expect(dto!.color_principal).toBe('#DC2626');
     expect(dto).not.toHaveProperty('owner_id');
     expect(dto).not.toHaveProperty('email');
     expect(dto).not.toHaveProperty('branding_ia');

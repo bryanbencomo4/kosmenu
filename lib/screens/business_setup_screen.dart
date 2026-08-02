@@ -270,6 +270,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _lastPaletteLogoPath = '';
   String _lastFontLogoPath = '';
   bool _paletteManuallyEdited = false;
+
+  /// Public menu appearance: `light` or `dark` (never an ambiguous bool).
+  String _menuThemeMode = 'light';
   bool _fontManuallyEdited = false;
   Map<String, dynamic> _seedBrandingIa = <String, dynamic>{};
   String _selectedHeadingFont = 'Poppins';
@@ -752,6 +755,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (headingFont.isNotEmpty) {
       _selectedHeadingFont = headingFont;
     }
+
+    _menuThemeMode = _normalizeMenuThemeMode(
+      raw?['menu_theme_mode'] ?? comercio.menuThemeMode,
+    );
 
     final footer = (raw?['menu_footer']?.toString() ?? '').trim();
     if (_footers.contains(footer)) {
@@ -1431,6 +1438,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
       _paletteManuallyEdited = map['paletteManuallyEdited'] as bool? ?? false;
       _fontManuallyEdited = map['fontManuallyEdited'] as bool? ?? false;
+      _menuThemeMode = _normalizeMenuThemeMode(map['menuThemeMode']);
 
       final footer = (map['footer'] as String? ?? '').trim();
       if (_footers.contains(footer)) {
@@ -1596,6 +1604,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'logoUrl': _selectedLogoUrl,
       'paletteManuallyEdited': _paletteManuallyEdited,
       'fontManuallyEdited': _fontManuallyEdited,
+      'menuThemeMode': _normalizeMenuThemeMode(_menuThemeMode),
       'footer': _selectedFooter,
       'payments': _selectedPaymentsForCurrency(_currentCurrency).toList(),
       'paymentsByCurrency': _selectedPaymentsByCurrency.map(
@@ -2309,12 +2318,46 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _applySelectedLogoFile(XFile logoFile) async {
+    final hadManualPalette = _paletteManuallyEdited;
+    var regeneratePalette = true;
+    if (hadManualPalette) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Nuevo logo'),
+            content: const Text(
+              'Ya personalizaste los colores manualmente. '
+              '¿Quieres regenerarlos desde el nuevo logo?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Conservar colores'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Regenerar colores'),
+              ),
+            ],
+          );
+        },
+      );
+      if (!mounted) {
+        return;
+      }
+      regeneratePalette = confirmed == true;
+    }
+
     setState(() {
       _selectedLogo = logoFile;
-      _lastPaletteLogoPath = '';
       _lastFontLogoPath = '';
-      _paletteManuallyEdited = false;
       _fontManuallyEdited = false;
+      // Theme mode is independent of logo colors and must not reset.
+      if (regeneratePalette) {
+        _lastPaletteLogoPath = '';
+        _paletteManuallyEdited = false;
+      }
     });
 
     final user = Supabase.instance.client.auth.currentUser;
@@ -2329,7 +2372,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     }
 
-    await _refreshSmartStyleSuggestions();
+    if (regeneratePalette) {
+      await _refreshSmartStyleSuggestions(force: true);
+    }
+    await _saveDraft();
+  }
+
+  Future<void> _regeneratePaletteFromLogo() async {
+    if (_selectedLogo == null && _selectedLogoUrl.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sube un logo para regenerar colores.')),
+      );
+      return;
+    }
+    setState(() {
+      _lastPaletteLogoPath = '';
+      _paletteManuallyEdited = false;
+    });
+    await _refreshSmartStyleSuggestions(force: true);
+    await _persistPaletteChanges();
     await _saveDraft();
   }
 
@@ -7416,10 +7480,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _paletteSuggestion.surface,
       ),
       'menu_palette_text': ColorArgbCodec.fromColor(_paletteSuggestion.text),
+      'menu_theme_mode': _normalizeMenuThemeMode(_menuThemeMode),
       'color_principal': _colorToHex(_paletteSuggestion.primary),
       'menu_font': _selectedHeadingFont,
       'branding_ia': _buildBrandingIaPayload(),
     };
+  }
+
+  String _normalizeMenuThemeMode(dynamic value) {
+    final raw = value?.toString().trim().toLowerCase() ?? '';
+    return raw == 'dark' ? 'dark' : 'light';
   }
 
   Future<void> _writeComercioFields(
@@ -7476,6 +7546,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         'menu_palette_accent',
         'menu_palette_surface',
         'menu_palette_text',
+        'menu_theme_mode',
         'color_principal',
         'branding_ia',
         'menu_font',
@@ -7583,6 +7654,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'menu_palette_accent',
       'menu_palette_surface',
       'menu_palette_text',
+      'menu_theme_mode',
       'color_principal',
       'branding_ia',
       'menu_font',
@@ -8057,6 +8129,45 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
+          'APARIENCIA DEL MENÚ',
+          style: GoogleFonts.poppins(
+            color: _setupTextLow,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Tema del menú',
+          style: GoogleFonts.poppins(
+            color: _setupTextHigh,
+            fontSize: 19,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        _MenuThemeModeSelector(
+          value: _menuThemeMode,
+          onChanged: (mode) {
+            setState(() => _menuThemeMode = _normalizeMenuThemeMode(mode));
+            unawaited(() async {
+              await _persistPaletteChanges();
+              await _saveDraft();
+            }());
+          },
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Los colores se adaptarán automáticamente a tu logo.',
+          style: TextStyle(
+            color: _setupTextLow,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 18),
+        Text(
           'Paleta',
           style: GoogleFonts.poppins(
             color: _setupTextHigh,
@@ -8072,6 +8183,26 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           onEditAccent: () => _editPaletteColor('accent'),
           onEditSurface: () => _editPaletteColor('surface'),
           onEditText: () => _editPaletteColor('text'),
+        ),
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _isGeminiPaletteLoading
+                ? null
+                : () => unawaited(_regeneratePaletteFromLogo()),
+            icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+            label: const Text('Regenerar colores desde el logo'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFD3E8FF),
+              side: const BorderSide(color: Color(0xFF345A93)),
+              textStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
         ),
         if (_isGeminiPaletteLoading || _paletteStatusMessage != null) ...[
           const SizedBox(height: 8),
@@ -10481,6 +10612,88 @@ class _LogoPreview extends StatelessWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _MenuThemeModeSelector extends StatelessWidget {
+  const _MenuThemeModeSelector({required this.value, required this.onChanged});
+
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = value.trim().toLowerCase() == 'dark' ? 'dark' : 'light';
+
+    Widget option({
+      required String mode,
+      required String label,
+      required IconData icon,
+    }) {
+      final isSelected = selected == mode;
+      return Expanded(
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => onChanged(mode),
+            borderRadius: BorderRadius.circular(12),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? const Color(0xFF243B63)
+                    : const Color(0xFF120E25),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isSelected
+                      ? const Color(0xFF7EB6FF)
+                      : const Color(0xFF3B2F63),
+                  width: isSelected ? 1.6 : 1,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 18,
+                    color: isSelected
+                        ? const Color(0xFFD3E8FF)
+                        : const Color(0xFFB7A9E8),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      label,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isSelected
+                            ? const Color(0xFFF4F7FF)
+                            : _setupTextLow,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Semantics(
+      label: 'Tema del menú',
+      child: Row(
+        children: [
+          option(mode: 'light', label: 'Claro', icon: Icons.wb_sunny_rounded),
+          const SizedBox(width: 10),
+          option(mode: 'dark', label: 'Oscuro', icon: Icons.dark_mode_rounded),
+        ],
       ),
     );
   }

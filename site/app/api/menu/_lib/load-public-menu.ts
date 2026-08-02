@@ -44,6 +44,8 @@ const COMERCIO_SELECT = [
   'menu_palette_accent',
   'menu_palette_surface',
   'menu_palette_text',
+  'menu_theme_mode',
+  'color_principal',
   'menu_layout',
   'menu_footer',
   'moneda',

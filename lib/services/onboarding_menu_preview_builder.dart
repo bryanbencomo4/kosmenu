@@ -20,12 +20,16 @@ class OnboardingMenuPreviewBuilder {
     required int? paletteAccentArgb,
     required int? paletteSurfaceArgb,
     required int? paletteTextArgb,
+    String menuThemeMode = 'light',
     required double exchangeRateValue,
     required List<Map<String, dynamic>> categories,
     required List<Map<String, dynamic>> products,
   }) {
     final name = businessName.trim().isEmpty ? 'Tu menu' : businessName.trim();
     final id = comercioId.trim().isEmpty ? 'preview' : comercioId.trim();
+    final themeMode = menuThemeMode.trim().toLowerCase() == 'dark'
+        ? 'dark'
+        : 'light';
 
     return <String, dynamic>{
       'comercio': <String, dynamic>{
@@ -45,6 +49,7 @@ class OnboardingMenuPreviewBuilder {
         'menu_palette_accent': paletteAccentArgb,
         'menu_palette_surface': paletteSurfaceArgb,
         'menu_palette_text': paletteTextArgb,
+        'menu_theme_mode': themeMode,
         'exchange_rate_value': exchangeRateValue > 0 ? exchangeRateValue : null,
         'tasa_cambio_pesos': exchangeRateValue > 0 ? exchangeRateValue : null,
       },

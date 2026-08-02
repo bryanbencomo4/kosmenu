@@ -9,6 +9,9 @@ class ComercioModel {
   final int? menuPaletteAccentArgb;
   final int? menuPaletteSurfaceArgb;
   final int? menuPaletteTextArgb;
+
+  /// Public menu appearance: `light` or `dark`.
+  final String menuThemeMode;
   final bool enLinea;
   final bool? creadoPorIa;
   final double? confianzaIa;
@@ -24,6 +27,7 @@ class ComercioModel {
     this.menuPaletteAccentArgb,
     this.menuPaletteSurfaceArgb,
     this.menuPaletteTextArgb,
+    this.menuThemeMode = 'light',
     this.enLinea = true,
     this.creadoPorIa,
     this.confianzaIa,
@@ -40,10 +44,11 @@ class ComercioModel {
       logoUrl: map['logo_url']?.toString(),
       whatsapp: map['whatsapp']?.toString(),
       menuPalette: map['menu_palette']?.toString(),
-        menuPalettePrimaryArgb: _toInt(map['menu_palette_primary']),
-        menuPaletteAccentArgb: _toInt(map['menu_palette_accent']),
-        menuPaletteSurfaceArgb: _toInt(map['menu_palette_surface']),
-        menuPaletteTextArgb: _toInt(map['menu_palette_text']),
+      menuPalettePrimaryArgb: _toInt(map['menu_palette_primary']),
+      menuPaletteAccentArgb: _toInt(map['menu_palette_accent']),
+      menuPaletteSurfaceArgb: _toInt(map['menu_palette_surface']),
+      menuPaletteTextArgb: _toInt(map['menu_palette_text']),
+      menuThemeMode: _normalizeMenuThemeMode(map['menu_theme_mode']),
       enLinea: map['en_linea'] is bool ? map['en_linea'] as bool : true,
       creadoPorIa: map['creado_por_ia'] as bool?,
       confianzaIa: confianzaValue is num
@@ -64,10 +69,16 @@ class ComercioModel {
       'menu_palette_accent': menuPaletteAccentArgb,
       'menu_palette_surface': menuPaletteSurfaceArgb,
       'menu_palette_text': menuPaletteTextArgb,
+      'menu_theme_mode': menuThemeMode,
       'en_linea': enLinea,
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,
     };
+  }
+
+  static String _normalizeMenuThemeMode(dynamic value) {
+    final raw = value?.toString().trim().toLowerCase() ?? '';
+    return raw == 'dark' ? 'dark' : 'light';
   }
 
   static int? _toInt(dynamic value) {

@@ -19,6 +19,8 @@ const PUBLIC_COMERCIO_KEYS = [
   'menu_palette_accent',
   'menu_palette_surface',
   'menu_palette_text',
+  'menu_theme_mode',
+  'color_principal',
   'menu_layout',
   'menu_footer',
   'menu_font',

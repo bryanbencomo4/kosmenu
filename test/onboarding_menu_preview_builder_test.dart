@@ -31,8 +31,30 @@ void main() {
       expect(comercio['permite_delivery'], isTrue);
       expect(comercio['whatsapp'], '+584140821633');
       expect(comercio['exchange_rate_value'], 36.5);
+      expect(comercio['menu_theme_mode'], 'light');
+      expect(comercio['menu_palette_primary'], 0xFFAA0000);
       expect(payload['categorias'], isEmpty);
       expect(payload['productos'], isEmpty);
+    });
+
+    test('persists dark menu theme mode for preview payload', () {
+      final payload = OnboardingMenuPreviewBuilder.build(
+        comercioId: 'c-dark',
+        businessName: 'Dark Cafe',
+        allowsDelivery: false,
+        menuPaletteId: 'logo-smart',
+        palettePrimaryArgb: 0xFF112233,
+        paletteAccentArgb: 0xFF445566,
+        paletteSurfaceArgb: 0xFF778899,
+        paletteTextArgb: 0xFFFFFFFF,
+        menuThemeMode: 'dark',
+        exchangeRateValue: 1,
+        categories: const <Map<String, dynamic>>[],
+        products: const <Map<String, dynamic>>[],
+      );
+
+      final comercio = Map<String, dynamic>.from(payload['comercio'] as Map);
+      expect(comercio['menu_theme_mode'], 'dark');
     });
 
     test('keeps real categories and products for multi-category preview', () {

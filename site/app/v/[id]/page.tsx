@@ -8,6 +8,11 @@ import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader
 import { CurrencyTicker } from './_components/CurrencyTicker';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
 import type { Country } from 'react-phone-number-input';
+import {
+  buildMenuTheme,
+  menuThemeCssVars,
+  normalizeMenuThemeMode,
+} from './_lib/menu-theme';
 
 type CategoriaRow = {
   id: string;
@@ -80,6 +85,15 @@ type ComercioRow = {
   direccion?: string | null;
   ciudad?: string | null;
   descripcion?: string | null;
+  menu_palette_primary?: number | string | null;
+  menu_palette_accent?: number | string | null;
+  menu_palette_surface?: number | string | null;
+  menu_palette_text?: number | string | null;
+  menu_theme_mode?: string | null;
+  color_principal?: string | number | null;
+  menu_layout?: string | null;
+  menu_font?: string | null;
+  /** Never exposed by public DTO; kept optional only for type compatibility. */
   branding_ia?: BrandingConfig | null;
 };
 
@@ -657,14 +671,6 @@ function fontFamilyCssValue(fontName: string, fallback: string) {
   return fontName ? `"${fontName.replace(/"/g, '')}", ${fallback}` : fallback;
 }
 
-function normalizeHexColor(value: string | null | undefined, fallback: string) {
-  const raw = (value ?? '').trim();
-  if (!/^#[0-9A-Fa-f]{6}$/.test(raw)) {
-    return fallback;
-  }
-  return raw;
-}
-
 function borderRadiusByStyle(style: string | null | undefined) {
   if (style === 'pill') return '999px';
   if (style === 'sharp') return '2px';
@@ -672,7 +678,9 @@ function borderRadiusByStyle(style: string | null | undefined) {
 }
 
 function normalizeLayoutType(value: string | null | undefined): 'list' | 'grid' | 'compact' {
-  if (value === 'grid' || value === 'compact') return value;
+  const raw = (value ?? '').trim().toLowerCase();
+  if (raw === 'compact') return 'compact';
+  if (raw === 'grid' || raw === 'cards') return 'grid';
   return 'list';
 }
 
@@ -1172,172 +1180,6 @@ function menuGridClass(layoutType: 'list' | 'grid' | 'compact', itemsPerRow: num
   }
 
   return 'grid grid-cols-1 gap-4 md:grid-cols-2';
-}
-
-type RubroPreset = {
-  id: string;
-  heroKicker: string;
-  vibeLine: string;
-  defaultPrimary: string;
-  defaultSecondary: string;
-  defaultBackground: string;
-  defaultCard: string;
-  defaultOnPrimary: string;
-  defaultLayout: 'list' | 'grid' | 'compact';
-  defaultItemsPerRow: number;
-  titleFallbackFont: string;
-  bodyFallbackFont: string;
-};
-
-const DEFAULT_PRESET: RubroPreset = {
-  id: 'general',
-  heroKicker: 'Menu publico',
-  vibeLine: 'Experiencia digital premium para ordenar en segundos.',
-  defaultPrimary: '#0EA5E9',
-  defaultSecondary: '#0369A1',
-  defaultBackground: '#F4F8FC',
-  defaultCard: '#FFFFFF',
-  defaultOnPrimary: '#FFFFFF',
-  defaultLayout: 'list',
-  defaultItemsPerRow: 2,
-  titleFallbackFont: 'Montserrat, sans-serif',
-  bodyFallbackFont: 'Roboto, sans-serif',
-};
-
-const RUBRO_PRESETS: Array<{ keywords: string[]; preset: RubroPreset }> = [
-  {
-    keywords: ['cafe', 'cafeteria', 'coffee', 'espresso', 'brunch'],
-    preset: {
-      id: 'cafeteria',
-      heroKicker: 'Cafe de especialidad',
-      vibeLine: 'Cafe, brunch y reposteria en una carta elegante.',
-      defaultPrimary: '#7C3F10',
-      defaultSecondary: '#B45309',
-      defaultBackground: '#FBF7F1',
-      defaultCard: '#FFFCF7',
-      defaultOnPrimary: '#FFFFFF',
-      defaultLayout: 'grid',
-      defaultItemsPerRow: 2,
-      titleFallbackFont: 'Playfair Display, serif',
-      bodyFallbackFont: 'Source Sans 3, sans-serif',
-    },
-  },
-  {
-    keywords: ['sushi', 'ramen', 'japones', 'nikkei', 'asiatico'],
-    preset: {
-      id: 'japones',
-      heroKicker: 'Cocina japonesa',
-      vibeLine: 'Presentacion limpia, cortes precisos y sabor intenso.',
-      defaultPrimary: '#B91C1C',
-      defaultSecondary: '#0F172A',
-      defaultBackground: '#F8FAFC',
-      defaultCard: '#FFFFFF',
-      defaultOnPrimary: '#FFFFFF',
-      defaultLayout: 'grid',
-      defaultItemsPerRow: 3,
-      titleFallbackFont: 'Poppins, sans-serif',
-      bodyFallbackFont: 'Inter, sans-serif',
-    },
-  },
-  {
-    keywords: ['parrilla', 'bbq', 'steak', 'carne', 'asado', 'burger'],
-    preset: {
-      id: 'parrilla',
-      heroKicker: 'Parrilla y fuego',
-      vibeLine: 'Carnes, ahumados y smash classics con caracter.',
-      defaultPrimary: '#DC2626',
-      defaultSecondary: '#7F1D1D',
-      defaultBackground: '#FFF7F6',
-      defaultCard: '#FFFFFF',
-      defaultOnPrimary: '#FFFFFF',
-      defaultLayout: 'list',
-      defaultItemsPerRow: 2,
-      titleFallbackFont: 'Bebas Neue, sans-serif',
-      bodyFallbackFont: 'Work Sans, sans-serif',
-    },
-  },
-  {
-    keywords: ['bar', 'coctel', 'cocktail', 'mixologia', 'cerveza', 'tragos'],
-    preset: {
-      id: 'bar',
-      heroKicker: 'Bar y mixologia',
-      vibeLine: 'Una carta nocturna para drinks y tapas con estilo.',
-      defaultPrimary: '#0F172A',
-      defaultSecondary: '#1D4ED8',
-      defaultBackground: '#EEF2FF',
-      defaultCard: '#FFFFFF',
-      defaultOnPrimary: '#FFFFFF',
-      defaultLayout: 'compact',
-      defaultItemsPerRow: 1,
-      titleFallbackFont: 'Space Grotesk, sans-serif',
-      bodyFallbackFont: 'DM Sans, sans-serif',
-    },
-  },
-  {
-    keywords: ['pasteleria', 'postres', 'bakery', 'panaderia', 'dessert'],
-    preset: {
-      id: 'bakery',
-      heroKicker: 'Panaderia y postres',
-      vibeLine: 'Texturas suaves, dulces finos y hornadas del dia.',
-      defaultPrimary: '#DB2777',
-      defaultSecondary: '#BE185D',
-      defaultBackground: '#FFF1F7',
-      defaultCard: '#FFFFFF',
-      defaultOnPrimary: '#FFFFFF',
-      defaultLayout: 'grid',
-      defaultItemsPerRow: 2,
-      titleFallbackFont: 'Fraunces, serif',
-      bodyFallbackFont: 'Manrope, sans-serif',
-    },
-  },
-  {
-    keywords: ['vegano', 'vegetariano', 'saludable', 'organic', 'fit'],
-    preset: {
-      id: 'verde',
-      heroKicker: 'Cocina saludable',
-      vibeLine: 'Ingredientes frescos, balance real y energia limpia.',
-      defaultPrimary: '#15803D',
-      defaultSecondary: '#166534',
-      defaultBackground: '#F3FAF5',
-      defaultCard: '#FFFFFF',
-      defaultOnPrimary: '#FFFFFF',
-      defaultLayout: 'grid',
-      defaultItemsPerRow: 3,
-      titleFallbackFont: 'Nunito, sans-serif',
-      bodyFallbackFont: 'Nunito Sans, sans-serif',
-    },
-  },
-];
-
-function normalizeTag(value: string | null | undefined) {
-  return (value ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-function detectRubroPreset(moodTags: string[] | null | undefined, searchableText: string) {
-  const normalizedText = normalizeTag(searchableText);
-  const normalizedTags = (moodTags ?? []).map((tag) => normalizeTag(tag));
-
-  for (const entry of RUBRO_PRESETS) {
-    const matched = entry.keywords.some(
-      (keyword) => normalizedText.includes(keyword) || normalizedTags.some((tag) => tag.includes(keyword)),
-    );
-    if (matched) return entry.preset;
-  }
-
-  return DEFAULT_PRESET;
-}
-
-function pageBackgroundByPreset(presetId: string) {
-  if (presetId === 'japones') {
-    return 'radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--primary-color) 16%, white) 0%, transparent 31%), linear-gradient(180deg, color-mix(in srgb, var(--secondary-color) 9%, transparent) 0%, transparent 40%), var(--bg-color)';
-  }
-  if (presetId === 'parrilla') {
-    return 'radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--primary-color) 22%, white) 0%, transparent 35%), radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--secondary-color) 15%, white) 0%, transparent 25%), var(--bg-color)';
-  }
-  if (presetId === 'bar') {
-    return 'radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--secondary-color) 26%, white) 0%, transparent 32%), linear-gradient(145deg, color-mix(in srgb, var(--primary-color) 12%, white) 0%, transparent 35%), var(--bg-color)';
-  }
-  return 'radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--primary-color) 23%, white) 0%, transparent 32%), radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--secondary-color) 18%, white) 0%, transparent 30%), var(--bg-color)';
 }
 
 function normalizeSearchText(value: string) {
@@ -2105,62 +1947,49 @@ export default function PublicMenuPage() {
   const comercioInitialLetter = comercioInitial(comercioNombre);
   const resolvedComercioId = (menuData?.comercio.id ?? commerceIdentifier).trim();
   const resolvedSlug = (menuData?.comercio.slug ?? commerceIdentifier).trim();
-  const branding = menuData?.comercio.branding_ia ?? null;
-  const rubroPreset = useMemo(
+  // Public identity uses menu_palette_* + menu_theme_mode (never branding_ia).
+  const menuTheme = useMemo(
     () =>
-      detectRubroPreset(
-        branding?.mood_tags,
-        [comercioNombre, branding?.descripcion_visual, menuData?.comercio.descripcion].filter(Boolean).join(' '),
-      ),
-    [branding?.mood_tags, branding?.descripcion_visual, comercioNombre, menuData?.comercio.descripcion],
+      buildMenuTheme({
+        themeMode: menuData?.comercio.menu_theme_mode,
+        menuPalettePrimary: menuData?.comercio.menu_palette_primary,
+        menuPaletteAccent: menuData?.comercio.menu_palette_accent,
+        colorPrincipal: menuData?.comercio.color_principal,
+      }),
+    [
+      menuData?.comercio.menu_theme_mode,
+      menuData?.comercio.menu_palette_primary,
+      menuData?.comercio.menu_palette_accent,
+      menuData?.comercio.color_principal,
+    ],
   );
+  const themeMode = normalizeMenuThemeMode(menuTheme.themeMode);
+  const layoutType = normalizeLayoutType(menuData?.comercio.menu_layout);
+  const itemsPerRow = clampItemsPerRow(undefined, layoutType);
+  const showImages = layoutType !== 'compact';
+  const borderRadius = borderRadiusByStyle(null);
+  const headingFont = normalizeFontName(menuData?.comercio.menu_font) || 'Poppins';
 
-  const primaryColor = normalizeHexColor(branding?.color_principal, rubroPreset.defaultPrimary);
-  const secondaryColor = normalizeHexColor(branding?.color_secundario, rubroPreset.defaultSecondary);
-  const backgroundColor = normalizeHexColor(branding?.colores_personalizados?.background, rubroPreset.defaultBackground);
-  const cardSurfaceColor = normalizeHexColor(branding?.colores_personalizados?.card_surface, rubroPreset.defaultCard);
-  const textOnPrimaryColor = normalizeHexColor(branding?.colores_personalizados?.text_on_primary, rubroPreset.defaultOnPrimary);
-  const layoutType = normalizeLayoutType(branding?.layout_type ?? rubroPreset.defaultLayout);
-  const itemsPerRow = clampItemsPerRow(
-    branding?.config_visual?.items_per_row ?? rubroPreset.defaultItemsPerRow,
-    layoutType,
+  const googleFontsUrl = useMemo(
+    () =>
+      getGoogleFontsUrl({
+        fuente_titulos: headingFont,
+        fuente_cuerpo: 'Inter',
+      }),
+    [headingFont],
   );
-  const showImages = branding?.config_visual?.show_images ?? layoutType !== 'compact';
-  const borderRadius = borderRadiusByStyle(branding?.estilo_botones);
-
-  const googleFontsUrl = useMemo(() => getGoogleFontsUrl(branding), [branding]);
 
   const containerStyle = useMemo(
     () =>
       ({
-        '--primary-color': primaryColor,
-        '--secondary-color': secondaryColor,
-        '--bg-color': backgroundColor,
-        '--card-surface': cardSurfaceColor,
-        '--text-on-primary': textOnPrimaryColor,
+        ...menuThemeCssVars(menuTheme),
         '--border-radius': borderRadius,
-        '--font-title': fontFamilyCssValue(
-          normalizeFontName(branding?.fuente_titulos),
-          rubroPreset.titleFallbackFont,
-        ),
-        '--font-body': fontFamilyCssValue(
-          normalizeFontName(branding?.fuente_cuerpo),
-          rubroPreset.bodyFallbackFont,
-        ),
+        '--font-title': fontFamilyCssValue(headingFont, 'Poppins, sans-serif'),
+        '--font-body': fontFamilyCssValue('Inter', 'system-ui, sans-serif'),
+        color: 'var(--menu-text)',
         fontFamily: 'var(--font-body)',
       }) as React.CSSProperties,
-    [
-      primaryColor,
-      secondaryColor,
-      backgroundColor,
-      cardSurfaceColor,
-      textOnPrimaryColor,
-      borderRadius,
-      rubroPreset.titleFallbackFont,
-      rubroPreset.bodyFallbackFont,
-      branding?.fuente_titulos,
-      branding?.fuente_cuerpo,
-    ],
+    [menuTheme, borderRadius, headingFont],
   );
 
   const titleFontStyle = useMemo(() => ({ fontFamily: 'var(--font-title)' }) as React.CSSProperties, []);
@@ -2268,10 +2097,8 @@ export default function PublicMenuPage() {
     menuData?.marketRates,
     menuData?.metodosPago,
   ]);
-  const brandingCheckoutConfig = useMemo(
-    () => readBrandingCheckoutConfig(menuData?.comercio.branding_ia),
-    [menuData?.comercio.branding_ia],
-  );
+  // branding_ia is intentionally absent from the public DTO; checkout uses payment methods.
+  const brandingCheckoutConfig = useMemo(() => readBrandingCheckoutConfig(null), []);
   const businessCheckoutCurrencies = useMemo(
     () =>
       businessCheckoutCurrenciesFromData(
@@ -3716,9 +3543,35 @@ export default function PublicMenuPage() {
           height: 3rem;
           border: 0;
           background: transparent;
-          color: #0f172a;
+          color: var(--menu-text, #0f172a);
           font-size: 0.95rem;
           outline: 0;
+        }
+
+        main[data-menu-theme] :focus-visible {
+          outline: 2px solid var(--menu-primary);
+          outline-offset: 2px;
+        }
+
+        main[data-menu-theme] .kos-menu-card {
+          background: var(--menu-surface);
+          border-color: var(--menu-border);
+          box-shadow: var(--menu-shadow);
+          color: var(--menu-text);
+        }
+
+        main[data-menu-theme] .kos-menu-muted {
+          color: var(--menu-text-muted);
+        }
+
+        main[data-menu-theme] .kos-menu-surface-alt {
+          background: var(--menu-surface-alt);
+          border-color: var(--menu-border);
+          color: var(--menu-text);
+        }
+
+        main[data-menu-theme="dark"] button.kos-pressable:hover {
+          filter: brightness(1.06);
         }
 
         @media (hover: hover) and (pointer: fine) {
@@ -3767,7 +3620,7 @@ export default function PublicMenuPage() {
         }
       `}</style>
       <main
-        className={`min-h-screen text-slate-900 ${
+        className={`min-h-screen ${
           isOwnerPreview && tickerDisplayEntries.length > 0
             ? 'pt-[5.5rem]'
             : isOwnerPreview
@@ -3776,9 +3629,11 @@ export default function PublicMenuPage() {
                 ? 'pt-9'
                 : ''
         }`}
+        data-menu-theme={themeMode}
         style={{
           ...containerStyle,
-          background: pageBackgroundByPreset(rubroPreset.id),
+          background: 'var(--menu-background)',
+          color: 'var(--menu-text)',
         }}
       >
         {isOwnerPreview ? (
@@ -3801,12 +3656,14 @@ export default function PublicMenuPage() {
         ) : null}
 
         <section
-          className="sticky z-40 border-b border-slate-200/90 bg-white/95 backdrop-blur-sm"
+          className="sticky z-40 backdrop-blur-sm"
           style={{
             top: `${
               (tickerDisplayEntries.length > 0 ? activeTopTickerHeightPx : 0) +
               (isOwnerPreview ? 40 : 0)
             }px`,
+            backgroundColor: 'color-mix(in srgb, var(--menu-surface) 95%, transparent)',
+            borderBottom: '1px solid var(--menu-border)',
           }}
         >
           <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
@@ -3829,7 +3686,7 @@ export default function PublicMenuPage() {
                 </div>
               )}
               <div className="min-w-0">
-                <h1 className="truncate text-[15px] font-black tracking-[-0.02em] text-slate-900 sm:text-base" style={titleFontStyle}>
+                <h1 className="truncate text-[15px] font-black tracking-[-0.02em] sm:text-base" style={{ ...titleFontStyle, color: 'var(--menu-text)' }}>
                   {comercioNombre}
                 </h1>
                 <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
@@ -4112,15 +3969,21 @@ export default function PublicMenuPage() {
 
           <div
             ref={stickySearchCardRef}
-            className="kos-motion-enter sticky z-30 mt-4 overflow-visible rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-[0_20px_55px_rgba(15,23,42,0.10)] backdrop-blur-xl md:p-4"
+            className="kos-menu-card kos-motion-enter sticky z-30 mt-4 overflow-visible rounded-[28px] border p-3 backdrop-blur-xl md:p-4"
             data-motion-in={isExperienceReady}
             style={{
               ...revealMotionStyle({ delay: motionDelay(4), duration: MOTION_TOKENS.duration.hero, intensity: 'medium' }),
               top: `${stickySearchTopPx}px`,
             }}
           >
-            <div className="pointer-events-none absolute inset-x-5 -bottom-4 h-8 rounded-full bg-gradient-to-b from-slate-900/12 via-slate-900/6 to-transparent blur-md" />
-            <div className="rounded-[22px] border border-slate-200/90 bg-[color:color-mix(in_srgb,var(--card-surface)_95%,white)] p-3 sm:p-4">
+            <div className="pointer-events-none absolute inset-x-5 -bottom-4 h-8 rounded-full bg-gradient-to-b from-black/12 via-black/6 to-transparent blur-md" />
+            <div
+              className="rounded-[22px] border p-3 sm:p-4"
+              style={{
+                backgroundColor: 'var(--menu-surface-alt)',
+                borderColor: 'var(--menu-border)',
+              }}
+            >
               <div className="relative">
                 <div className="relative min-w-0">
                   <input
@@ -4128,12 +3991,18 @@ export default function PublicMenuPage() {
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="Buscar producto..."
-                    className="h-12 w-full rounded-2xl border border-slate-200/90 bg-white pl-11 pr-12 text-sm font-semibold text-slate-900 outline-none transition-[border-color,background-color,box-shadow] duration-200 placeholder:text-slate-400 focus:border-slate-300 focus:ring-4 focus:ring-slate-200/70"
+                    className="h-12 w-full rounded-2xl border pl-11 pr-12 text-sm font-semibold outline-none transition-[border-color,background-color,box-shadow] duration-200"
+                    style={{
+                      backgroundColor: 'var(--menu-surface)',
+                      borderColor: 'var(--menu-border)',
+                      color: 'var(--menu-text)',
+                    }}
                   />
                   <svg
                     viewBox="0 0 24 24"
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+                    className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2"
+                    style={{ color: 'var(--menu-text-muted)' }}
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="2"
@@ -4148,7 +4017,11 @@ export default function PublicMenuPage() {
                     type="button"
                     onClick={() => setSearchQuery('')}
                     aria-label="Limpiar busqueda"
-                    className="kos-surface-motion kos-pressable absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+                    className="kos-surface-motion kos-pressable absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full"
+                    style={{
+                      backgroundColor: 'var(--menu-surface-alt)',
+                      color: 'var(--menu-text-muted)',
+                    }}
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4">
                       <path d="M6 6l12 12" />
@@ -4170,21 +4043,23 @@ export default function PublicMenuPage() {
                         categoryChipRefs.current[categoria.id] = element;
                       }}
                       onClick={() => scrollToCategory(categoria.id)}
-                      className={`kos-motion-enter kos-surface-motion kos-pressable kos-hover-subtle inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-extrabold uppercase tracking-[0.04em] ${
-                        activeCategoryId === categoria.id
-                          ? 'text-white shadow-[0_10px_24px_rgba(15,23,42,0.14)]'
-                          : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                      }`}
+                      className="kos-motion-enter kos-surface-motion kos-pressable kos-hover-subtle inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-extrabold uppercase tracking-[0.04em]"
                       data-motion-in={isExperienceReady}
                       style={
                         {
                           ...revealMotionStyle({ delay: motionDelay(categoria.productos.length > 0 ? visibleCategorias.findIndex((item) => item.id === categoria.id) + 5 : 5, 32), intensity: 'subtle' }),
                           ...(activeCategoryId === categoria.id
                             ? {
-                                backgroundColor: 'var(--primary-color)',
-                                borderColor: 'var(--primary-color)',
+                                backgroundColor: 'var(--menu-primary)',
+                                border: '1px solid var(--menu-primary)',
+                                color: 'var(--menu-on-primary)',
+                                boxShadow: 'var(--menu-shadow)',
                               }
-                            : undefined),
+                            : {
+                                backgroundColor: 'var(--menu-surface)',
+                                border: '1px solid var(--menu-border)',
+                                color: 'var(--menu-text)',
+                              }),
                         }
                       }
                     >
@@ -4192,9 +4067,15 @@ export default function PublicMenuPage() {
                         aria-hidden="true"
                         className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[13px]"
                         style={{
-                          backgroundColor: activeCategoryId === categoria.id ? 'rgba(255,255,255,0.18)' : categoria.visual.tint,
-                          border: `1px solid ${activeCategoryId === categoria.id ? 'rgba(255,255,255,0.22)' : categoria.visual.border}`,
-                          boxShadow: activeCategoryId === categoria.id ? 'none' : categoria.visual.shadow,
+                          backgroundColor:
+                            activeCategoryId === categoria.id
+                              ? 'color-mix(in srgb, var(--menu-on-primary) 18%, transparent)'
+                              : 'var(--menu-surface-alt)',
+                          border: `1px solid ${
+                            activeCategoryId === categoria.id
+                              ? 'color-mix(in srgb, var(--menu-on-primary) 22%, transparent)'
+                              : 'var(--menu-border)'
+                          }`,
                         }}
                       >
                         <span className="translate-y-[0.5px]">{categoria.visual.glyph}</span>
@@ -4223,11 +4104,11 @@ export default function PublicMenuPage() {
 
           <div className="mt-5 pb-44">
             {!hasProducts ? (
-              <div className="rounded-[28px] border border-slate-200/90 bg-white/92 p-8 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur-sm">
-                <p className="text-xl font-black text-slate-900" style={titleFontStyle}>
+              <div className="kos-menu-card rounded-[28px] border p-8 text-center backdrop-blur-sm">
+                <p className="text-xl font-black" style={{ ...titleFontStyle, color: 'var(--menu-text)' }}>
                   {searchQuery.trim() ? 'No encontramos productos con ese termino.' : 'Estamos preparando el menu digital'}
                 </p>
-                <p className="mt-2 text-sm font-medium text-slate-600">
+                <p className="kos-menu-muted mt-2 text-sm font-medium">
                   {searchQuery.trim() ? 'Prueba con otro nombre o categoria.' : 'Vuelve en unos minutos para ver todos los productos.'}
                 </p>
               </div>
@@ -4252,18 +4133,21 @@ export default function PublicMenuPage() {
                           aria-hidden="true"
                           className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-lg"
                           style={{
-                            backgroundColor: categoria.visual.tint,
-                            border: `1px solid ${categoria.visual.border}`,
-                            boxShadow: categoria.visual.shadow,
+                            backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface-alt))',
+                            border: '1px solid var(--menu-border)',
+                            color: 'var(--menu-primary)',
                           }}
                         >
                           <span className="translate-y-[0.5px]">{categoria.visual.glyph}</span>
                         </span>
-                        <h2 className="min-w-0 flex-1 text-[1.65rem] font-black uppercase tracking-[-0.03em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--secondary-color)' }}>
+                        <h2 className="min-w-0 flex-1 text-[1.65rem] font-black uppercase tracking-[-0.03em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--menu-text)' }}>
                           {categoria.displayName}
                         </h2>
                       </div>
-                      <span className="shrink-0 whitespace-nowrap rounded-full border border-slate-200 bg-white/84 px-3 py-1.5 text-[10px] font-black uppercase leading-none tracking-[0.08em] text-slate-500 shadow-[0_8px_20px_rgba(15,23,42,0.05)] sm:px-3 sm:py-1 sm:text-[11px] sm:tracking-[0.14em]">
+                      <span
+                        className="kos-menu-surface-alt shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-[10px] font-black uppercase leading-none tracking-[0.08em] sm:px-3 sm:py-1 sm:text-[11px] sm:tracking-[0.14em]"
+                        style={{ color: 'var(--menu-text-muted)' }}
+                      >
                         {categoria.productos.length} item{categoria.productos.length === 1 ? '' : 's'}
                       </span>
                     </div>
@@ -4291,7 +4175,7 @@ export default function PublicMenuPage() {
                               productCardRefs.current[producto.id] = element;
                             }}
                             data-product-id={producto.id}
-                            className="kos-motion-enter kos-surface-motion kos-pressable kos-hover-subtle overflow-hidden rounded-[28px] border bg-[color:color-mix(in_srgb,var(--card-surface)_94%,white)] shadow-[0_18px_38px_rgba(15,23,42,0.07)]"
+                            className="kos-menu-card kos-motion-enter kos-surface-motion kos-pressable kos-hover-subtle overflow-hidden rounded-[28px] border"
                             data-motion-in={isExperienceReady || isProductRevealed}
                             style={{
                               ...revealMotionStyle({
@@ -4299,7 +4183,6 @@ export default function PublicMenuPage() {
                                 duration: MOTION_TOKENS.duration.hero,
                                 intensity: 'medium',
                               }),
-                              borderColor: 'color-mix(in srgb, var(--primary-color) 12%, white)',
                               willChange: isProductRevealed ? 'auto' : 'transform, opacity',
                             }}
                           >
@@ -4341,26 +4224,27 @@ export default function PublicMenuPage() {
                               <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
                                 <div>
                                   <h3
-                                    className="text-[1.05rem] font-extrabold leading-5 text-slate-900 sm:text-[1.2rem]"
+                                    className="text-[1.05rem] font-extrabold leading-5 sm:text-[1.2rem]"
                                     style={{
                                       ...titleFontStyle,
                                       wordBreak: 'break-word',
+                                      color: 'var(--menu-text)',
                                     }}
                                   >
                                     {producto.nombre}
                                   </h3>
 
-                                  <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-slate-600 sm:text-sm">
+                                  <p className="kos-menu-muted mt-2 line-clamp-2 text-[13px] leading-5 sm:text-sm">
                                     {producto.descripcion?.trim() || 'Preparacion recomendada por la casa.'}
                                   </p>
                                 </div>
 
                                 <div className="mt-4">
-                                  <p className="text-[1.6rem] font-black leading-none tracking-[-0.04em]" style={{ ...titleFontStyle, color: 'var(--primary-color)' }}>
+                                  <p className="text-[1.6rem] font-black leading-none tracking-[-0.04em]" style={{ ...titleFontStyle, color: 'var(--menu-primary)' }}>
                                     {convertedPrice}
                                   </p>
                                   {selectedCurrencyCode !== businessBaseCurrency ? (
-                                    <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                                    <p className="kos-menu-muted mt-1 text-[11px] font-bold uppercase tracking-[0.12em]">
                                       Base {formatAmountByCurrency(producto.precio ?? 0, businessBaseCurrency)}
                                     </p>
                                   ) : null}
@@ -4374,37 +4258,58 @@ export default function PublicMenuPage() {
                                           incrementProduct(producto.id);
                                         }}
                                         disabled={isProductUnavailable}
-                                        className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex min-h-11 items-center justify-center rounded-2xl px-4 py-3 text-sm font-black shadow-[0_16px_28px_rgba(15,23,42,0.14)]"
+                                        className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex min-h-11 items-center justify-center rounded-2xl px-4 py-3 text-sm font-black"
                                         style={{
                                           minWidth: '9rem',
                                           borderRadius: '18px',
-                                          backgroundColor: isProductUnavailable ? '#E2E8F0' : 'var(--primary-color)',
-                                          color: isProductUnavailable ? '#64748B' : 'var(--text-on-primary)',
+                                          backgroundColor: isProductUnavailable
+                                            ? 'var(--menu-surface-alt)'
+                                            : 'var(--menu-primary)',
+                                          color: isProductUnavailable
+                                            ? 'var(--menu-text-muted)'
+                                            : 'var(--menu-on-primary)',
                                           cursor: isProductUnavailable ? 'not-allowed' : 'pointer',
-                                          boxShadow: isProductUnavailable ? 'none' : undefined,
+                                          boxShadow: isProductUnavailable ? 'none' : 'var(--menu-shadow)',
                                           opacity: isProductUnavailable ? 0.9 : 1,
                                         }}
                                       >
                                         {isProductUnavailable ? 'No disponible' : 'Agregar'}
                                       </button>
                                     ) : (
-                                      <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
+                                      <div
+                                        className="inline-flex items-center gap-2 rounded-2xl border p-1.5"
+                                        style={{
+                                          backgroundColor: 'var(--menu-surface)',
+                                          borderColor: 'var(--menu-border)',
+                                        }}
+                                      >
                                         <button
                                           type="button"
                                           onClick={() => decrementProduct(producto.id)}
-                                          className="kos-surface-motion kos-pressable grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-lg font-black text-slate-700"
+                                          className="kos-surface-motion kos-pressable grid h-9 w-9 place-items-center rounded-xl border text-lg font-black"
+                                          style={{
+                                            backgroundColor: 'var(--menu-surface-alt)',
+                                            borderColor: 'var(--menu-border)',
+                                            color: 'var(--menu-text)',
+                                          }}
                                         >
                                           -
                                         </button>
-                                        <span className="min-w-8 text-center text-sm font-black text-slate-900">{quantity}</span>
+                                        <span className="min-w-8 text-center text-sm font-black" style={{ color: 'var(--menu-text)' }}>
+                                          {quantity}
+                                        </span>
                                         <button
                                           type="button"
                                           onClick={() => incrementProduct(producto.id)}
                                           disabled={isProductUnavailable}
                                           className="kos-surface-motion kos-pressable grid h-9 w-9 place-items-center rounded-xl text-lg font-black"
                                           style={{
-                                            backgroundColor: isProductUnavailable ? '#E2E8F0' : 'var(--primary-color)',
-                                            color: isProductUnavailable ? '#94A3B8' : 'var(--text-on-primary)',
+                                            backgroundColor: isProductUnavailable
+                                              ? 'var(--menu-surface-alt)'
+                                              : 'var(--menu-primary)',
+                                            color: isProductUnavailable
+                                              ? 'var(--menu-text-muted)'
+                                              : 'var(--menu-on-primary)',
                                             cursor: isProductUnavailable ? 'not-allowed' : 'pointer',
                                           }}
                                         >
@@ -4417,8 +4322,8 @@ export default function PublicMenuPage() {
                                       <span
                                         className="rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em]"
                                         style={{
-                                          backgroundColor: 'color-mix(in srgb, var(--primary-color) 12%, white)',
-                                          color: 'var(--primary-color)',
+                                          backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
+                                          color: 'var(--menu-primary)',
                                         }}
                                       >
                                         {quantity} en tu pedido
@@ -4446,9 +4351,12 @@ export default function PublicMenuPage() {
           >
             <div className="pointer-events-auto mx-auto flex max-w-6xl items-center justify-between gap-3">
               <div
-                className="flex w-full items-center gap-3 rounded-[28px] border border-white/10 px-3.5 py-3.5 text-white shadow-[0_20px_55px_rgba(15,23,42,0.32)]"
+                className="flex w-full items-center gap-3 rounded-[28px] border px-3.5 py-3.5 shadow-[0_20px_55px_rgba(15,23,42,0.32)]"
                 style={{
-                  background: 'linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 78%, black) 0%, color-mix(in srgb, var(--secondary-color) 82%, black) 100%)',
+                  backgroundColor: 'var(--menu-primary)',
+                  borderColor: 'color-mix(in srgb, var(--menu-primary) 70%, black)',
+                  color: 'var(--menu-on-primary)',
+                  boxShadow: 'var(--menu-shadow)',
                 }}
               >
                 <div className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/14 backdrop-blur-sm">
