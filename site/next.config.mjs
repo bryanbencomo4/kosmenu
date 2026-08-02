@@ -27,15 +27,8 @@ function buildContentSecurityPolicy({ allowAppFrame = false } = {}) {
 }
 
 function buildSecurityHeaders({ allowAppFrame = false } = {}) {
+  // X-Frame-Options is applied in middleware so /preview/* can omit it for app iframe embedding.
   return [
-    ...(allowAppFrame
-      ? []
-      : [
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
-        ]),
     {
       key: 'X-Content-Type-Options',
       value: 'nosniff',
