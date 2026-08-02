@@ -277,7 +277,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _allowDelivery = false;
   bool _receiveOrdersOnWhatsapp = true;
   bool _isVirtualBusiness = false;
-  bool _showOnPublicDirectory = true;
+  /// Hidden until the public business directory ships on the landing page.
+  static const bool _publicDirectoryUiEnabled = false;
+  bool _showOnPublicDirectory = false;
   String _selectedPhoneCountryIso = 'VE';
   bool _menuScanCompleted = false;
   String _menuAiSetupMode = '';
@@ -628,9 +630,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
     _allowDelivery = raw?['permite_delivery'] == true;
     _receiveOrdersOnWhatsapp = raw?['recibe_pedidos_whatsapp'] == true;
-    _showOnPublicDirectory = raw?['mostrar_en_directorio_publico'] is bool
-        ? raw!['mostrar_en_directorio_publico'] as bool
-        : true;
+    _showOnPublicDirectory = _publicDirectoryUiEnabled &&
+        (raw?['mostrar_en_directorio_publico'] is bool
+            ? raw!['mostrar_en_directorio_publico'] as bool
+            : false);
     if (_isVirtualBusiness) {
       _allowDelivery = false;
     }
@@ -1397,7 +1400,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _receiveOrdersOnWhatsapp =
           map['receiveOrdersOnWhatsapp'] as bool? ?? true;
       _isVirtualBusiness = map['isVirtualBusiness'] as bool? ?? false;
-      _showOnPublicDirectory = map['showOnPublicDirectory'] as bool? ?? true;
+      _showOnPublicDirectory = _publicDirectoryUiEnabled &&
+          (map['showOnPublicDirectory'] as bool? ?? false);
       if (_isVirtualBusiness) {
         _allowDelivery = false;
       }
@@ -1574,7 +1578,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'allowDelivery': _allowDelivery,
       'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
       'isVirtualBusiness': _isVirtualBusiness,
-      'showOnPublicDirectory': _showOnPublicDirectory,
+      'showOnPublicDirectory':
+          _publicDirectoryUiEnabled ? _showOnPublicDirectory : false,
       'menuScanCompleted': _menuScanCompleted,
       'menuAiSetupMode': _menuAiSetupMode,
       'manualMenuSetupSelected': _manualMenuSetupSelected,
@@ -7429,7 +7434,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
       'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
       'negocio_virtual': _isVirtualBusiness,
-      'mostrar_en_directorio_publico': _showOnPublicDirectory,
+      'mostrar_en_directorio_publico':
+          _publicDirectoryUiEnabled ? _showOnPublicDirectory : false,
       'logo_url': (logoUrl != null && logoUrl.trim().isNotEmpty)
           ? logoUrl.trim()
           : null,
@@ -9527,24 +9533,26 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             style: const TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
-        const SizedBox(height: 8),
-        SwitchListTile.adaptive(
-          value: _showOnPublicDirectory,
-          onChanged: (value) {
-            setState(() => _showOnPublicDirectory = value);
-            unawaited(_saveDraft());
-          },
-          activeThumbColor: _palette.primary,
-          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
-          inactiveThumbColor: const Color(0xFFE7E0F9),
-          inactiveTrackColor: const Color(0xFF3A305A),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: const Text('Mostrar en elmenuxfa.com'),
-          subtitle: const Text(
-            'Aparece en el directorio publico donde los clientes descubren negocios. Tu menu propio sigue en tu enlace.',
-            style: TextStyle(color: _setupTextMedium, fontSize: 12),
+        if (_publicDirectoryUiEnabled) ...[
+          const SizedBox(height: 8),
+          SwitchListTile.adaptive(
+            value: _showOnPublicDirectory,
+            onChanged: (value) {
+              setState(() => _showOnPublicDirectory = value);
+              unawaited(_saveDraft());
+            },
+            activeThumbColor: _palette.primary,
+            activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+            inactiveThumbColor: const Color(0xFFE7E0F9),
+            inactiveTrackColor: const Color(0xFF3A305A),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: const Text('Mostrar en elmenuxfa.com'),
+            subtitle: const Text(
+              'Aparece en el directorio publico donde los clientes descubren negocios. Tu menu propio sigue en tu enlace.',
+              style: TextStyle(color: _setupTextMedium, fontSize: 12),
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
