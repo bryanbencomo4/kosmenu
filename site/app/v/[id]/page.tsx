@@ -13,6 +13,15 @@ import {
   menuThemeCssVars,
   normalizeMenuThemeMode,
 } from './_lib/menu-theme';
+import {
+  buildComboRail,
+  buildCrossSellItems,
+  buildProductNudge,
+  freeDeliveryProgress,
+  productImageUrl,
+  resolveHeroCover,
+} from './_lib/upsell-heuristics';
+import { UpsellMenuExperience } from './_components/upsell/UpsellMenuExperience';
 
 type CategoriaRow = {
   id: string;
@@ -2193,6 +2202,64 @@ export default function PublicMenuPage() {
       ? `Explora ${visibleCategorias[0].displayName} y pide directo desde tu mesa.`
       : 'Explora el menú y arma tu pedido en segundos.');
   const heroBadgeLabel = searchQuery.trim() ? 'Resultados del menú' : 'Disponible hoy';
+
+  const upsellCategories = useMemo(
+    () =>
+      (menuData?.categorias ?? []).map((categoria) => ({
+        id: categoria.id,
+        nombre: categoria.nombre,
+        orden: categoria.orden,
+      })),
+    [menuData?.categorias],
+  );
+  const upsellProducts = useMemo(
+    () =>
+      (menuData?.productos ?? []).map((producto) => ({
+        id: producto.id,
+        categoria_id: producto.categoria_id,
+        nombre: producto.nombre,
+        descripcion: producto.descripcion,
+        precio: producto.precio,
+        imagen_url: producto.imagen_url,
+        disponible: producto.disponible,
+      })),
+    [menuData?.productos],
+  );
+  const upsellHeroCover = useMemo(
+    () => resolveHeroCover(upsellProducts, comercioLogoUrl) || null,
+    [comercioLogoUrl, upsellProducts],
+  );
+  const comboRailItems = useMemo(
+    () => buildComboRail(upsellCategories, upsellProducts, comercioLogoUrl),
+    [comercioLogoUrl, upsellCategories, upsellProducts],
+  );
+  const crossSellItems = useMemo(() => {
+    const inCart = new Set(Object.keys(cart).filter((id) => (cart[id] ?? 0) > 0));
+    return buildCrossSellItems(upsellCategories, upsellProducts, comercioLogoUrl, inCart);
+  }, [cart, comercioLogoUrl, upsellCategories, upsellProducts]);
+  const upsellGridProducts = useMemo(() => {
+    const source = visibleCategorias.flatMap((categoria) =>
+      categoria.productos.map((producto, index) => ({
+        ...producto,
+        nudge: buildProductNudge(producto, upsellCategories, index),
+      })),
+    );
+    // Prefer products of the active category first for the 2-col grid feel.
+    if (!activeCategoryId) return source;
+    const active = source.filter((p) =>
+      visibleCategorias.find((c) => c.id === activeCategoryId)?.productos.some((x) => x.id === p.id),
+    );
+    return active.length ? active : source;
+  }, [activeCategoryId, upsellCategories, visibleCategorias]);
+  const deliveryProgress = useMemo(
+    () => freeDeliveryProgress(cartTotal),
+    [cartTotal],
+  );
+  const formatUpsellPrice = (amount: number) =>
+    formatAmountByCurrency(
+      convertFromBaseCurrency(amount, businessBaseCurrency, selectedCurrencyCode, selectedExchangeRate),
+      selectedCurrencyCode,
+    );
   const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
@@ -3833,564 +3900,66 @@ export default function PublicMenuPage() {
           </div>
         ) : null}
 
-        <section className="mx-auto mt-4 max-w-6xl px-4 sm:mt-5 sm:px-6">
-          <div
-            className="kos-motion-enter relative overflow-hidden rounded-[32px] border border-slate-900/8 bg-slate-950 shadow-[0_22px_55px_rgba(15,23,42,0.14)]"
-            data-motion-in={isExperienceReady}
-            style={revealMotionStyle({ duration: MOTION_TOKENS.duration.hero, intensity: 'medium' })}
-          >
-            <img
-              src={heroImageSrc}
-              alt={heroProduct?.nombre || comercioNombre}
-              className="absolute inset-0 h-full w-full object-cover"
-              loading="eager"
-              onError={(event) => {
-                const img = event.currentTarget;
-                if (img.src !== defaultProductImage) {
-                  img.onerror = null;
-                  img.src = defaultProductImage;
-                }
-              }}
-            />
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.28)_0%,rgba(15,23,42,0.52)_38%,rgba(15,23,42,0.86)_100%)]" />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_32%)]" />
-
-            <div className="relative flex min-h-[19rem] flex-col justify-between p-4 sm:min-h-[22rem] sm:p-6">
-              <div className="flex items-start justify-between gap-3">
-                <div
-                  className="kos-motion-enter inline-flex items-center gap-2 rounded-full bg-[rgba(239,68,68,0.92)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-white shadow-[0_12px_26px_rgba(239,68,68,0.32)]"
-                  data-motion-in={isExperienceReady}
-                  style={revealMotionStyle({ delay: motionDelay(1), intensity: 'subtle' })}
-                >
-                  <Flame className="h-3.5 w-3.5" strokeWidth={2.4} />
-                  {heroBadgeLabel}
-                </div>
-                <div
-                  className="kos-motion-enter rounded-full border border-white/15 bg-black/25 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-white/92 backdrop-blur-sm"
-                  data-motion-in={isExperienceReady}
-                  style={revealMotionStyle({ delay: motionDelay(2), intensity: 'subtle', direction: 'left' })}
-                >
-                  {selectedCurrencyCode}
-                </div>
-              </div>
-
-              <div className="max-w-[34rem]">
-                <h2
-                  className="kos-motion-enter max-w-full pb-1 text-[2rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[2.75rem] md:text-[3.4rem]"
-                  data-motion-in={isExperienceReady}
-                  style={{
-                    ...titleFontStyle,
-                    ...revealMotionStyle({ delay: motionDelay(3), duration: MOTION_TOKENS.duration.hero, intensity: 'strong' }),
-                    overflowWrap: 'anywhere',
-                  }}
-                >
-                  {comercioNombre}
-                </h2>
-
-                <p
-                  className="kos-motion-enter mt-3 max-w-xl text-sm font-medium leading-6 text-white/88 sm:text-[15px]"
-                  data-motion-in={isExperienceReady}
-                  style={{
-                    ...revealMotionStyle({ delay: motionDelay(4), intensity: 'medium' }),
-                    display: '-webkit-box',
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
-                    overflowWrap: 'anywhere',
-                  }}
-                >
-                  {heroSubtitle}
-                </p>
-
-                <div
-                  className="kos-motion-enter mt-4 inline-flex w-fit max-w-[17rem] items-start gap-2 rounded-[15px] border border-white/16 bg-[rgba(255,255,255,0.09)] px-2.5 py-2 text-left shadow-[0_10px_22px_rgba(15,23,42,0.12)] backdrop-blur-md"
-                  data-motion-in={isExperienceReady}
-                  style={revealMotionStyle({ delay: motionDelay(5), intensity: 'subtle' })}
-                >
-                  <span className="mt-0.5 flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/92">
-                    <MapPin className="h-3.5 w-3.5" strokeWidth={2.3} />
-                  </span>
-                  <span
-                    className="block text-[10px] font-semibold leading-[1.28] text-white/84 sm:text-[11px]"
-                    style={{
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {heroLocation || `@${resolvedSlug}`}
-                  </span>
-                </div>
-
-                <div ref={statsCardsRef} className="mt-5 max-w-md">
-                  <div
-                    className="kos-motion-enter kos-float-subtle grid grid-cols-[0.78fr_0.9fr_1.62fr] overflow-hidden rounded-[18px] border border-white/16 bg-[linear-gradient(180deg,rgba(255,255,255,0.12)_0%,rgba(255,255,255,0.07)_100%)] shadow-[0_18px_32px_rgba(15,23,42,0.14)] backdrop-blur-md sm:grid-cols-[0.84fr_0.96fr_1.5fr] sm:rounded-[20px]"
-                    data-motion-in={isExperienceReady}
-                    style={revealMotionStyle({ delay: motionDelay(6), intensity: 'medium' })}
-                  >
-                    <div className="flex min-h-[56px] flex-col items-center justify-center px-2.5 py-2 text-center sm:min-h-[64px] sm:px-3">
-                      <span className="text-[17px] font-black leading-none text-white sm:text-[18px]">{animatedCategoryCount}</span>
-                      <span className="mt-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/74 sm:text-[10px]">Categorías</span>
-                    </div>
-
-                    <div className="flex min-h-[56px] flex-col items-center justify-center border-l border-white/10 px-2.5 py-2 text-center sm:min-h-[64px] sm:px-3">
-                      <span className="text-[17px] font-black leading-none text-white sm:text-[18px]">{animatedProductCount}</span>
-                      <span className="mt-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/74 sm:text-[10px]">Productos</span>
-                    </div>
-
-                    <div className="flex min-h-[56px] items-center justify-center gap-1.5 border-l border-white/10 px-2 py-2 text-center sm:min-h-[64px] sm:gap-2 sm:px-3">
-                      <span className="shrink-0 text-white/92">
-                        <svg
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                          className="h-[clamp(22px,5.6vw,28px)] w-[clamp(22px,5.6vw,28px)]"
-                          fill="currentColor"
-                        >
-                          <path d="M19,7c0-1.1-0.9-2-2-2h-3v2h3v2.65L13.52,14H10V9H6c-2.21,0-4,1.79-4,4v3h2c0,1.66,1.34,3,3,3s3-1.34,3-3h4.48L19,10.35V7z M7,17c-0.55,0-1-0.45-1-1h2C8,16.55,7.55,17,7,17z" />
-                          <rect x="5" y="6" width="5" height="2" />
-                          <path d="M19,13c-1.66,0-3,1.34-3,3s1.34,3,3,3s3-1.34,3-3S20.66,13,19,13z M19,17c-0.55,0-1-0.45-1-1s0.45-1,1-1s1,0.45,1,1S19.55,17,19,17z" />
-                        </svg>
-                      </span>
-                      <div className="min-w-0 text-left">
-                        <p className="text-[clamp(8.5px,2.1vw,11px)] font-black uppercase leading-[1.05] tracking-[0.11em] text-white/95 sm:tracking-[0.13em]">
-                          {supportsDelivery ? 'Delivery' : 'Retiro'}
-                        </p>
-                        <p className="mt-1 text-[clamp(8.5px,2.1vw,11px)] font-black uppercase leading-[1.05] tracking-[0.08em] text-white/74 sm:tracking-[0.11em]">
-                          {supportsDelivery ? 'Disponible' : 'En tienda'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            ref={stickySearchCardRef}
-            className="kos-menu-card kos-motion-enter sticky z-30 mt-4 overflow-visible rounded-[28px] border p-3 backdrop-blur-xl md:p-4"
-            data-motion-in={isExperienceReady}
-            style={{
-              ...revealMotionStyle({ delay: motionDelay(4), duration: MOTION_TOKENS.duration.hero, intensity: 'medium' }),
-              top: `${stickySearchTopPx}px`,
-            }}
-          >
-            <div className="pointer-events-none absolute inset-x-5 -bottom-4 h-8 rounded-full bg-gradient-to-b from-black/12 via-black/6 to-transparent blur-md" />
-            <div
-              className="rounded-[22px] border p-3 sm:p-4"
-              style={{
-                backgroundColor: 'var(--menu-surface-alt)',
-                borderColor: 'var(--menu-border)',
-              }}
-            >
-              <div className="relative">
-                <div className="relative min-w-0">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="Buscar producto..."
-                    className="h-12 w-full rounded-2xl border pl-11 pr-12 text-sm font-semibold outline-none transition-[border-color,background-color,box-shadow] duration-200"
-                    style={{
-                      backgroundColor: 'var(--menu-surface)',
-                      borderColor: 'var(--menu-border)',
-                      color: 'var(--menu-text)',
-                    }}
-                  />
-                  <svg
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                    className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2"
-                    style={{ color: 'var(--menu-text-muted)' }}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <circle cx="11" cy="11" r="7" />
-                    <path d="M20 20l-3.5-3.5" />
-                  </svg>
-                </div>
-
-                {searchQuery ? (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    aria-label="Limpiar busqueda"
-                    className="kos-surface-motion kos-pressable absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full"
-                    style={{
-                      backgroundColor: 'var(--menu-surface-alt)',
-                      color: 'var(--menu-text-muted)',
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4">
-                      <path d="M6 6l12 12" />
-                      <path d="M18 6L6 18" />
-                    </svg>
-                  </button>
-                ) : null}
-              </div>
-
-              <div
-                className="mt-3 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-              >
-                <div className="flex w-max items-center gap-2 pr-2">
-                  {visibleCategorias.map((categoria) => (
-                    <button
-                      type="button"
-                      key={categoria.id}
-                      ref={(element) => {
-                        categoryChipRefs.current[categoria.id] = element;
-                      }}
-                      onClick={() => scrollToCategory(categoria.id)}
-                      className="kos-motion-enter kos-surface-motion kos-pressable kos-hover-subtle inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-extrabold uppercase tracking-[0.04em]"
-                      data-motion-in={isExperienceReady}
-                      style={
-                        {
-                          ...revealMotionStyle({ delay: motionDelay(categoria.productos.length > 0 ? visibleCategorias.findIndex((item) => item.id === categoria.id) + 5 : 5, 32), intensity: 'subtle' }),
-                          ...(activeCategoryId === categoria.id
-                            ? {
-                                backgroundColor: 'var(--menu-primary)',
-                                border: '1px solid var(--menu-primary)',
-                                color: 'var(--menu-on-primary)',
-                                boxShadow: 'var(--menu-shadow)',
-                              }
-                            : {
-                                backgroundColor: 'var(--menu-surface)',
-                                border: '1px solid var(--menu-border)',
-                                color: 'var(--menu-text)',
-                              }),
-                        }
-                      }
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[13px]"
-                        style={{
-                          backgroundColor:
-                            activeCategoryId === categoria.id
-                              ? 'color-mix(in srgb, var(--menu-on-primary) 18%, transparent)'
-                              : 'var(--menu-surface-alt)',
-                          border: `1px solid ${
-                            activeCategoryId === categoria.id
-                              ? 'color-mix(in srgb, var(--menu-on-primary) 22%, transparent)'
-                              : 'var(--menu-border)'
-                          }`,
-                        }}
-                      >
-                        <span className="translate-y-[0.5px]">{categoria.visual.glyph}</span>
-                      </span>
-                      <span>{categoria.displayName}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {showScrollTopButton ? (
-            <div className={`fixed right-4 z-[45] ${cartCount > 0 ? 'bottom-24 sm:bottom-28' : 'bottom-6 sm:bottom-8'}`}>
-              <button
-                type="button"
-                onClick={() => window.scrollTo({ top: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' })}
-                aria-label="Volver arriba"
-                className="kos-surface-motion kos-pressable kos-hover-subtle flex h-12 w-12 items-center justify-center rounded-full shadow-[0_18px_38px_rgba(15,23,42,0.24)]"
-                style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
-              >
-                <ArrowUp className="h-5 w-5" strokeWidth={2.6} />
-              </button>
-            </div>
-          ) : null}
-
-          <div className="mt-5 pb-44">
-            {!hasProducts ? (
-              <div className="kos-menu-card rounded-[28px] border p-8 text-center backdrop-blur-sm">
-                <p className="text-xl font-black" style={{ ...titleFontStyle, color: 'var(--menu-text)' }}>
-                  {searchQuery.trim() ? 'No encontramos productos con ese termino.' : 'Estamos preparando el menu digital'}
-                </p>
-                <p className="kos-menu-muted mt-2 text-sm font-medium">
-                  {searchQuery.trim() ? 'Prueba con otro nombre o categoria.' : 'Vuelve en unos minutos para ver todos los productos.'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-8">
-                {visibleCategorias.map((categoria) => (
-                  <section
-                    key={categoria.id}
-                    id={`categoria-${categoria.id}`}
-                    ref={(element) => {
-                      categorySectionRefs.current[categoria.id] = element;
-                    }}
-                    className="scroll-mt-[12rem]"
-                  >
-                    <div
-                      className="kos-motion-enter mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2"
-                      data-motion-in={isExperienceReady || Boolean(revealedCategoryIds[categoria.id])}
-                      style={revealMotionStyle({ intensity: 'medium' })}
-                    >
-                      <div className="flex min-w-0 flex-1 items-center gap-3">
-                        <span
-                          aria-hidden="true"
-                          className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-lg"
-                          style={{
-                            backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface-alt))',
-                            border: '1px solid var(--menu-border)',
-                            color: 'var(--menu-primary)',
-                          }}
-                        >
-                          <span className="translate-y-[0.5px]">{categoria.visual.glyph}</span>
-                        </span>
-                        <h2 className="min-w-0 flex-1 text-[1.65rem] font-black uppercase tracking-[-0.03em] md:text-[2rem]" style={{ ...titleFontStyle, color: 'var(--menu-text)' }}>
-                          {categoria.displayName}
-                        </h2>
-                      </div>
-                      <span
-                        className="kos-menu-surface-alt shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-[10px] font-black uppercase leading-none tracking-[0.08em] sm:px-3 sm:py-1 sm:text-[11px] sm:tracking-[0.14em]"
-                        style={{ color: 'var(--menu-text-muted)' }}
-                      >
-                        {categoria.productos.length} item{categoria.productos.length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-
-                    <div className={menuGridClass(layoutType, itemsPerRow)}>
-                      {categoria.productos.map((producto, productIndex) => {
-                        const quantity = cart[producto.id] ?? 0;
-                        const isZeroPricedProduct = (producto.precio ?? 0) <= 0;
-                        const isProductUnavailable = producto.disponible === false || isZeroPricedProduct;
-                        const isProductRevealed = Boolean(revealedProductIds[producto.id]);
-                        const convertedPrice = formatAmountByCurrency(
-                          convertFromBaseCurrency(
-                            producto.precio ?? 0,
-                            businessBaseCurrency,
-                            selectedCurrencyCode,
-                            selectedExchangeRate,
-                          ),
-                          selectedCurrencyCode,
-                        );
-
-                        return (
-                          <article
-                            key={producto.id}
-                            ref={(element) => {
-                              productCardRefs.current[producto.id] = element;
-                            }}
-                            data-product-id={producto.id}
-                            className="kos-menu-card kos-motion-enter kos-surface-motion kos-pressable kos-hover-subtle overflow-hidden rounded-[28px] border"
-                            data-motion-in={isExperienceReady || isProductRevealed}
-                            style={{
-                              ...revealMotionStyle({
-                                delay: motionDelay(productIndex),
-                                duration: MOTION_TOKENS.duration.hero,
-                                intensity: 'medium',
-                              }),
-                              willChange: isProductRevealed ? 'auto' : 'transform, opacity',
-                            }}
-                          >
-                            <div className="flex gap-3 p-3 sm:gap-4 sm:p-4">
-                              {showImages ? (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setExpandedProductImage({
-                                      src: safeImageSrc(producto.imagen_url, comercioLogoUrl),
-                                      alt: producto.nombre,
-                                      title: producto.nombre,
-                                      description: producto.descripcion?.trim() || 'Preparacion recomendada por la casa.',
-                                    })
-                                  }
-                                  className="kos-surface-motion kos-pressable kos-hover-subtle relative h-[8.75rem] w-[8.4rem] shrink-0 overflow-hidden rounded-[22px] bg-slate-100 shadow-[0_14px_26px_rgba(15,23,42,0.14)] sm:h-[10rem] sm:w-[9.5rem]"
-                                  aria-label={`Ver imagen grande de ${producto.nombre}`}
-                                >
-                                  <img
-                                    src={safeImageSrc(producto.imagen_url, comercioLogoUrl)}
-                                    alt={producto.nombre}
-                                    className="h-full w-full object-cover"
-                                    loading="lazy"
-                                    onError={(event) => {
-                                      const img = event.currentTarget;
-                                      if (img.src !== defaultProductImage) {
-                                        img.onerror = null;
-                                        img.src = defaultProductImage;
-                                      }
-                                    }}
-                                  />
-                                  <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent" />
-                                  <span className={`absolute left-2 top-2 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${isProductUnavailable ? 'bg-slate-900/85 text-white' : 'bg-white/92 text-slate-900'}`}>
-                                    {isProductUnavailable ? 'No disponible' : 'Pedir'}
-                                  </span>
-                                </button>
-                              ) : null}
-
-                              <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
-                                <div>
-                                  <h3
-                                    className="text-[1.05rem] font-extrabold leading-5 sm:text-[1.2rem]"
-                                    style={{
-                                      ...titleFontStyle,
-                                      wordBreak: 'break-word',
-                                      color: 'var(--menu-text)',
-                                    }}
-                                  >
-                                    {producto.nombre}
-                                  </h3>
-
-                                  <p className="kos-menu-muted mt-2 line-clamp-2 text-[13px] leading-5 sm:text-sm">
-                                    {producto.descripcion?.trim() || 'Preparacion recomendada por la casa.'}
-                                  </p>
-                                </div>
-
-                                <div className="mt-4">
-                                  <p className="text-[1.6rem] font-black leading-none tracking-[-0.04em]" style={{ ...titleFontStyle, color: 'var(--menu-primary)' }}>
-                                    {convertedPrice}
-                                  </p>
-                                  {selectedCurrencyCode !== businessBaseCurrency ? (
-                                    <p className="kos-menu-muted mt-1 text-[11px] font-bold uppercase tracking-[0.12em]">
-                                      Base {formatAmountByCurrency(producto.precio ?? 0, businessBaseCurrency)}
-                                    </p>
-                                  ) : null}
-
-                                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                                    {quantity === 0 ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (isProductUnavailable) return;
-                                          incrementProduct(producto.id);
-                                        }}
-                                        disabled={isProductUnavailable}
-                                        className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex min-h-11 items-center justify-center rounded-2xl px-4 py-3 text-sm font-black"
-                                        style={{
-                                          minWidth: '9rem',
-                                          borderRadius: '18px',
-                                          backgroundColor: isProductUnavailable
-                                            ? 'var(--menu-surface-alt)'
-                                            : 'var(--menu-primary)',
-                                          color: isProductUnavailable
-                                            ? 'var(--menu-text-muted)'
-                                            : 'var(--menu-on-primary)',
-                                          cursor: isProductUnavailable ? 'not-allowed' : 'pointer',
-                                          boxShadow: isProductUnavailable ? 'none' : 'var(--menu-shadow)',
-                                          opacity: isProductUnavailable ? 0.9 : 1,
-                                        }}
-                                      >
-                                        {isProductUnavailable ? 'No disponible' : 'Agregar'}
-                                      </button>
-                                    ) : (
-                                      <div
-                                        className="inline-flex items-center gap-2 rounded-2xl border p-1.5"
-                                        style={{
-                                          backgroundColor: 'var(--menu-surface)',
-                                          borderColor: 'var(--menu-border)',
-                                        }}
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() => decrementProduct(producto.id)}
-                                          className="kos-surface-motion kos-pressable grid h-9 w-9 place-items-center rounded-xl border text-lg font-black"
-                                          style={{
-                                            backgroundColor: 'var(--menu-surface-alt)',
-                                            borderColor: 'var(--menu-border)',
-                                            color: 'var(--menu-text)',
-                                          }}
-                                        >
-                                          -
-                                        </button>
-                                        <span className="min-w-8 text-center text-sm font-black" style={{ color: 'var(--menu-text)' }}>
-                                          {quantity}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => incrementProduct(producto.id)}
-                                          disabled={isProductUnavailable}
-                                          className="kos-surface-motion kos-pressable grid h-9 w-9 place-items-center rounded-xl text-lg font-black"
-                                          style={{
-                                            backgroundColor: isProductUnavailable
-                                              ? 'var(--menu-surface-alt)'
-                                              : 'var(--menu-primary)',
-                                            color: isProductUnavailable
-                                              ? 'var(--menu-text-muted)'
-                                              : 'var(--menu-on-primary)',
-                                            cursor: isProductUnavailable ? 'not-allowed' : 'pointer',
-                                          }}
-                                        >
-                                          +
-                                        </button>
-                                      </div>
-                                    )}
-
-                                    {quantity > 0 ? (
-                                      <span
-                                        className="rounded-full px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em]"
-                                        style={{
-                                          backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
-                                          color: 'var(--menu-primary)',
-                                        }}
-                                      >
-                                        {quantity} en tu pedido
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {cartCount > 0 ? (
-          <section
-            className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-3 sm:px-4"
-            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
-          >
-            <div className="pointer-events-auto mx-auto flex max-w-6xl items-center justify-between gap-3">
-              <div
-                className="flex w-full items-center gap-3 rounded-[28px] border px-3.5 py-3.5 shadow-[0_20px_55px_rgba(15,23,42,0.32)]"
-                style={{
-                  backgroundColor: 'var(--menu-primary)',
-                  borderColor: 'color-mix(in srgb, var(--menu-primary) 70%, black)',
-                  color: 'var(--menu-on-primary)',
-                  boxShadow: 'var(--menu-shadow)',
-                }}
-              >
-                <div className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/14 backdrop-blur-sm">
-                  <ShoppingCart className="h-5 w-5" strokeWidth={2.4} />
-                  <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#FACC15] px-1 text-[10px] font-black text-slate-950">
-                    {cartCount}
-                  </span>
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/70">
-                    {cartCount} producto{cartCount === 1 ? '' : 's'}
-                  </p>
-                  <div className="mt-1 flex items-center gap-2">
-                    <p className="truncate text-xl font-black tracking-[-0.03em] text-white" style={titleFontStyle}>
-                      {formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
-                    </p>
-                    <span className="hidden text-xs font-semibold text-white/70 sm:inline">{selectedCurrencyCode}</span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={openCheckoutSheet}
-                  disabled={isSubmittingOrder}
-                  className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex min-h-12 items-center gap-2 rounded-2xl bg-[#FACC15] px-4 py-3 text-sm font-black text-slate-950 shadow-[0_16px_32px_rgba(250,204,21,0.28)]"
-                >
-                  {isSubmittingOrder ? 'Procesando...' : 'Ver pedido'}
-                  {!isSubmittingOrder ? <ArrowRight className="h-4 w-4" strokeWidth={2.5} /> : null}
-                </button>
-              </div>
-            </div>
-          </section>
-        ) : null}
+        <UpsellMenuExperience
+          businessName={comercioNombre}
+          subtitle={heroSubtitle}
+          coverUrl={upsellHeroCover}
+          logoUrl={comercioLogoUrl || null}
+          supportsDelivery={supportsDelivery}
+          locationLabel={heroLocation || null}
+          stickyTopPx={stickySearchTopPx}
+          stickySearchCardRef={stickySearchCardRef}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onClearSearch={() => setSearchQuery('')}
+          categories={visibleCategorias.map((categoria) => ({
+            id: categoria.id,
+            label: categoria.displayName,
+            glyph: categoria.visual.glyph,
+          }))}
+          activeCategoryId={activeCategoryId}
+          onSelectCategory={scrollToCategory}
+          setChipRef={(id) => (element) => {
+            categoryChipRefs.current[id] = element;
+          }}
+          comboItems={comboRailItems}
+          gridTitle={
+            searchQuery.trim()
+              ? 'Resultados'
+              : visibleCategorias.find((c) => c.id === activeCategoryId)?.displayName ||
+                visibleCategorias[0]?.displayName ||
+                'Menú'
+          }
+          gridProducts={upsellGridProducts}
+          crossSellItems={crossSellItems}
+          getQuantity={(id) => cart[id] ?? 0}
+          formatPrice={formatUpsellPrice}
+          resolveImage={(url) => productImageUrl(url, comercioLogoUrl)}
+          onAdd={incrementProduct}
+          onIncrement={incrementProduct}
+          onDecrement={decrementProduct}
+          cartCount={cartCount}
+          cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
+          showDeliveryProgress={supportsDelivery && cartCount > 0}
+          freeUnlocked={deliveryProgress.unlocked}
+          progressRatio={deliveryProgress.ratio}
+          remainingToFreeLabel={
+            deliveryProgress.unlocked
+              ? null
+              : formatUpsellPrice(deliveryProgress.remaining)
+          }
+          onContinue={openCheckoutSheet}
+          continueDisabled={isSubmittingOrder}
+          isPreview={isOwnerPreview}
+          emptyMessage={
+            hasProducts
+              ? null
+              : searchQuery.trim()
+                ? 'No encontramos productos con ese término.'
+                : 'Estamos preparando el menú digital'
+          }
+          titleStyle={titleFontStyle}
+        />
 
         {expandedProductImage ? (
           <section
