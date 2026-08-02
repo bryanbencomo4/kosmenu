@@ -18,7 +18,7 @@ export function ComboRail({ items, formatPrice, onAdd, titleStyle }: ComboRailPr
   if (!items.length) return null;
 
   return (
-    <section className="mx-auto mt-5 w-full max-w-[430px] sm:max-w-[760px]">
+    <section className="mx-auto mt-5 w-full max-w-6xl">
       <div className="flex items-end justify-between px-4 sm:px-6">
         <h2 className="text-lg font-black tracking-[-0.02em]" style={{ ...titleStyle, color: 'var(--menu-text)' }}>
           Combos recomendados

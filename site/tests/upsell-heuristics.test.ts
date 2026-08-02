@@ -3,15 +3,21 @@ import { describe, expect, it } from 'vitest';
 import {
   buildComboRail,
   buildCrossSellItems,
+  displayProductImage,
   freeDeliveryProgress,
   productImageUrl,
+  resolveHeroCover,
 } from '../app/v/[id]/_lib/upsell-heuristics';
 
 describe('upsell heuristics', () => {
-  it('ignores commerce logo urls as product images', () => {
+  it('ignores commerce logo urls as product images but allows logo display fallback', () => {
     const logo = 'https://x/logos-comercios/a.png';
     expect(productImageUrl(logo, logo)).toBeNull();
+    expect(productImageUrl('', logo)).toBeNull();
     expect(productImageUrl('https://x/products/pizza.png', logo)).toBe('https://x/products/pizza.png');
+    expect(displayProductImage('', logo)).toBe(logo);
+    expect(displayProductImage(logo, logo)).toBe(logo);
+    expect(resolveHeroCover([{ id: 'p1', categoria_id: 'c1', nombre: 'Pizza', precio: 10 }], logo)).toBe(logo);
   });
 
   it('builds combo rail from combo categories with demo compare-at prices', () => {

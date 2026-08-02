@@ -12,7 +12,7 @@ export function CrossSellRail({ items, formatPrice, onAdd, titleStyle }: CrossSe
   if (!items.length) return null;
 
   return (
-    <section className="mx-auto mt-6 w-full max-w-[430px] sm:max-w-[760px]">
+    <section className="mx-auto mt-6 w-full max-w-6xl">
       <h2 className="px-4 text-lg font-black tracking-[-0.02em] sm:px-6" style={{ ...titleStyle, color: 'var(--menu-text)' }}>
         Clientes también agregan
       </h2>

@@ -22,7 +22,7 @@ export function UpsellHeroCard({
   titleStyle,
 }: UpsellHeroCardProps) {
   return (
-    <section className="mx-auto w-full max-w-[430px] px-4 pt-3 sm:max-w-[760px] sm:px-6">
+    <section className="mx-auto w-full max-w-6xl px-4 pt-3 sm:px-6">
       <div
         className="relative overflow-hidden rounded-[28px]"
         style={{

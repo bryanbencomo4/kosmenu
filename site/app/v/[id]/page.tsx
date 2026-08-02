@@ -18,7 +18,7 @@ import {
   buildCrossSellItems,
   buildProductNudge,
   freeDeliveryProgress,
-  productImageUrl,
+  displayProductImage,
   resolveHeroCover,
 } from './_lib/upsell-heuristics';
 import { UpsellMenuExperience } from './_components/upsell/UpsellMenuExperience';
@@ -3934,7 +3934,7 @@ export default function PublicMenuPage() {
           crossSellItems={crossSellItems}
           getQuantity={(id) => cart[id] ?? 0}
           formatPrice={formatUpsellPrice}
-          resolveImage={(url) => productImageUrl(url, comercioLogoUrl)}
+          resolveImage={(url) => displayProductImage(url, comercioLogoUrl) ?? safeImageSrc(url, comercioLogoUrl)}
           onAdd={incrementProduct}
           onIncrement={incrementProduct}
           onDecrement={decrementProduct}

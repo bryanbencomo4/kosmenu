@@ -30,7 +30,7 @@ export function UpsellCartFooter({
       className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-3"
       style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)' }}
     >
-      <div className="pointer-events-auto mx-auto w-full max-w-[430px] sm:max-w-[760px]">
+      <div className="pointer-events-auto mx-auto w-full max-w-6xl">
         {isPreview ? (
           <p className="mb-2 text-center text-[11px] font-semibold text-amber-800">
             Vista previa: el pedido no se enviará

@@ -50,11 +50,11 @@ export function UpsellProductGrid({
   if (!products.length) return null;
 
   return (
-    <section className="mx-auto mt-6 w-full max-w-[430px] px-4 sm:max-w-[760px] sm:px-6">
+    <section className="mx-auto mt-6 w-full max-w-6xl px-4 sm:px-6">
       <h2 className="text-lg font-black tracking-[-0.02em]" style={{ ...titleStyle, color: 'var(--menu-text)' }}>
         {title}
       </h2>
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {products.map((product) => (
           <UpsellProductTile
             key={product.id}

@@ -105,7 +105,7 @@ export function UpsellMenuExperience({
 
       <section
         ref={stickySearchCardRef}
-        className="sticky z-30 mx-auto mt-4 w-full max-w-[430px] px-4 sm:max-w-[760px] sm:px-6"
+        className="sticky z-30 mx-auto mt-4 w-full max-w-6xl px-4 sm:px-6"
         style={{ top: `${stickyTopPx}px` }}
       >
         <div
@@ -189,7 +189,7 @@ export function UpsellMenuExperience({
 
       {emptyMessage ? (
         <div
-          className="mx-auto mt-6 max-w-[430px] rounded-[22px] border p-6 text-center sm:max-w-[760px]"
+          className="mx-auto mt-6 max-w-6xl rounded-[22px] border p-6 text-center"
           style={{
             backgroundColor: 'var(--menu-surface)',
             borderColor: 'var(--menu-border)',

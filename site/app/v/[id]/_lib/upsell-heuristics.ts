@@ -38,13 +38,18 @@ function isAvailable(product: UpsellProduct) {
   return product.disponible !== false && (product.precio ?? 0) > 0;
 }
 
+/** Real product photo only — null when empty or identical to the commerce logo. */
 export function productImageUrl(imageUrl: string | null | undefined, logoUrl?: string | null) {
   const raw = (imageUrl ?? '').trim();
   if (!raw) return null;
   const logo = (logoUrl ?? '').trim();
   if (logo && raw === logo) return null;
-  if (/\/logos-comercios\//i.test(raw)) return null;
   return raw;
+}
+
+/** Display helper: product photo, else commerce logo (matches previous public menu fallback). */
+export function displayProductImage(imageUrl: string | null | undefined, logoUrl?: string | null) {
+  return productImageUrl(imageUrl, logoUrl) || (logoUrl ?? '').trim() || null;
 }
 
 export function categoryIdsByKind(categories: UpsellCategory[]) {
@@ -112,7 +117,7 @@ export function buildComboRail(
       badgeLabel: BADGE_LABELS[badge],
       // Demo compare-at: ~12–18% above current price for visual savings cue.
       compareAtPrice: Math.round(price * (badge === 'ahorra' ? 1.18 : 1.12) * 100) / 100,
-      imageUrl: productImageUrl(product.imagen_url, logoUrl),
+      imageUrl: displayProductImage(product.imagen_url, logoUrl),
     };
   });
 }
@@ -140,7 +145,7 @@ export function buildCrossSellItems(
 
   return pool.slice(0, limit).map((product) => ({
     product,
-    imageUrl: productImageUrl(product.imagen_url, logoUrl),
+    imageUrl: displayProductImage(product.imagen_url, logoUrl),
   }));
 }
 
@@ -211,5 +216,5 @@ export function resolveHeroCover(
     const url = productImageUrl(product.imagen_url, logoUrl);
     if (url) return url;
   }
-  return null;
+  return (logoUrl ?? '').trim() || null;
 }
