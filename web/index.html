@@ -32,8 +32,139 @@
   <title>elmenuxfa.com</title>
   <link rel="manifest" href="manifest.json">
 
-  <!-- Required by google_maps_flutter_web (same key as SupabaseConfig.googleMapsApiKey). -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB9WNMyQma0-n4sMXN_lWJwYNxxkWDEmyQ&loading=async"></script>
+  <!-- Required by google_maps_flutter_web + place search (same key as SupabaseConfig.googleMapsApiKey). -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB9WNMyQma0-n4sMXN_lWJwYNxxkWDEmyQ&libraries=places&loading=async"></script>
+  <script>
+    // Thin bridge so Flutter web can use Places/Geocoder without dart:io HttpClient.
+    window.__elmenuxfaPlaces = {
+      whenReady: function () {
+        return new Promise(function (resolve, reject) {
+          var started = Date.now();
+          var tick = function () {
+            if (window.google && google.maps && google.maps.places && google.maps.Geocoder) {
+              resolve();
+              return;
+            }
+            if (Date.now() - started > 15000) {
+              reject(new Error('Google Places unavailable'));
+              return;
+            }
+            setTimeout(tick, 40);
+          };
+          tick();
+        });
+      },
+      autocomplete: function (input, lat, lng, radiusMeters) {
+        var self = this;
+        return self.whenReady().then(function () {
+          return new Promise(function (resolve, reject) {
+            var service = new google.maps.places.AutocompleteService();
+            var request = { input: input, language: 'es' };
+            if (typeof lat === 'number' && typeof lng === 'number') {
+              request.location = new google.maps.LatLng(lat, lng);
+              request.radius = typeof radiusMeters === 'number' ? radiusMeters : 30000;
+            }
+            service.getPlacePredictions(request, function (predictions, status) {
+              if (
+                status === google.maps.places.PlacesServiceStatus.OK ||
+                status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS
+              ) {
+                resolve(
+                  (predictions || []).map(function (item) {
+                    return {
+                      placeId: item.place_id || '',
+                      description: item.description || '',
+                    };
+                  })
+                );
+                return;
+              }
+              reject(new Error(String(status || 'UNKNOWN')));
+            });
+          });
+        });
+      },
+      details: function (placeId) {
+        var self = this;
+        return self.whenReady().then(function () {
+          return new Promise(function (resolve, reject) {
+            var attr = document.createElement('div');
+            var service = new google.maps.places.PlacesService(attr);
+            service.getDetails(
+              {
+                placeId: placeId,
+                fields: ['formatted_address', 'address_components', 'geometry', 'name', 'types'],
+                language: 'es',
+              },
+              function (place, status) {
+                if (status !== google.maps.places.PlacesServiceStatus.OK || !place) {
+                  reject(new Error(String(status || 'UNKNOWN')));
+                  return;
+                }
+                var loc = place.geometry && place.geometry.location;
+                resolve({
+                  formatted_address: place.formatted_address || place.name || '',
+                  address_components: (place.address_components || []).map(function (c) {
+                    return {
+                      long_name: c.long_name,
+                      short_name: c.short_name,
+                      types: c.types || [],
+                    };
+                  }),
+                  geometry: {
+                    location: {
+                      lat: loc ? loc.lat() : null,
+                      lng: loc ? loc.lng() : null,
+                    },
+                  },
+                  types: place.types || [],
+                });
+              }
+            );
+          });
+        });
+      },
+      reverseGeocode: function (lat, lng) {
+        var self = this;
+        return self.whenReady().then(function () {
+          return new Promise(function (resolve, reject) {
+            var geocoder = new google.maps.Geocoder();
+            geocoder.geocode(
+              { location: { lat: lat, lng: lng }, language: 'es' },
+              function (results, status) {
+                if (
+                  status === google.maps.GeocoderStatus.OK ||
+                  status === 'OK'
+                ) {
+                  resolve(
+                    (results || []).map(function (item) {
+                      return {
+                        formatted_address: item.formatted_address || '',
+                        types: item.types || [],
+                        address_components: (item.address_components || []).map(function (c) {
+                          return {
+                            long_name: c.long_name,
+                            short_name: c.short_name,
+                            types: c.types || [],
+                          };
+                        }),
+                      };
+                    })
+                  );
+                  return;
+                }
+                if (status === google.maps.GeocoderStatus.ZERO_RESULTS || status === 'ZERO_RESULTS') {
+                  resolve([]);
+                  return;
+                }
+                reject(new Error(String(status || 'UNKNOWN')));
+              }
+            );
+          });
+        });
+      },
+    };
+  </script>
 </head>
 <body>
   <!--

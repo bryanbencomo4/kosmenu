@@ -23,6 +23,7 @@ import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:kosmenu_app/services/business_sectors_service.dart';
+import 'package:kosmenu_app/services/google_places_lookup.dart';
 import 'package:kosmenu_app/services/logo_image_guard.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
@@ -3118,265 +3119,44 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return null;
   }
 
-  Future<Map<String, dynamic>> _httpGetJson(Uri uri) async {
-    final client = HttpClient();
-    try {
-      final request = await client.getUrl(uri);
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      final decoded = jsonDecode(body);
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-      if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
-      }
-      return <String, dynamic>{};
-    } finally {
-      client.close(force: true);
-    }
-  }
-
-  String? _componentLongName(
-    List<Map<String, dynamic>> components,
-    String type,
-  ) {
-    for (final component in components) {
-      final types = (component['types'] as List<dynamic>? ?? <dynamic>[])
-          .map((item) => item.toString())
-          .toList();
-      if (types.contains(type)) {
-        final value = component['long_name']?.toString().trim();
-        if (value != null && value.isNotEmpty) {
-          return value;
-        }
-      }
-    }
-    return null;
-  }
-
-  String? _toSpecificAddress(Map<String, dynamic> result) {
-    final components =
-        (result['address_components'] as List<dynamic>? ?? <dynamic>[])
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList();
-    if (components.isEmpty) {
-      return result['formatted_address']?.toString().trim();
-    }
-
-    final street = _componentLongName(components, 'route');
-    final streetNumber = _componentLongName(components, 'street_number');
-    final premise = _componentLongName(components, 'premise');
-    final subpremise = _componentLongName(components, 'subpremise');
-    final neighborhood =
-        _componentLongName(components, 'neighborhood') ??
-        _componentLongName(components, 'sublocality') ??
-        _componentLongName(components, 'sublocality_level_1');
-    final locality =
-        _componentLongName(components, 'locality') ??
-        _componentLongName(components, 'administrative_area_level_2');
-    final region = _componentLongName(
-      components,
-      'administrative_area_level_1',
-    );
-
-    final plusCodeMap = result['plus_code'] is Map
-        ? Map<String, dynamic>.from(result['plus_code'] as Map)
-        : <String, dynamic>{};
-    final plusCodeShort =
-        plusCodeMap['compound_code']?.toString().trim().isNotEmpty == true
-        ? plusCodeMap['compound_code'].toString().trim()
-        : (plusCodeMap['global_code']?.toString().trim() ?? '');
-
-    final firstLineParts = <String>[];
-    if (street != null && street.isNotEmpty) {
-      firstLineParts.add(street);
-      if (streetNumber != null && streetNumber.isNotEmpty) {
-        firstLineParts.add(streetNumber);
-      }
-    } else if (premise != null && premise.isNotEmpty) {
-      firstLineParts.add(premise);
-      if (subpremise != null && subpremise.isNotEmpty) {
-        firstLineParts.add(subpremise);
-      }
-    }
-
-    final detailParts = <String>[];
-    if (neighborhood != null && neighborhood.isNotEmpty) {
-      detailParts.add(neighborhood);
-    }
-    if (locality != null && locality.isNotEmpty) {
-      detailParts.add(locality);
-    }
-    if (region != null && region.isNotEmpty) {
-      detailParts.add(region);
-    }
-    if (plusCodeShort.isNotEmpty) {
-      detailParts.add(plusCodeShort);
-    }
-
-    final firstLine = firstLineParts.join(' ').trim();
-    final detailLine = detailParts.join(', ').trim();
-    if (firstLine.isNotEmpty && detailLine.isNotEmpty) {
-      return '$firstLine, $detailLine';
-    }
-    if (firstLine.isNotEmpty) {
-      return firstLine;
-    }
-    if (detailLine.isNotEmpty) {
-      return detailLine;
-    }
-    return result['formatted_address']?.toString().trim();
-  }
-
   Future<String?> _reverseGeocodeFromLatLng(LatLng position) async {
-    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
-    if (apiKey.isEmpty) {
-      return null;
-    }
-
     try {
-      final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
-        'latlng': '${position.latitude},${position.longitude}',
-        'language': 'es',
-        'key': apiKey,
-      });
-
-      final json = await _httpGetJson(uri);
-      final status = (json['status']?.toString().trim() ?? '');
-      if (status != 'OK') {
-        return null;
-      }
-
-      final results = (json['results'] as List<dynamic>? ?? <dynamic>[])
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
-      if (results.isEmpty) {
-        return null;
-      }
-
-      Map<String, dynamic> best = results.first;
-      var bestScore = -1;
-      for (final result in results) {
-        final types = (result['types'] as List<dynamic>? ?? <dynamic>[])
-            .map((item) => item.toString())
-            .toList();
-        var score = 0;
-        if (types.contains('street_address')) score += 5;
-        if (types.contains('premise')) score += 4;
-        if (types.contains('subpremise')) score += 3;
-        if (types.contains('route')) score += 2;
-        if (types.contains('plus_code')) score += 1;
-        final components = result['address_components'] as List<dynamic>?;
-        if ((components?.length ?? 0) >= 4) {
-          score += 2;
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          best = result;
-        }
-      }
-
-      final specific = _toSpecificAddress(best);
-      if (specific != null && specific.trim().isNotEmpty) {
-        return specific.trim();
-      }
-
-      final formatted = best['formatted_address']?.toString().trim();
-      if (formatted != null && formatted.isNotEmpty) {
-        return formatted;
-      }
+      return await GooglePlacesLookup.reverseGeocode(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+    } on GooglePlacesLookupException catch (error) {
+      debugPrint(
+        'Reverse geocode error: ${error.status ?? 'unknown'}: ${error.message}',
+      );
       return null;
-    } catch (_) {
+    } catch (error) {
+      debugPrint('Reverse geocode error: $error');
       return null;
     }
   }
 
-  Future<List<_PlaceSearchSuggestion>> _searchPlaceSuggestions(
+  Future<List<PlaceSuggestion>> _searchPlaceSuggestions(
     String query, {
     LatLng? near,
   }) async {
-    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
-    if (apiKey.isEmpty || query.trim().length < 3) {
-      return <_PlaceSearchSuggestion>[];
-    }
-
-    try {
-      final params = <String, String>{
-        'input': query.trim(),
-        'language': 'es',
-        'types': 'geocode',
-        'key': apiKey,
-      };
-      if (near != null) {
-        params['location'] = '${near.latitude},${near.longitude}';
-        params['radius'] = '30000';
-      }
-
-      final uri = Uri.https(
-        'maps.googleapis.com',
-        '/maps/api/place/autocomplete/json',
-        params,
-      );
-      final json = await _httpGetJson(uri);
-      final status = (json['status']?.toString().trim() ?? '');
-      if (status != 'OK' && status != 'ZERO_RESULTS') {
-        return <_PlaceSearchSuggestion>[];
-      }
-
-      final predictions = (json['predictions'] as List<dynamic>? ?? <dynamic>[])
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
-
-      return predictions
-          .where((item) => item['place_id'] != null)
-          .map(
-            (item) => _PlaceSearchSuggestion(
-              placeId: item['place_id'].toString(),
-              description: item['description']?.toString().trim() ?? '',
-            ),
-          )
-          .where((item) => item.description.isNotEmpty)
-          .take(6)
-          .toList();
-    } catch (_) {
-      return <_PlaceSearchSuggestion>[];
-    }
+    return GooglePlacesLookup.autocomplete(
+      query: query,
+      nearLatitude: near?.latitude,
+      nearLongitude: near?.longitude,
+    );
   }
 
   Future<Map<String, dynamic>?> _fetchPlaceDetails(String placeId) async {
-    final apiKey = SupabaseConfig.googleMapsApiKey.trim();
-    if (apiKey.isEmpty || placeId.trim().isEmpty) {
-      return null;
-    }
-
     try {
-      final uri = Uri.https(
-        'maps.googleapis.com',
-        '/maps/api/place/details/json',
-        {
-          'place_id': placeId.trim(),
-          'fields':
-              'formatted_address,address_component,geometry/location,plus_code,types',
-          'language': 'es',
-          'key': apiKey,
-        },
+      return await GooglePlacesLookup.details(placeId);
+    } on GooglePlacesLookupException catch (error) {
+      debugPrint(
+        'Place details error: ${error.status ?? 'unknown'}: ${error.message}',
       );
-      final json = await _httpGetJson(uri);
-      final status = (json['status']?.toString().trim() ?? '');
-      if (status != 'OK') {
-        return null;
-      }
-
-      final result = json['result'];
-      if (result is Map) {
-        return Map<String, dynamic>.from(result);
-      }
       return null;
-    } catch (_) {
+    } catch (error) {
+      debugPrint('Place details error: $error');
       return null;
     }
   }
@@ -3426,7 +3206,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     Timer? geocodeDebounce;
     Timer? searchDebounce;
     LatLng? lastGeocodedPoint;
-    List<_PlaceSearchSuggestion> placeSuggestions = <_PlaceSearchSuggestion>[];
+    List<PlaceSuggestion> placeSuggestions = <PlaceSuggestion>[];
     final mapController = Completer<GoogleMapController>();
 
     final picked = await showModalBottomSheet<_PickedBusinessLocation>(
@@ -3476,30 +3256,75 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 }
                 setSheetState(() {
                   searchingPlaces = false;
-                  placeSuggestions = <_PlaceSearchSuggestion>[];
+                  placeSuggestions = <PlaceSuggestion>[];
                 });
                 return;
               }
 
               setSheetState(() => searchingPlaces = true);
-              final suggestions = await _searchPlaceSuggestions(
-                query,
-                near: selected,
-              );
-              if (!context.mounted) {
-                return;
+              try {
+                final suggestions = await _searchPlaceSuggestions(
+                  query,
+                  near: selected,
+                );
+                if (!context.mounted) {
+                  return;
+                }
+                setSheetState(() {
+                  searchingPlaces = false;
+                  placeSuggestions = suggestions;
+                });
+              } on GooglePlacesLookupException catch (error) {
+                debugPrint(
+                  'Place search error: ${error.status ?? 'unknown'}: ${error.message}',
+                );
+                if (!context.mounted) {
+                  return;
+                }
+                setSheetState(() {
+                  searchingPlaces = false;
+                  placeSuggestions = <PlaceSuggestion>[];
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'No se pudieron cargar sugerencias. Intenta de nuevo.',
+                    ),
+                  ),
+                );
+              } catch (error) {
+                debugPrint('Place search error: $error');
+                if (!context.mounted) {
+                  return;
+                }
+                setSheetState(() {
+                  searchingPlaces = false;
+                  placeSuggestions = <PlaceSuggestion>[];
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'No se pudieron cargar sugerencias. Intenta de nuevo.',
+                    ),
+                  ),
+                );
               }
-              setSheetState(() {
-                searchingPlaces = false;
-                placeSuggestions = suggestions;
-              });
             }
 
             Future<void> selectSuggestion(
-              _PlaceSearchSuggestion suggestion,
+              PlaceSuggestion suggestion,
             ) async {
               final details = await _fetchPlaceDetails(suggestion.placeId);
               if (details == null || !context.mounted) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'No se pudo abrir esa ubicacion. Prueba otra sugerencia.',
+                      ),
+                    ),
+                  );
+                }
                 return;
               }
 
@@ -3524,14 +3349,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               );
 
               final specific =
-                  _toSpecificAddress(details) ?? suggestion.description;
+                  formatSpecificAddress(details) ?? suggestion.description;
               if (!context.mounted) {
                 return;
               }
               setSheetState(() {
                 previewAddress = specific;
                 searchController.text = specific;
-                placeSuggestions = <_PlaceSearchSuggestion>[];
+                placeSuggestions = <PlaceSuggestion>[];
               });
               unawaited(syncAddress());
             }
@@ -3660,7 +3485,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                         searchController.clear();
                                         setSheetState(() {
                                           placeSuggestions =
-                                              <_PlaceSearchSuggestion>[];
+                                              <PlaceSuggestion>[];
                                         });
                                       },
                                       icon: const Icon(
@@ -11396,16 +11221,6 @@ class _PickedBusinessLocation {
   final double latitude;
   final double longitude;
   final String address;
-}
-
-class _PlaceSearchSuggestion {
-  const _PlaceSearchSuggestion({
-    required this.placeId,
-    required this.description,
-  });
-
-  final String placeId;
-  final String description;
 }
 
 class _ParsedPhoneNumber {
