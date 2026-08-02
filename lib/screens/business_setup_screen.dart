@@ -20,11 +20,13 @@ import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
+import 'package:kosmenu_app/screens/public_menu_view.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:kosmenu_app/services/business_sectors_service.dart';
 import 'package:kosmenu_app/services/google_places_lookup.dart';
 import 'package:kosmenu_app/services/logo_image_guard.dart';
+import 'package:kosmenu_app/services/onboarding_menu_preview_builder.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:geolocator/geolocator.dart';
@@ -277,6 +279,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _allowDelivery = false;
   bool _receiveOrdersOnWhatsapp = true;
   bool _isVirtualBusiness = false;
+
   /// Hidden until the public business directory ships on the landing page.
   static const bool _publicDirectoryUiEnabled = false;
   bool _showOnPublicDirectory = false;
@@ -358,8 +361,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final values = <String>{
       ..._availableSectorNames,
       if (_selectedCategory.trim().isNotEmpty) _selectedCategory.trim(),
-    }.toList()
-      ..sort((a, b) => a.compareTo(b));
+    }.toList()..sort((a, b) => a.compareTo(b));
     if (!values.contains('Otros')) {
       values.add('Otros');
     }
@@ -630,7 +632,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
     _allowDelivery = raw?['permite_delivery'] == true;
     _receiveOrdersOnWhatsapp = raw?['recibe_pedidos_whatsapp'] == true;
-    _showOnPublicDirectory = _publicDirectoryUiEnabled &&
+    _showOnPublicDirectory =
+        _publicDirectoryUiEnabled &&
         (raw?['mostrar_en_directorio_publico'] is bool
             ? raw!['mostrar_en_directorio_publico'] as bool
             : false);
@@ -1400,7 +1403,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _receiveOrdersOnWhatsapp =
           map['receiveOrdersOnWhatsapp'] as bool? ?? true;
       _isVirtualBusiness = map['isVirtualBusiness'] as bool? ?? false;
-      _showOnPublicDirectory = _publicDirectoryUiEnabled &&
+      _showOnPublicDirectory =
+          _publicDirectoryUiEnabled &&
           (map['showOnPublicDirectory'] as bool? ?? false);
       if (_isVirtualBusiness) {
         _allowDelivery = false;
@@ -1578,8 +1582,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'allowDelivery': _allowDelivery,
       'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
       'isVirtualBusiness': _isVirtualBusiness,
-      'showOnPublicDirectory':
-          _publicDirectoryUiEnabled ? _showOnPublicDirectory : false,
+      'showOnPublicDirectory': _publicDirectoryUiEnabled
+          ? _showOnPublicDirectory
+          : false,
       'menuScanCompleted': _menuScanCompleted,
       'menuAiSetupMode': _menuAiSetupMode,
       'manualMenuSetupSelected': _manualMenuSetupSelected,
@@ -3316,9 +3321,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               }
             }
 
-            Future<void> selectSuggestion(
-              PlaceSuggestion suggestion,
-            ) async {
+            Future<void> selectSuggestion(PlaceSuggestion suggestion) async {
               final details = await _fetchPlaceDetails(suggestion.placeId);
               if (details == null || !context.mounted) {
                 if (context.mounted) {
@@ -3952,19 +3955,123 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     await _saveDraft();
   }
 
-  Future<void> _openDraftPreview() async {
-    final slug = _normalizeSlug(_slugController.text);
-    if (slug.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Define una URL del menu para abrir el preview real.'),
+  Future<void> _openMenuPreview() async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: CircularProgressIndicator(strokeWidth: 2.6),
+        ),
+      ),
+    );
+
+    try {
+      final payload = await _buildOnboardingMenuPreviewPayload();
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context, rootNavigator: true).pop();
+
+      final comercioId = (_editingComercioId ?? '').trim();
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => PublicMenuView(
+            comercioId: comercioId.isEmpty ? 'preview' : comercioId,
+            isPreview: true,
+            previewPayload: payload,
+          ),
         ),
       );
-      return;
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se pudo abrir la vista previa: ${error.toString().replaceFirst('Exception: ', '')}',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _buildOnboardingMenuPreviewPayload() async {
+    final comercioId = (_editingComercioId ?? '').trim();
+    var categories = <Map<String, dynamic>>[];
+    var products = <Map<String, dynamic>>[];
+
+    if (comercioId.isNotEmpty) {
+      final client = Supabase.instance.client;
+      final categoryRows = await client
+          .from('categorias')
+          .select('id, nombre, orden, activo')
+          .eq('comercio_id', comercioId)
+          .order('orden', ascending: true)
+          .order('nombre', ascending: true);
+      final productRows = await client
+          .from('productos')
+          .select(
+            'id, categoria_id, nombre, descripcion, precio, orden, disponible, '
+            'imagen_url, imagen_source_type, ai_image_status, ai_image_error_message',
+          )
+          .eq('comercio_id', comercioId)
+          .order('orden', ascending: true)
+          .order('nombre', ascending: true);
+
+      categories = (categoryRows as List<dynamic>)
+          .map((row) => Map<String, dynamic>.from(row as Map))
+          .where((row) => row['activo'] != false)
+          .toList();
+      final activeCategoryIds = categories
+          .map((row) => row['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      products = (productRows as List<dynamic>)
+          .map((row) => Map<String, dynamic>.from(row as Map))
+          .where((row) {
+            if (row['disponible'] == false) {
+              return false;
+            }
+            final categoryId = row['categoria_id']?.toString() ?? '';
+            return categoryId.isEmpty || activeCategoryIds.contains(categoryId);
+          })
+          .toList();
     }
 
-    final url = AppLinks.publicMenuByIdentifier(comercioId: slug, slug: slug);
-    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    final quoteCurrency = _selectedCurrencies.contains('VES')
+        ? 'VES'
+        : (_selectedCurrencies.length > 1
+              ? _selectedCurrencies.firstWhere(
+                  (code) => code != _baseCurrency,
+                  orElse: () => _baseCurrency,
+                )
+              : _baseCurrency);
+    final exchangeRate = _effectiveExchangeRateForCurrency(quoteCurrency);
+
+    return OnboardingMenuPreviewBuilder.build(
+      comercioId: comercioId,
+      businessName: _nameController.text,
+      logoUrl: _selectedLogoUrl,
+      category: _selectedCategory,
+      whatsapp: _whatsappE164,
+      allowsDelivery: _allowDelivery,
+      address: _addressController.text,
+      latitude: _businessLatitude,
+      longitude: _businessLongitude,
+      menuPaletteId: _selectedPaletteId,
+      palettePrimaryArgb: ColorArgbCodec.fromColor(_palette.primary),
+      paletteAccentArgb: ColorArgbCodec.fromColor(_palette.accent),
+      paletteSurfaceArgb: ColorArgbCodec.fromColor(_palette.surface),
+      paletteTextArgb: ColorArgbCodec.fromColor(_palette.text),
+      exchangeRateValue: exchangeRate,
+      categories: categories,
+      products: products,
+    );
   }
 
   Future<void> _nextStep() async {
@@ -4039,7 +4146,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    if (_step == _SetupStep.style && (_editingComercioId ?? '').trim().isNotEmpty) {
+    if (_step == _SetupStep.style &&
+        (_editingComercioId ?? '').trim().isNotEmpty) {
       await _persistPaletteChanges();
     }
 
@@ -7136,17 +7244,23 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     }
 
-    await Supabase.instance.client.from('comercios').update(<String, dynamic>{
-      'branding_ia': _buildBrandingIaPayload(),
-      'exchange_rate_mode': _exchangeRateMode,
-      'exchange_rate_source': _exchangeRateSource,
-      'exchange_rate_quote_currency':
-          quotedCurrency == primaryCurrency ? null : quotedCurrency,
-      'exchange_rate_value': primaryExchangeRate > 0 ? primaryExchangeRate : null,
-      'last_rate_update': primaryExchangeRate > 0
-          ? DateTime.now().toUtc().toIso8601String()
-          : null,
-    }).eq('id', comercioId);
+    await Supabase.instance.client
+        .from('comercios')
+        .update(<String, dynamic>{
+          'branding_ia': _buildBrandingIaPayload(),
+          'exchange_rate_mode': _exchangeRateMode,
+          'exchange_rate_source': _exchangeRateSource,
+          'exchange_rate_quote_currency': quotedCurrency == primaryCurrency
+              ? null
+              : quotedCurrency,
+          'exchange_rate_value': primaryExchangeRate > 0
+              ? primaryExchangeRate
+              : null,
+          'last_rate_update': primaryExchangeRate > 0
+              ? DateTime.now().toUtc().toIso8601String()
+              : null,
+        })
+        .eq('id', comercioId);
   }
 
   Future<void> _syncPaymentMethods(String comercioId) async {
@@ -7272,7 +7386,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     customColors['text_on_primary'] = text;
     merged['colores_personalizados'] = customColors;
 
-  if (merged['schema_version'] == null) {
+    if (merged['schema_version'] == null) {
       merged['schema_version'] = 2;
     }
     if (!merged.containsKey('layout_type')) {
@@ -7329,9 +7443,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   Map<String, dynamic> _paletteFieldsPayload() {
     return <String, dynamic>{
       'menu_palette': _selectedPaletteId,
-      'menu_palette_primary': ColorArgbCodec.fromColor(_paletteSuggestion.primary),
-      'menu_palette_accent': ColorArgbCodec.fromColor(_paletteSuggestion.accent),
-      'menu_palette_surface': ColorArgbCodec.fromColor(_paletteSuggestion.surface),
+      'menu_palette_primary': ColorArgbCodec.fromColor(
+        _paletteSuggestion.primary,
+      ),
+      'menu_palette_accent': ColorArgbCodec.fromColor(
+        _paletteSuggestion.accent,
+      ),
+      'menu_palette_surface': ColorArgbCodec.fromColor(
+        _paletteSuggestion.surface,
+      ),
       'menu_palette_text': ColorArgbCodec.fromColor(_paletteSuggestion.text),
       'color_principal': _colorToHex(_paletteSuggestion.primary),
       'menu_font': _selectedHeadingFont,
@@ -7439,8 +7559,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
       'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
       'negocio_virtual': _isVirtualBusiness,
-      'mostrar_en_directorio_publico':
-          _publicDirectoryUiEnabled ? _showOnPublicDirectory : false,
+      'mostrar_en_directorio_publico': _publicDirectoryUiEnabled
+          ? _showOnPublicDirectory
+          : false,
       'logo_url': (logoUrl != null && logoUrl.trim().isNotEmpty)
           ? logoUrl.trim()
           : null,
@@ -7865,7 +7986,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               backgroundColor: _palette.primary,
                               minimumSize: const Size.fromHeight(50),
                             ),
-                              child: Text(
+                            child: Text(
                               _saving
                                   ? 'Guardando...'
                                   : _isLastStepInFlow
@@ -9416,10 +9537,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   _addressController.text.trim().isEmpty
                       ? 'Sin direccion seleccionada. Abre el mapa y arrastra hasta el punto exacto del negocio.'
                       : _addressController.text.trim(),
-                  style: const TextStyle(
-                    color: _setupTextMedium,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(color: _setupTextMedium, fontSize: 12),
                 ),
                 if (_businessLatitude != null &&
                     _businessLongitude != null) ...[
@@ -9720,18 +9838,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   Widget _buildFinishStep() {
     final base = AppLinks.productionUrl;
     final slug = _normalizeSlug(_slugController.text);
-    final previewTextColor = _palette.surface.computeLuminance() > 0.42
-        ? const Color(0xFF1E1238)
-        : _palette.text;
-    final previewMutedColor = previewTextColor.withValues(alpha: 0.72);
-    final previewCurrency = _selectedCurrencies.isEmpty
-        ? 'USD'
-        : _selectedCurrencies.first;
-    final featuredItems = <Map<String, String>>[
-      {'name': 'Producto destacado', 'price': previewCurrency},
-      {'name': 'Especial de la casa', 'price': previewCurrency},
-      {'name': 'Recomendacion del dia', 'price': previewCurrency},
-    ];
+    final futureUrl = slug.isEmpty ? '$base/v/tu-slug' : '$base/v/$slug';
 
     return SafeArea(
       top: false,
@@ -9756,7 +9863,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Confirma la configuracion antes de guardar. El menu se publicara con esta base inicial.',
+              'Confirma la configuracion antes de guardar. Puedes previsualizar el menu con los datos actuales sin publicarlo.',
               style: TextStyle(color: _setupTextMedium, fontSize: 12),
             ),
             const SizedBox(height: 12),
@@ -9772,8 +9879,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              '$base/v/$slug',
+              futureUrl,
               style: GoogleFonts.poppins(color: _setupTextLow, fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'URL publica disponible despues de guardar y publicar el menu.',
+              style: GoogleFonts.poppins(
+                color: _setupTextLow.withValues(alpha: 0.85),
+                fontSize: 11,
+              ),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -9840,140 +9955,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: _palette.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _palette.primary.withValues(alpha: 0.45),
-                ),
-              ),
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: _palette.primary.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(
-                          Icons.mobile_friendly_rounded,
-                          color: _palette.primary,
-                          size: 18,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Preview aproximado del menu publico',
-                          style: GoogleFonts.poppins(
-                            color: previewTextColor,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _nameController.text.trim().isEmpty
-                              ? 'Tu menu'
-                              : _nameController.text.trim(),
-                          style: _headingFontStyle(
-                            color: previewTextColor,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            _PreviewChip(
-                              label: _selectedCategory,
-                              textColor: previewTextColor,
-                            ),
-                            _PreviewChip(
-                              label: 'Tarjetas',
-                              textColor: previewTextColor,
-                            ),
-                            _PreviewChip(
-                              label: _selectedCurrencies.join(' + '),
-                              textColor: previewTextColor,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        ...featuredItems.map((item) {
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.11),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    item['name']!,
-                                    style: TextStyle(
-                                      color: previewTextColor,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  item['price']!,
-                                  style: TextStyle(
-                                    color: previewMutedColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
-              child: FilledButton.tonalIcon(
-                onPressed: _openDraftPreview,
-                icon: const Icon(Icons.open_in_browser_rounded),
-                label: const Text('Ver preview real'),
+              child: FilledButton.icon(
+                onPressed: _openMenuPreview,
+                icon: const Icon(Icons.visibility_rounded),
+                label: const Text('Vista previa del menu'),
                 style: FilledButton.styleFrom(
                   foregroundColor: const Color(0xFFF8F5FF),
-                  backgroundColor: const Color(0xFF2D2152),
+                  backgroundColor: const Color(0xFF6D28D9),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
             ),
@@ -10949,32 +10941,6 @@ class _SummaryTag extends StatelessWidget {
         style: const TextStyle(
           color: _setupTextHigh,
           fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _PreviewChip extends StatelessWidget {
-  const _PreviewChip({required this.label, required this.textColor});
-
-  final String label;
-  final Color textColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
       ),

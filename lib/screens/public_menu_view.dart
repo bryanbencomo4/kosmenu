@@ -23,11 +23,20 @@ class PublicMenuView extends StatefulWidget {
     required this.comercioId,
     this.assistedMode,
     this.entrySource,
+    this.isPreview = false,
+    this.previewPayload,
   });
 
   final String comercioId;
   final bool? assistedMode;
   final String? entrySource;
+
+  /// When true, skips public API fetch / analytics and blocks persisted orders.
+  final bool isPreview;
+
+  /// In-memory payload with the same shape as [PublicMenuApiService.fetchMenu]:
+  /// `{ comercio, categorias, productos }`.
+  final Map<String, dynamic>? previewPayload;
 
   @override
   State<PublicMenuView> createState() => _PublicMenuViewState();
@@ -63,7 +72,32 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     _isAssistedMode = widget.assistedMode ?? routeParams['mode'] == 'assisted';
     _entrySource = (widget.entrySource ?? routeParams['source'])?.trim();
     _scrollController = ScrollController()..addListener(_handleMenuScroll);
-    _menuFuture = _fetchMenuData();
+    _menuFuture = widget.isPreview
+        ? Future<_PublicMenuData>.value(_parsePreviewOrEmpty())
+        : _fetchMenuData();
+  }
+
+  _PublicMenuData _parsePreviewOrEmpty() {
+    final payload = widget.previewPayload;
+    if (payload == null) {
+      return _PublicMenuData(
+        comercioId: widget.comercioId.trim().isEmpty
+            ? 'preview'
+            : widget.comercioId.trim(),
+        comercioNombre: 'Tu menu',
+        comercioLogoUrl: null,
+        whatsappNumber: null,
+        allowsDelivery: false,
+        comercioAddress: '',
+        businessLatitude: null,
+        businessLongitude: null,
+        tasaCambioPesos: 0,
+        palette: _PublicMenuPalette.fromMenuPalette(null),
+        categories: const <_PublicCategory>[],
+        products: const <_PublicProduct>[],
+      );
+    }
+    return _parseMenuPayload(payload, fallbackComercioId: widget.comercioId);
   }
 
   @override
@@ -78,11 +112,23 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
   Future<_PublicMenuData> _fetchMenuData() async {
     final payload = await PublicMenuApiService().fetchMenu(widget.comercioId);
+    final data = _parseMenuPayload(
+      payload,
+      fallbackComercioId: widget.comercioId,
+    );
+    _syncAiImageRefresh(data.products);
+    return data;
+  }
+
+  _PublicMenuData _parseMenuPayload(
+    Map<String, dynamic> payload, {
+    required String fallbackComercioId,
+  }) {
     final comercioMap = Map<String, dynamic>.from(
       (payload['comercio'] as Map?) ?? const <String, dynamic>{},
     );
     final resolvedComercioId =
-        (comercioMap['id']?.toString() ?? widget.comercioId).trim();
+        (comercioMap['id']?.toString() ?? fallbackComercioId).trim();
 
     final categories = ((payload['categorias'] as List<dynamic>?) ?? const [])
         .map(
@@ -98,10 +144,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
         )
         .toList();
 
-    _syncAiImageRefresh(products);
-
     return _PublicMenuData(
-      comercioId: resolvedComercioId,
+      comercioId: resolvedComercioId.isEmpty ? 'preview' : resolvedComercioId,
       comercioNombre: comercioMap['nombre']?.toString() ?? 'Kosmenu',
       comercioLogoUrl: _resolveComercioLogoUrl(comercioMap),
       whatsappNumber: _normalizePhone(comercioMap['whatsapp']?.toString()),
@@ -125,6 +169,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   }
 
   void _syncAiImageRefresh(List<_PublicProduct> products) {
+    if (widget.isPreview) {
+      return;
+    }
     final hasPendingAiImages = products.any(
       (product) => product.hasAiImageInProgress,
     );
@@ -801,6 +848,20 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   }
 
   Future<void> _openOrderSheet(_PublicMenuData data) async {
+    if (widget.isPreview) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Vista previa. Los pedidos estaran disponibles cuando el menu este publicado.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final cartItems = data.products
         .where((product) => (_cart[product.id] ?? 0) > 0)
         .map(
@@ -1018,7 +1079,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                             selected:
                                 selectedDeliveryMode == _deliveryModeDelivery,
                             onSelected:
-                                checkoutAttempt.isSubmitting || !data.allowsDelivery
+                                checkoutAttempt.isSubmitting ||
+                                    !data.allowsDelivery
                                 ? null
                                 : (_) {
                                     setModalState(
@@ -1275,11 +1337,12 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                 }
                                 final name = file.name;
                                 final mime = _guessComprobanteMime(name);
-                                final error = ComprobanteClientValidator.validate(
-                                  fileName: name,
-                                  mimeType: mime,
-                                  sizeBytes: bytes.length,
-                                );
+                                final error =
+                                    ComprobanteClientValidator.validate(
+                                      fileName: name,
+                                      mimeType: mime,
+                                      sizeBytes: bytes.length,
+                                    );
                                 if (error != null) {
                                   if (!context.mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1303,7 +1366,8 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           ),
                         ),
                       ),
-                      if (checkoutAttempt.isSubmitting && uploadProgress > 0) ...[
+                      if (checkoutAttempt.isSubmitting &&
+                          uploadProgress > 0) ...[
                         const SizedBox(height: 8),
                         LinearProgressIndicator(value: uploadProgress),
                       ],
@@ -1358,11 +1422,13 @@ class _PublicMenuViewState extends State<PublicMenuView> {
 
                                   final localScaffoldMessenger =
                                       ScaffoldMessenger.of(context);
-                                  final clientName =
-                                      clientNameController.text.trim();
+                                  final clientName = clientNameController.text
+                                      .trim();
                                   final clientWhatsapp =
-                                      clientWhatsappController.text
-                                          .replaceAll(RegExp(r'\D'), '');
+                                      clientWhatsappController.text.replaceAll(
+                                        RegExp(r'\D'),
+                                        '',
+                                      );
 
                                   if (clientName.length < 3) {
                                     checkoutAttempt.endSubmit();
@@ -1701,6 +1767,14 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                   RefreshIndicator(
                     color: palette.primary,
                     onRefresh: () async {
+                      if (widget.isPreview) {
+                        final future = Future<_PublicMenuData>.value(
+                          _parsePreviewOrEmpty(),
+                        );
+                        setState(() => _menuFuture = future);
+                        await future;
+                        return;
+                      }
                       final future = _fetchMenuData();
                       setState(() => _menuFuture = future);
                       await future;
@@ -1713,11 +1787,19 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           pinned: true,
                           floating: false,
                           elevation: 0,
-                          expandedHeight: 172,
+                          expandedHeight: widget.isPreview ? 210 : 172,
                           backgroundColor: palette.surface.withValues(
                             alpha: 0.96,
                           ),
                           foregroundColor: palette.onSurface,
+                          leading: Navigator.of(context).canPop()
+                              ? IconButton(
+                                  tooltip: 'Cerrar vista previa',
+                                  onPressed: () =>
+                                      Navigator.of(context).maybePop(),
+                                  icon: const Icon(Icons.close_rounded),
+                                )
+                              : null,
                           title: Text(
                             data.comercioNombre,
                             style: GoogleFonts.manrope(
@@ -1751,6 +1833,36 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                   mainAxisAlignment: MainAxisAlignment.end,
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    if (widget.isPreview)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 7,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.28,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.22,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          'Vista previa. Este menú aún no está publicado.',
+                                          style: GoogleFonts.manrope(
+                                            color: palette.onSurface,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                    if (widget.isPreview)
+                                      const SizedBox(height: 10),
                                     if (_isAssistedMode)
                                       Container(
                                         padding: const EdgeInsets.symmetric(
@@ -1795,7 +1907,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      _isAssistedMode
+                                      widget.isPreview
+                                          ? 'Así se verá tu menú con los datos actuales del onboarding.'
+                                          : _isAssistedMode
                                           ? 'Toca cualquier producto para sumarlo al pedido al instante.'
                                           : 'Explora el menú y arma tu pedido a tu ritmo.',
                                       maxLines: 2,
