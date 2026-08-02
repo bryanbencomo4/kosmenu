@@ -10,7 +10,15 @@ import {
   publicSiteHost,
 } from './app/_lib/public-site-config';
 
-const EXCLUDED_PREFIXES = ['/api', '/_next', '/v', '/orders', '/delivery', '/.well-known'];
+const EXCLUDED_PREFIXES = [
+  '/api',
+  '/_next',
+  '/v',
+  '/preview',
+  '/orders',
+  '/delivery',
+  '/.well-known',
+];
 const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml', ...legalPagePaths]);
 const CANONICAL_HOST = publicSiteHost;
 const CANONICAL_REDIRECT_HOSTS = new Set([
@@ -40,6 +48,10 @@ function isOrderTrackingPath(pathname: string) {
   return /^\/v\/[^/]+\/orders\/[^/]+/.test(pathname);
 }
 
+function isOwnerMenuPreviewPath(pathname?: string) {
+  return Boolean(pathname && pathname.startsWith('/preview/'));
+}
+
 function applySecurityHeaders(response: NextResponse, pathname?: string) {
   if (process.env.NODE_ENV === 'production') {
     response.headers.set(
@@ -47,7 +59,7 @@ function applySecurityHeaders(response: NextResponse, pathname?: string) {
       'max-age=31536000; includeSubDomains; preload',
     );
   }
-  if (process.env.VERCEL_ENV === 'preview') {
+  if (process.env.VERCEL_ENV === 'preview' || isOwnerMenuPreviewPath(pathname)) {
     response.headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
   }
   response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -56,7 +68,16 @@ function applySecurityHeaders(response: NextResponse, pathname?: string) {
     'Referrer-Policy',
     pathname && isOrderTrackingPath(pathname) ? 'no-referrer' : 'strict-origin-when-cross-origin',
   );
-  response.headers.set('X-Frame-Options', 'DENY');
+  // Allow Flutter app (app.elmenuxfa.com) to embed owner preview only.
+  if (isOwnerMenuPreviewPath(pathname)) {
+    response.headers.delete('X-Frame-Options');
+    response.headers.set(
+      'Content-Security-Policy',
+      "frame-ancestors 'self' https://app.elmenuxfa.com http://localhost:* http://127.0.0.1:*",
+    );
+  } else {
+    response.headers.set('X-Frame-Options', 'DENY');
+  }
   return response;
 }
 

@@ -20,13 +20,12 @@ import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
-import 'package:kosmenu_app/screens/public_menu_view.dart';
+import 'package:kosmenu_app/screens/next_menu_preview_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:kosmenu_app/services/business_sectors_service.dart';
 import 'package:kosmenu_app/services/google_places_lookup.dart';
 import 'package:kosmenu_app/services/logo_image_guard.dart';
-import 'package:kosmenu_app/services/onboarding_menu_preview_builder.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:geolocator/geolocator.dart';
@@ -3956,6 +3955,31 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Future<void> _openMenuPreview() async {
+    final comercioId = (_editingComercioId ?? '').trim();
+    if (comercioId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Completa el paso Menu para crear el negocio antes de previsualizar.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final accessToken =
+        Supabase.instance.client.auth.currentSession?.accessToken.trim() ?? '';
+    if (accessToken.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Tu sesion expiro. Vuelve a iniciar sesion para ver la vista previa.',
+          ),
+        ),
+      );
+      return;
+    }
+
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -3969,20 +3993,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
 
     try {
-      final payload = await _buildOnboardingMenuPreviewPayload();
+      await _persistDraftForMenuPreview();
       if (!mounted) {
         return;
       }
       Navigator.of(context, rootNavigator: true).pop();
 
-      final comercioId = (_editingComercioId ?? '').trim();
+      final previewUri = AppLinks.ownerMenuPreviewUri(
+        comercioId: comercioId,
+        accessToken: accessToken,
+      );
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
-          builder: (_) => PublicMenuView(
-            comercioId: comercioId.isEmpty ? 'preview' : comercioId,
-            isPreview: true,
-            previewPayload: payload,
-          ),
+          builder: (_) => NextMenuPreviewScreen(previewUrl: previewUri),
         ),
       );
     } catch (error) {
@@ -4000,78 +4023,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
-  Future<Map<String, dynamic>> _buildOnboardingMenuPreviewPayload() async {
-    final comercioId = (_editingComercioId ?? '').trim();
-    var categories = <Map<String, dynamic>>[];
-    var products = <Map<String, dynamic>>[];
-
-    if (comercioId.isNotEmpty) {
-      final client = Supabase.instance.client;
-      final categoryRows = await client
-          .from('categorias')
-          .select('id, nombre, orden, activo')
-          .eq('comercio_id', comercioId)
-          .order('orden', ascending: true)
-          .order('nombre', ascending: true);
-      final productRows = await client
-          .from('productos')
-          .select(
-            'id, categoria_id, nombre, descripcion, precio, orden, disponible, '
-            'imagen_url, imagen_source_type, ai_image_status, ai_image_error_message',
-          )
-          .eq('comercio_id', comercioId)
-          .order('orden', ascending: true)
-          .order('nombre', ascending: true);
-
-      categories = (categoryRows as List<dynamic>)
-          .map((row) => Map<String, dynamic>.from(row as Map))
-          .where((row) => row['activo'] != false)
-          .toList();
-      final activeCategoryIds = categories
-          .map((row) => row['id']?.toString() ?? '')
-          .where((id) => id.isNotEmpty)
-          .toSet();
-      products = (productRows as List<dynamic>)
-          .map((row) => Map<String, dynamic>.from(row as Map))
-          .where((row) {
-            if (row['disponible'] == false) {
-              return false;
-            }
-            final categoryId = row['categoria_id']?.toString() ?? '';
-            return categoryId.isEmpty || activeCategoryIds.contains(categoryId);
-          })
-          .toList();
+  /// Persists current onboarding branding/ops without publishing (en_linea untouched).
+  Future<void> _persistDraftForMenuPreview() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      throw StateError('Debes iniciar sesion para previsualizar el menu.');
     }
 
-    final quoteCurrency = _selectedCurrencies.contains('VES')
-        ? 'VES'
-        : (_selectedCurrencies.length > 1
-              ? _selectedCurrencies.firstWhere(
-                  (code) => code != _baseCurrency,
-                  orElse: () => _baseCurrency,
-                )
-              : _baseCurrency);
-    final exchangeRate = _effectiveExchangeRateForCurrency(quoteCurrency);
-
-    return OnboardingMenuPreviewBuilder.build(
-      comercioId: comercioId,
-      businessName: _nameController.text,
-      logoUrl: _selectedLogoUrl,
-      category: _selectedCategory,
-      whatsapp: _whatsappE164,
-      allowsDelivery: _allowDelivery,
-      address: _addressController.text,
-      latitude: _businessLatitude,
-      longitude: _businessLongitude,
-      menuPaletteId: _selectedPaletteId,
-      palettePrimaryArgb: ColorArgbCodec.fromColor(_palette.primary),
-      paletteAccentArgb: ColorArgbCodec.fromColor(_palette.accent),
-      paletteSurfaceArgb: ColorArgbCodec.fromColor(_palette.surface),
-      paletteTextArgb: ColorArgbCodec.fromColor(_palette.text),
-      exchangeRateValue: exchangeRate,
-      categories: categories,
-      products: products,
-    );
+    final logoUrl = _selectedLogoUrl.trim().isEmpty
+        ? null
+        : _selectedLogoUrl.trim();
+    await _upsertComercio(user: user, logoUrl: logoUrl);
+    await _persistPaletteChanges();
   }
 
   Future<void> _nextStep() async {

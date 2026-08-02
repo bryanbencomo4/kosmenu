@@ -110,6 +110,27 @@ class AppLinks {
     return publicMenuByComercio(identifier);
   }
 
+  /// Owner-only Next.js preview (same UI as `/v/[id]`, skips publish gate).
+  static String ownerMenuPreviewByComercio(String comercioId) {
+    final base = productionUrl.endsWith('/')
+        ? productionUrl.substring(0, productionUrl.length - 1)
+        : productionUrl;
+    final encodedId = Uri.encodeComponent(comercioId.trim());
+    return '$base/preview/$encodedId';
+  }
+
+  static Uri ownerMenuPreviewUri({
+    required String comercioId,
+    required String accessToken,
+  }) {
+    final base = ownerMenuPreviewByComercio(comercioId);
+    final token = accessToken.trim();
+    if (token.isEmpty) {
+      return Uri.parse(base);
+    }
+    return Uri.parse('$base#access_token=${Uri.encodeComponent(token)}');
+  }
+
   static String orderDetailsById(String orderId, {bool forceWebView = false}) {
     final base = productionUrl.endsWith('/')
         ? productionUrl.substring(0, productionUrl.length - 1)

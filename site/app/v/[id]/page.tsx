@@ -3,7 +3,7 @@
 import Head from 'next/head';
 import { ArrowRight, ArrowUp, ChevronDown, Flame, Info, Mail, MapPin, Menu, MessageCircle, Phone, Share2, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, usePathname, useRouter } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
 import { CurrencyTicker } from './_components/CurrencyTicker';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
@@ -1549,14 +1549,40 @@ function getBrowserCurrentPoint() {
   });
 }
 
+function readOwnerPreviewAccessTokenFromHash() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const rawHash = (window.location.hash ?? '').replace(/^#/, '').trim();
+  if (!rawHash) {
+    return '';
+  }
+
+  const params = new URLSearchParams(rawHash);
+  const token = (params.get('access_token') ?? '').trim();
+  if (token) {
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}`,
+    );
+  }
+  return token;
+}
+
 export default function PublicMenuPage() {
   const params = useParams<{ id: string }>();
+  const pathname = usePathname();
   const router = useRouter();
   const commerceIdentifier = (params?.id ?? '').trim();
+  const isOwnerPreview = (pathname ?? '').startsWith('/preview/');
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDraftMode, setIsDraftMode] = useState(false);
+  const [ownerPreviewToken, setOwnerPreviewToken] = useState<string | null>(null);
+  const [ownerPreviewTokenReady, setOwnerPreviewTokenReady] = useState(!isOwnerPreview);
   const [menuData, setMenuData] = useState<MenuData | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
@@ -1645,9 +1671,25 @@ export default function PublicMenuPage() {
   }, [isConfirmOpen]);
 
   useEffect(() => {
+    if (!isOwnerPreview) {
+      setOwnerPreviewToken(null);
+      setOwnerPreviewTokenReady(true);
+      return;
+    }
+
+    const token = readOwnerPreviewAccessTokenFromHash();
+    setOwnerPreviewToken(token || null);
+    setOwnerPreviewTokenReady(true);
+  }, [isOwnerPreview]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadMenu() {
+      if (!ownerPreviewTokenReady) {
+        return;
+      }
+
       if (!supabaseUrl || !supabaseAnonKey) {
         setError('Faltan NEXT_PUBLIC_SUPABASE_URL y/o NEXT_PUBLIC_SUPABASE_ANON_KEY.');
         setLoading(false);
@@ -1660,25 +1702,36 @@ export default function PublicMenuPage() {
         return;
       }
 
+      if (isOwnerPreview && !ownerPreviewToken) {
+        setError(
+          'Sesion de vista previa invalida. Cierra y vuelve a abrir desde el onboarding.',
+        );
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
 
         const encodedIdentifier = encodeURIComponent(commerceIdentifier);
-        const requestPath = `/api/menu/${encodedIdentifier}`;
+        const requestPath = isOwnerPreview
+          ? `/api/menu/${encodedIdentifier}/preview`
+          : `/api/menu/${encodedIdentifier}`;
+        const requestInit: RequestInit = {
+          method: 'GET',
+          cache: 'no-store',
+          headers: isOwnerPreview
+            ? { Authorization: `Bearer ${ownerPreviewToken}` }
+            : undefined,
+        };
         let response: Response;
 
         try {
-          response = await fetch(requestPath, {
-            method: 'GET',
-            cache: 'no-store',
-          });
+          response = await fetch(requestPath, requestInit);
         } catch {
           // Fallback to absolute URL when relative fetch fails on edge/proxy clients.
-          response = await fetch(`${publicBaseUrl}${requestPath}`, {
-            method: 'GET',
-            cache: 'no-store',
-          });
+          response = await fetch(`${publicBaseUrl}${requestPath}`, requestInit);
         }
 
         const payload = (await response.json().catch(() => ({}))) as {
@@ -1688,7 +1741,7 @@ export default function PublicMenuPage() {
         };
 
         if (!response.ok) {
-          if (response.status === 403) {
+          if (!isOwnerPreview && response.status === 403) {
             const code = (payload.code ?? '').trim();
             if (code === 'MENU_DRAFT_MODE' || code === 'OWNER_EMAIL_NOT_VERIFIED') {
               if (!cancelled) {
@@ -1741,7 +1794,12 @@ export default function PublicMenuPage() {
     return () => {
       cancelled = true;
     };
-  }, [commerceIdentifier]);
+  }, [
+    commerceIdentifier,
+    isOwnerPreview,
+    ownerPreviewToken,
+    ownerPreviewTokenReady,
+  ]);
 
   const categoriasConProductos = useMemo(() => {
     if (!menuData) return [];
@@ -3241,7 +3299,26 @@ export default function PublicMenuPage() {
     };
   }
 
+  function openCheckoutSheet() {
+    if (isOwnerPreview) {
+      window.alert(
+        'Vista previa. Los pedidos estaran disponibles cuando el menu este publicado.',
+      );
+      return;
+    }
+    setCheckoutError(null);
+    setCheckoutStep(0);
+    setIsConfirmOpen(true);
+  }
+
   async function confirmOrder() {
+    if (isOwnerPreview) {
+      setCheckoutError(
+        'Vista previa. Los pedidos no se pueden confirmar aqui.',
+      );
+      return;
+    }
+
     if (
       cartItems.length === 0 ||
       isSubmittingOrder ||
@@ -3690,14 +3767,27 @@ export default function PublicMenuPage() {
         }
       `}</style>
       <main
-        className={`min-h-screen text-slate-900 ${tickerDisplayEntries.length > 0 ? 'pt-9' : ''}`}
+        className={`min-h-screen text-slate-900 ${
+          isOwnerPreview && tickerDisplayEntries.length > 0
+            ? 'pt-[5.5rem]'
+            : isOwnerPreview
+              ? 'pt-12'
+              : tickerDisplayEntries.length > 0
+                ? 'pt-9'
+                : ''
+        }`}
         style={{
           ...containerStyle,
           background: pageBackgroundByPreset(rubroPreset.id),
         }}
       >
+        {isOwnerPreview ? (
+          <div className="fixed inset-x-0 top-0 z-[60] border-b border-amber-300/50 bg-amber-50 px-4 py-2 text-center text-xs font-semibold text-amber-950 sm:text-sm">
+            Vista previa. Este menú aún no está publicado.
+          </div>
+        ) : null}
         {tickerDisplayEntries.length > 0 ? (
-        <section className="fixed inset-x-0 top-0 z-50 border-b border-slate-900/10 bg-slate-950 text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)]">
+        <section className={`fixed inset-x-0 z-50 border-b border-slate-900/10 bg-slate-950 text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)] ${isOwnerPreview ? 'top-10' : 'top-0'}`}>
           <div className="mx-auto flex h-9 max-w-6xl items-center overflow-hidden px-4 sm:px-6">
             <div className="mr-3 shrink-0 rounded-full bg-white/12 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/90">
               Divisas
@@ -3712,7 +3802,12 @@ export default function PublicMenuPage() {
 
         <section
           className="sticky z-40 border-b border-slate-200/90 bg-white/95 backdrop-blur-sm"
-          style={{ top: `${tickerDisplayEntries.length > 0 ? activeTopTickerHeightPx : 0}px` }}
+          style={{
+            top: `${
+              (tickerDisplayEntries.length > 0 ? activeTopTickerHeightPx : 0) +
+              (isOwnerPreview ? 40 : 0)
+            }px`,
+          }}
         >
           <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
@@ -3757,11 +3852,7 @@ export default function PublicMenuPage() {
 
               <button
                 type="button"
-                onClick={() => {
-                  setCheckoutError(null);
-                  setCheckoutStep(0);
-                  setIsConfirmOpen(true);
-                }}
+                onClick={openCheckoutSheet}
                 aria-label={cartCount > 0 ? 'Ver pedido' : 'Carrito vacio'}
                 className="kos-surface-motion kos-pressable kos-hover-subtle relative inline-flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-slate-800 shadow-sm"
               >
@@ -4381,11 +4472,7 @@ export default function PublicMenuPage() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setCheckoutError(null);
-                    setCheckoutStep(0);
-                    setIsConfirmOpen(true);
-                  }}
+                  onClick={openCheckoutSheet}
                   disabled={isSubmittingOrder}
                   className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex min-h-12 items-center gap-2 rounded-2xl bg-[#FACC15] px-4 py-3 text-sm font-black text-slate-950 shadow-[0_16px_32px_rgba(250,204,21,0.28)]"
                 >
