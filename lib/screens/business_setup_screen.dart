@@ -3829,10 +3829,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         catalogId: catalogId,
       );
       final enqueuedJobs = (queued['enqueued_jobs'] as num?)?.toInt() ?? 0;
+      final backendMessage = queued['message']?.toString().trim() ?? '';
       final statusMessage = enqueuedJobs > 0
           ? 'Imagenes IA en cola para $enqueuedJobs productos. Se procesaran en segundo plano.'
-          : (queued['message']?.toString() ??
-                'No habia productos pendientes para generar imagen IA.');
+          : (backendMessage.isNotEmpty
+                ? formatAiImageUserMessage(backendMessage)
+                : 'No habia productos pendientes para generar imagen IA.');
 
       if (!mounted) {
         return;
@@ -3851,10 +3853,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         return;
       }
 
-      final message = error.toString().replaceFirst('Bad state: ', '');
+      final message = formatAiImageUserMessage(
+        error.toString().replaceFirst('Bad state: ', ''),
+      );
+      final isLimit = isAiImageOnboardingLimitMessage(message);
       setState(() {
         _aiImageGenerationMessage = message;
-        _aiImageGenerationMessageIsError = true;
+        _aiImageGenerationMessageIsError = !isLimit;
       });
 
       ScaffoldMessenger.of(

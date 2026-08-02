@@ -94,9 +94,32 @@ Deno.serve(async (req: Request) => {
 
     await enforceAiLimits(supabase, commerceId);
 
-    const state = manualRequest
-      ? null
-      : await enforceAiImageOnboardingLimit(supabase, commerceId);
+    let state = null;
+    if (!manualRequest) {
+      try {
+        state = await enforceAiImageOnboardingLimit(supabase, commerceId);
+      } catch (error) {
+        // Reimport / second opt-in during onboarding: menu import already
+        // succeeded; do not fail the client with 429 for a one-shot image quota.
+        if (error instanceof AiUsageError && error.status === 429) {
+          return jsonResponse(
+            {
+              ok: true,
+              mode: 'queue',
+              commerce_id: commerceId,
+              requested_items: 0,
+              enqueued_jobs: 0,
+              planned_credits_cost: 0,
+              skipped_reason: 'onboarding_image_limit',
+              message:
+                'La generacion de imagenes IA ya se uso una vez en onboarding. El menu se importo bien; no se vuelven a encolar imagenes.',
+            },
+            200,
+          );
+        }
+        throw error;
+      }
+    }
 
     const items = await resolveItems({
       supabase,
@@ -128,10 +151,17 @@ Deno.serve(async (req: Request) => {
     ) {
       return jsonResponse(
         {
-          error: 'AI image limit reached',
-          message: 'AI image generation is only available once during onboarding',
+          ok: true,
+          mode: 'queue',
+          commerce_id: commerceId,
+          requested_items: items.length,
+          enqueued_jobs: 0,
+          planned_credits_cost: 0,
+          skipped_reason: 'onboarding_image_quota',
+          message:
+            'Se alcanzo el tope de imagenes IA del onboarding. El menu se importo bien; no se encolaron imagenes adicionales.',
         },
-        429,
+        200,
       );
     }
 
