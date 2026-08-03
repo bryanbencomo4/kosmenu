@@ -13,6 +13,8 @@ class ProductModel {
   final String imagenSourceType;
   final String aiImageStatus;
   final String? aiImageErrorMessage;
+  final String? upsellBadge;
+  final double? precioComparacion;
 
   const ProductModel({
     required this.id,
@@ -29,12 +31,15 @@ class ProductModel {
     this.imagenSourceType = 'manual',
     this.aiImageStatus = 'none',
     this.aiImageErrorMessage,
+    this.upsellBadge,
+    this.precioComparacion,
   });
 
   factory ProductModel.fromMap(Map<String, dynamic> map) {
     final precioValue = map['precio'];
     final ordenValue = map['orden'];
     final confianzaValue = map['confianza_ia'];
+    final compareValue = map['precio_comparacion'];
 
     return ProductModel(
       id: map['id']?.toString() ?? '',
@@ -55,6 +60,10 @@ class ProductModel {
       imagenSourceType: map['imagen_source_type']?.toString() ?? 'manual',
       aiImageStatus: map['ai_image_status']?.toString() ?? 'none',
       aiImageErrorMessage: map['ai_image_error_message']?.toString(),
+      upsellBadge: _normalizeUpsellBadge(map['upsell_badge']),
+      precioComparacion: compareValue is num
+          ? compareValue.toDouble()
+          : double.tryParse('${map['precio_comparacion']}'),
     );
   }
 
@@ -75,6 +84,10 @@ class ProductModel {
     String? aiImageStatus,
     String? aiImageErrorMessage,
     bool clearAiImageErrorMessage = false,
+    String? upsellBadge,
+    bool clearUpsellBadge = false,
+    double? precioComparacion,
+    bool clearPrecioComparacion = false,
   }) {
     return ProductModel(
       id: id ?? this.id,
@@ -93,6 +106,10 @@ class ProductModel {
       aiImageErrorMessage: clearAiImageErrorMessage
           ? null
           : (aiImageErrorMessage ?? this.aiImageErrorMessage),
+      upsellBadge: clearUpsellBadge ? null : (upsellBadge ?? this.upsellBadge),
+      precioComparacion: clearPrecioComparacion
+          ? null
+          : (precioComparacion ?? this.precioComparacion),
     );
   }
 
@@ -119,6 +136,8 @@ class ProductModel {
       'imagen_source_type': imagenSourceType,
       'ai_image_status': aiImageStatus,
       'ai_image_error_message': aiImageErrorMessage,
+      'upsell_badge': upsellBadge,
+      'precio_comparacion': precioComparacion,
     };
   }
 
@@ -151,5 +170,12 @@ class ProductModel {
     }
 
     return raw;
+  }
+
+  static String? _normalizeUpsellBadge(dynamic value) {
+    final raw = value?.toString().trim().toLowerCase() ?? '';
+    if (raw.isEmpty) return null;
+    const allowed = <String>{'mas_pedido', 'mejor_valor', 'ahorra'};
+    return allowed.contains(raw) ? raw : null;
   }
 }

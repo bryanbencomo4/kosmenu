@@ -45,6 +45,7 @@ const COMERCIO_SELECT = [
   'menu_palette_surface',
   'menu_palette_text',
   'menu_theme_mode',
+  'upsell_config',
   'color_principal',
   'menu_layout',
   'menu_footer',

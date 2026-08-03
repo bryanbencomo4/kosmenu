@@ -9,6 +9,7 @@ type ComboRailProps = {
   formatPrice: (amount: number) => string;
   onAdd: (productId: string) => void;
   titleStyle?: CSSProperties;
+  showDemoLabel?: boolean;
 };
 
 const badgeStyles: Record<ComboRailItem['badge'], { bg: string; fg: string }> = {
@@ -19,7 +20,7 @@ const badgeStyles: Record<ComboRailItem['badge'], { bg: string; fg: string }> = 
 
 const CARD_STEP_PX = 222; // ~210 card + gap
 
-export function ComboRail({ items, formatPrice, onAdd, titleStyle }: ComboRailProps) {
+export function ComboRail({ items, formatPrice, onAdd, titleStyle, showDemoLabel = false }: ComboRailProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
     pointerId: number;
@@ -112,9 +113,11 @@ export function ComboRail({ items, formatPrice, onAdd, titleStyle }: ComboRailPr
           Combos recomendados
         </h2>
         <div className="flex items-center gap-2">
-          <span className="hidden text-[11px] font-semibold sm:inline" style={{ color: 'var(--menu-text-muted)' }}>
-            Demo upsell
-          </span>
+          {showDemoLabel ? (
+            <span className="hidden text-[11px] font-semibold sm:inline" style={{ color: 'var(--menu-text-muted)' }}>
+              Demo upsell
+            </span>
+          ) : null}
           <div className="flex items-center gap-1.5">
             <button
               type="button"

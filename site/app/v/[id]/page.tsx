@@ -14,13 +14,15 @@ import {
   normalizeMenuThemeMode,
 } from './_lib/menu-theme';
 import {
-  buildComboRail,
-  buildCrossSellItems,
-  buildProductNudge,
-  freeDeliveryProgress,
   displayProductImage,
   resolveHeroCover,
 } from './_lib/upsell-heuristics';
+import {
+  parseUpsellConfig,
+  resolveFreeDeliveryProgress,
+  resolveProductNudge,
+  resolveUpsell,
+} from './_lib/resolve-upsell';
 import { UpsellMenuExperience } from './_components/upsell/UpsellMenuExperience';
 
 type CategoriaRow = {
@@ -38,6 +40,8 @@ type ProductoRow = {
   precio?: number | null;
   imagen_url?: string | null;
   disponible?: boolean | null;
+  upsell_badge?: string | null;
+  precio_comparacion?: number | null;
 };
 
 type BrandingConfig = {
@@ -99,6 +103,7 @@ type ComercioRow = {
   menu_palette_surface?: number | string | null;
   menu_palette_text?: number | string | null;
   menu_theme_mode?: string | null;
+  upsell_config?: Record<string, unknown> | string | null;
   color_principal?: string | number | null;
   menu_layout?: string | null;
   menu_font?: string | null;
@@ -2222,26 +2227,41 @@ export default function PublicMenuPage() {
         precio: producto.precio,
         imagen_url: producto.imagen_url,
         disponible: producto.disponible,
+        upsell_badge: producto.upsell_badge,
+        precio_comparacion: producto.precio_comparacion,
       })),
     [menuData?.productos],
+  );
+  const upsellConfig = useMemo(
+    () => parseUpsellConfig(menuData?.comercio.upsell_config),
+    [menuData?.comercio.upsell_config],
   );
   const upsellHeroCover = useMemo(
     () => resolveHeroCover(upsellProducts, comercioLogoUrl) || null,
     [comercioLogoUrl, upsellProducts],
   );
-  const comboRailItems = useMemo(
-    () => buildComboRail(upsellCategories, upsellProducts, comercioLogoUrl),
-    [comercioLogoUrl, upsellCategories, upsellProducts],
-  );
-  const crossSellItems = useMemo(() => {
+  const resolvedUpsell = useMemo(() => {
     const inCart = new Set(Object.keys(cart).filter((id) => (cart[id] ?? 0) > 0));
-    return buildCrossSellItems(upsellCategories, upsellProducts, comercioLogoUrl, inCart);
-  }, [cart, comercioLogoUrl, upsellCategories, upsellProducts]);
+    return resolveUpsell({
+      config: upsellConfig,
+      categories: upsellCategories,
+      products: upsellProducts,
+      logoUrl: comercioLogoUrl,
+      excludeCrossSellIds: inCart,
+    });
+  }, [cart, comercioLogoUrl, upsellCategories, upsellConfig, upsellProducts]);
+  const comboRailItems = resolvedUpsell.comboItems;
+  const crossSellItems = resolvedUpsell.crossSellItems;
   const upsellGridProducts = useMemo(() => {
     const source = visibleCategorias.flatMap((categoria) =>
       categoria.productos.map((producto, index) => ({
         ...producto,
-        nudge: buildProductNudge(producto, upsellCategories, index),
+        nudge: resolveProductNudge(
+          producto,
+          upsellCategories,
+          index,
+          resolvedUpsell.showProductNudges,
+        ),
       })),
     );
     // Prefer products of the active category first for the 2-col grid feel.
@@ -2250,10 +2270,10 @@ export default function PublicMenuPage() {
       visibleCategorias.find((c) => c.id === activeCategoryId)?.productos.some((x) => x.id === p.id),
     );
     return active.length ? active : source;
-  }, [activeCategoryId, upsellCategories, visibleCategorias]);
+  }, [activeCategoryId, resolvedUpsell.showProductNudges, upsellCategories, visibleCategorias]);
   const deliveryProgress = useMemo(
-    () => freeDeliveryProgress(cartTotal),
-    [cartTotal],
+    () => resolveFreeDeliveryProgress(cartTotal, resolvedUpsell.freeDeliveryThreshold),
+    [cartTotal, resolvedUpsell.freeDeliveryThreshold],
   );
   const formatUpsellPrice = (amount: number) =>
     formatAmountByCurrency(
@@ -3923,6 +3943,8 @@ export default function PublicMenuPage() {
             categoryChipRefs.current[id] = element;
           }}
           comboItems={comboRailItems}
+          showDemoUpsellLabel={resolvedUpsell.showDemoLabel}
+          showDemoSocialProof={resolvedUpsell.showDemoLabel}
           gridTitle={
             searchQuery.trim()
               ? 'Resultados'
@@ -3940,7 +3962,9 @@ export default function PublicMenuPage() {
           onDecrement={decrementProduct}
           cartCount={cartCount}
           cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
-          showDeliveryProgress={supportsDelivery && cartCount > 0}
+          showDeliveryProgress={
+            supportsDelivery && cartCount > 0 && deliveryProgress.enabled && resolvedUpsell.showDeliveryProgress
+          }
           freeUnlocked={deliveryProgress.unlocked}
           progressRatio={deliveryProgress.ratio}
           remainingToFreeLabel={
@@ -3948,6 +3972,7 @@ export default function PublicMenuPage() {
               ? null
               : formatUpsellPrice(deliveryProgress.remaining)
           }
+          freeDeliveryDemoLabel={resolvedUpsell.showDemoLabel}
           onContinue={openCheckoutSheet}
           continueDisabled={isSubmittingOrder}
           isPreview={isOwnerPreview}

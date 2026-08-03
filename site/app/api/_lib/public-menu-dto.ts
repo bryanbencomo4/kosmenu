@@ -20,6 +20,7 @@ const PUBLIC_COMERCIO_KEYS = [
   'menu_palette_surface',
   'menu_palette_text',
   'menu_theme_mode',
+  'upsell_config',
   'color_principal',
   'menu_layout',
   'menu_footer',

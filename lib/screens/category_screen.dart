@@ -12,6 +12,7 @@ import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
+import 'package:kosmenu_app/screens/upsell_settings_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/category_icon_ai_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
@@ -1836,6 +1837,17 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     );
   }
 
+  Future<void> _openUpsellSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => UpsellSettingsScreen(
+          products: List<ProductModel>.from(_products),
+          currencyCode: _commerceCurrency,
+        ),
+      ),
+    );
+  }
+
   String _formatAiImageErrorMessage(String? rawMessage) {
     final message = (rawMessage ?? '').trim();
     if (message.isEmpty) {
@@ -2231,6 +2243,16 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               title: 'Nuevo producto',
               subtitle: 'Vende más rápido',
               onTap: _openProductFormDirect,
+              compact: isDesktop,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _QuickActionCard(
+              icon: Icons.local_offer_outlined,
+              title: 'Upselling',
+              subtitle: 'Combos y envío',
+              onTap: _openUpsellSettings,
               compact: isDesktop,
             ),
           ),
@@ -2697,6 +2719,21 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               style: headerOutlinedStyle(
                 foreground: darkText,
                 border: const Color(0xFFE8EAF2),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: disabled ? null : _openUpsellSettings,
+              icon: Icon(Icons.local_offer_outlined, size: 18, color: purple),
+              label: Text(
+                'Upselling',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600,
+                  color: purple,
+                ),
+              ),
+              style: headerOutlinedStyle(
+                foreground: purple,
+                border: purple.withValues(alpha: 0.45),
               ),
             ),
             FilledButton.icon(

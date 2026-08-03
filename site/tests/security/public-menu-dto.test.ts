@@ -20,6 +20,7 @@ describe('public menu DTO', () => {
       menu_palette_primary: -65536,
       menu_palette_accent: 0xff0ea5e9,
       menu_theme_mode: 'dark',
+      upsell_config: { mode: 'custom', combo_product_ids: ['p1'] },
       color_principal: '#DC2626',
     });
 
@@ -29,6 +30,7 @@ describe('public menu DTO', () => {
     expect(dto!.menu_palette_primary).toBe(-65536);
     expect(dto!.menu_palette_accent).toBe(0xff0ea5e9);
     expect(dto!.menu_theme_mode).toBe('dark');
+    expect(dto!.upsell_config).toEqual({ mode: 'custom', combo_product_ids: ['p1'] });
     expect(dto!.color_principal).toBe('#DC2626');
     expect(dto).not.toHaveProperty('owner_id');
     expect(dto).not.toHaveProperty('email');

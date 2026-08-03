@@ -31,6 +31,7 @@ select
   id, slug, nombre, logo_url, whatsapp, direccion, latitud, longitud,
   permite_delivery, en_linea, menu_palette, menu_palette_primary,
   menu_palette_accent, menu_palette_surface, menu_palette_text,
+  menu_theme_mode, upsell_config,
   menu_layout, menu_footer, moneda, tasa_cambio_pesos, exchange_rate_value
 from public.comercios
 where en_linea = true;

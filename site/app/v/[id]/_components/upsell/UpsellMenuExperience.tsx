@@ -31,6 +31,7 @@ type UpsellMenuExperienceProps = {
   onSelectCategory: (id: string) => void;
   setChipRef: (id: string) => RefCallback<HTMLButtonElement>;
   comboItems: ComboRailItem[];
+  showDemoUpsellLabel?: boolean;
   gridTitle: string;
   gridProducts: UpsellGridProduct[];
   crossSellItems: CrossSellItem[];
@@ -46,11 +47,13 @@ type UpsellMenuExperienceProps = {
   freeUnlocked: boolean;
   progressRatio: number;
   remainingToFreeLabel: string | null;
+  freeDeliveryDemoLabel?: boolean;
   onContinue: () => void;
   continueDisabled?: boolean;
   isPreview?: boolean;
   emptyMessage?: string | null;
   titleStyle?: CSSProperties;
+  showDemoSocialProof?: boolean;
 };
 
 export function UpsellMenuExperience({
@@ -70,6 +73,7 @@ export function UpsellMenuExperience({
   onSelectCategory,
   setChipRef,
   comboItems,
+  showDemoUpsellLabel = false,
   gridTitle,
   gridProducts,
   crossSellItems,
@@ -85,11 +89,13 @@ export function UpsellMenuExperience({
   freeUnlocked,
   progressRatio,
   remainingToFreeLabel,
+  freeDeliveryDemoLabel = false,
   onContinue,
   continueDisabled,
   isPreview,
   emptyMessage,
   titleStyle,
+  showDemoSocialProof = false,
 }: UpsellMenuExperienceProps) {
   return (
     <>
@@ -101,6 +107,7 @@ export function UpsellMenuExperience({
         supportsDelivery={supportsDelivery}
         locationLabel={locationLabel}
         titleStyle={titleStyle}
+        showDemoSocialProof={showDemoSocialProof}
       />
 
       <section
@@ -184,6 +191,7 @@ export function UpsellMenuExperience({
           formatPrice={formatPrice}
           onAdd={onAdd}
           titleStyle={titleStyle}
+          showDemoLabel={showDemoUpsellLabel}
         />
       ) : null}
 
@@ -230,6 +238,7 @@ export function UpsellMenuExperience({
         freeUnlocked={freeUnlocked}
         progressRatio={progressRatio}
         remainingToFreeLabel={remainingToFreeLabel}
+        demoLabel={freeDeliveryDemoLabel}
         onContinue={onContinue}
         disabled={continueDisabled}
         isPreview={isPreview}

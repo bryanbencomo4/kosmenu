@@ -7,6 +7,7 @@ type UpsellCartFooterProps = {
   freeUnlocked?: boolean;
   progressRatio?: number;
   showDeliveryProgress?: boolean;
+  demoLabel?: boolean;
   disabled?: boolean;
   onContinue: () => void;
   isPreview?: boolean;
@@ -19,6 +20,7 @@ export function UpsellCartFooter({
   freeUnlocked,
   progressRatio = 0,
   showDeliveryProgress,
+  demoLabel = false,
   disabled,
   onContinue,
   isPreview,
@@ -47,7 +49,9 @@ export function UpsellCartFooter({
           >
             <p className="text-[11px] font-bold" style={{ color: 'var(--menu-text)' }}>
               {freeUnlocked
-                ? '¡Envío gratis desbloqueado! (demo)'
+                ? demoLabel
+                  ? '¡Envío gratis desbloqueado! (demo)'
+                  : '¡Envío gratis desbloqueado!'
                 : remainingToFreeLabel
                   ? `Te faltan ${remainingToFreeLabel} para envío gratis`
                   : 'Progreso de envío gratis'}

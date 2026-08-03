@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
+import 'package:kosmenu_app/models/upsell_config.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
@@ -41,11 +42,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _priceController = TextEditingController();
+  final _compareAtPriceController = TextEditingController();
   final _picker = ImagePicker();
   final WebCameraHandoffService _webCameraHandoffService =
       const WebCameraHandoffService();
 
   String? _selectedCategoryId;
+  String? _upsellBadge;
   String? _remoteImageUrl;
   String? _businessLogoUrl;
   String? _businessCategory;
@@ -75,6 +78,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _priceController.text = product != null
         ? product.precio.toStringAsFixed(2)
         : '';
+    _compareAtPriceController.text = product?.precioComparacion != null
+        ? product!.precioComparacion!.toStringAsFixed(2)
+        : '';
+    _upsellBadge = UpsellBadge.normalize(product?.upsellBadge);
     _selectedCategoryId =
         product?.categoriaId ??
         widget.initialCategoryId ??
@@ -90,6 +97,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _nameController.dispose();
     _descriptionController.dispose();
     _priceController.dispose();
+    _compareAtPriceController.dispose();
     super.dispose();
   }
 
@@ -1018,6 +1026,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         finalImageUrl = await _uploadImage(_pickedImage!);
       }
 
+      final compareRaw = _compareAtPriceController.text.trim().replaceAll(',', '.');
+      final compareParsed = compareRaw.isEmpty ? null : double.tryParse(compareRaw);
+      final compareAtBase = compareParsed == null
+          ? null
+          : _convertToBaseCurrency(
+              value: compareParsed,
+              fromCurrency: _selectedPriceCurrency,
+            );
+
       final payload = <String, dynamic>{
         'comercio_id': SupabaseConfig.currentComercioId,
         'categoria_id': _selectedCategoryId,
@@ -1028,6 +1045,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           fromCurrency: _selectedPriceCurrency,
         ),
         'imagen_url': finalImageUrl,
+        'upsell_badge': UpsellBadge.normalize(_upsellBadge),
+        'precio_comparacion': compareAtBase,
       };
 
       if (widget.isEditing) {
@@ -1218,6 +1237,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   nameController: _nameController,
                   descriptionController: _descriptionController,
                   priceController: _priceController,
+                  compareAtPriceController: _compareAtPriceController,
+                  upsellBadge: _upsellBadge,
+                  onUpsellBadgeChanged: (value) =>
+                      setState(() => _upsellBadge = value),
                   isEditing: widget.isEditing,
                   validateCategory: _validateCategory,
                   validateName: _validateName,
@@ -1658,6 +1681,9 @@ class _FormPanel extends StatelessWidget {
     required this.nameController,
     required this.descriptionController,
     required this.priceController,
+    required this.compareAtPriceController,
+    required this.upsellBadge,
+    required this.onUpsellBadgeChanged,
     required this.isEditing,
     required this.validateCategory,
     required this.validateName,
@@ -1680,6 +1706,9 @@ class _FormPanel extends StatelessWidget {
   final TextEditingController nameController;
   final TextEditingController descriptionController;
   final TextEditingController priceController;
+  final TextEditingController compareAtPriceController;
+  final String? upsellBadge;
+  final ValueChanged<String?> onUpsellBadgeChanged;
   final bool isEditing;
   final bool isGeneratingDescription;
   final FormFieldValidator<String> validateCategory;
@@ -1949,6 +1978,47 @@ class _FormPanel extends StatelessWidget {
                     ),
                   );
                 },
+              ),
+              const SizedBox(height: 18),
+              fieldLabel('Upselling'),
+              DropdownButtonFormField<String?>(
+                key: ValueKey<String?>('upsell-badge-$upsellBadge'),
+                initialValue: upsellBadge,
+                isExpanded: true,
+                items: <DropdownMenuItem<String?>>[
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Sin badge'),
+                  ),
+                  ...UpsellBadge.values.map(
+                    (value) => DropdownMenuItem<String?>(
+                      value: value,
+                      child: Text(UpsellBadge.label(value)),
+                    ),
+                  ),
+                ],
+                onChanged: isSaving ? null : onUpsellBadgeChanged,
+                decoration: const InputDecoration(
+                  labelText: 'Badge en combos',
+                  hintText: 'Opcional',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: compareAtPriceController,
+                enabled: !isSaving,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                style: GoogleFonts.manrope(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Precio anterior (tachado)',
+                  hintText: 'Opcional',
+                  prefixText: '\$ ',
+                ),
               ),
               const SizedBox(height: 16),
               SizedBox(

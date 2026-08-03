@@ -78,7 +78,7 @@ export type ComboRailItem = {
 };
 
 const BADGES: Array<ComboRailItem['badge']> = ['mas_pedido', 'mejor_valor', 'ahorra'];
-const BADGE_LABELS: Record<ComboRailItem['badge'], string> = {
+export const BADGE_LABELS: Record<ComboRailItem['badge'], string> = {
   mas_pedido: 'Más pedido',
   mejor_valor: 'Mejor valor',
   ahorra: 'Ahorra',
