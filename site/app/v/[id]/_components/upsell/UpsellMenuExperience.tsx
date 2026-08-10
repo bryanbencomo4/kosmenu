@@ -2,11 +2,9 @@
 
 import type { CSSProperties, Ref, RefCallback } from 'react';
 import { UpsellHeroCard } from './UpsellHeroCard';
-import { ComboRail } from './ComboRail';
+import { BundleRail, type BundleRailItem } from './BundleRail';
 import { UpsellProductGrid, type UpsellGridProduct } from './UpsellProductGrid';
-import { CrossSellRail } from './CrossSellRail';
 import { UpsellCartFooter } from './UpsellCartFooter';
-import type { ComboRailItem, CrossSellItem } from '../../_lib/upsell-heuristics';
 
 export type UpsellCategoryTab = {
   id: string;
@@ -19,7 +17,6 @@ type UpsellMenuExperienceProps = {
   subtitle: string;
   coverUrl?: string | null;
   logoUrl?: string | null;
-  supportsDelivery: boolean;
   locationLabel?: string | null;
   stickyTopPx: number;
   stickySearchCardRef?: Ref<HTMLDivElement | null>;
@@ -30,11 +27,10 @@ type UpsellMenuExperienceProps = {
   activeCategoryId: string | null;
   onSelectCategory: (id: string) => void;
   setChipRef: (id: string) => RefCallback<HTMLButtonElement>;
-  comboItems: ComboRailItem[];
-  showDemoUpsellLabel?: boolean;
+  bundleItems: BundleRailItem[];
+  onAddBundle: (bundleId: string) => void;
   gridTitle: string;
   gridProducts: UpsellGridProduct[];
-  crossSellItems: CrossSellItem[];
   getQuantity: (id: string) => number;
   formatPrice: (amount: number) => string;
   resolveImage: (url?: string | null) => string | null;
@@ -47,13 +43,11 @@ type UpsellMenuExperienceProps = {
   freeUnlocked: boolean;
   progressRatio: number;
   remainingToFreeLabel: string | null;
-  freeDeliveryDemoLabel?: boolean;
   onContinue: () => void;
   continueDisabled?: boolean;
   isPreview?: boolean;
   emptyMessage?: string | null;
   titleStyle?: CSSProperties;
-  showDemoSocialProof?: boolean;
 };
 
 export function UpsellMenuExperience({
@@ -61,7 +55,6 @@ export function UpsellMenuExperience({
   subtitle,
   coverUrl,
   logoUrl,
-  supportsDelivery,
   locationLabel,
   stickyTopPx,
   stickySearchCardRef,
@@ -72,11 +65,10 @@ export function UpsellMenuExperience({
   activeCategoryId,
   onSelectCategory,
   setChipRef,
-  comboItems,
-  showDemoUpsellLabel = false,
+  bundleItems,
+  onAddBundle,
   gridTitle,
   gridProducts,
-  crossSellItems,
   getQuantity,
   formatPrice,
   resolveImage,
@@ -89,13 +81,11 @@ export function UpsellMenuExperience({
   freeUnlocked,
   progressRatio,
   remainingToFreeLabel,
-  freeDeliveryDemoLabel = false,
   onContinue,
   continueDisabled,
   isPreview,
   emptyMessage,
   titleStyle,
-  showDemoSocialProof = false,
 }: UpsellMenuExperienceProps) {
   return (
     <>
@@ -104,10 +94,8 @@ export function UpsellMenuExperience({
         subtitle={subtitle}
         coverUrl={coverUrl}
         logoUrl={logoUrl}
-        supportsDelivery={supportsDelivery}
         locationLabel={locationLabel}
         titleStyle={titleStyle}
-        showDemoSocialProof={showDemoSocialProof}
       />
 
       <section
@@ -186,13 +174,7 @@ export function UpsellMenuExperience({
       </section>
 
       {!searchQuery.trim() ? (
-        <ComboRail
-          items={comboItems}
-          formatPrice={formatPrice}
-          onAdd={onAdd}
-          titleStyle={titleStyle}
-          showDemoLabel={showDemoUpsellLabel}
-        />
+        <BundleRail items={bundleItems} formatPrice={formatPrice} onAdd={onAddBundle} titleStyle={titleStyle} />
       ) : null}
 
       {emptyMessage ? (
@@ -220,15 +202,6 @@ export function UpsellMenuExperience({
         />
       )}
 
-      {!searchQuery.trim() ? (
-        <CrossSellRail
-          items={crossSellItems}
-          formatPrice={formatPrice}
-          onAdd={onAdd}
-          titleStyle={titleStyle}
-        />
-      ) : null}
-
       <div className="h-36" />
 
       <UpsellCartFooter
@@ -238,7 +211,6 @@ export function UpsellMenuExperience({
         freeUnlocked={freeUnlocked}
         progressRatio={progressRatio}
         remainingToFreeLabel={remainingToFreeLabel}
-        demoLabel={freeDeliveryDemoLabel}
         onContinue={onContinue}
         disabled={continueDisabled}
         isPreview={isPreview}

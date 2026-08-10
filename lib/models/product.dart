@@ -15,6 +15,7 @@ class ProductModel {
   final String? aiImageErrorMessage;
   final String? upsellBadge;
   final double? precioComparacion;
+  final bool upsellEnabled;
 
   const ProductModel({
     required this.id,
@@ -33,6 +34,7 @@ class ProductModel {
     this.aiImageErrorMessage,
     this.upsellBadge,
     this.precioComparacion,
+    this.upsellEnabled = true,
   });
 
   factory ProductModel.fromMap(Map<String, dynamic> map) {
@@ -64,6 +66,9 @@ class ProductModel {
       precioComparacion: compareValue is num
           ? compareValue.toDouble()
           : double.tryParse('${map['precio_comparacion']}'),
+      upsellEnabled: map['upsell_enabled'] is bool
+          ? map['upsell_enabled'] as bool
+          : true,
     );
   }
 
@@ -88,6 +93,7 @@ class ProductModel {
     bool clearUpsellBadge = false,
     double? precioComparacion,
     bool clearPrecioComparacion = false,
+    bool? upsellEnabled,
   }) {
     return ProductModel(
       id: id ?? this.id,
@@ -110,6 +116,7 @@ class ProductModel {
       precioComparacion: clearPrecioComparacion
           ? null
           : (precioComparacion ?? this.precioComparacion),
+      upsellEnabled: upsellEnabled ?? this.upsellEnabled,
     );
   }
 
@@ -138,6 +145,7 @@ class ProductModel {
       'ai_image_error_message': aiImageErrorMessage,
       'upsell_badge': upsellBadge,
       'precio_comparacion': precioComparacion,
+      'upsell_enabled': upsellEnabled,
     };
   }
 

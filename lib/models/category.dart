@@ -8,6 +8,7 @@ class CategoryModel {
   final String? icono;
   final bool? creadoPorIa;
   final double? confianzaIa;
+  final String? rol;
 
   const CategoryModel({
     required this.id,
@@ -19,7 +20,40 @@ class CategoryModel {
     this.icono,
     this.creadoPorIa,
     this.confianzaIa,
+    this.rol,
   });
+
+  /// Roles used for cold-start cross-sell templates.
+  static const List<String> roles = [
+    'main',
+    'drink',
+    'side',
+    'dessert',
+    'extra',
+    'combo',
+    'other',
+  ];
+
+  static String roleLabel(String? role) {
+    switch (role) {
+      case 'main':
+        return 'Plato principal';
+      case 'drink':
+        return 'Bebida';
+      case 'side':
+        return 'Acompañante';
+      case 'dessert':
+        return 'Postre';
+      case 'extra':
+        return 'Extra';
+      case 'combo':
+        return 'Combo';
+      case 'other':
+        return 'Otro';
+      default:
+        return 'Sin definir';
+    }
+  }
 
   factory CategoryModel.fromMap(Map<String, dynamic> map) {
     final ordenValue = map['orden'];
@@ -37,6 +71,7 @@ class CategoryModel {
       confianzaIa: confianzaValue is num
           ? confianzaValue.toDouble()
           : double.tryParse('${map['confianza_ia']}'),
+      rol: map['rol']?.toString(),
     );
   }
 
@@ -55,7 +90,23 @@ class CategoryModel {
       'icono': icono,
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,
+      'rol': rol,
     };
+  }
+
+  CategoryModel copyWith({String? rol, bool clearRol = false}) {
+    return CategoryModel(
+      id: id,
+      comercioId: comercioId,
+      catalogoId: catalogoId,
+      nombre: nombre,
+      orden: orden,
+      activo: activo,
+      icono: icono,
+      creadoPorIa: creadoPorIa,
+      confianzaIa: confianzaIa,
+      rol: clearRol ? null : (rol ?? this.rol),
+    );
   }
 
   Map<String, dynamic> toJson() {

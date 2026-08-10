@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Heart } from 'lucide-react';
-import type { ProductNudge } from '../../_lib/upsell-heuristics';
 
 export type UpsellGridProduct = {
   id: string;
@@ -12,7 +11,6 @@ export type UpsellGridProduct = {
   precio?: number | null;
   imagen_url?: string | null;
   disponible?: boolean | null;
-  nudge: ProductNudge | null;
 };
 
 type UpsellProductGridProps = {
@@ -26,15 +24,6 @@ type UpsellProductGridProps = {
   onDecrement: (id: string) => void;
   titleStyle?: CSSProperties;
 };
-
-function nudgeColors(accent: ProductNudge['accent']) {
-  if (accent === 'green') return { bg: 'rgba(22,163,74,0.12)', fg: '#15803D' };
-  if (accent === 'orange') return { bg: 'rgba(234,88,12,0.12)', fg: '#C2410C' };
-  return {
-    bg: 'color-mix(in srgb, var(--menu-primary) 14%, transparent)',
-    fg: 'var(--menu-primary)',
-  };
-}
 
 export function UpsellProductGrid({
   title,
@@ -91,8 +80,6 @@ function UpsellProductTile({
 }) {
   const [failed, setFailed] = useState(false);
   const unavailable = product.disponible === false || (product.precio ?? 0) <= 0;
-  const nudge = product.nudge;
-  const nudgeStyle = nudge ? nudgeColors(nudge.accent) : null;
 
   return (
     <article
@@ -179,20 +166,6 @@ function UpsellProductTile({
           )}
         </div>
       </div>
-
-      {nudge && nudgeStyle ? (
-        <div
-          className="border-t px-2.5 py-1.5 text-center text-[10px] font-bold leading-tight"
-          style={{
-            backgroundColor: nudgeStyle.bg,
-            color: nudgeStyle.fg,
-            borderColor: 'var(--menu-border)',
-          }}
-        >
-          {nudge.kind === 'drink' ? '+ ' : ''}
-          {nudge.label}
-        </div>
-      ) : null}
     </article>
   );
 }

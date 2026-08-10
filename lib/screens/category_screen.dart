@@ -12,7 +12,7 @@ import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
-import 'package:kosmenu_app/screens/upsell_settings_screen.dart';
+import 'package:kosmenu_app/screens/boost_sales_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/category_icon_ai_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
@@ -1840,7 +1840,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   Future<void> _openUpsellSettings() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => UpsellSettingsScreen(
+        builder: (_) => BoostSalesScreen(
+          categories: List<CategoryModel>.from(_categories),
           products: List<ProductModel>.from(_products),
           currencyCode: _commerceCurrency,
         ),
@@ -2250,8 +2251,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           Expanded(
             child: _QuickActionCard(
               icon: Icons.local_offer_outlined,
-              title: 'Upselling',
-              subtitle: 'Combos y envío',
+              title: 'Aumentar ventas',
+              subtitle: 'Reglas, combos y envío',
               onTap: _openUpsellSettings,
               compact: isDesktop,
             ),
@@ -2725,7 +2726,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               onPressed: disabled ? null : _openUpsellSettings,
               icon: Icon(Icons.local_offer_outlined, size: 18, color: purple),
               label: Text(
-                'Upselling',
+                'Aumentar ventas',
                 style: GoogleFonts.poppins(
                   fontWeight: FontWeight.w600,
                   color: purple,

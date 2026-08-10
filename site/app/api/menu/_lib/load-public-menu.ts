@@ -25,6 +25,9 @@ export type LoadedPublicMenu = {
   productos: unknown[];
   metodosPago: ReturnType<typeof toPublicMetodosPagoDto>;
   marketRates: unknown;
+  upsellSettings: Record<string, unknown> | null;
+  upsellRules: unknown[];
+  bundles: unknown[];
 };
 
 const COMERCIO_SELECT = [
@@ -45,7 +48,6 @@ const COMERCIO_SELECT = [
   'menu_palette_surface',
   'menu_palette_text',
   'menu_theme_mode',
-  'upsell_config',
   'color_principal',
   'menu_layout',
   'menu_footer',
@@ -102,29 +104,51 @@ export async function loadPublicMenuByIdentifier(
   const isOnline = comercioRow.en_linea !== false;
   const comercio = toPublicComercioDto(comercioRow);
 
-  const [categoriasResult, productosResult, metodosPagoResult, marketRatesResult] =
-    await Promise.all([
-      supabase
-        .from('categorias')
-        .select('*')
-        .eq('comercio_id', resolvedComercioId)
-        .order('orden', { ascending: true }),
-      supabase
-        .from('productos')
-        .select('*')
-        .eq('comercio_id', resolvedComercioId)
-        .order('nombre', { ascending: true }),
-      supabase
-        .from('metodos_pago')
-        .select('id,comercio_id,nombre,tipo,descripcion,detalles')
-        .eq('comercio_id', resolvedComercioId),
-      supabase
-        .from('global_market_rates')
-        .select('bcv_rate, p2p_binance_rate, payload, updated_at')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+  const [
+    categoriasResult,
+    productosResult,
+    metodosPagoResult,
+    marketRatesResult,
+    upsellSettingsResult,
+    upsellRulesResult,
+    bundlesResult,
+  ] = await Promise.all([
+    supabase
+      .from('categorias')
+      .select('*')
+      .eq('comercio_id', resolvedComercioId)
+      .order('orden', { ascending: true }),
+    supabase
+      .from('productos')
+      .select('*')
+      .eq('comercio_id', resolvedComercioId)
+      .order('nombre', { ascending: true }),
+    supabase
+      .from('metodos_pago')
+      .select('id,comercio_id,nombre,tipo,descripcion,detalles')
+      .eq('comercio_id', resolvedComercioId),
+    supabase
+      .from('global_market_rates')
+      .select('bcv_rate, p2p_binance_rate, payload, updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('upsell_settings')
+      .select('*')
+      .eq('comercio_id', resolvedComercioId)
+      .maybeSingle(),
+    supabase
+      .from('upsell_rules')
+      .select('*, upsell_rule_targets(*)')
+      .eq('comercio_id', resolvedComercioId)
+      .eq('enabled', true),
+    supabase
+      .from('bundles')
+      .select('*, bundle_items(*)')
+      .eq('comercio_id', resolvedComercioId)
+      .eq('enabled', true),
+  ]);
 
   if (categoriasResult.error) {
     throw new Error(categoriasResult.error.message);
@@ -137,6 +161,15 @@ export async function loadPublicMenuByIdentifier(
   }
   if (marketRatesResult.error) {
     throw new Error(marketRatesResult.error.message);
+  }
+  if (upsellSettingsResult.error) {
+    throw new Error(upsellSettingsResult.error.message);
+  }
+  if (upsellRulesResult.error) {
+    throw new Error(upsellRulesResult.error.message);
+  }
+  if (bundlesResult.error) {
+    throw new Error(bundlesResult.error.message);
   }
 
   const productos = (productosResult.data ?? []).filter((producto: ProductoRow) => {
@@ -156,6 +189,9 @@ export async function loadPublicMenuByIdentifier(
     productos,
     metodosPago: toPublicMetodosPagoDto(metodosPagoResult.data ?? []),
     marketRates: marketRatesResult.data ?? null,
+    upsellSettings: (upsellSettingsResult.data ?? null) as Record<string, unknown> | null,
+    upsellRules: upsellRulesResult.data ?? [],
+    bundles: bundlesResult.data ?? [],
   };
 }
 
@@ -168,6 +204,9 @@ export function toPublicMenuResponseBody(menu: LoadedPublicMenu) {
       productos: menu.productos,
       metodosPago: menu.metodosPago,
       marketRates: menu.marketRates,
+      upsellSettings: menu.upsellSettings,
+      upsellRules: menu.upsellRules,
+      bundles: menu.bundles,
     },
   };
 }

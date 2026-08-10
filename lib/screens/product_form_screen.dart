@@ -49,6 +49,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   String? _selectedCategoryId;
   String? _upsellBadge;
+  bool _upsellEnabled = true;
   String? _remoteImageUrl;
   String? _businessLogoUrl;
   String? _businessCategory;
@@ -82,6 +83,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         ? product!.precioComparacion!.toStringAsFixed(2)
         : '';
     _upsellBadge = UpsellBadge.normalize(product?.upsellBadge);
+    _upsellEnabled = product?.upsellEnabled ?? true;
     _selectedCategoryId =
         product?.categoriaId ??
         widget.initialCategoryId ??
@@ -1047,6 +1049,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         'imagen_url': finalImageUrl,
         'upsell_badge': UpsellBadge.normalize(_upsellBadge),
         'precio_comparacion': compareAtBase,
+        'upsell_enabled': _upsellEnabled,
       };
 
       if (widget.isEditing) {
@@ -1241,6 +1244,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   upsellBadge: _upsellBadge,
                   onUpsellBadgeChanged: (value) =>
                       setState(() => _upsellBadge = value),
+                  upsellEnabled: _upsellEnabled,
+                  onUpsellEnabledChanged: (value) =>
+                      setState(() => _upsellEnabled = value),
                   isEditing: widget.isEditing,
                   validateCategory: _validateCategory,
                   validateName: _validateName,
@@ -1684,6 +1690,8 @@ class _FormPanel extends StatelessWidget {
     required this.compareAtPriceController,
     required this.upsellBadge,
     required this.onUpsellBadgeChanged,
+    required this.upsellEnabled,
+    required this.onUpsellEnabledChanged,
     required this.isEditing,
     required this.validateCategory,
     required this.validateName,
@@ -1709,6 +1717,8 @@ class _FormPanel extends StatelessWidget {
   final TextEditingController compareAtPriceController;
   final String? upsellBadge;
   final ValueChanged<String?> onUpsellBadgeChanged;
+  final bool upsellEnabled;
+  final ValueChanged<bool> onUpsellEnabledChanged;
   final bool isEditing;
   final bool isGeneratingDescription;
   final FormFieldValidator<String> validateCategory;
@@ -2018,6 +2028,20 @@ class _FormPanel extends StatelessWidget {
                   labelText: 'Precio anterior (tachado)',
                   hintText: 'Opcional',
                   prefixText: '\$ ',
+                ),
+              ),
+              const SizedBox(height: 10),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: upsellEnabled,
+                onChanged: isSaving ? null : onUpsellEnabledChanged,
+                title: Text(
+                  'Incluir en sugerencias de venta adicional',
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5),
+                ),
+                subtitle: Text(
+                  'Si lo apagas, este producto nunca aparece como sugerencia aunque una regla lo incluya.',
+                  style: GoogleFonts.manrope(fontSize: 11.5, color: colorScheme.onSurfaceVariant),
                 ),
               ),
               const SizedBox(height: 16),
