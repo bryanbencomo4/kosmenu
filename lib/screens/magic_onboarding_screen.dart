@@ -431,7 +431,7 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'El formato HEIC no es compatible. Usa JPG o PNG (en iPhone: Ajustes → Cámara → Formatos → Más compatible).',
+              'El formato HEIC no es compatible. Usa JPG o PNG (en iPhone: Ajustes -> Cámara -> Formatos -> Más compatible).',
             ),
           ),
         );

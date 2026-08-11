@@ -41,6 +41,8 @@ class _BoostSalesRulesScreenState extends State<BoostSalesRulesScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    List<UpsellRuleModel> rules = [];
+    Object? loadError;
     try {
       final comercioId = SupabaseConfig.currentComercioId.trim();
       final rows = await Supabase.instance.client
@@ -49,7 +51,7 @@ class _BoostSalesRulesScreenState extends State<BoostSalesRulesScreen> {
           .eq('comercio_id', comercioId)
           .order('created_at');
 
-      final rules = (rows as List<dynamic>).map((row) {
+      rules = (rows as List<dynamic>).map((row) {
         final map = row as Map<String, dynamic>;
         final targets = (map['upsell_rule_targets'] as List<dynamic>? ?? [])
             .map((t) => UpsellRuleTarget.fromMap(t as Map<String, dynamic>))
@@ -57,17 +59,24 @@ class _BoostSalesRulesScreenState extends State<BoostSalesRulesScreen> {
           ..sort((a, b) => a.position.compareTo(b.position));
         return UpsellRuleModel.fromMap(map, targets: targets);
       }).toList();
-
-      if (!mounted) return;
-      setState(() {
-        _rules = rules;
-        _loading = false;
-      });
     } catch (error) {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      loadError = error;
+    }
+    // Wait for any in-flight GoogleFonts (Poppins) downloads before the first
+    // real paint. On web/CanvasKit, painting text while a font is still being
+    // fetched can leave a paragraph with corrupted layout (one glyph per
+    // line) that never self-corrects once the font arrives.
+    try {
+      await GoogleFonts.pendingFonts();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _rules = rules;
+      _loading = false;
+    });
+    if (loadError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudieron cargar las reglas: $error')),
+        SnackBar(content: Text('No se pudieron cargar las reglas: $loadError')),
       );
     }
   }
@@ -83,7 +92,7 @@ class _BoostSalesRulesScreenState extends State<BoostSalesRulesScreen> {
       case 'cart':
         return 'El carrito';
       default:
-        return '—';
+        return '-';
     }
   }
 
@@ -188,9 +197,27 @@ class _BoostSalesRulesScreenState extends State<BoostSalesRulesScreen> {
                             Row(
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    '${_triggerLabel(rule)} → ${_targetsLabel(rule)}',
-                                    style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
+                                  child: Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          _triggerLabel(rule),
+                                          style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 6),
+                                        child: Icon(Icons.arrow_forward_rounded, size: 15, color: Color(0xFF6B7280)),
+                                      ),
+                                      Flexible(
+                                        child: Text(
+                                          _targetsLabel(rule),
+                                          style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 Switch.adaptive(
@@ -307,7 +334,7 @@ class _RuleEditorScreenState extends State<_RuleEditorScreen> {
         .map((t) => t.targetType == 'product' ? products[t.productId] : categories[t.categoryId])
         .whereType<String>()
         .join(', ');
-    return targetNames.isEmpty ? triggerName : '$triggerName → $targetNames';
+    return targetNames.isEmpty ? triggerName : '$triggerName -> $targetNames';
   }
 
   bool get _canSave {

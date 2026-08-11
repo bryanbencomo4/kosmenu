@@ -9,7 +9,15 @@ class _RoleTemplate {
   final String fromRole;
   final String toRole;
 
-  String get label => '${CategoryModel.roleLabel(fromRole)} → ${CategoryModel.roleLabel(toRole)}';
+  String get fromLabel => CategoryModel.roleLabel(fromRole);
+  String get toLabel => CategoryModel.roleLabel(toRole);
+
+  // Plain ASCII on purpose: CanvasKit (Flutter web) can briefly mis-render
+  // decorative Unicode glyphs like "→" while it fetches a fallback font,
+  // collapsing the whole line into one character per line. Widgets that
+  // display this on screen build it from fromLabel/toLabel with an Icon
+  // instead; this string is only used for snackbars/DB names.
+  String get label => '$fromLabel -> $toLabel';
 }
 
 const _templates = <_RoleTemplate>[
@@ -49,6 +57,7 @@ class _BoostSalesAutoSuggestionsScreenState extends State<BoostSalesAutoSuggesti
   String _templateKey(_RoleTemplate t) => '${t.fromRole}->${t.toRole}';
 
   Future<void> _loadExistingRules() async {
+    var approved = <String>{};
     try {
       final comercioId = SupabaseConfig.currentComercioId.trim();
       final rules = await Supabase.instance.client
@@ -57,7 +66,6 @@ class _BoostSalesAutoSuggestionsScreenState extends State<BoostSalesAutoSuggesti
           .eq('comercio_id', comercioId)
           .eq('trigger_type', 'category');
 
-      final approved = <String>{};
       for (final rule in rules as List<dynamic>) {
         final triggerCategoryId = rule['trigger_category_id']?.toString();
         final fromRole = _roleByCategoryId[triggerCategoryId];
@@ -70,14 +78,21 @@ class _BoostSalesAutoSuggestionsScreenState extends State<BoostSalesAutoSuggesti
           approved.add('$fromRole->$toRole');
         }
       }
-      if (!mounted) return;
-      setState(() {
-        _approvedTemplateKeys = approved;
-        _loading = false;
-      });
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      approved = {};
     }
+    // Wait for any in-flight GoogleFonts (Poppins) downloads before the first
+    // real paint. On web/CanvasKit, painting text while a font is still being
+    // fetched can leave a paragraph with corrupted layout (one glyph per
+    // line) that never self-corrects once the font arrives.
+    try {
+      await GoogleFonts.pendingFonts();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _approvedTemplateKeys = approved;
+      _loading = false;
+    });
   }
 
   Future<void> _saveRoles() async {
@@ -124,7 +139,7 @@ class _BoostSalesAutoSuggestionsScreenState extends State<BoostSalesAutoSuggesti
             .from('upsell_rules')
             .insert({
               'comercio_id': comercioId,
-              'name': '${from.nombre} → ${CategoryModel.roleLabel(template.toRole)}',
+              'name': '${from.nombre} -> ${CategoryModel.roleLabel(template.toRole)}',
               'enabled': true,
               'trigger_type': 'category',
               'trigger_category_id': from.id,
@@ -233,7 +248,29 @@ class _BoostSalesAutoSuggestionsScreenState extends State<BoostSalesAutoSuggesti
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(template.label, style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        template.fromLabel,
+                                        style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 13.5),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 6),
+                                      child: Icon(Icons.arrow_forward_rounded, size: 14, color: Color(0xFF6B7280)),
+                                    ),
+                                    Flexible(
+                                      child: Text(
+                                        template.toLabel,
+                                        style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 13.5),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                                 const SizedBox(height: 2),
                                 Text(
                                   available
