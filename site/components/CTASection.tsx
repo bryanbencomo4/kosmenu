@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { ArrowRight, ChevronRight, MessageCircle } from 'lucide-react';
 
+import { MerchantCtaPrimary } from './merchant/MerchantAuthControls';
+
 type CTASectionProps = {
   signupHref: string;
   supportHref: string;
@@ -17,22 +19,17 @@ export function CTASection({ signupHref, supportHref }: CTASectionProps) {
             </span>
             <div className="max-w-2xl">
               <h2 className="font-[var(--font-display)] text-[2rem] font-black leading-[1.02] tracking-[-0.03em] text-white sm:text-[2.35rem]">
-                Empieza a vender con un menú digital profesional.
+                Convierte cada mesa en un vendedor inteligente.
               </h2>
               <p className="mt-3 max-w-xl text-sm leading-7 text-violet-100/80 sm:text-[15px]">
-                Crea tu cuenta, configura tu menú y publica en minutos. El QR se genera automáticamente.
+                Pide tu Kit Portamenú Inteligente: portamenús que son tuyos y una plataforma para mantener tu menú
+                inteligente actualizado.
               </p>
             </div>
           </div>
 
           <div className="flex flex-col gap-3 lg:min-w-[22rem]">
-            <Link
-              href={signupHref}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#FACC15] px-6 py-4 text-sm font-bold text-[#0B0F1A] shadow-[0_22px_50px_-24px_rgba(250,204,21,0.95)] transition-all duration-300 hover:scale-105 hover:bg-[#fde047]"
-            >
-              Crear mi menú ahora
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+            <MerchantCtaPrimary signupHref={signupHref} />
             <Link
               href={supportHref}
               target="_blank"
@@ -46,7 +43,7 @@ export function CTASection({ signupHref, supportHref }: CTASectionProps) {
               href="#demo"
               className="inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-2 text-sm font-semibold text-violet-100/80 transition-all duration-300 hover:text-white"
             >
-              Ver demo del menú
+              Ver la experiencia
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>

@@ -1,4 +1,4 @@
-﻿// ignore_for_file: avoid_print
+// ignore_for_file: avoid_print
 
 import 'dart:async';
 import 'dart:math';
@@ -15,6 +15,7 @@ import 'package:kosmenu_app/screens/product_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/category_icon_ai_service.dart';
+import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -1488,7 +1489,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     if (confirmed != true) {
       return;
     }
-    final customPrompt = await _askAiImagePrompt(product.nombre);
+    final customPrompt = await showAiImagePromptDialog(
+      context,
+      productName: product.nombre,
+      description: product.descripcion,
+      categoryName: _categoryNameFor(product.categoriaId),
+    );
     if (!mounted || customPrompt == null) {
       return;
     }
@@ -1544,68 +1550,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       });
       _showMessage(friendlyMessage);
     }
-  }
-
-  Future<String?> _askAiImagePrompt(String productName) async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        final colorScheme = Theme.of(dialogContext).colorScheme;
-        return AlertDialog(
-          backgroundColor: colorScheme.surfaceContainerHigh,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          title: Text(
-            'Describe la imagen',
-            style: GoogleFonts.manrope(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Describe el fondo o escena para "$productName". Si es marca conocida (Netflix, HBO Max, Spotify, etc.), el logo oficial se agrega automáticamente; no pidas el logo en el texto.',
-                  style: TextStyle(color: colorScheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  maxLines: 4,
-                  minLines: 3,
-                  maxLength: 500,
-                  decoration: const InputDecoration(
-                    hintText:
-                        'Ej: Fondo oscuro premium, TV con ambiente de cine, sin audífonos, sin texto, estilo limpio.',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(null),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton.icon(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(controller.text.trim()),
-              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-              label: const Text('Generar imagen'),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-    return result;
   }
 
   void _syncAiImageRefresh(List<ProductModel> products) {
@@ -1832,9 +1776,65 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }
 
   Future<void> _openAiMenuGenerator() async {
-    await Navigator.of(context).push(
+    final result = await Navigator.of(context).push<MagicOnboardingResult>(
       MaterialPageRoute(builder: (_) => const MagicOnboardingScreen()),
     );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    await _loadCategories();
+
+    if (!mounted) {
+      return;
+    }
+
+    final categoryLabel = result.createdCategories == 1
+        ? '1 categoría'
+        : '${result.createdCategories} categorías';
+    final productLabel = result.createdProducts == 1
+        ? '1 producto'
+        : '${result.createdProducts} productos';
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Menú listo: $categoryLabel y $productLabel.'),
+      ),
+    );
+
+    if (result.requestAiProductImages) {
+      unawaited(_enqueueOnboardingAiImages(result));
+    }
+  }
+
+  Future<void> _enqueueOnboardingAiImages(MagicOnboardingResult result) async {
+    final catalogId = result.catalog.id.trim();
+    if (catalogId.isEmpty) {
+      return;
+    }
+
+    try {
+      final response = await _aiImageService.enqueueOnboardingImages(
+        comercioId: SupabaseConfig.currentComercioId,
+        catalogId: catalogId,
+      );
+      if (!mounted) {
+        return;
+      }
+      final enqueuedJobs = (response['enqueued_jobs'] as num?)?.toInt() ?? 0;
+      final message = response['message']?.toString().trim() ?? '';
+      if (enqueuedJobs > 0) {
+        _showMessage(
+          message.isNotEmpty
+              ? message
+              : 'Generando $enqueuedJobs imagenes IA en segundo plano...',
+        );
+      }
+      unawaited(_loadCategories(showLoadingIndicator: false));
+    } catch (_) {
+      // Menu data already loaded; image generation can be retried per product.
+    }
   }
 
   Future<void> _openUpsellSettings() async {

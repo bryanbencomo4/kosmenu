@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 
+import { supportEmail } from '../../_lib/public-site-config';
 import {
   escapeHtml,
   resolveSafeTrackingUrl,
@@ -39,8 +40,9 @@ export async function sendOrderEmail(input: SendOrderEmailInput) {
     return { ok: false, skipped: true as const, message: 'Email delivery is not configured.' };
   }
 
-  // From address is server-controlled only.
-  const fromEmail = process.env.RESEND_FROM_EMAIL?.trim() || 'elmenuxfa.com <onboarding@resend.dev>';
+  // From address is server-controlled only. Domain DKIM is on elmenuxfa.com;
+  // onboarding@resend.dev cannot deliver to customer inboxes.
+  const fromEmail = process.env.RESEND_FROM_EMAIL?.trim() || `elmenuxfa.com <${supportEmail}>`;
   const resend = new Resend(resendApiKey);
 
   const trackingLink = resolveSafeTrackingUrl(input.orderTrackingUrl, orderId, input.comercioSlug);

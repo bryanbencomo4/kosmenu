@@ -11,6 +11,8 @@ export type UpsellGridProduct = {
   precio?: number | null;
   imagen_url?: string | null;
   disponible?: boolean | null;
+  priceLabel?: string | null;
+  requiresConfiguration?: boolean | null;
 };
 
 type UpsellProductGridProps = {
@@ -49,7 +51,8 @@ export function UpsellProductGrid({
             key={product.id}
             product={product}
             quantity={getQuantity(product.id)}
-            priceLabel={formatPrice(Number(product.precio ?? 0))}
+            priceLabel={product.priceLabel ?? formatPrice(Number(product.precio ?? 0))}
+            requiresConfiguration={product.requiresConfiguration === true}
             imageUrl={resolveImage(product.imagen_url)}
             onAdd={() => onAdd(product.id)}
             onIncrement={() => onIncrement(product.id)}
@@ -69,6 +72,7 @@ function UpsellProductTile({
   onAdd,
   onIncrement,
   onDecrement,
+  requiresConfiguration,
 }: {
   product: UpsellGridProduct;
   quantity: number;
@@ -77,9 +81,10 @@ function UpsellProductTile({
   onAdd: () => void;
   onIncrement: () => void;
   onDecrement: () => void;
+  requiresConfiguration: boolean;
 }) {
   const [failed, setFailed] = useState(false);
-  const unavailable = product.disponible === false || (product.precio ?? 0) <= 0;
+  const unavailable = product.disponible === false || ((product.precio ?? 0) <= 0 && !requiresConfiguration);
 
   return (
     <article
@@ -125,7 +130,7 @@ function UpsellProductTile({
         </p>
 
         <div className="mt-2">
-          {quantity === 0 ? (
+          {quantity === 0 || requiresConfiguration ? (
             <button
               type="button"
               disabled={unavailable}
@@ -136,7 +141,7 @@ function UpsellProductTile({
                 color: 'var(--menu-on-primary)',
               }}
             >
-              {unavailable ? 'Agotado' : 'Agregar'}
+              {unavailable ? 'Agotado' : requiresConfiguration ? (quantity > 0 ? 'Agregar otro' : 'Elegir') : 'Agregar'}
             </button>
           ) : (
             <div

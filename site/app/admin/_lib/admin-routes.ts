@@ -65,7 +65,7 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
   },
   {
     label: 'Suscripciones',
-    href: '/admin#subscriptions',
+    href: '/admin/suscripciones',
     icon: 'subscriptions',
     permission: 'subscriptions.read',
   },

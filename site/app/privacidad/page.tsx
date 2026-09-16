@@ -9,9 +9,9 @@ const lastUpdatedLabel = '20 de julio de 2026';
 const cardClassName = 'rounded-[1.35rem] border border-white/10 bg-[#09111e]/78 p-5 sm:p-6';
 
 export const metadata: Metadata = {
-  title: 'Política de privacidad | ElMenúXFA',
+  title: 'Política de privacidad | elmenuxfa',
   description:
-    'Conoce cómo ElMenúXFA recopila y usa información del sitio público, menús digitales, pedidos y formularios de contacto.',
+    'Conoce cómo elmenuxfa recopila y usa información del sitio público, menús digitales, pedidos y formularios de contacto.',
   alternates: {
     canonical: canonicalUrl,
   },
@@ -37,10 +37,10 @@ export default function PrivacyPage() {
             Privacidad
           </span>
           <h1 className="mt-4 font-[var(--font-display)] text-[2.2rem] font-black leading-[0.98] tracking-[-0.05em] text-white sm:text-[3rem]">
-            Política de privacidad de ElMenúXFA
+            Política de privacidad de elmenuxfa
           </h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300 sm:text-[15px]">
-            Esta política aplica al sitio público de ElMenúXFA, a los menús digitales de negocios, al flujo de pedidos y a
+            Esta política aplica al sitio público de elmenuxfa, a los menús digitales de negocios, al flujo de pedidos y a
             los formularios de contacto o soporte que uses dentro de la plataforma.
           </p>
           <p className="mt-3 text-sm text-slate-400">Última actualización: {lastUpdatedLabel}</p>
@@ -78,7 +78,7 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-bold text-white">3. Con quién compartimos datos</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
               No vendemos tu información personal. Podemos apoyarnos en proveedores de infraestructura, mensajería o base
-              de datos para operar ElMenúXFA. Los datos de un pedido se ponen a disposición del negocio correspondiente
+              de datos para operar elmenuxfa. Los datos de un pedido se ponen a disposición del negocio correspondiente
               para atenderlo. También podemos compartir información cuando una autoridad competente lo exija o cuando sea
               necesario para prevenir fraude, abuso o riesgos de seguridad.
             </p>

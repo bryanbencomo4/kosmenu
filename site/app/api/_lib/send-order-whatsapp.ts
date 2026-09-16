@@ -19,7 +19,7 @@ type WasenderErrorPayload = {
   error?: string;
 };
 
-const DEFAULT_WASENDER_ENDPOINT = 'https://wasenderapi.com/api/send-message';
+const DEFAULT_WASENDER_ENDPOINT = 'https://www.wasenderapi.com/api/send-message';
 
 function normalizeStatusLabel(status: string) {
   const value = (status ?? '').toString().trim();
@@ -118,7 +118,6 @@ export async function sendOrderNotification(
 
   const endpoint = process.env.WASENDER_API_ENDPOINT?.trim() || DEFAULT_WASENDER_ENDPOINT;
   const recipient = normalizePhoneToE164(phone);
-  const recipientForApi = recipient.replace(/^\+/, '');
   const safeCustomerName = (customerName ?? '').toString().trim() || 'cliente';
   const safeOrderId = (orderId ?? '').toString().trim();
   const safeBusinessName = (options?.businessName ?? 'elmenuxfa.com').toString().trim() || 'elmenuxfa.com';
@@ -159,7 +158,7 @@ export async function sendOrderNotification(
       Accept: 'application/json',
     },
     body: JSON.stringify({
-      to: recipientForApi,
+      to: recipient,
       text,
     }),
   });

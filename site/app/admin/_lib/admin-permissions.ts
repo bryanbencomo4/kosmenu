@@ -37,6 +37,7 @@ const rolePermissions: Record<AdminRole, readonly AdminPermission[]> = {
     'businesses.read',
     'menus.read',
     'orders.read',
+    'subscriptions.read',
     'delivery.read',
   ],
   sales: [

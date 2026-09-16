@@ -5,6 +5,7 @@ import { Montserrat, Roboto } from 'next/font/google';
 import { publicSiteUrl } from './_lib/public-site-config';
 import { SupabaseRecoveryRedirectGuard } from './_components/SupabaseRecoveryRedirectGuard';
 import { CookieConsentBanner } from '../components/CookieConsentBanner';
+import { WhatsAppChatWidget } from '../components/WhatsAppChatWidget';
 
 const displayFont = Montserrat({
   subsets: ['latin'],
@@ -20,9 +21,16 @@ const bodyFont = Roboto({
 
 export const metadata: Metadata = {
   metadataBase: new URL(publicSiteUrl),
-  title: 'ElMenúXFA | Menú digital con QR y Table Tent para restaurantes',
+  title: 'elmenuxfa | Menú inteligente para restaurantes con QR y autoservicio',
   description:
-    'Tu menú digital listo para que tus clientes escaneen, elijan y ordenen. Incluye menú online, QR personalizado y Table Tent físico. $10/mes.',
+    'Convierte cada mesa en un vendedor inteligente. Kit Portamenú Inteligente $10 de lanzamiento. Plataforma $10/mes o $90/año. Autoservicio para restaurantes.',
+  keywords: [
+    'menú inteligente para restaurantes',
+    'menú QR',
+    'autoservicio para restaurantes',
+    'portamenú inteligente',
+    'elmenuxfa',
+  ],
   robots:
     process.env.VERCEL_ENV === 'preview'
       ? { index: false, follow: false, nocache: true }
@@ -44,6 +52,7 @@ export default function RootLayout({
       <body className={`${displayFont.variable} ${bodyFont.variable}`}>
         <SupabaseRecoveryRedirectGuard />
         {children}
+        <WhatsAppChatWidget />
         <CookieConsentBanner />
       </body>
     </html>

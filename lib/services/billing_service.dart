@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/services/payment_catalog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -130,6 +133,20 @@ class BillingPayment {
     if (exp == null) return true;
     return exp.isAfter(DateTime.now());
   }
+}
+
+class BillingCheckoutContext {
+  const BillingCheckoutContext({
+    required this.snapshot,
+    required this.methods,
+    this.pendingSubmission,
+    this.latestSubmission,
+  });
+
+  final BillingSnapshot snapshot;
+  final List<PaymentMethodCatalog> methods;
+  final PaymentSubmission? pendingSubmission;
+  final PaymentSubmission? latestSubmission;
 }
 
 class BillingSnapshot {
@@ -342,6 +359,202 @@ class BillingService {
     }
 
     return loadSnapshot(comercioId: businessId);
+  }
+
+  Future<BillingCheckoutContext> loadCheckoutContext({String? comercioId}) async {
+    final snapshot = await loadSnapshot(comercioId: comercioId);
+    final businessId = (comercioId ?? SupabaseConfig.currentComercioId).trim();
+    final client = Supabase.instance.client;
+
+    List<PaymentMethodCatalog> methods = fallbackPaymentMethods();
+    try {
+      final rows = await client
+          .from('payment_methods')
+          .select()
+          .order('sort_order', ascending: true);
+      if (rows.isNotEmpty) {
+        methods = rows
+            .whereType<Map>()
+            .map((row) => PaymentMethodCatalog.fromRow(Map<String, dynamic>.from(row)))
+            .toList(growable: false);
+      }
+    } catch (_) {
+      // Catalog table is not on this environment yet; keep the built-in list.
+    }
+
+    PaymentSubmission? pending;
+    PaymentSubmission? latest;
+    try {
+      final rows = await client
+          .from('payment_submissions')
+          .select()
+          .eq('business_id', businessId)
+          .order('created_at', ascending: false)
+          .limit(8);
+      final submissions = rows
+          .whereType<Map>()
+          .map((row) => PaymentSubmission.fromRow(Map<String, dynamic>.from(row)))
+          .toList(growable: false);
+      latest = submissions.isEmpty ? null : submissions.first;
+      for (final item in submissions) {
+        if (item.isPending) {
+          pending = item;
+          break;
+        }
+      }
+    } catch (_) {
+      // Manual-review table is optional until the migration is applied.
+    }
+
+    return BillingCheckoutContext(
+      snapshot: snapshot,
+      methods: mergePaymentCatalog(methods),
+      pendingSubmission: pending,
+      latestSubmission: latest,
+    );
+  }
+
+  Future<GiftCardRedeemResult> redeemGiftCard({
+    required String code,
+    String? comercioId,
+  }) async {
+    final businessId = _requireBusinessId(comercioId);
+    try {
+      final response = await Supabase.instance.client.rpc(
+        'redeem_gift_card',
+        params: <String, dynamic>{
+          'p_code': code.trim(),
+          'p_business_id': businessId,
+        },
+      );
+      final data = _asMap(response);
+      return GiftCardRedeemResult(
+        months: data['months'] is num
+            ? (data['months'] as num).toInt()
+            : int.tryParse('${data['months'] ?? ''}') ?? 1,
+        periodEnd: _asDate(data['period_end']),
+        idempotent: data['idempotent'] == true,
+      );
+    } catch (error) {
+      throw StateError(mapBillingRpcError(error));
+    }
+  }
+
+  Future<PaymentSubmission> submitManualPayment({
+    required PaymentMethodCatalog method,
+    required ManualPaymentDraft draft,
+    String? comercioId,
+  }) async {
+    final validation = validateManualPaymentDraft(method: method, draft: draft);
+    if (validation != null) {
+      throw StateError(validation);
+    }
+
+    final businessId = _requireBusinessId(comercioId);
+    try {
+      final response = await Supabase.instance.client.rpc(
+        'submit_manual_payment',
+        params: <String, dynamic>{
+          'p_business_id': businessId,
+          'p_method_code': method.code,
+          'p_months': draft.months,
+          'p_reference': draft.reference.trim().isEmpty ? null : draft.reference.trim(),
+          'p_payer_name': draft.payerName.trim().isEmpty ? null : draft.payerName.trim(),
+          'p_receipt_path': draft.receiptPath,
+          'p_advisor_code': draft.advisorCode.trim().isEmpty
+              ? null
+              : draft.advisorCode.trim(),
+          'p_declared_amount': draft.declaredAmount,
+          'p_declared_currency': draft.declaredCurrency,
+        },
+      );
+      final data = _asMap(response);
+      return PaymentSubmission(
+        id: '${data['submission_id'] ?? ''}',
+        methodCode: method.code,
+        status: '${data['status'] ?? 'pending'}',
+        amountUsd: _asDouble(data['amount_usd']),
+        months: draft.months,
+        reference: draft.reference.trim().isEmpty ? null : draft.reference.trim(),
+      );
+    } catch (error) {
+      throw StateError(mapBillingRpcError(error));
+    }
+  }
+
+  Future<void> cancelManualPayment(String submissionId) async {
+    try {
+      await Supabase.instance.client.rpc(
+        'cancel_manual_payment',
+        params: <String, dynamic>{'p_submission_id': submissionId},
+      );
+    } catch (error) {
+      throw StateError(mapBillingRpcError(error));
+    }
+  }
+
+  Future<String> uploadSubscriptionReceipt({
+    required Uint8List bytes,
+    required String fileName,
+    required String mimeType,
+    String? comercioId,
+  }) async {
+    if (bytes.isEmpty) {
+      throw StateError('El comprobante esta vacio.');
+    }
+    if (bytes.length > 5 * 1024 * 1024) {
+      throw StateError('El comprobante no puede superar 5 MB.');
+    }
+
+    final allowed = <String>{
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+    };
+    if (!allowed.contains(mimeType)) {
+      throw StateError('Usa una imagen JPG, PNG, WEBP o un PDF.');
+    }
+
+    final businessId = _requireBusinessId(comercioId);
+    final safeExt = switch (mimeType) {
+      'image/png' => 'png',
+      'image/webp' => 'webp',
+      'application/pdf' => 'pdf',
+      _ => 'jpg',
+    };
+    final objectPath =
+        '$businessId/${DateTime.now().millisecondsSinceEpoch}_${_safeFileStem(fileName)}.$safeExt';
+
+    await Supabase.instance.client.storage
+        .from('comprobantes-suscripcion')
+        .uploadBinary(
+          objectPath,
+          bytes,
+          fileOptions: FileOptions(contentType: mimeType, upsert: false),
+        );
+
+    return objectPath;
+  }
+
+  String _requireBusinessId(String? comercioId) {
+    final businessId = (comercioId ?? SupabaseConfig.currentComercioId).trim();
+    if (businessId.isEmpty) {
+      throw StateError('No hay comercio activo.');
+    }
+    return businessId;
+  }
+
+  String _safeFileStem(String fileName) {
+    final stem = fileName.split(RegExp(r'[\\/]')).last.replaceAll(
+      RegExp(r'[^A-Za-z0-9._-]'),
+      '_',
+    );
+    final withoutExt = stem.contains('.')
+        ? stem.substring(0, stem.lastIndexOf('.'))
+        : stem;
+    final trimmed = withoutExt.trim();
+    return trimmed.isEmpty ? 'comprobante' : trimmed.substring(0, trimmed.length.clamp(0, 40));
   }
 }
 

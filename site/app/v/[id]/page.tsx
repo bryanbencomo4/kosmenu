@@ -31,12 +31,32 @@ import { UpsellMenuExperience } from './_components/upsell/UpsellMenuExperience'
 import { AddToCartUpsellSheet, type AddToCartSuggestion } from './_components/upsell/AddToCartUpsellSheet';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
 import type { BundleRailItem } from './_components/upsell/BundleRail';
+import { formatPaymentMethodDetails } from '../../_lib/payment-method-display';
+import {
+  exchangeSourceLabel,
+  resolveCheckoutCurrencyRate,
+  resolveCheckoutCurrencySource,
+} from '../../_lib/checkout-exchange-rate';
+import {
+  buildCartLineKey,
+  buildOrderLineLabel,
+  formatProductPriceLabel,
+  getProductMinimumPrice,
+  isServicioAdicionalName,
+  parseCartLineKey,
+  productRequiresConfiguration,
+  resolveCartLineUnitPrice,
+  summarizeCartLineSelection,
+  type CartLineSelection,
+} from '../../_lib/menu-product-options';
+import { ProductOptionsSheet } from './_components/ProductOptionsSheet';
 
 type CategoriaRow = {
   id: string;
   nombre: string;
   orden?: number | null;
   icono?: string | null;
+  opciones_menu?: unknown;
 };
 
 type ProductoRow = {
@@ -51,6 +71,7 @@ type ProductoRow = {
   precio_comparacion?: number | null;
   upsell_enabled?: boolean | null;
   orden?: number | null;
+  opciones_menu?: unknown;
 };
 
 type UpsellSettingsRow = {
@@ -196,6 +217,12 @@ type MenuData = {
   categorias: CategoriaRow[];
   productos: ProductoRow[];
   metodosPago: MetodoPagoRow[];
+  checkoutExchange?: {
+    currencies?: string[];
+    exchangeRates?: Record<string, number | null>;
+    exchangeRateModes?: Record<string, string>;
+    exchangeRateSources?: Record<string, string>;
+  } | null;
   marketRates?: MarketRatesRow | null;
   upsellSettings?: UpsellSettingsRow | null;
   upsellRules?: UpsellRuleRow[] | null;
@@ -798,16 +825,7 @@ function paymentMethodLabel(method: MetodoPagoRow) {
 }
 
 function paymentMethodDetails(method: MetodoPagoRow) {
-  const details: string[] = [];
-  if (method.banco) details.push(`Banco: ${method.banco}`);
-  if (method.titular) details.push(`Titular: ${method.titular}`);
-  if (method.cedula) details.push(`Cedula: ${method.cedula}`);
-  if (method.telefono) details.push(`Telefono: ${method.telefono}`);
-  if (method.numero) details.push(`Numero: ${method.numero}`);
-  if (method.alias) details.push(`Alias: ${method.alias}`);
-  if (method.descripcion) details.push(method.descripcion);
-  if (method.detalles) details.push(method.detalles);
-  return details;
+  return formatPaymentMethodDetails(method);
 }
 
 function currencyCodeFromPaymentMethodTipo(tipo: string) {
@@ -1025,21 +1043,6 @@ function derivedExchangeRateForCurrency(
   return 1;
 }
 
-function exchangeSourceLabel(source: string | null | undefined) {
-  switch ((source ?? '').trim().toLowerCase()) {
-    case 'bcv':
-      return 'BCV';
-    case 'p2p_binance':
-      return 'Binance P2P';
-    case 'google':
-      return 'Google Finance';
-    case 'manual':
-      return 'Manual';
-    default:
-      return 'Referencia del negocio';
-  }
-}
-
 function formatTickerRate(rate: number) {
   if (!Number.isFinite(rate) || rate <= 0) return '0';
 
@@ -1160,7 +1163,7 @@ function buildConfiguredTickerEntries(
     const rate = resolveCheckoutCurrencyRate(currency, {
       baseCurrency,
       paymentExchangeRate: paymentGroup?.exchangeRate,
-      brandingConfig: options.brandingConfig,
+      checkoutExchange: options.brandingConfig,
       businessExchangeRate: options.businessExchangeRate,
       businessQuoteCurrency: options.businessQuoteCurrency,
       businessExchangeSource: options.businessExchangeSource,
@@ -1176,65 +1179,6 @@ function buildConfiguredTickerEntries(
   }
 
   return lines;
-}
-
-function resolveCheckoutCurrencyRate(
-  currency: string,
-  options: {
-    baseCurrency: string;
-    paymentExchangeRate: number | null | undefined;
-    brandingConfig: BrandingCheckoutConfig;
-    businessExchangeRate: number | null | undefined;
-    businessQuoteCurrency: string | null;
-    businessExchangeSource: string;
-    businessExchangeMode: string;
-    marketRates: MarketRatesRow | null | undefined;
-  },
-) {
-  const quote = normalizeCurrencyCode(currency);
-  const base = normalizeCurrencyCode(options.baseCurrency);
-  if (quote === base) {
-    return 1;
-  }
-
-  const brandingRate = options.brandingConfig.exchangeRates[quote];
-  const currencyMode = options.brandingConfig.exchangeRateModes[quote] ?? options.businessExchangeMode;
-  const currencySource =
-    options.brandingConfig.exchangeRateSources[quote] ?? options.businessExchangeSource ?? 'google';
-
-  if (brandingRate && brandingRate > 0 && brandingRate !== 1) {
-    return brandingRate;
-  }
-
-  if (
-    options.businessExchangeRate &&
-    options.businessExchangeRate > 0 &&
-    options.businessExchangeRate !== 1 &&
-    quote === normalizeCurrencyCode(options.businessQuoteCurrency ?? '')
-  ) {
-    return options.businessExchangeRate;
-  }
-
-  if (
-    options.paymentExchangeRate &&
-    options.paymentExchangeRate > 0 &&
-    options.paymentExchangeRate !== 1
-  ) {
-    return options.paymentExchangeRate;
-  }
-
-  if (brandingRate && brandingRate > 0) {
-    return brandingRate;
-  }
-
-  return derivedExchangeRateForCurrency(
-    base,
-    quote,
-    currencySource,
-    options.marketRates,
-    options.businessExchangeRate,
-    options.businessQuoteCurrency,
-  );
 }
 
 function convertFromBaseCurrency(amountInBaseCurrency: number, baseCurrency: string, targetCurrency: string, exchangeRate: number) {
@@ -1539,6 +1483,10 @@ export default function PublicMenuPage() {
     open: boolean;
     suggestions: AddToCartSuggestion[];
   }>({ open: false, suggestions: [] });
+  const [productOptionsSheet, setProductOptionsSheet] = useState<{
+    open: boolean;
+    productId: string | null;
+  }>({ open: false, productId: null });
   const upsellAttributionRef = useRef<
     Map<string, { ruleId?: string | null; bundleId?: string | null; surface: UpsellSurface }>
   >(new Map());
@@ -1732,12 +1680,25 @@ export default function PublicMenuPage() {
     if (!menuData) return [];
 
     return menuData.categorias
+      .filter((categoria) => !isServicioAdicionalName(categoria.nombre))
       .map((categoria) => ({
         ...categoria,
-        productos: menuData.productos.filter((producto) => producto.categoria_id === categoria.id),
+        productos: menuData.productos
+          .filter((producto) => producto.categoria_id === categoria.id)
+          .filter((producto) => !isServicioAdicionalName(producto.nombre)),
       }))
       .filter((categoria) => categoria.productos.length > 0);
   }, [menuData]);
+
+  const categoryByProductId = useMemo(() => {
+    const map = new Map<string, CategoriaRow>();
+    for (const categoria of categoriasConProductos) {
+      for (const producto of categoria.productos) {
+        map.set(producto.id, categoria);
+      }
+    }
+    return map;
+  }, [categoriasConProductos]);
 
   // Bundles are synthetic products (`bundle:{id}`) so the existing cart/checkout
   // machinery (increment/decrement, totals, order summary) handles them for free.
@@ -1773,34 +1734,60 @@ export default function PublicMenuPage() {
       let changed = false;
       const next: Record<string, number> = {};
 
-      for (const [productId, quantity] of Object.entries(prev)) {
+      for (const [cartKey, quantity] of Object.entries(prev)) {
+        const { productId } = parseCartLineKey(cartKey);
         const product = productById.get(productId);
-        if (!product || (product.precio ?? 0) <= 0 || quantity <= 0) {
+        const unitPrice = product
+          ? resolveCartLineUnitPrice(
+              product,
+              categoryByProductId.get(productId) ?? null,
+              parseCartLineKey(cartKey).selection,
+            )
+          : 0;
+        if (!product || unitPrice <= 0 || quantity <= 0) {
           changed = true;
           continue;
         }
-        next[productId] = quantity;
+        next[cartKey] = quantity;
       }
 
       return changed ? next : prev;
     });
-  }, [productById]);
+  }, [categoryByProductId, productById]);
 
   const cartItems = useMemo(() => {
     return Object.entries(cart)
-      .map(([productId, quantity]) => {
+      .map(([cartKey, quantity]) => {
+        const { productId, selection } = parseCartLineKey(cartKey);
         const product = productById.get(productId);
         if (!product || quantity <= 0) return null;
-        return { product, quantity };
+        const category = categoryByProductId.get(productId) ?? null;
+        const unitPrice = resolveCartLineUnitPrice(product, category, selection);
+        if (unitPrice <= 0) return null;
+        return { cartKey, product, category, selection, quantity, unitPrice };
       })
-      .filter(Boolean) as Array<{ product: ProductoRow; quantity: number }>;
-  }, [cart, productById]);
+      .filter(Boolean) as Array<{
+      cartKey: string;
+      product: ProductoRow;
+      category: CategoriaRow | null;
+      selection: CartLineSelection;
+      quantity: number;
+      unitPrice: number;
+    }>;
+  }, [cart, categoryByProductId, productById]);
 
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.quantity, 0), [cartItems]);
   const cartTotal = useMemo(
-    () => cartItems.reduce((sum, item) => sum + (item.product.precio ?? 0) * item.quantity, 0),
+    () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems],
   );
+
+  function getProductCartQuantity(productId: string) {
+    return Object.entries(cart).reduce((sum, [cartKey, quantity]) => {
+      if (parseCartLineKey(cartKey).productId !== productId) return sum;
+      return sum + quantity;
+    }, 0);
+  }
 
   const filteredCategorias = useMemo(() => {
     const normalizedQuery = normalizeSearchText(searchQuery);
@@ -2180,6 +2167,21 @@ export default function PublicMenuPage() {
   const businessExchangeMode = (menuData?.comercio.exchange_rate_mode ?? 'auto').toString().trim().toLowerCase();
   const businessExchangeRate =
     parseExchangeRate(menuData?.comercio.exchange_rate_value) ?? parseExchangeRate(menuData?.comercio.tasa_cambio_pesos);
+  const checkoutExchangeConfig = useMemo(
+    () => ({
+      exchangeRates: menuData?.checkoutExchange?.exchangeRates ?? {},
+      exchangeRateModes: menuData?.checkoutExchange?.exchangeRateModes ?? {},
+      exchangeRateSources: menuData?.checkoutExchange?.exchangeRateSources ?? {},
+    }),
+    [menuData?.checkoutExchange],
+  );
+  const brandingCheckoutConfig = useMemo(
+    () => ({
+      currencies: menuData?.checkoutExchange?.currencies ?? [],
+      ...checkoutExchangeConfig,
+    }),
+    [checkoutExchangeConfig, menuData?.checkoutExchange?.currencies],
+  );
   const paymentMethodsByCurrency = useMemo(() => {
     const grouped = new Map<string, { methods: MetodoPagoRow[]; exchangeRate: number | null }>();
     for (const method of menuData?.metodosPago ?? []) {
@@ -2200,16 +2202,16 @@ export default function PublicMenuPage() {
       .map(([currency, value]) => ({
       currency,
       methods: value.methods,
-      exchangeRate:
-        value.exchangeRate ??
-        derivedExchangeRateForCurrency(
-          businessBaseCurrency,
-          currency,
-          businessExchangeSource,
-          menuData?.marketRates,
-          businessExchangeRate,
-          businessQuoteCurrency,
-        ),
+      exchangeRate: resolveCheckoutCurrencyRate(currency, {
+        baseCurrency: businessBaseCurrency,
+        paymentExchangeRate: value.exchangeRate,
+        checkoutExchange: checkoutExchangeConfig,
+        businessExchangeRate,
+        businessQuoteCurrency,
+        businessExchangeSource,
+        businessExchangeMode,
+        marketRates: menuData?.marketRates,
+      }),
     }))
       .sort((left, right) => {
         if (left.currency === businessBaseCurrency) return -1;
@@ -2217,15 +2219,16 @@ export default function PublicMenuPage() {
         return left.currency.localeCompare(right.currency);
       });
   }, [
+    brandingCheckoutConfig,
     businessBaseCurrency,
+    businessExchangeMode,
     businessExchangeRate,
     businessExchangeSource,
     businessQuoteCurrency,
+    checkoutExchangeConfig,
     menuData?.marketRates,
     menuData?.metodosPago,
   ]);
-  // branding_ia is intentionally absent from the public DTO; checkout uses payment methods.
-  const brandingCheckoutConfig = useMemo(() => readBrandingCheckoutConfig(null), []);
   const businessCheckoutCurrencies = useMemo(
     () =>
       businessCheckoutCurrenciesFromData(
@@ -2266,12 +2269,40 @@ export default function PublicMenuPage() {
   const selectedCurrencyCode = normalizeCurrencyCode(
     selectedCurrency || selectedCurrencyGroup?.currency || businessBaseCurrency,
   );
-  const selectedExchangeRate =
-    selectedCurrencyCode === businessBaseCurrency
-      ? 1
-      : Number.isFinite(selectedCurrencyGroup?.exchangeRate)
-        ? Number(selectedCurrencyGroup?.exchangeRate)
-        : 1;
+  const selectedExchangeRate = useMemo(
+    () =>
+      selectedCurrencyCode === businessBaseCurrency
+        ? 1
+        : resolveCheckoutCurrencyRate(selectedCurrencyCode, {
+            baseCurrency: businessBaseCurrency,
+            paymentExchangeRate: selectedCurrencyGroup?.exchangeRate,
+            checkoutExchange: checkoutExchangeConfig,
+            businessExchangeRate,
+            businessQuoteCurrency,
+            businessExchangeSource,
+            businessExchangeMode,
+            marketRates: menuData?.marketRates,
+          }),
+    [
+      businessBaseCurrency,
+      businessExchangeMode,
+      businessExchangeRate,
+      businessExchangeSource,
+      businessQuoteCurrency,
+      checkoutExchangeConfig,
+      menuData?.marketRates,
+      selectedCurrencyCode,
+      selectedCurrencyGroup?.exchangeRate,
+    ],
+  );
+  const selectedExchangeSource = useMemo(
+    () =>
+      resolveCheckoutCurrencySource(selectedCurrencyCode, {
+        checkoutExchange: checkoutExchangeConfig,
+        businessExchangeSource,
+      }),
+    [businessExchangeSource, checkoutExchangeConfig, selectedCurrencyCode],
+  );
   const orderSubtotalConverted = convertFromBaseCurrency(
     orderSubtotal,
     businessBaseCurrency,
@@ -2485,14 +2516,23 @@ export default function PublicMenuPage() {
       selectedCurrencyCode,
     );
   const upsellGridProducts = useMemo(() => {
-    const source = visibleCategorias.flatMap((categoria) => categoria.productos);
+    const source = visibleCategorias.flatMap((categoria) =>
+      categoria.productos.map((producto) => {
+        const requiresConfiguration = productRequiresConfiguration(producto, categoria);
+        return {
+          ...producto,
+          requiresConfiguration,
+          priceLabel: formatProductPriceLabel(producto, formatUpsellPrice),
+        };
+      }),
+    );
     // Prefer products of the active category first for the 2-col grid feel.
     if (!activeCategoryId) return source;
     const active = source.filter((p) =>
       visibleCategorias.find((c) => c.id === activeCategoryId)?.productos.some((x) => x.id === p.id),
     );
     return active.length ? active : source;
-  }, [activeCategoryId, visibleCategorias]);
+  }, [activeCategoryId, formatUpsellPrice, visibleCategorias]);
   const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
@@ -2514,20 +2554,21 @@ export default function PublicMenuPage() {
   const nextStepCtaLabels = ['Continuar', 'Continuar', 'Continuar'];
   const checkoutSummaryItems = useMemo(
     () =>
-      cartItems.map(({ product, quantity }) => {
+      cartItems.map(({ cartKey, product, category, selection, quantity, unitPrice: baseUnitPrice }) => {
         const unitPrice = convertFromBaseCurrency(
-          product.precio ?? 0,
+          baseUnitPrice,
           businessBaseCurrency,
           selectedCurrencyCode,
           selectedExchangeRate,
         );
+        const optionSummary = summarizeCartLineSelection(product, selection, category);
         return {
-          id: product.id,
-          name: product.nombre,
-          description: (product.descripcion ?? '').trim(),
+          id: cartKey,
+          name: buildOrderLineLabel(product, selection, category),
+          description: optionSummary || (product.descripcion ?? '').trim(),
           imageUrl: safeImageSrc(product.imagen_url, comercioLogoUrl),
           quantity,
-          canIncrease: (product.precio ?? 0) > 0,
+          canIncrease: baseUnitPrice > 0,
           unitPrice,
           totalPrice: unitPrice * quantity,
         };
@@ -2663,7 +2704,7 @@ export default function PublicMenuPage() {
                           <span className="min-w-8 px-2 text-center text-sm font-black text-slate-900">{item.quantity}</span>
                           <button
                             type="button"
-                            onClick={() => incrementProduct(item.id)}
+                            onClick={() => incrementCartLine(item.id)}
                             disabled={!item.canIncrease}
                             className="grid h-8 w-8 place-items-center rounded-full bg-white text-base font-black text-slate-700 disabled:opacity-40"
                             aria-label={`Aumentar cantidad de ${item.name}`}
@@ -2712,7 +2753,7 @@ export default function PublicMenuPage() {
               </div>
               {selectedCurrencyCode !== businessBaseCurrency ? (
                 <p className="mt-2 text-[11px] font-semibold text-slate-500">
-                  Tasa usada: 1 {businessBaseCurrency} = {selectedExchangeRate} {selectedCurrencyCode}
+                  Tasa usada ({exchangeSourceLabel(selectedExchangeSource)}): 1 {businessBaseCurrency} = {selectedExchangeRate} {selectedCurrencyCode}
                 </p>
               ) : null}
             </div>
@@ -3153,51 +3194,111 @@ export default function PublicMenuPage() {
     return menuData.metodosPago.find((method) => method.id === selectedPaymentMethodId) ?? null;
   }
 
-  function incrementProduct(productId: string) {
+  function addConfiguredProductToCart(
+    productId: string,
+    selection: CartLineSelection,
+    quantity = 1,
+  ) {
     const product = productById.get(productId);
-    if (!product || (product.precio ?? 0) <= 0) return;
+    if (!product) return;
 
+    const category = categoryByProductId.get(productId) ?? null;
+    const unitPrice = resolveCartLineUnitPrice(product, category, selection);
+    if (unitPrice <= 0) return;
+
+    const cartKey = buildCartLineKey(productId, selection);
     setCart((prev) => ({
       ...prev,
-      [productId]: (prev[productId] ?? 0) + 1,
+      [cartKey]: (prev[cartKey] ?? 0) + quantity,
     }));
   }
 
-  function decrementProduct(productId: string) {
+  function incrementProduct(productId: string) {
+    const product = productById.get(productId);
+    const category = categoryByProductId.get(productId) ?? null;
+    if (!product) return;
+
+    if (productRequiresConfiguration(product, category)) {
+      setProductOptionsSheet({ open: true, productId });
+      return;
+    }
+
+    if (getProductMinimumPrice(product) <= 0) return;
+
+    const cartKey = buildCartLineKey(productId, {});
+    setCart((prev) => ({
+      ...prev,
+      [cartKey]: (prev[cartKey] ?? 0) + 1,
+    }));
+  }
+
+  function incrementCartLine(cartKey: string) {
+    const { productId } = parseCartLineKey(cartKey);
+    const product = productById.get(productId);
+    const category = categoryByProductId.get(productId) ?? null;
+    if (!product) return;
+
+    if (productRequiresConfiguration(product, category)) {
+      setProductOptionsSheet({ open: true, productId });
+      return;
+    }
+
+    setCart((prev) => ({
+      ...prev,
+      [cartKey]: (prev[cartKey] ?? 0) + 1,
+    }));
+  }
+
+  function decrementProduct(cartKey: string) {
     setCart((prev) => {
-      const current = prev[productId] ?? 0;
+      const current = prev[cartKey] ?? 0;
       if (current <= 1) {
         if (isConfirmOpen && Object.keys(prev).length === 1) {
           shouldReturnToMenuOnEmptyCartRef.current = true;
         }
         const next = { ...prev };
-        delete next[productId];
+        delete next[cartKey];
         return next;
       }
 
       return {
         ...prev,
-        [productId]: current - 1,
+        [cartKey]: current - 1,
       };
     });
   }
 
-  function removeProductFromCart(productId: string) {
+  function decrementProductById(productId: string) {
+    const matchingKey = Object.keys(cart).find(
+      (cartKey) => parseCartLineKey(cartKey).productId === productId,
+    );
+    if (!matchingKey) return;
+    decrementProduct(matchingKey);
+  }
+
+  function removeProductFromCart(cartKey: string) {
     setCart((prev) => {
-      if (!(productId in prev)) return prev;
+      if (!(cartKey in prev)) return prev;
 
       if (isConfirmOpen && Object.keys(prev).length === 1) {
         shouldReturnToMenuOnEmptyCartRef.current = true;
       }
 
       const next = { ...prev };
-      delete next[productId];
+      delete next[cartKey];
       return next;
     });
   }
 
   /** Momento 1: fires only on a fresh add (0 -> 1), never on a plain +1 tap. */
   function handleAddToCartFromGrid(productId: string) {
+    const product = productById.get(productId);
+    const category = categoryByProductId.get(productId) ?? null;
+    if (product && productRequiresConfiguration(product, category)) {
+      setProductOptionsSheet({ open: true, productId });
+      return;
+    }
+
     incrementProduct(productId);
     const suggestions = suggestionsToViewItems(resolveSuggestions('add_to_cart', productId));
     if (suggestions.length === 0) {
@@ -3351,6 +3452,7 @@ export default function PublicMenuPage() {
     paymentMeta: {
       currency: string;
       exchangeRate: number;
+      exchangeRateSource: string;
       referenceLast4: string;
       proofFile: File | null;
     },
@@ -3370,8 +3472,23 @@ export default function PublicMenuPage() {
     let paymentProofUrl = '';
 
     if (paymentMeta.proofFile) {
+      const permitResponse = await fetch('/api/orders/comprobantes/permit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slug: resolvedComercioId,
+          comercioId: resolvedComercioId,
+        }),
+      });
+      const permitPayload = await permitResponse.json().catch(() => ({}));
+      const permit = (permitPayload?.data?.permit ?? '').toString().trim();
+      if (!permitResponse.ok || !permit) {
+        throw new Error('No se pudo subir el comprobante de pago.');
+      }
+
       const form = new FormData();
       form.append('comercioId', resolvedComercioId);
+      form.append('permit', permit);
       form.append('file', paymentMeta.proofFile);
       const uploadResponse = await fetch('/api/orders/comprobantes', {
         method: 'POST',
@@ -3415,9 +3532,10 @@ export default function PublicMenuPage() {
     );
     const orderItems = cartItems.map((item) => ({
       product_id: item.product.id,
-      nombre: item.product.nombre,
+      nombre: buildOrderLineLabel(item.product, item.selection, item.category),
       cantidad: item.quantity,
-      precio: item.product.precio ?? 0,
+      precio: item.unitPrice,
+      opciones: item.selection,
     }));
 
     const detalles = {
@@ -3426,6 +3544,7 @@ export default function PublicMenuPage() {
       telefono_cliente: customerWhatsapp,
       moneda_checkout: normalizeCurrencyCode(paymentMeta.currency),
       tasa_cambio_snapshot: paymentMeta.exchangeRate,
+      exchange_rate_source: paymentMeta.exchangeRateSource,
       metodo_pago: paymentMethod
         ? {
             id: paymentMethod.id,
@@ -3541,7 +3660,9 @@ export default function PublicMenuPage() {
       `Metodo de pago: ${paymentLabel}.\n` +
       (email ? `Correo del cliente: ${email}.\n` : '') +
       `Moneda seleccionada: ${normalizeCurrencyCode(paymentMeta.currency)}.\n` +
-      (paymentMeta.exchangeRate > 1 ? `Tasa aplicada: ${paymentMeta.exchangeRate}.\n` : '') +
+      (paymentMeta.exchangeRate > 1
+        ? `Tasa aplicada (${exchangeSourceLabel(paymentMeta.exchangeRateSource)}): ${paymentMeta.exchangeRate}.\n`
+        : '') +
       (paymentMeta.referenceLast4 ? `Referencia digital: ****${paymentMeta.referenceLast4}.\n` : '') +
       (paymentProofUrl ? `Comprobante: ${paymentProofUrl}.\n` : '') +
       `Subtotal: ${formatAmountByCurrency(subtotalConverted, paymentMeta.currency)}.\n` +
@@ -3621,6 +3742,7 @@ export default function PublicMenuPage() {
         {
           currency: selectedCurrencyCode,
           exchangeRate: selectedExchangeRate,
+          exchangeRateSource: selectedExchangeSource,
           referenceLast4: paymentReferenceLast4,
           proofFile: paymentProofFile,
         },
@@ -4317,12 +4439,12 @@ export default function PublicMenuPage() {
                 'Menú'
           }
           gridProducts={upsellGridProducts}
-          getQuantity={(id) => cart[id] ?? 0}
+          getQuantity={(id) => getProductCartQuantity(id)}
           formatPrice={formatUpsellPrice}
           resolveImage={(url) => displayProductImage(url, comercioLogoUrl) ?? safeImageSrc(url, comercioLogoUrl)}
           onAdd={handleAddToCartFromGrid}
           onIncrement={incrementProduct}
-          onDecrement={decrementProduct}
+          onDecrement={decrementProductById}
           cartCount={cartCount}
           cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
           showDeliveryProgress={cartCount > 0 && deliveryProgress.enabled}
@@ -4352,6 +4474,33 @@ export default function PublicMenuPage() {
           formatPrice={formatUpsellPrice}
           onAdd={handleAcceptAddToCartSuggestion}
           onDismiss={handleDismissAddToCartSheet}
+        />
+
+        <ProductOptionsSheet
+          open={productOptionsSheet.open}
+          product={
+            productOptionsSheet.productId
+              ? productById.get(productOptionsSheet.productId) ?? null
+              : null
+          }
+          category={
+            productOptionsSheet.productId
+              ? categoryByProductId.get(productOptionsSheet.productId) ?? null
+              : null
+          }
+          formatPrice={formatUpsellPrice}
+          onClose={() => setProductOptionsSheet({ open: false, productId: null })}
+          onConfirm={(selection, quantity) => {
+            if (!productOptionsSheet.productId) return;
+            addConfiguredProductToCart(productOptionsSheet.productId, selection, quantity);
+            setProductOptionsSheet({ open: false, productId: null });
+            const suggestions = suggestionsToViewItems(
+              resolveSuggestions('add_to_cart', productOptionsSheet.productId),
+            );
+            if (suggestions.length > 0) {
+              setAddToCartSheet({ open: true, suggestions });
+            }
+          }}
         />
 
         {expandedProductImage ? (
@@ -4520,7 +4669,10 @@ export default function PublicMenuPage() {
                               <p className="px-1 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{group.currency}</p>
                               {group.currency !== businessBaseCurrency && group.exchangeRate > 0 ? (
                                 <p className="px-1 pt-1 text-[11px] font-semibold text-slate-500">
-                                  Tasa aplicada: 1 {businessBaseCurrency} = {group.exchangeRate} {group.currency}
+                                  Tasa aplicada ({exchangeSourceLabel(resolveCheckoutCurrencySource(group.currency, {
+                                    checkoutExchange: checkoutExchangeConfig,
+                                    businessExchangeSource,
+                                  }))}): 1 {businessBaseCurrency} = {group.exchangeRate} {group.currency}
                                 </p>
                               ) : null}
                               <div className="mt-1 space-y-1.5">
@@ -4876,7 +5028,7 @@ export default function PublicMenuPage() {
                                       <span className="min-w-10 px-2 text-center text-sm font-black text-slate-900">{item.quantity}</span>
                                       <button
                                         type="button"
-                                        onClick={() => incrementProduct(item.id)}
+                                        onClick={() => incrementCartLine(item.id)}
                                         disabled={!item.canIncrease}
                                         className="grid h-9 w-9 place-items-center rounded-full bg-white text-base font-black text-slate-700 disabled:opacity-40"
                                         aria-label={`Aumentar cantidad de ${item.name}`}
@@ -5386,7 +5538,7 @@ export default function PublicMenuPage() {
                         </p>
                         {selectedCurrencyCode !== businessBaseCurrency ? (
                           <p className="mt-1 text-[11px] font-semibold text-slate-500">
-                            Tasa snapshot usada: {selectedExchangeRate} {selectedCurrencyCode} por 1 {businessBaseCurrency}
+                            Tasa snapshot ({exchangeSourceLabel(selectedExchangeSource)}): {selectedExchangeRate} {selectedCurrencyCode} por 1 {businessBaseCurrency}
                           </p>
                         ) : null}
                       </div>

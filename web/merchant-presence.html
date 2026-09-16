@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>merchant presence</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        var ALLOWED_PARENTS = {
+          'https://elmenuxfa.com': true,
+          'http://localhost:3000': true,
+          'http://127.0.0.1:3000': true,
+        };
+        var ALLOWED_APIS = {
+          'https://elmenuxfa.com': true,
+          'http://localhost:3000': true,
+          'http://127.0.0.1:3000': true,
+        };
+
+        function apiOrigin() {
+          try {
+            var requested = new URLSearchParams(location.search).get('api') || 'https://elmenuxfa.com';
+            var origin = new URL(requested).origin;
+            return ALLOWED_APIS[origin] ? origin : 'https://elmenuxfa.com';
+          } catch (error) {
+            return 'https://elmenuxfa.com';
+          }
+        }
+
+        function readAccessToken() {
+          try {
+            var keys = Object.keys(localStorage);
+            for (var i = 0; i < keys.length; i += 1) {
+              var key = keys[i];
+              if (key.indexOf('auth-token') === -1 && key.indexOf('supabase.auth') === -1) {
+                continue;
+              }
+              var parsed = JSON.parse(localStorage.getItem(key) || 'null');
+              if (!parsed) continue;
+              var session = parsed.currentSession || parsed.session || parsed;
+              var token = session && (session.access_token || session.accessToken);
+              if (typeof token === 'string' && token.split('.').length === 3) {
+                return token;
+              }
+            }
+          } catch (error) {
+            return null;
+          }
+          return null;
+        }
+
+        function post(payload) {
+          var message = Object.assign({ source: 'elmenuxfa-merchant-presence' }, payload);
+          var parentOrigin = (document.referrer && ALLOWED_PARENTS[new URL(document.referrer).origin])
+            ? new URL(document.referrer).origin
+            : null;
+          if (parentOrigin) {
+            parent.postMessage(message, parentOrigin);
+            return;
+          }
+          Object.keys(ALLOWED_PARENTS).forEach(function (origin) {
+            parent.postMessage(message, origin);
+          });
+        }
+
+        var token = readAccessToken();
+        if (!token) {
+          post({ loggedIn: false, reason: 'no-session' });
+          return;
+        }
+
+        fetch(apiOrigin() + '/api/me/merchant', {
+          method: 'GET',
+          headers: { Authorization: 'Bearer ' + token },
+        })
+          .then(function (response) {
+            return response.json().then(function (body) {
+              return { ok: response.ok, body: body };
+            });
+          })
+          .then(function (result) {
+            if (!result.ok || !result.body || !result.body.data) {
+              post({ loggedIn: false, reason: 'lookup-failed' });
+              return;
+            }
+            post({ loggedIn: true, merchant: result.body.data });
+          })
+          .catch(function () {
+            post({ loggedIn: false, reason: 'lookup-failed' });
+          });
+      })();
+    </script>
+  </body>
+</html>

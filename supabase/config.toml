@@ -1,5 +1,9 @@
 project_id = "qqhberaayhohxlbbhdyi"
 
+# pg_net trigger on pedidos posts without a JWT. Gateway JWT would 401 every WhatsApp/push.
+[functions.notify-order]
+verify_jwt = false
+
 [functions.process-ai-image-jobs]
 verify_jwt = false
 
@@ -10,3 +14,7 @@ verify_jwt = false
 # Authenticated merchants create checkouts; JWT verified inside the function.
 [functions.create-zeno-checkout]
 verify_jwt = true
+
+# pg_cron worker: subscription grace + Zeno reconcile. Secret header, no JWT.
+[functions.billing-lifecycle]
+verify_jwt = false

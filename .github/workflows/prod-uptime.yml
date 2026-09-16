@@ -1,0 +1,83 @@
+name: Production uptime
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: health + public surfaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Site health
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -m 20 -o /tmp/health.json -w "%{http_code}" https://elmenuxfa.com/api/health)
+          echo "health HTTP $code"
+          cat /tmp/health.json
+          test "$code" = "200"
+          grep -q '"ok":true' /tmp/health.json
+
+      - name: Public menu HTML
+        run: |
+          set -euo pipefail
+          curl -sS -m 25 -f https://elmenuxfa.com/v/napoles-pizza | grep -qi "napoles\|pizza\|elmenuxfa"
+
+      - name: Merchant panel boots
+        run: |
+          set -euo pipefail
+          curl -sS -m 25 -f https://app.elmenuxfa.com/ | grep -qi "flutter\|elmenuxfa"
+
+      - name: Legal pages
+        run: |
+          set -euo pipefail
+          curl -sS -m 15 -f -o /dev/null https://elmenuxfa.com/privacidad
+          curl -sS -m 15 -f -o /dev/null https://elmenuxfa.com/terminos
+
+      - name: Public menu API
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -m 20 -o /tmp/menu.json -w "%{http_code}" https://elmenuxfa.com/api/menu/napoles-pizza)
+          echo "menu HTTP $code"
+          # 200 = published; 403 MENU_DRAFT_MODE = unpaid/suspended (stack still up)
+          test "$code" = "200" -o "$code" = "403"
+          grep -qi "napoles\|pizza\|productos\|comercio\|MENU_DRAFT\|mantenimiento" /tmp/menu.json
+
+      - name: Public order validation (no pedido creado)
+        run: |
+          set -euo pipefail
+          order_code=$(curl -sS -m 20 -o /tmp/order.json -w "%{http_code}" \
+            -X POST https://elmenuxfa.com/api/orders \
+            -H "content-type: application/json" \
+            -d '{}')
+          echo "orders empty POST HTTP $order_code"
+          test "$order_code" = "400"
+
+          permit_code=$(curl -sS -m 20 -o /tmp/permit.json -w "%{http_code}" \
+            -X POST https://elmenuxfa.com/api/orders/comprobantes/permit \
+            -H "content-type: application/json" \
+            -d '{"slug":"napoles-pizza"}')
+          echo "permit HTTP $permit_code"
+          # 200 when the canary is published; 404 when billing has unpublished it
+          test "$permit_code" = "200" -o "$permit_code" = "404"
+          if [ "$permit_code" = "200" ]; then
+            grep -q '"permit"' /tmp/permit.json
+          fi
+
+          upload_code=$(curl -sS -m 20 -o /tmp/upload.json -w "%{http_code}" \
+            -X POST https://elmenuxfa.com/api/orders/comprobantes \
+            -F "comercioId=00000000-0000-4000-8000-000000000000")
+          echo "upload without permit HTTP $upload_code"
+          test "$upload_code" = "400" -o "$upload_code" = "403"
+
+      - name: Zeno webhook rejects unsigned payload
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -m 20 -o /tmp/zeno.json -w "%{http_code}" \
+            -X POST https://qqhberaayhohxlbbhdyi.supabase.co/functions/v1/zeno-webhook \
+            -H "content-type: application/json" \
+            -d '{"type":"checkout.completed"}')
+          echo "zeno-webhook unsigned HTTP $code"
+          test "$code" = "400"

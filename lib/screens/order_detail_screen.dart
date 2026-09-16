@@ -14,6 +14,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/delivery_courier_service.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
+import 'package:kosmenu_app/services/order_notification_service.dart';
 import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
@@ -137,6 +138,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           .update({'estado': 'cancelado', 'detalles': detalles})
           .eq('id', pedido.id)
           .eq('estado', 'pendiente');
+
+      final publicOrderId =
+          pedido.detalles['order_id']?.toString().trim() ??
+          pedido.detalles['codigo_orden']?.toString().trim() ??
+          widget.orderId;
+      unawaited(
+        OrderNotificationService.dispatchStatusChange(
+          orderId: publicOrderId,
+          previousStatus: 'pendiente',
+        ),
+      );
     } finally {
       _isAutoCancelingExpiredPending = false;
     }
@@ -692,6 +704,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       });
 
       await _playSuccessOverlay();
+
+      unawaited(
+        OrderNotificationService.dispatchStatusChange(
+          orderId: widget.orderId,
+          previousStatus: latestStatus,
+        ),
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

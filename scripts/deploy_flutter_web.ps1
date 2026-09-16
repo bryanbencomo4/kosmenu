@@ -45,11 +45,28 @@ $vercelConfig = @'
 {
   "rewrites": [
     {
-      "source": "/((?!assets/|canvaskit/|icons/|main\\.dart\\.js|flutter[^/]*\\.js|manifest\\.json|version\\.json|favicon\\.png|.*\\.(?:png|jpg|jpeg|svg|webp|wasm|otf|ttf|woff2?)$).*)",
+      "source": "/((?!assets/|canvaskit/|icons/|main\\.dart\\.js|flutter[^/]*\\.js|manifest\\.json|version\\.json|favicon\\.png|merchant-presence\\.html|.*\\.(?:png|jpg|jpeg|svg|webp|wasm|otf|ttf|woff2?)$).*)",
       "destination": "/index.html"
     }
   ],
   "headers": [
+    {
+      "source": "/merchant-presence.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors https://elmenuxfa.com http://localhost:3000 http://127.0.0.1:3000"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
+      ]
+    },
     {
       "source": "/flutter_service_worker.js",
       "headers": [

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kosmenu_app/services/logo_image_guard.dart';
 
@@ -165,6 +167,7 @@ void main() {
       final isTreatedAsError = switch (outcome) {
         LogoEditCancelled() => false,
         LogoEditSuccess() => false,
+        LogoEditSuccessBytes() => false,
         LogoEditFailure() => true,
       };
 
@@ -177,6 +180,7 @@ void main() {
         'exhaustivo', () {
       String describe(LogoEditOutcome outcome) => switch (outcome) {
         LogoEditSuccess(:final path) => 'success:$path',
+        LogoEditSuccessBytes(:final fileName) => 'success-bytes:$fileName',
         LogoEditCancelled() => 'cancelled',
         LogoEditFailure() => 'failure',
       };
@@ -186,6 +190,16 @@ void main() {
       expect(
         describe(LogoEditFailure(Exception('x'), StackTrace.current)),
         'failure',
+      );
+      expect(
+        describe(
+          LogoEditSuccessBytes(
+            bytes: Uint8List(0),
+            fileName: 'logo.png',
+            mimeType: 'image/png',
+          ),
+        ),
+        'success-bytes:logo.png',
       );
     });
   });

@@ -89,6 +89,160 @@ body {
   background-color: #060b17;
 }
 
+.hero-title-mobile,
+.hero-lead-mobile,
+.hero-cta-mobile-label {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .hero-shell .hero-inner {
+    padding-top: 0.5rem;
+    padding-bottom: 1.75rem;
+  }
+
+  .hero-shell .hero-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  .hero-shell .hero-copy {
+    display: contents;
+  }
+
+  .hero-shell .hero-badge,
+  .hero-shell .hero-mobile-title,
+  .hero-shell .hero-lead,
+  .hero-shell .hero-product,
+  .hero-shell .hero-cta-row,
+  .hero-shell .hero-benefits,
+  .hero-shell .hero-benefits > div {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .hero-shell .hero-badge {
+    order: 1;
+    max-width: 90%;
+    margin: 0 auto;
+    padding: 0.3rem 0.7rem;
+    font-size: 10px;
+  }
+
+  .hero-shell .hero-mobile-title {
+    order: 2;
+    max-width: 90%;
+    margin: 0.7rem auto 0;
+    font-size: clamp(2.625rem, 11.2vw, 3rem);
+    line-height: 0.96;
+    letter-spacing: -0.055em;
+  }
+
+  .hero-shell .hero-title-desktop,
+  .hero-shell .hero-lead-desktop,
+  .hero-shell .hero-cta-desktop-label,
+  .hero-shell .hero-secondary-actions,
+  .hero-shell .hero-note,
+  .hero-shell .hero-benefit-detail,
+  .hero-shell .hero-orbit-system {
+    display: none;
+  }
+
+  .hero-shell .hero-title-mobile {
+    display: block;
+  }
+
+  .hero-shell .hero-title-mobile-accent {
+    display: block;
+    color: #facc15;
+  }
+
+  .hero-shell .hero-lead {
+    order: 3;
+    max-width: 90%;
+    margin: 0.55rem auto 0;
+    font-size: 0.98rem;
+    line-height: 1.45;
+    color: #cbd5e1;
+  }
+
+  .hero-shell .hero-lead-mobile {
+    display: inline;
+  }
+
+  .hero-shell .hero-product {
+    order: 4;
+    width: 100%;
+    margin: 1.15rem auto 0.15rem;
+    justify-content: center;
+  }
+
+  .hero-shell .hero-mobile-product {
+    width: 90%;
+    max-width: none;
+  }
+
+  .hero-shell .hero-mobile-product img {
+    width: 100%;
+    height: auto;
+    max-height: 46vh;
+    object-fit: contain;
+  }
+
+  .hero-shell .hero-cta-row {
+    order: 5;
+    width: 90%;
+    margin: 0.85rem auto 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  .hero-shell .hero-mobile-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 55px;
+    padding: 0.85rem 1.1rem;
+    font-size: 0.92rem;
+    box-shadow: 0 22px 48px -16px rgba(250, 204, 21, 0.95);
+  }
+
+  .hero-shell .hero-cta-mobile-label {
+    display: inline;
+  }
+
+  .hero-shell .hero-benefits {
+    order: 6;
+    width: 90%;
+    margin: 1rem auto 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .hero-shell .hero-benefits > div {
+    min-height: 0;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 0.9rem;
+    font-size: 0.86rem;
+  }
+
+  .hero-shell .hero-benefit-icon {
+    height: 1.75rem;
+    width: 1.75rem;
+  }
+
+  .hero-shell .hero-benefit-copy {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
 .hero-grid {
   background-image:
     linear-gradient(rgba(148, 163, 184, 0.075) 1px, transparent 1px),
@@ -350,7 +504,71 @@ body {
   animation-delay: 700ms;
 }
 
+@keyframes waPanelIn {
+  from {
+    opacity: 0;
+    transform: translate3d(10px, 18px, 0) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes waMsgIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes waTypingDot {
+  0%,
+  70%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.28;
+  }
+  35% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+.whatsapp-chat-panel {
+  transform-origin: 100% 100%;
+  animation: waPanelIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.whatsapp-chat-message {
+  animation: waMsgIn 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.whatsapp-typing-dot {
+  animation: waTypingDot 1s ease-in-out infinite;
+}
+
+.whatsapp-typing-dot:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.whatsapp-typing-dot:nth-child(3) {
+  animation-delay: 300ms;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .whatsapp-chat-panel,
+  .whatsapp-chat-message,
+  .whatsapp-typing-dot {
+    animation: none !important;
+    opacity: 1;
+    transform: none !important;
+  }
+
   .hero-orbit-system,
   .animate-float-slow,
   .animate-glow-pulse,

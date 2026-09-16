@@ -7,9 +7,9 @@ const lastUpdatedLabel = '20 de julio de 2026';
 const cardClassName = 'rounded-[1.35rem] border border-white/10 bg-[#09111e]/78 p-5 sm:p-6';
 
 export const metadata: Metadata = {
-  title: 'Términos y condiciones | ElMenúXFA',
+  title: 'Términos y condiciones | elmenuxfa',
   description:
-    'Consulta las condiciones de uso de ElMenúXFA: sitio público, menús digitales y servicio para negocios de comida.',
+    'Consulta las condiciones de uso de elmenuxfa: sitio público, menús digitales y servicio para negocios de comida.',
   alternates: {
     canonical: canonicalUrl,
   },
@@ -27,7 +27,7 @@ export default function TermsPage() {
             Términos y condiciones de uso
           </h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300 sm:text-[15px]">
-            Al usar ElMenúXFA aceptas estas condiciones para el sitio público, los menús digitales y el servicio dirigido
+            Al usar elmenuxfa aceptas estas condiciones para el sitio público, los menús digitales y el servicio dirigido
             a negocios de comida.
           </p>
           <p className="mt-3 text-sm text-slate-400">Última actualización: {lastUpdatedLabel}</p>
@@ -37,7 +37,7 @@ export default function TermsPage() {
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">1. Uso permitido</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              Puedes usar ElMenúXFA para conocer el servicio, abrir menús digitales de negocios, realizar pedidos según la
+              Puedes usar elmenuxfa para conocer el servicio, abrir menús digitales de negocios, realizar pedidos según la
               configuración de cada comercio y contactar al equipo comercial o de soporte. No está permitido usar la
               plataforma para actividades fraudulentas, scraping abusivo, interferencia técnica o cualquier conducta que
               afecte a otros usuarios o comercios.
@@ -56,7 +56,7 @@ export default function TermsPage() {
           <section className={cardClassName}>
             <h2 className="text-xl font-bold text-white">3. Pedidos y relación comercial</h2>
             <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-[15px]">
-              ElMenúXFA facilita la publicación del menú y la recepción de pedidos. La relación de compra, entrega,
+              elmenuxfa facilita la publicación del menú y la recepción de pedidos. La relación de compra, entrega,
               cobro y atención al cliente se establece entre el diner y el negocio. Ante incidencias de un pedido,
               contacta primero al comercio; si el problema es técnico de la plataforma, escríbenos a{' '}
               <a

@@ -1,31 +1,46 @@
 import { NextResponse } from 'next/server';
 
+import { verifyComprobantePermit } from '../../_lib/comprobante-permit';
 import { COMPROBANTE_MAX_BYTES } from '../../_lib/comprobante-upload';
 import { uploadComprobanteObject } from '../../_lib/comprobante-storage';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
 
 /**
  * Server-side comprobante upload (service role).
+ * Requires a short-lived HMAC permit issued for an online comercio.
  * Returns an opaque storage ref — never a permanent public URL.
- * Bucket must be private in production (see proposed-storage-comprobantes-policies.sql).
  */
 export async function POST(request: Request) {
   try {
     const ip = getClientIp(request);
-    const limit = consumeRateLimit(`comprobantes:upload:${ip}`, 20, 60_000);
-    if (limit.ok === false) {
+    const ipLimit = consumeRateLimit(`comprobantes:upload:${ip}`, 8, 60_000);
+    if (ipLimit.ok === false) {
       return NextResponse.json(
         { error: 'Too many requests.' },
-        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } },
+        { status: 429, headers: { 'Retry-After': String(ipLimit.retryAfterSec) } },
       );
     }
 
     const form = await request.formData();
     const comercioId = String(form.get('comercioId') ?? '').trim();
+    const permit = String(form.get('permit') ?? request.headers.get('x-comprobante-permit') ?? '').trim();
     const file = form.get('file');
 
-    if (!comercioId || !(file instanceof File)) {
+    if (!comercioId || !permit || !(file instanceof File)) {
       return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
+    }
+
+    const permitCheck = verifyComprobantePermit(permit, comercioId);
+    if (permitCheck.ok === false) {
+      return NextResponse.json({ error: permitCheck.error }, { status: 403 });
+    }
+
+    const comercioLimit = consumeRateLimit(`comprobantes:upload:comercio:${comercioId}`, 6, 60 * 60 * 1000);
+    if (comercioLimit.ok === false) {
+      return NextResponse.json(
+        { error: 'Too many requests.' },
+        { status: 429, headers: { 'Retry-After': String(comercioLimit.retryAfterSec) } },
+      );
     }
 
     if (file.size > COMPROBANTE_MAX_BYTES) {
@@ -53,7 +68,6 @@ export async function POST(request: Request) {
         ok: true,
         data: {
           storageRef: uploaded.storageRef,
-          // Compatibility field for checkout until clients stop expecting public URLs.
           paymentProofUrl: uploaded.storageRef,
         },
       },
@@ -61,7 +75,7 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
-    if (message.includes('Missing environment variable: SUPABASE_SERVICE_ROLE_KEY')) {
+    if (message.includes('Missing environment variable')) {
       console.error('[comprobantes] privileged client unavailable');
       return NextResponse.json({ error: 'Unavailable.' }, { status: 503 });
     }

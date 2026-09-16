@@ -233,8 +233,18 @@ void main() {
 
     test('accepts storage:// response and rejects public http urls', () async {
       final okClient = MockClient((request) async {
-        expect(request.url.path, contains('/api/orders/comprobantes'));
         expect(request.method, 'POST');
+        if (request.url.path.endsWith('/permit')) {
+          return http.Response(
+            jsonEncode({
+              'ok': true,
+              'data': {'permit': 'test-permit-token'},
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        expect(request.url.path, contains('/api/orders/comprobantes'));
         return http.Response(
           jsonEncode({
             'ok': true,
@@ -255,8 +265,18 @@ void main() {
       );
       expect(ok.storageRef, startsWith('storage://comprobantes/'));
 
-      final badClient = MockClient(
-        (_) async => http.Response(
+      final badClient = MockClient((request) async {
+        if (request.url.path.endsWith('/permit')) {
+          return http.Response(
+            jsonEncode({
+              'ok': true,
+              'data': {'permit': 'test-permit-token'},
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response(
           jsonEncode({
             'ok': true,
             'data': {
@@ -265,8 +285,8 @@ void main() {
           }),
           201,
           headers: {'content-type': 'application/json'},
-        ),
-      );
+        );
+      });
       expect(
         () => PublicOrderApiService(client: badClient).uploadComprobante(
           comercioId: 'c1',

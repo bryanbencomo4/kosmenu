@@ -21,7 +21,7 @@ export type AudienceBenefit = {
 };
 
 export const audienceBenefits: AudienceBenefit[] = [
-  { title: 'Menos errores al recibir pedidos', icon: ShieldCheck, accent: 'violet' },
-  { title: 'Catálogo siempre actualizado', icon: RefreshCw, accent: 'yellow' },
-  { title: 'Experiencia más profesional', icon: Star, accent: 'violet' },
+  { title: 'Menos espera y más autoservicio', icon: ShieldCheck, accent: 'violet' },
+  { title: 'Menú siempre actualizado', icon: RefreshCw, accent: 'yellow' },
+  { title: 'Imagen más profesional en mesa', icon: Star, accent: 'violet' },
 ];

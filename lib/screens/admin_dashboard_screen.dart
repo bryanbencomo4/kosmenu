@@ -8,7 +8,10 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
+import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
+import 'package:kosmenu_app/services/order_notification_service.dart';
+import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
@@ -55,6 +58,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   List<PedidoModel> _latestOrders = const <PedidoModel>[];
   final Map<String, String> _optimisticStatusByOrderId = <String, String>{};
   final Set<String> _autoCancelInFlight = <String>{};
+  final Set<String> _autoCanceledHandledIds = <String>{};
 
   MagicOnboardingResult? _recentCatalogResult;
   Timer? _recentCatalogTimer;
@@ -155,6 +159,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       }
       await Future<void>.delayed(const Duration(milliseconds: 700));
       await Supabase.instance.client.auth.signOut();
+      SupabaseConfig.clearCurrentComercioId();
+      clearMerchantPresence();
+      if (!mounted) return;
+      // Without this the merchant stays on a dashboard that has no session
+      // left to query with.
+      returnToAuthGate(context);
     } catch (signOutError) {
       debugPrint('No se pudo cerrar sesion automaticamente: $signOutError');
     }
@@ -208,6 +218,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   ) async {
     final expired = orders
         .where((pedido) => !pedido.hasParseError)
+        .where((pedido) => pedido.statusBucket == OrderStatusBucket.pending)
+        .where((pedido) => !_autoCanceledHandledIds.contains(pedido.id))
         .where(_isPendingExpired)
         .where((pedido) => !_autoCancelInFlight.contains(pedido.id))
         .toList(growable: false);
@@ -226,11 +238,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           'at': DateTime.now().toIso8601String(),
         };
 
-        await Supabase.instance.client
+        final updatedRows = await Supabase.instance.client
             .from('pedidos')
             .update({'estado': 'cancelado', 'detalles': detalles})
             .eq('id', pedido.id)
-            .eq('estado', 'pendiente');
+            .eq('estado', 'pendiente')
+            .select('id');
+
+        _autoCanceledHandledIds.add(pedido.id);
+
+        if ((updatedRows as List).isEmpty) {
+          continue;
+        }
+
+        final publicOrderId =
+            pedido.detalles['order_id']?.toString().trim() ??
+            pedido.detalles['codigo_orden']?.toString().trim() ??
+            pedido.id;
+        unawaited(
+          OrderNotificationService.dispatchStatusChange(
+            orderId: publicOrderId,
+            previousStatus: 'pendiente',
+          ),
+        );
+
         canceledCount += 1;
       } catch (error) {
         debugPrint(
@@ -322,6 +353,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     if (comercio.id.trim().isNotEmpty) {
       SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
+      syncMerchantPresence(
+        name: comercio.nombre,
+        logoUrl: comercio.logoUrl,
+        slug: comercio.slug,
+      );
     }
 
     final creditsResponse = results[3] as FunctionResponse;

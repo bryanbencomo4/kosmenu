@@ -348,6 +348,7 @@ function OrderTrackingPageInner() {
   const [syncMode, setSyncMode] = useState<'conectando' | 'realtime' | 'polling' | 'sin-senal'>('conectando');
   const [lastSyncAt, setLastSyncAt] = useState(0);
   const [locationHint, setLocationHint] = useState('');
+  const [tokenRecoveryChecked, setTokenRecoveryChecked] = useState(false);
   const lastStatusRef = useRef<OrderStatus | null>(null);
   const autoCancelAttemptedRef = useRef(false);
 
@@ -384,6 +385,34 @@ function OrderTrackingPageInner() {
       window.sessionStorage.removeItem(key);
     }
   }, [orderId]);
+
+  useEffect(() => {
+    if (trackingToken) {
+      setTokenRecoveryChecked(true);
+      return;
+    }
+
+    if (typeof window === 'undefined' || !orderId) {
+      setTokenRecoveryChecked(true);
+      return;
+    }
+
+    const storedTrackingUrl = window.sessionStorage.getItem(`order-tracking:${orderId}`)?.trim() ?? '';
+    if (storedTrackingUrl) {
+      try {
+        const parsed = new URL(storedTrackingUrl, window.location.origin);
+        const recoveredToken = (parsed.searchParams.get('t') ?? parsed.searchParams.get('token') ?? '').trim();
+        if (recoveredToken && pathname) {
+          router.replace(`${pathname}?t=${encodeURIComponent(recoveredToken)}`);
+          return;
+        }
+      } catch {
+        // Ignore malformed session URLs.
+      }
+    }
+
+    setTokenRecoveryChecked(true);
+  }, [orderId, pathname, router, trackingToken]);
 
   async function cancelOrder(source: 'cliente' | 'timeout') {
     if (!orderId || !trackingToken || cancelLoading) return;
@@ -520,6 +549,10 @@ function OrderTrackingPageInner() {
   }
 
   useEffect(() => {
+    if (!tokenRecoveryChecked) {
+      return;
+    }
+
     if (!orderId) {
       setLoading(false);
       setError('ORDER_ID invalido.');
@@ -529,7 +562,9 @@ function OrderTrackingPageInner() {
     if (!trackingToken) {
       setLoading(false);
       setOrder(null);
-      setError('Este enlace de seguimiento no es valido o ha expirado.');
+      setError(
+        'Este enlace de seguimiento no es valido o ha expirado. Abre el enlace completo que recibiste por WhatsApp o correo (debe incluir ?t=...).',
+      );
       return;
     }
 
@@ -605,7 +640,7 @@ function OrderTrackingPageInner() {
       active = false;
       window.clearInterval(pollingIntervalId);
     };
-  }, [orderId, trackingToken]);
+  }, [orderId, tokenRecoveryChecked, trackingToken]);
 
   const delivery = order?.detalles?.delivery ?? null;
   const isDelivery = (delivery?.mode ?? 'pickup') === 'delivery';

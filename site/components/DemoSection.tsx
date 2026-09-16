@@ -1,9 +1,5 @@
-'use client';
-
-import { useEffect, useState } from 'react';
 import { ArrowRight, Link2, QrCode, Sparkles, UtensilsCrossed } from 'lucide-react';
 import Link from 'next/link';
-import { publicSiteUrl } from '../app/_lib/public-site-config';
 import { DemoTableTent } from './demo/DemoTableTent';
 import { ClientViewCard, NoCameraCard } from './demo/DemoSideCards';
 
@@ -63,12 +59,6 @@ type DemoSectionProps = {
 };
 
 export function DemoSection({ signupHref }: DemoSectionProps) {
-  const [demoUrl, setDemoUrl] = useState(`${publicSiteUrl}${DEMO_PATH}`);
-
-  useEffect(() => {
-    setDemoUrl(`${window.location.origin}${DEMO_PATH}`);
-  }, []);
-
   return (
     <section
       id="demo"
@@ -106,7 +96,7 @@ export function DemoSection({ signupHref }: DemoSectionProps) {
               </span>
             </h2>
             <p className="mt-4 max-w-[27rem] text-[1rem] leading-[1.6] text-slate-300/88 sm:text-[1.05rem]">
-              Muestra a tus clientes cómo funciona tu menú digital: escanean el Table Tent, abren el demo al instante y
+              Muestra a tus clientes cómo funciona tu menú inteligente: escanean el portamenú, abren el demo al instante y
               exploran la experiencia real desde su celular.
             </p>
 
@@ -125,12 +115,12 @@ export function DemoSection({ signupHref }: DemoSectionProps) {
             </div>
             <div className="mt-6 space-y-4 xl:mt-0 xl:space-y-3.5">
               <ClientViewCard />
-              <NoCameraCard demoUrl={demoUrl} demoPath={DEMO_PATH} displayUrl={DEMO_DISPLAY_URL} />
+              <NoCameraCard demoPath={DEMO_PATH} displayUrl={DEMO_DISPLAY_URL} />
               <Link
                 href={signupHref}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-[1.1rem] border border-[#FACC15]/35 bg-[#FACC15]/12 px-5 py-3.5 text-[0.92rem] font-bold text-[#FACC15] transition-all duration-300 hover:bg-[#FACC15]/18 hover:text-[#fde047]"
               >
-                Crear mi propio menú
+                Crear mi Kit Menú Inteligente
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>

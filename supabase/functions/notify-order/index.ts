@@ -45,7 +45,7 @@ const corsHeaders = {
 
 const FIREBASE_AUTH_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const FIREBASE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const DEFAULT_WASENDER_ENDPOINT = 'https://wasenderapi.com/api/send-message';
+const DEFAULT_WASENDER_ENDPOINT = 'https://www.wasenderapi.com/api/send-message';
 const DEFAULT_PUBLIC_SITE_URL = 'https://elmenuxfa.com';
 
 function getPublicSiteUrl(): string {
@@ -98,6 +98,7 @@ Deno.serve(async (req: Request) => {
     });
 
     const commerce = await loadCommerceInfo(supabase, comercioId);
+    const pedidoId = (record.id ?? '').toString().trim();
     const shouldSendPush = eventType === 'INSERT';
     const shouldSendWhatsapp = eventType === 'INSERT' || statusChanged;
 
@@ -109,11 +110,15 @@ Deno.serve(async (req: Request) => {
           firebaseClientEmail,
           firebasePrivateKey,
           orderId,
+          pedidoId,
+          eventType,
+          statusKey: currentStatus,
         })
       : { ok: true, skipped: true, reason: 'push-not-applicable' };
 
     const whatsappResult = shouldSendWhatsapp
       ? await maybeSendWhatsappNotification({
+          supabase,
           apiKey: waSenderApiKey,
           endpoint: waSenderEndpoint,
           record,
@@ -122,6 +127,8 @@ Deno.serve(async (req: Request) => {
           currentStatus,
           orderId,
           commerce,
+          pedidoId,
+          eventType,
         })
       : { ok: true, skipped: true, reason: 'status-unchanged' };
 
@@ -344,13 +351,116 @@ function messageLinesByStatus(status: string) {
   }
 }
 
-function buildTrackingUrl(orderId: string, slug: string): string {
+function buildTrackingUrl(orderId: string, slug: string, trackingToken?: string): string {
   const publicSiteUrl = getPublicSiteUrl();
-  if (slug) {
-    return `${publicSiteUrl}/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}`;
+  const path = slug
+    ? `${publicSiteUrl}/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}`
+    : `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
+
+  const token = (trackingToken ?? '').trim();
+  if (!token) {
+    return path;
   }
 
-  return `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
+  return `${path}?t=${encodeURIComponent(token)}`;
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function generatePublicTrackingToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+async function hashPublicTrackingToken(token: string): Promise<string> {
+  const data = new TextEncoder().encode(token.trim());
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function extractStoredTrackingUrl(record: PedidoRecord): string {
+  const detalles = record.detalles && typeof record.detalles === 'object' ? record.detalles : null;
+  const raw = (detalles?.tracking_url ?? '').toString().trim();
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const site = new URL(getPublicSiteUrl());
+    const parsed = new URL(raw, site.origin);
+    if (parsed.origin !== site.origin) {
+      return '';
+    }
+
+    const token = (parsed.searchParams.get('t') ?? parsed.searchParams.get('token') ?? '').trim();
+    if (!token) {
+      return '';
+    }
+
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+async function ensureTrackingUrl(params: {
+  supabase: ReturnType<typeof createClient>;
+  record: PedidoRecord;
+  orderId: string;
+  businessSlug: string;
+}): Promise<string> {
+  const stored = extractStoredTrackingUrl(params.record);
+  if (stored) {
+    return stored;
+  }
+
+  const pedidoId = (params.record.id ?? '').trim();
+  if (!pedidoId) {
+    return buildTrackingUrl(params.orderId, params.businessSlug);
+  }
+
+  const token = generatePublicTrackingToken();
+  const tokenHash = await hashPublicTrackingToken(token);
+  const trackingUrl = buildTrackingUrl(params.orderId, params.businessSlug, token);
+
+  const currentDetalles =
+    params.record.detalles && typeof params.record.detalles === 'object'
+      ? { ...(params.record.detalles as Record<string, unknown>) }
+      : {};
+
+  const nextDetalles = {
+    ...currentDetalles,
+    tracking_url: trackingUrl,
+    public_tracking_token_hash: tokenHash,
+  };
+
+  const { error } = await params.supabase
+    .from('pedidos')
+    .update({
+      detalles: nextDetalles,
+      public_tracking_token_hash: tokenHash,
+    })
+    .eq('id', pedidoId);
+
+  if (error) {
+    console.warn('ensureTrackingUrl update failed', {
+      orderId: params.orderId,
+      message: error.message,
+    });
+    return buildTrackingUrl(params.orderId, params.businessSlug);
+  }
+
+  return trackingUrl;
 }
 
 function buildBusinessUrl(slug: string): string {
@@ -368,9 +478,10 @@ function buildWhatsappMessage(params: {
   businessName: string;
   businessSlug: string;
   status: string;
+  trackingUrl: string;
 }) {
   const businessUrl = buildBusinessUrl(params.businessSlug);
-  const trackingUrl = buildTrackingUrl(params.orderId, params.businessSlug);
+  const trackingUrl = params.trackingUrl.trim() || buildTrackingUrl(params.orderId, params.businessSlug);
   const messageVariant = messageLinesByStatus(params.status);
 
   return [
@@ -397,6 +508,10 @@ function normalizePhoneToE164(phone: string): string {
   }
 
   const normalizedInput = raw.startsWith('00') ? `+${raw.slice(2)}` : raw;
+  if (/^\+\d{10,15}$/.test(normalizedInput)) {
+    return normalizedInput;
+  }
+
   const digits = normalizedInput.replace(/\D/g, '');
 
   if (/^(?:58)?4\d{9}$/.test(digits)) {
@@ -412,14 +527,44 @@ function normalizePhoneToE164(phone: string): string {
     return `+${digits}`;
   }
 
-  if (/^\+\d{10,15}$/.test(normalizedInput)) {
-    return normalizedInput;
-  }
-
   throw new Error('Invalid phone number.');
 }
 
+async function claimNotificationSlot(
+  supabase: ReturnType<typeof createClient>,
+  params: {
+    pedidoId: string;
+    channel: 'whatsapp' | 'push';
+    eventType: string;
+    statusKey: string;
+  },
+): Promise<boolean> {
+  if (!params.pedidoId) {
+    return true;
+  }
+
+  const { error } = await supabase.from('order_notification_dedup').insert({
+    pedido_id: params.pedidoId,
+    channel: params.channel,
+    event_type: params.eventType,
+    status_key: params.statusKey,
+  });
+
+  if (!error) {
+    return true;
+  }
+
+  if ((error as { code?: string }).code === '23505') {
+    return false;
+  }
+
+  // Table may not exist yet in some environments — do not block delivery.
+  console.warn('order_notification_dedup insert skipped', error.message);
+  return true;
+}
+
 async function maybeSendWhatsappNotification(params: {
+  supabase: ReturnType<typeof createClient>;
   apiKey: string;
   endpoint: string;
   record: PedidoRecord;
@@ -428,6 +573,8 @@ async function maybeSendWhatsappNotification(params: {
   currentStatus: string;
   orderId: string;
   commerce: CommerceInfo;
+  pedidoId: string;
+  eventType: string;
 }) {
   if (!isWhatsappNotificationsEnabled(params.record)) {
     return { ok: true, skipped: true, reason: 'whatsapp-disabled-by-customer' };
@@ -441,14 +588,31 @@ async function maybeSendWhatsappNotification(params: {
     return { ok: true, skipped: true, reason: 'customer-phone-missing' };
   }
 
+  const claimed = await claimNotificationSlot(params.supabase, {
+    pedidoId: params.pedidoId,
+    channel: 'whatsapp',
+    eventType: params.eventType,
+    statusKey: params.currentStatus,
+  });
+  if (!claimed) {
+    return { ok: true, skipped: true, reason: 'whatsapp-already-sent' };
+  }
+
   try {
     const recipient = normalizePhoneToE164(params.customerPhone);
+    const trackingUrl = await ensureTrackingUrl({
+      supabase: params.supabase,
+      record: params.record,
+      orderId: params.orderId,
+      businessSlug: params.commerce.slug,
+    });
     const text = buildWhatsappMessage({
       customerName: params.customerName,
       orderId: params.orderId,
       businessName: params.commerce.name,
       businessSlug: params.commerce.slug,
       status: params.currentStatus,
+      trackingUrl,
     });
 
     const response = await fetch(params.endpoint, {
@@ -459,7 +623,7 @@ async function maybeSendWhatsappNotification(params: {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        to: recipient.replace(/^\+/, ''),
+        to: recipient,
         text,
       }),
     });
@@ -474,6 +638,11 @@ async function maybeSendWhatsappNotification(params: {
     }
 
     if (!response.ok) {
+      console.error('WASender delivery failed', {
+        orderId: params.orderId,
+        status: response.status,
+        recipientSuffix: recipient.slice(-4),
+      });
       return {
         ok: false,
         status: response.status,
@@ -504,6 +673,9 @@ async function maybeSendPushNotifications(params: {
   firebaseClientEmail: string;
   firebasePrivateKey: string;
   orderId: string;
+  pedidoId: string;
+  eventType: string;
+  statusKey: string;
 }) {
   if (!params.commerce.ownerId) {
     return { ok: true, skipped: true, reason: 'owner-not-found' };
@@ -511,6 +683,16 @@ async function maybeSendPushNotifications(params: {
 
   if (!params.firebaseProjectId || !params.firebaseClientEmail || !params.firebasePrivateKey) {
     return { ok: true, skipped: true, reason: 'firebase-config-missing' };
+  }
+
+  const claimed = await claimNotificationSlot(params.supabase, {
+    pedidoId: params.pedidoId,
+    channel: 'push',
+    eventType: params.eventType,
+    statusKey: params.statusKey,
+  });
+  if (!claimed) {
+    return { ok: true, skipped: true, reason: 'push-already-sent' };
   }
 
   const tokens = await loadUserTokens(params.supabase, params.commerce.ownerId);

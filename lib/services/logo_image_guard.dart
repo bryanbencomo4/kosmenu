@@ -1,9 +1,12 @@
 /// Pure helpers for the business logo picker/cropper flow. Deliberately free
-/// of any Flutter dependency (only `dart:core` types are used) so this file
-/// can be unit-tested without a widget environment and reused outside
-/// widgets if needed. Callers that want debug logging pass their own
-/// callback (e.g. `debugPrint`) rather than this file importing Flutter.
+/// of any Flutter dependency (only `dart:core` and `dart:typed_data` types are
+/// used) so this file can be unit-tested without a widget environment and
+/// reused outside widgets if needed. Callers that want debug logging pass
+/// their own callback (e.g. `debugPrint`) rather than this file importing
+/// Flutter.
 library;
+
+import 'dart:typed_data';
 
 /// Returns true when [fileName]/[mimeType] point to a HEIC/HEIF image.
 ///
@@ -86,6 +89,24 @@ class LogoEditSuccess extends LogoEditOutcome {
   const LogoEditSuccess(this.path);
 
   final String path;
+}
+
+/// The user completed the crop and the result only exists in memory.
+///
+/// The web editor rasterizes the crop itself, so there is no file path to
+/// persist. [fileName] and [mimeType] must be carried along because the
+/// storage upload derives the object extension and its `Content-Type` from
+/// them.
+class LogoEditSuccessBytes extends LogoEditOutcome {
+  const LogoEditSuccessBytes({
+    required this.bytes,
+    required this.fileName,
+    required this.mimeType,
+  });
+
+  final Uint8List bytes;
+  final String fileName;
+  final String mimeType;
 }
 
 /// The user closed/cancelled the cropper without confirming. Not an error:

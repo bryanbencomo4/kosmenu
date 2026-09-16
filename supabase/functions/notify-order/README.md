@@ -30,11 +30,11 @@ Important:
 
 ## Deploy
 
+`supabase/config.toml` sets `verify_jwt = false` for this function. The `pedidos` trigger posts through `pg_net` without an Authorization header, so JWT verification at the gateway would drop every WhatsApp and push notification.
+
 ```bash
 supabase functions deploy notify-order --no-verify-jwt
 ```
-
-`--no-verify-jwt` is required when invoking this function from a Supabase Database Webhook.
 
 Set secrets:
 

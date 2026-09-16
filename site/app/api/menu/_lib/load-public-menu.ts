@@ -1,4 +1,8 @@
 import {
+  extractPublicCheckoutExchange,
+  type PublicCheckoutExchangeConfig,
+} from '../../_lib/checkout-exchange-config';
+import {
   toPublicComercioDto,
   toPublicMetodosPagoDto,
 } from '../../_lib/public-menu-dto';
@@ -24,6 +28,7 @@ export type LoadedPublicMenu = {
   categorias: unknown[];
   productos: unknown[];
   metodosPago: ReturnType<typeof toPublicMetodosPagoDto>;
+  checkoutExchange: PublicCheckoutExchangeConfig;
   marketRates: unknown;
   upsellSettings: Record<string, unknown> | null;
   upsellRules: unknown[];
@@ -54,6 +59,10 @@ const COMERCIO_SELECT = [
   'moneda',
   'tasa_cambio_pesos',
   'exchange_rate_value',
+  'exchange_rate_mode',
+  'exchange_rate_source',
+  'exchange_rate_quote_currency',
+  'branding_ia',
 ].join(',');
 
 export async function isOwnerEmailVerified(
@@ -103,6 +112,7 @@ export async function loadPublicMenuByIdentifier(
   const ownerId = (comercioRow.owner_id ?? '').toString().trim();
   const isOnline = comercioRow.en_linea !== false;
   const comercio = toPublicComercioDto(comercioRow);
+  const checkoutExchange = extractPublicCheckoutExchange(comercioRow.branding_ia);
 
   const [
     categoriasResult,
@@ -188,6 +198,7 @@ export async function loadPublicMenuByIdentifier(
     categorias: categoriasResult.data ?? [],
     productos,
     metodosPago: toPublicMetodosPagoDto(metodosPagoResult.data ?? []),
+    checkoutExchange,
     marketRates: marketRatesResult.data ?? null,
     upsellSettings: (upsellSettingsResult.data ?? null) as Record<string, unknown> | null,
     upsellRules: upsellRulesResult.data ?? [],
@@ -203,6 +214,7 @@ export function toPublicMenuResponseBody(menu: LoadedPublicMenu) {
       categorias: menu.categorias,
       productos: menu.productos,
       metodosPago: menu.metodosPago,
+      checkoutExchange: menu.checkoutExchange,
       marketRates: menu.marketRates,
       upsellSettings: menu.upsellSettings,
       upsellRules: menu.upsellRules,

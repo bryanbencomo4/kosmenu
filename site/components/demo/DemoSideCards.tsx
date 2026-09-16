@@ -9,7 +9,7 @@ const CLIENT_VIEW_ITEMS = [
   },
   {
     icon: UtensilsCrossed,
-    title: 'Explora el menú',
+    title: 'Explora el menú inteligente',
     description: 'desde su celular',
   },
   {
@@ -44,13 +44,12 @@ export function ClientViewCard() {
 }
 
 type NoCameraCardProps = {
-  demoUrl: string;
   demoPath: string;
   displayUrl: string;
 };
 
-export function NoCameraCard({ demoUrl, demoPath, displayUrl }: NoCameraCardProps) {
-  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=4&data=${encodeURIComponent(demoUrl)}`;
+export function NoCameraCard({ demoPath, displayUrl }: NoCameraCardProps) {
+  const qrSrc = '/demo/demo-qr.png';
 
   return (
     <aside className="rounded-[1.35rem] border border-white/10 bg-[#0b1220]/92 p-4 shadow-[0_24px_60px_-40px_rgba(0,0,0,1)]">

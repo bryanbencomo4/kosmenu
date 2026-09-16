@@ -225,6 +225,15 @@ const FOOD_KEYWORDS = [
   'snack',
   'comida rapida',
   'comida rápida',
+  'charcutera',
+  'charcuterie',
+  'embutido',
+  'embutidos',
+  'tabla de quesos',
+  'tabla de queso',
+  'antipasto',
+  'fiambre',
+  'fiambres',
 ];
 
 const RETAIL_KEYWORDS = [

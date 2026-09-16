@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image/image.dart' as img;
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -26,8 +25,10 @@ import 'package:kosmenu_app/services/branding_ai_service.dart';
 import 'package:kosmenu_app/services/business_sectors_service.dart';
 import 'package:kosmenu_app/services/google_places_lookup.dart';
 import 'package:kosmenu_app/services/logo_image_guard.dart';
+import 'package:kosmenu_app/services/logo_palette.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/logo_crop_editor.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -1920,31 +1921,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             return;
           }
 
-          final editOutcome = await _openManualLogoEditor(currentPath);
+          final editOutcome = await _openManualLogoEditor(_selectedLogo!);
           if (!mounted) {
             return;
           }
-
-          switch (editOutcome) {
-            case LogoEditCancelled():
-              return;
-            case LogoEditFailure():
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Esta imagen no pudo procesarse. Intenta con una imagen JPG o PNG diferente.',
-                  ),
-                ),
-              );
-              return;
-            case LogoEditSuccess(:final path):
-              final persistedPath = await _persistLogoToLocalStorage(path);
-              if (!mounted) {
-                return;
-              }
-              await _applySelectedLogoFile(XFile(persistedPath));
-              return;
-          }
+          await _applyLogoEditOutcome(editOutcome);
+          return;
         }
 
         if (!mounted) {
@@ -1991,31 +1973,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           return;
         }
 
-        final editOutcome = await _openManualLogoEditor(picked.path);
+        final editOutcome = await _openManualLogoEditor(picked);
         if (!mounted) {
           return;
         }
-
-        switch (editOutcome) {
-          case LogoEditCancelled():
-            return;
-          case LogoEditFailure():
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Esta imagen no pudo procesarse. Intenta con una imagen JPG o PNG diferente.',
-                ),
-              ),
-            );
-            return;
-          case LogoEditSuccess(:final path):
-            final persistedPath = await _persistLogoToLocalStorage(path);
-            if (!mounted) {
-              return;
-            }
-            await _applySelectedLogoFile(XFile(persistedPath));
-            return;
-        }
+        await _applyLogoEditOutcome(editOutcome);
+        return;
       }
     } on PlatformException catch (error) {
       if (!mounted) {
@@ -2195,17 +2158,26 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     unawaited(_openMenuPromptSetup());
   }
 
-  Future<LogoEditOutcome> _openManualLogoEditor(String sourcePath) async {
+  /// Opens the crop editor for [source].
+  ///
+  /// Web uses the in-app editor: `image_cropper`'s web implementation throws
+  /// unless it receives `WebUiSettings`, which every logo pick hit as
+  /// "Esta imagen no pudo procesarse" regardless of the file format. Android
+  /// and iOS keep using the platform cropper (uCrop / TOCropViewController).
+  Future<LogoEditOutcome> _openManualLogoEditor(XFile source) async {
+    if (kIsWeb) {
+      return _openInAppLogoEditor(source);
+    }
+
+    final sourcePath = source.path;
     try {
-      if (!kIsWeb) {
-        final sourceFile = File(sourcePath);
-        if (!await sourceFile.exists()) {
-          debugPrint('Logo crop error: source file missing before cropping.');
-          return LogoEditFailure(
-            StateError('Source logo file not found before cropping.'),
-            StackTrace.current,
-          );
-        }
+      final sourceFile = File(sourcePath);
+      if (!await sourceFile.exists()) {
+        debugPrint('Logo crop error: source file missing before cropping.');
+        return LogoEditFailure(
+          StateError('Source logo file not found before cropping.'),
+          StackTrace.current,
+        );
       }
 
       final cropped = await ImageCropper().cropImage(
@@ -2239,6 +2211,63 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     } catch (error, stackTrace) {
       debugPrint('Logo crop error: ${error.runtimeType}: $error\n$stackTrace');
       return LogoEditFailure(error, stackTrace);
+    }
+  }
+
+  /// Crops [source] with the Flutter editor, used on web where there is no
+  /// platform cropper. Reading the bytes and decoding them happens here, so a
+  /// genuinely unreadable file is the only thing that ends up reported as a
+  /// failure.
+  Future<LogoEditOutcome> _openInAppLogoEditor(XFile source) async {
+    try {
+      final bytes = await source.readAsBytes();
+      if (!mounted) {
+        return const LogoEditCancelled();
+      }
+
+      final cropped = await showLogoCropEditor(context, sourceBytes: bytes);
+      if (cropped == null) {
+        return const LogoEditCancelled();
+      }
+
+      return LogoEditSuccessBytes(
+        bytes: cropped.bytes,
+        fileName: cropped.fileName,
+        mimeType: cropped.mimeType,
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Logo crop error: ${error.runtimeType}: $error\n$stackTrace');
+      return LogoEditFailure(error, stackTrace);
+    }
+  }
+
+  Future<void> _applyLogoEditOutcome(LogoEditOutcome outcome) async {
+    switch (outcome) {
+      case LogoEditCancelled():
+        return;
+      case LogoEditFailure():
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Esta imagen no pudo procesarse. Intenta con una imagen JPG o PNG diferente.',
+            ),
+          ),
+        );
+        return;
+      case LogoEditSuccess(:final path):
+        final persistedPath = await _persistLogoToLocalStorage(path);
+        if (!mounted) {
+          return;
+        }
+        await _applySelectedLogoFile(XFile(persistedPath));
+        return;
+      case LogoEditSuccessBytes(:final bytes, :final fileName, :final mimeType):
+        // `XFile.fromData` keeps the name/MIME the storage upload needs, which
+        // a path-only round trip through local storage would drop.
+        await _applySelectedLogoFile(
+          XFile.fromData(bytes, name: fileName, mimeType: mimeType),
+        );
+        return;
     }
   }
 
@@ -2496,7 +2525,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
 
       _isGeminiPaletteLoading = false;
-      if (geminiAnalysis == null) {
+      // Gemini only refines what the local pixel extraction already found, so
+      // the rescue palette is for logos we could not read at all. Applying it
+      // whenever Gemini failed discarded the colors taken from the logo itself
+      // and turned every brand red.
+      if (geminiAnalysis == null && localAnalysis == null) {
         if (!_paletteManuallyEdited) {
           _paletteSuggestion = const _PaletteOption(
             id: 'rescue-premium',
@@ -2517,9 +2550,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         ];
       }
 
-      _paletteStatusMessage = geminiAnalysis == null
-          ? 'Hemos seleccionado una paleta Premium para ti. Puedes personalizarla ahora o mas tarde.'
-          : null;
+      if (geminiAnalysis != null) {
+        _paletteStatusMessage = null;
+      } else if (localAnalysis != null) {
+        _paletteStatusMessage =
+            'Tomamos los colores de tu logo. Puedes personalizarlos ahora o mas tarde.';
+      } else {
+        _paletteStatusMessage =
+            'Hemos seleccionado una paleta Premium para ti. Puedes personalizarla ahora o mas tarde.';
+      }
       _paletteStatusIsError = false;
 
       final suggestedFont = geminiAnalysis?.suggestedHeadingFont?.trim() ?? '';
@@ -2640,7 +2679,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         colors: extractedColors,
         suggestedHeadingFont: branding['fuente_titulos']?.toString(),
       );
-    } catch (_) {
+    } catch (error) {
+      // `generate-branding-gemini` charges AI credits, so an exhausted balance
+      // looks identical to a network failure from here. Log it: the palette
+      // silently degrades to the local one and there would be no other trace.
+      debugPrint('Gemini palette analysis failed: ${error.runtimeType}: $error');
       return null;
     }
   }
@@ -2703,158 +2746,34 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   Future<_LogoPaletteAnalysis?> _analyzeLogoPalette(XFile logoFile) async {
     try {
-      final bytes = await logoFile.readAsBytes();
-      final decoded = img.decodeImage(bytes);
-      if (decoded == null) {
+      final palette = extractLogoPalette(await logoFile.readAsBytes());
+      if (palette == null) {
         return null;
       }
-
-      final resized = img.copyResize(
-        decoded,
-        width: decoded.width > 96 ? 96 : decoded.width,
-      );
-
-      final Map<int, int> colorCounts = <int, int>{};
-      for (var y = 0; y < resized.height; y += 2) {
-        for (var x = 0; x < resized.width; x += 2) {
-          final pixel = resized.getPixel(x, y);
-          final a = pixel.a;
-          if (a < 180) {
-            continue;
-          }
-
-          final quantized =
-              ((pixel.r ~/ 12) << 16) |
-              ((pixel.g ~/ 12) << 8) |
-              (pixel.b ~/ 12);
-          colorCounts.update(
-            quantized,
-            (value) => value + 1,
-            ifAbsent: () => 1,
-          );
-        }
-      }
-
-      if (colorCounts.isEmpty) {
-        return null;
-      }
-
-      final sorted = colorCounts.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-
-      final List<Color> extractedColors = <Color>[];
-      for (final entry in sorted) {
-        final r = (((entry.key >> 16) & 0xFF) * 12).clamp(0, 255);
-        final g = (((entry.key >> 8) & 0xFF) * 12).clamp(0, 255);
-        final b = ((entry.key & 0xFF) * 12).clamp(0, 255);
-        final candidate = Color.fromARGB(255, r, g, b);
-        if (extractedColors.any(
-          (item) => _colorDistance(item, candidate) < 34,
-        )) {
-          continue;
-        }
-        extractedColors.add(candidate);
-        if (extractedColors.length == 8) {
-          break;
-        }
-      }
-
-      Color? primary;
-      Color? secondary;
-      Color? surface;
-      for (final candidate in extractedColors) {
-        final hsl = HSLColor.fromColor(candidate);
-        if (hsl.saturation > 0.28 &&
-            hsl.lightness > 0.18 &&
-            hsl.lightness < 0.78) {
-          primary = candidate;
-          break;
-        }
-      }
-
-      primary ??= extractedColors.first;
-      for (final candidate in extractedColors) {
-        if (_colorDistance(primary, candidate) < 85) {
-          continue;
-        }
-        final hsl = HSLColor.fromColor(candidate);
-        if (hsl.saturation > 0.12 &&
-            hsl.lightness > 0.14 &&
-            hsl.lightness < 0.9) {
-          secondary = candidate;
-          break;
-        }
-      }
-
-      secondary ??= _resolveAccentColor(
-        primary: primary,
-        candidates: extractedColors,
-      );
-      for (final candidate in extractedColors) {
-        final lightness = HSLColor.fromColor(candidate).lightness;
-        if (lightness < 0.28) {
-          surface = candidate;
-          break;
-        }
-      }
-      surface ??= extractedColors.reduce((best, current) {
-        return HSLColor.fromColor(current).lightness <
-                HSLColor.fromColor(best).lightness
-            ? current
-            : best;
-      });
-      final text =
-          ThemeData.estimateBrightnessForColor(surface) == Brightness.dark
-          ? const Color(0xFFF8F5FF)
-          : const Color(0xFF1D1733);
 
       return _LogoPaletteAnalysis(
         palette: _PaletteOption(
           id: 'logo-smart',
           name: 'Sugerida por logo',
-          primary: primary,
-          accent: secondary,
-          surface: surface,
-          text: text,
+          primary: palette.primary,
+          accent: palette.accent,
+          surface: palette.surface,
+          text: palette.text,
         ),
-        colors: extractedColors,
+        colors: palette.colors,
       );
-    } catch (_) {
+    } catch (error) {
+      debugPrint('Local palette analysis failed: ${error.runtimeType}: $error');
       return null;
     }
   }
 
-  double _colorDistance(Color a, Color b) {
-    final dr = (a.r - b.r).abs();
-    final dg = (a.g - b.g).abs();
-    final db = (a.b - b.b).abs();
-    return dr * 0.3 + dg * 0.59 + db * 0.11;
-  }
+  double _colorDistance(Color a, Color b) => logoColorDistance(a, b);
 
   Color _resolveAccentColor({
     required Color primary,
     required List<Color> candidates,
-  }) {
-    for (final candidate in candidates) {
-      if (_colorDistance(primary, candidate) < 72) {
-        continue;
-      }
-      final hsl = HSLColor.fromColor(candidate);
-      if (hsl.saturation > 0.1 && hsl.lightness > 0.16 && hsl.lightness < 0.9) {
-        return candidate;
-      }
-    }
-
-    final base = HSLColor.fromColor(primary);
-    final shifted = (base.hue + 34.0) % 360.0;
-    final derived = base
-        .withHue(shifted)
-        .withSaturation((base.saturation + 0.08).clamp(0.18, 0.9));
-    final lightness = base.lightness < 0.26
-        ? 0.44
-        : (base.lightness + 0.06).clamp(0.26, 0.78);
-    return derived.withLightness(lightness).toColor();
-  }
+  }) => resolveLogoAccentColor(primary: primary, candidates: candidates);
 
   Future<void> _editPaletteColor(String role) async {
     final initial = switch (role) {
@@ -7271,12 +7190,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     }
 
+    final quotedSource =
+        _exchangeRateSourceByCurrency[quotedCurrency] ?? _exchangeRateSource;
+    final quotedMode =
+        _exchangeRateModeByCurrency[quotedCurrency] ?? _exchangeRateMode;
+
     await Supabase.instance.client
         .from('comercios')
         .update(<String, dynamic>{
           'branding_ia': _buildBrandingIaPayload(),
-          'exchange_rate_mode': _exchangeRateMode,
-          'exchange_rate_source': _exchangeRateSource,
+          'exchange_rate_mode': quotedMode,
+          'exchange_rate_source': quotedSource,
           'exchange_rate_quote_currency': quotedCurrency == primaryCurrency
               ? null
               : quotedCurrency,
@@ -7593,9 +7517,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
       'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
       'negocio_virtual': _isVirtualBusiness,
-      'mostrar_en_directorio_publico': _publicDirectoryUiEnabled
-          ? _showOnPublicDirectory
-          : false,
+      if (_publicDirectoryUiEnabled)
+        'mostrar_en_directorio_publico': _showOnPublicDirectory,
       'logo_url': (logoUrl != null && logoUrl.trim().isNotEmpty)
           ? logoUrl.trim()
           : null,
@@ -7603,8 +7526,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'tasa_cambio_pesos': primaryCurrency == 'COP' && primaryExchangeRate > 0
           ? primaryExchangeRate
           : null,
-      'exchange_rate_mode': _exchangeRateMode,
-      'exchange_rate_source': _exchangeRateSource,
+      'exchange_rate_mode':
+          _exchangeRateModeByCurrency[quotedCurrency] ?? _exchangeRateMode,
+      'exchange_rate_source':
+          _exchangeRateSourceByCurrency[quotedCurrency] ?? _exchangeRateSource,
       'exchange_rate_quote_currency': quotedCurrency == primaryCurrency
           ? null
           : quotedCurrency,

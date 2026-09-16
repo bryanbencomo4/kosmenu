@@ -17,8 +17,81 @@ import 'package:kosmenu_app/services/order_gate_handler.dart';
 import 'package:kosmenu_app/services/push_notification_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+/// Replaces Flutter's release-mode error box, which paints a bare gray
+/// rectangle with no message (its text is only built behind an `assert`), so a
+/// failed build is indistinguishable from a broken page and leaves the merchant
+/// with no way out.
+///
+/// Built from widgets that need no inherited ancestors (no `MediaQuery`,
+/// `Material` or `Scaffold`) because this can be rendered anywhere in the tree,
+/// including above the app's own providers.
+Widget _buildRecoverableErrorScreen(FlutterErrorDetails details) {
+  debugPrint('UI build error: ${details.exceptionAsString()}');
+
+  return Directionality(
+    textDirection: TextDirection.ltr,
+    child: Container(
+      color: const Color(0xFF1B1236),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFFD8B4FE),
+            size: 44,
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Algo se interrumpio en esta pantalla.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFFF8F5FF),
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Vuelve al inicio para continuar. Si vuelve a pasar, recarga la '
+            'pagina.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFFB9AED7), fontSize: 14),
+          ),
+          const SizedBox(height: 18),
+          GestureDetector(
+            onTap: () => _navigatorKey.currentState?.pushAndRemoveUntil(
+              MaterialPageRoute(builder: (_) => const AuthGate()),
+              (route) => false,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
+              decoration: BoxDecoration(
+                color: const Color(0xFF8B5CF6),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                'Volver al inicio',
+                style: TextStyle(
+                  color: Color(0xFFFFFFFF),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ErrorWidget.builder = _buildRecoverableErrorScreen;
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -53,7 +126,6 @@ class KosmenuApp extends StatefulWidget {
 }
 
 class _KosmenuAppState extends State<KosmenuApp> {
-  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final deep_links.AppLinks _appLinks = deep_links.AppLinks();
   final PushNotificationService _pushNotifications =
       PushNotificationService.instance;

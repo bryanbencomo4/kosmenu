@@ -5,6 +5,9 @@ const DEFAULT_SUPPORT_EMAIL = 'hola@elmenuxfa.com';
 const DEFAULT_MARKETING_WHATSAPP_DIGITS = '584148216433';
 const DEFAULT_MARKETING_WHATSAPP_MESSAGE =
   'Hola, necesito ayuda con elmenuxfa.com (soporte).';
+const DEFAULT_CHAT_WHATSAPP_DIGITS = '584220451906';
+const DEFAULT_CHAT_WHATSAPP_MESSAGE =
+  'Hola, quiero información sobre el Kit Menú Inteligente de elmenuxfa.';
 const DEVELOPMENT_PUBLIC_HOSTS = ['www.localhost', 'elmenuxfa.local', 'www.elmenuxfa.local'] as const;
 const DEVELOPMENT_ADMIN_HOSTS = ['admin.localhost', 'admin.elmenuxfa.local'] as const;
 
@@ -78,6 +81,18 @@ export const marketingWhatsappMessage = resolveText(
 export const marketingWhatsappHref = marketingWhatsappDigits
   ? `https://wa.me/${marketingWhatsappDigits}?text=${encodeURIComponent(marketingWhatsappMessage)}`
   : supportEmailHref;
+
+export const chatWhatsappDigits = resolveDigits(
+  process.env.NEXT_PUBLIC_CHAT_WHATSAPP_DIGITS,
+  DEFAULT_CHAT_WHATSAPP_DIGITS,
+);
+
+export const chatWhatsappMessage = resolveText(
+  process.env.NEXT_PUBLIC_CHAT_WHATSAPP_MESSAGE,
+  DEFAULT_CHAT_WHATSAPP_MESSAGE,
+);
+
+export const chatWhatsappHref = `https://wa.me/${chatWhatsappDigits}?text=${encodeURIComponent(chatWhatsappMessage)}`;
 
 /** Flutter web app — login (default). */
 export const appLoginHref = appSiteUrl;

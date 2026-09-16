@@ -7,8 +7,12 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
+import 'package:kosmenu_app/screens/billing_gift_card_screen.dart';
+import 'package:kosmenu_app/screens/billing_manual_payment_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
+import 'package:kosmenu_app/services/payment_catalog.dart';
+import 'package:kosmenu_app/widgets/payment_method_mark.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -24,30 +28,94 @@ class BillingPlanScreen extends StatefulWidget {
 
 class _BillingPlanScreenState extends State<BillingPlanScreen> {
   final _billing = const BillingService();
-  late Future<BillingSnapshot> _future;
+  late Future<BillingCheckoutContext> _future;
   bool _paying = false;
+  bool _cancelling = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.initialSnapshot != null
-        ? Future.value(widget.initialSnapshot!)
-        : _billing.loadSnapshot().then((snap) async {
-            if (!snap.requiresPaymentToPublish) return snap;
-            try {
-              return await _billing.reconcileCheckout();
-            } catch (_) {
-              return snap;
-            }
-          });
+    _future = _loadContext(initial: widget.initialSnapshot);
+  }
+
+  Future<BillingCheckoutContext> _loadContext({BillingSnapshot? initial}) async {
+    if (initial != null && !initial.requiresPaymentToPublish) {
+      return _billing.loadCheckoutContext();
+    }
+    if (initial != null && initial.requiresPaymentToPublish) {
+      try {
+        await _billing.reconcileCheckout();
+      } catch (_) {}
+    } else {
+      try {
+        final snap = await _billing.loadSnapshot();
+        if (snap.requiresPaymentToPublish) {
+          await _billing.reconcileCheckout();
+        }
+      } catch (_) {}
+    }
+    return _billing.loadCheckoutContext();
   }
 
   Future<void> _reload() async {
     setState(() {
       _error = null;
-      _future = _billing.loadSnapshot();
+      _future = _billing.loadCheckoutContext();
     });
+  }
+
+  Future<void> _openGiftCard(PaymentMethodCatalog method) async {
+    final activated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => BillingGiftCardScreen(method: method)),
+    );
+    if (!mounted) return;
+    if (activated == true) {
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const BillingPaymentSuccessScreen()),
+      );
+      return;
+    }
+    await _reload();
+  }
+
+  Future<void> _openManual(
+    PaymentMethodCatalog method,
+    BillingCheckoutContext contextData,
+  ) async {
+    final sent = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => BillingManualPaymentScreen(
+          method: method,
+          plan: contextData.snapshot.plan,
+          hasPendingSubmission: contextData.pendingSubmission != null,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (sent == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pago enviado. Te avisamos cuando lo revisemos.'),
+        ),
+      );
+    }
+    await _reload();
+  }
+
+  Future<void> _cancelPending(PaymentSubmission submission) async {
+    if (_cancelling) return;
+    setState(() => _cancelling = true);
+    try {
+      await _billing.cancelManualPayment(submission.id);
+      if (!mounted) return;
+      await _reload();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error'.replaceFirst('Bad state: ', ''));
+    } finally {
+      if (mounted) setState(() => _cancelling = false);
+    }
   }
 
   Future<void> _pay(BillingSnapshot snapshot) async {
@@ -100,7 +168,7 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 640),
-            child: FutureBuilder<BillingSnapshot>(
+            child: FutureBuilder<BillingCheckoutContext>(
               future: _future,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -113,10 +181,13 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
                   );
                 }
 
-                final data = snapshot.data!;
+                final checkout = snapshot.data!;
+                final data = checkout.snapshot;
                 final plan = data.plan;
                 final sub = data.subscription;
                 final payment = data.latestPayment;
+                final automatic = automaticPaymentMethods(checkout.methods);
+                final manual = manualPaymentMethods(checkout.methods);
 
                 return ListView(
                   padding: const EdgeInsets.all(16),
@@ -152,7 +223,7 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
                             ),
                           ),
                           Text(
-                            '/ mes · pago con criptomonedas',
+                            '/ mes · elige como pagar',
                             style: GoogleFonts.manrope(
                               color: AppColors.textSoft,
                               fontWeight: FontWeight.w600,
@@ -192,7 +263,7 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
                             const SizedBox(height: 10),
                             Text(
                               'Tu menú está deshabilitado hasta que actives el plan. '
-                              'Paga con criptomonedas para publicarlo.',
+                              'Elige un metodo de verificacion automatica o envia un pago para revision.',
                               style: GoogleFonts.manrope(
                                 color: AppColors.textSoft,
                                 height: 1.35,
@@ -224,30 +295,72 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
                           ),
                         ),
                       ),
-                    if (!data.canPublish)
-                      FilledButton(
-                      onPressed: _paying || plan == null
-                          ? null
-                          : () => _pay(data),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    if (checkout.pendingSubmission != null) ...[
+                      _PendingReviewCard(
+                        submission: checkout.pendingSubmission!,
+                        methods: checkout.methods,
+                        cancelling: _cancelling,
+                        onCancel: () =>
+                            _cancelPending(checkout.pendingSubmission!),
+                      ),
+                      const SizedBox(height: 16),
+                    ] else if (checkout.latestSubmission?.isRejected == true) ...[
+                      _RejectedReviewCard(
+                        submission: checkout.latestSubmission!,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    _MethodGroup(
+                      title: 'Verificacion automatica',
+                      subtitle:
+                          'Se activa solo. No subas comprobante ni esperes revision.',
+                      tone: AppColors.success,
+                      children: automatic
+                          .map(
+                            (method) => _MethodTile(
+                              method: method,
+                              busy: _paying,
+                              onTap: () {
+                                if (method.isCrypto) {
+                                  _pay(data);
+                                  return;
+                                }
+                                if (method.isGiftCard) {
+                                  _openGiftCard(method);
+                                }
+                              },
+                            ),
+                          )
+                          .toList(growable: false),
+                    ),
+                    const SizedBox(height: 14),
+                    _MethodGroup(
+                      title: 'Verificacion manual',
+                      subtitle:
+                          'Paga, envia el comprobante y un administrador lo revisa.',
+                      tone: AppColors.warning,
+                      children: manual
+                          .map(
+                            (method) => _MethodTile(
+                              method: method,
+                              busy: _paying || checkout.pendingSubmission != null,
+                              onTap: () => _openManual(method, checkout),
+                            ),
+                          )
+                          .toList(growable: false),
+                    ),
+                    if (manual.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Los metodos manuales aparecen cuando un administrador carga los datos de la cuenta.',
+                          style: GoogleFonts.manrope(
+                            color: AppColors.textSoft,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
-                      child: _paying
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(
-                              'Pagar con criptomonedas',
-                              style: GoogleFonts.manrope(
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                    ),
+                    const SizedBox(height: 16),
                     if (data.hasActiveSubscription) ...[
                       FilledButton(
                         onPressed: () {
@@ -295,14 +408,15 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
                       TextButton(
                         onPressed: _paying ? null : () => _pay(data),
                         child: Text(
-                          'Generar nuevo checkout',
+                          'Generar nuevo checkout de Binance Pay',
                           style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
                         ),
                       ),
                     ],
                     const SizedBox(height: 12),
                     Text(
-                      'El pago se confirma automáticamente. WhatsApp es solo soporte.',
+                      'Binance Pay y las tarjetas de regalo se confirman solas. '
+                      'Los demas metodos los revisa un administrador. WhatsApp es solo soporte.',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.manrope(
                         color: AppColors.textSoft,
@@ -759,6 +873,214 @@ class _BillingPaymentSuccessScreenState
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MethodGroup extends StatelessWidget {
+  const _MethodGroup({
+    required this.title,
+    required this.subtitle,
+    required this.tone,
+    required this.children,
+  });
+
+  final String title;
+  final String subtitle;
+  final Color tone;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: GoogleFonts.manrope(
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+              color: tone,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: GoogleFonts.manrope(
+              color: AppColors.textSoft,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (children.isEmpty)
+            Text(
+              'No hay metodos activos en este grupo.',
+              style: GoogleFonts.manrope(color: AppColors.textSoft),
+            )
+          else
+            ...children,
+        ],
+      ),
+    );
+  }
+}
+
+class _MethodTile extends StatelessWidget {
+  const _MethodTile({
+    required this.method,
+    required this.onTap,
+    this.busy = false,
+  });
+
+  final PaymentMethodCatalog method;
+  final VoidCallback onTap;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: AppColors.surfaceMuted,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: busy ? null : onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                PaymentMethodMark(method: method, size: 44),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        method.name,
+                        style: GoogleFonts.manrope(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      Text(
+                        method.tagline,
+                        style: GoogleFonts.manrope(
+                          color: AppColors.textSoft,
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppColors.textSoft.withValues(alpha: busy ? 0.4 : 1),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingReviewCard extends StatelessWidget {
+  const _PendingReviewCard({
+    required this.submission,
+    required this.methods,
+    required this.cancelling,
+    required this.onCancel,
+  });
+
+  final PaymentSubmission submission;
+  final List<PaymentMethodCatalog> methods;
+  final bool cancelling;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    PaymentMethodCatalog? method;
+    for (final item in methods) {
+      if (item.code == submission.methodCode) {
+        method = item;
+        break;
+      }
+    }
+    return _SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Pago en revision',
+            style: GoogleFonts.manrope(
+              fontWeight: FontWeight.w800,
+              color: AppColors.warning,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Enviamos ${method?.name ?? submission.methodCode} '
+            '(\$${submission.amountUsd.toStringAsFixed(0)} USD'
+            '${submission.months == 1 ? '' : ' · ${submission.months} meses'}). '
+            'Un administrador lo confirma. No envies otro comprobante mientras tanto.',
+            style: GoogleFonts.manrope(
+              color: AppColors.textSoft,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: cancelling ? null : onCancel,
+            child: Text(
+              cancelling ? 'Cancelando…' : 'Cancelar esta solicitud',
+              style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RejectedReviewCard extends StatelessWidget {
+  const _RejectedReviewCard({required this.submission});
+
+  final PaymentSubmission submission;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'El ultimo pago fue rechazado',
+            style: GoogleFonts.manrope(
+              fontWeight: FontWeight.w800,
+              color: AppColors.danger,
+            ),
+          ),
+          if (submission.reviewNote != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              submission.reviewNote!,
+              style: GoogleFonts.manrope(
+                color: AppColors.textSoft,
+                height: 1.4,
+              ),
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text(
+            'Puedes enviar otro pago con los datos correctos.',
+            style: GoogleFonts.manrope(color: AppColors.textSoft),
+          ),
+        ],
       ),
     );
   }

@@ -14,6 +14,7 @@ import {
   normalizePublicStatus,
   toPublicOrderTrackingResponse,
 } from '../../_lib/public-order';
+import { dispatchOrderNotification } from '../../_lib/dispatch-order-notification';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 
@@ -72,21 +73,37 @@ async function findOrderByOrderId(
   supabase: ReturnType<typeof getServiceSupabaseClient>,
   orderId: string,
 ) {
-  const derivedComercioId = extractComercioId(orderId);
+  const select =
+    'id,comercio_id,estado,created_at,total,costo_delivery,public_tracking_token_hash,detalles';
 
-  let query = supabase
+  const { data: directMatch, error: directError } = await supabase
     .from('pedidos')
-    .select(
-      'id,comercio_id,estado,created_at,total,costo_delivery,public_tracking_token_hash,detalles',
-    )
+    .select(select)
+    .eq('detalles->>order_id', orderId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (directError) {
+    throw new Error(directError.message);
+  }
+
+  if (directMatch) {
+    return directMatch as PedidoRow;
+  }
+
+  const derivedComercioId = extractComercioId(orderId);
+  if (!derivedComercioId) {
+    return null;
+  }
+
+  const { data: rows, error } = await supabase
+    .from('pedidos')
+    .select(select)
+    .eq('comercio_id', derivedComercioId)
     .order('created_at', { ascending: false })
     .limit(200);
 
-  if (derivedComercioId) {
-    query = query.eq('comercio_id', derivedComercioId);
-  }
-
-  const { data: rows, error } = await query;
   if (error) {
     throw new Error(error.message);
   }
@@ -355,6 +372,12 @@ export async function PATCH(request: Request, { params }: Params) {
       }
 
       const updated = attempt.data as PedidoRow;
+      void dispatchOrderNotification({
+        type: 'UPDATE',
+        record: updated as Record<string, unknown>,
+        old_record: { ...order, estado: currentStatus },
+      }).catch(() => undefined);
+
       const comercio = await loadComercio(supabase, updated.comercio_id);
       return NextResponse.json(
         { ok: true, data: toPublicOrderTrackingResponse(updated, orderId, comercio) },
@@ -457,6 +480,12 @@ export async function PATCH(request: Request, { params }: Params) {
       estado: 'cancelado',
       detalles: nextDetalles,
     };
+    void dispatchOrderNotification({
+      type: 'UPDATE',
+      record: updated as Record<string, unknown>,
+      old_record: { ...order, estado: currentStatus },
+    }).catch(() => undefined);
+
     const comercio = await loadComercio(supabase, updated.comercio_id);
     return NextResponse.json(
       { ok: true, data: toPublicOrderTrackingResponse(updated, orderId, comercio) },

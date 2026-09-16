@@ -5,13 +5,20 @@ import { BusinessLandingPage } from '../components/business/BusinessLandingPage'
 
 const canonicalUrl = publicSiteUrl;
 
-const seoTitle = 'ElMenúXFA | Menú digital con QR y Table Tent para restaurantes';
+const seoTitle = 'elmenuxfa | Menú inteligente para restaurantes con QR y autoservicio';
 const seoDescription =
-  'Tu menú digital listo para que tus clientes escaneen, elijan y ordenen. Incluye menú online, QR personalizado y Table Tent físico. $10/mes.';
+  'Convierte cada mesa en un vendedor inteligente. Kit Portamenú Inteligente $10 de lanzamiento. Plataforma $10/mes o $90/año. Autoservicio para restaurantes.';
 
 export const metadata: Metadata = {
   title: seoTitle,
   description: seoDescription,
+  keywords: [
+    'menú inteligente para restaurantes',
+    'menú QR',
+    'autoservicio para restaurantes',
+    'portamenú inteligente',
+    'elmenuxfa',
+  ],
   alternates: {
     canonical: canonicalUrl,
   },
@@ -19,7 +26,7 @@ export const metadata: Metadata = {
     title: seoTitle,
     description: seoDescription,
     url: canonicalUrl,
-    siteName: 'ElMenúXFA',
+    siteName: 'elmenuxfa',
     locale: 'es_CO',
     type: 'website',
     images: [
@@ -27,7 +34,7 @@ export const metadata: Metadata = {
         url: `${canonicalUrl}/branding/full_logo.png`,
         width: 1200,
         height: 630,
-        alt: 'ElMenúXFA',
+        alt: 'elmenuxfa menú inteligente para restaurantes',
       },
     ],
   },

@@ -25,13 +25,13 @@ export function TargetSection() {
               <span className="block">
                 que quieren{' '}
                 <span className="bg-gradient-to-r from-violet-400 to-purple-500 bg-clip-text text-transparent">
-                  vender mejor
+                  verse más profesionales
                 </span>
               </span>
             </h2>
             <p className="mt-5 max-w-[34rem] text-[1.05rem] leading-[1.7] text-slate-300/90">
-              Ideal para restaurantes, cafeterías, food trucks y emprendimientos gastronómicos que buscan una
-              experiencia más profesional y rápida para sus clientes.
+              Ideal para restaurantes, cafeterías, food trucks y negocios gastronómicos que quieren menos espera, más
+              autoservicio y una imagen más profesional en cada mesa.
             </p>
           </div>
 

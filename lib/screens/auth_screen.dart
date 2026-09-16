@@ -8,10 +8,26 @@ import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
+import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+/// Drops every route and returns to the auth gate.
+///
+/// Signing out cannot just pop to the first route: onboarding and billing
+/// replace the whole stack with `pushAndRemoveUntil(..., (route) => false)`,
+/// so the gate that swaps the UI for a signed-out user is usually no longer
+/// mounted by the time a merchant reaches the profile. Popping then revealed
+/// the dashboard itself (the first route) with a dead session instead of the
+/// login screen.
+void returnToAuthGate(BuildContext context) {
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => const AuthGate()),
+    (route) => false,
+  );
+}
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -29,13 +45,14 @@ class _AuthGateState extends State<AuthGate> {
     Future<PostAuthDestination> resolveOnce() async {
       final row = await Supabase.instance.client
           .from('comercios')
-          .select('id, slug')
+          .select('id, slug, nombre, logo_url')
           .eq('owner_id', userId)
           .limit(1)
           .maybeSingle();
 
       if (row == null) {
         SupabaseConfig.clearCurrentComercioId();
+        syncMerchantPresence(name: 'Tu cuenta');
         return resolvePostAuthDestination(
           hasCommerce: false,
           hasCatalog: false,
@@ -47,12 +64,23 @@ class _AuthGateState extends State<AuthGate> {
       final comercioSlug = row['slug']?.toString().trim();
       if (comercioId.isEmpty) {
         SupabaseConfig.clearCurrentComercioId();
+        syncMerchantPresence(name: 'Tu cuenta');
         return resolvePostAuthDestination(
           hasCommerce: false,
           hasCatalog: false,
           hasActiveSubscription: false,
         );
       }
+
+      final comercioNombre = row['nombre']?.toString().trim();
+      final comercioLogoUrl = row['logo_url']?.toString().trim();
+      syncMerchantPresence(
+        name: (comercioNombre == null || comercioNombre.isEmpty)
+            ? 'Tu cuenta'
+            : comercioNombre,
+        logoUrl: comercioLogoUrl,
+        slug: comercioSlug,
+      );
 
       final firstCatalog = await Supabase.instance.client
           .from('catalogos')
@@ -140,6 +168,7 @@ class _AuthGateState extends State<AuthGate> {
 
         if (session == null) {
           SupabaseConfig.clearCurrentComercioId();
+          clearMerchantPresence();
           _resetTargetCache();
           return const AuthScreen();
         }

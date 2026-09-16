@@ -4,97 +4,86 @@ import {
   CircleDollarSign,
   Gift,
   LayoutGrid,
-  MessageCircle,
   QrCode,
   Rocket,
-  TrendingUp,
-  Zap,
+  Settings2,
+  Sparkles,
+  UtensilsCrossed,
 } from 'lucide-react';
 
 const steps = [
   {
     number: 1,
-    title: 'Crea tu cuenta',
-    description: 'Regístrate y agrega los datos de tu negocio.',
+    title: 'Creamos tu menú inteligente',
+    description: 'Diseño inicial de categorías, productos y precios listos para tus clientes.',
     badgeClass: 'border-violet-300/25 bg-violet-500/15 text-violet-100',
     iconShellClass: 'border-violet-400/30 bg-violet-500/12 text-violet-200',
-    icon: MessageCircle,
-    previewSrc: '/branding/step-preview-1.png',
-    previewAlt: 'Registro de cuenta para crear un menú digital',
+    icon: Sparkles,
+    previewSrc: '/branding/step-preview-2.png',
+    previewAlt: 'Menú inteligente con categorías y productos para restaurante',
     previewAspect: 'aspect-square',
   },
   {
     number: 2,
-    title: 'Configura tu menú',
-    description: 'Crea categorías, productos, precios y opciones.',
+    title: 'Configuramos tu restaurante',
+    description: 'Logo, marca, mesas y plataforma lista para operar.',
     badgeClass: 'border-violet-300/25 bg-violet-500/15 text-violet-100',
     iconShellClass: 'border-violet-400/30 bg-violet-500/12 text-violet-200',
-    icon: LayoutGrid,
-    previewSrc: '/branding/step-preview-2.png',
-    previewAlt: 'Lista de categorías del menú con fotos de productos',
+    icon: Settings2,
+    previewSrc: '/branding/step-preview-1.png',
+    previewAlt: 'Configuración del restaurante en elmenuxfa',
     previewAspect: 'aspect-square',
   },
   {
     number: 3,
-    title: 'Personaliza tu diseño',
-    description: 'Agrega tu logo, colores e imágenes.',
+    title: 'Instalas tus portamenús',
+    description: 'Colocas 4 portamenús premium con tu QR personalizado en las mesas.',
     badgeClass: 'border-sky-300/25 bg-sky-500/15 text-sky-50',
     iconShellClass: 'border-sky-400/30 bg-sky-500/12 text-sky-100',
-    icon: QrCode,
-    previewSrc: '/branding/step-preview-3.png',
-    previewAlt: 'Personalización visual del menú digital',
+    icon: UtensilsCrossed,
+    previewSrc: '/branding/step-preview-4.png',
+    previewAlt: 'Portamenú con QR listo para instalar en las mesas',
     previewAspect: 'aspect-square',
   },
   {
     number: 4,
-    title: 'Publica y genera tu QR',
-    description: 'Activa el menú y descarga automáticamente tu código QR.',
+    title: 'Tus clientes escanean y disfrutan',
+    description: 'Autoservicio desde el celular: exploran, eligen y viven una experiencia moderna.',
     badgeClass: 'border-cyan-300/25 bg-cyan-500/15 text-cyan-50',
     iconShellClass: 'border-cyan-400/30 bg-cyan-500/12 text-cyan-100',
-    icon: Gift,
-    previewSrc: '/branding/step-preview-4.png',
-    previewAlt: 'QR listo para descargar e imprimir',
-    previewAspect: 'aspect-square',
-  },
-  {
-    number: 5,
-    title: 'Administra todo en línea',
-    description: 'Actualiza productos, precios y disponibilidad cuando quieras.',
-    badgeClass: 'border-violet-300/25 bg-violet-500/15 text-violet-100',
-    iconShellClass: 'border-violet-400/30 bg-violet-500/12 text-violet-200',
-    icon: Rocket,
+    icon: QrCode,
     previewSrc: '/branding/step-preview-5.png',
-    previewAlt: 'Panel para administrar el menú digital',
+    previewAlt: 'Cliente explorando el menú inteligente desde el celular',
     previewAspect: 'aspect-square',
   },
 ] as const;
 
 const trustItems = [
   {
-    label: 'Publicación rápida',
-    icon: Zap,
+    label: 'Listo para mesas',
+    icon: LayoutGrid,
     iconClass: 'border-yellow-400/18 bg-yellow-500/12 text-[#FACC15]',
   },
   {
-    label: '$10/mes',
+    label: 'Kit $10 lanzamiento',
     icon: CircleDollarSign,
     iconClass: 'border-violet-400/18 bg-violet-500/10 text-violet-200',
   },
   {
-    label: 'Table Tent incluido',
+    label: '4 portamenús incluidos',
     icon: Gift,
     iconClass: 'border-cyan-400/18 bg-cyan-500/10 text-cyan-200',
   },
   {
-    label: 'Sin apps para clientes',
-    icon: TrendingUp,
+    label: 'Autoservicio sin apps',
+    icon: Rocket,
     iconClass: 'border-yellow-400/18 bg-yellow-500/10 text-yellow-300',
   },
 ] as const;
 
 export function Steps() {
   return (
-    <section id="como-funciona" className="perf-section relative overflow-hidden border-y border-white/8 bg-[#050916]">
+    <section id="como-funciona" className="perf-section relative scroll-mt-28 overflow-hidden border-y border-white/8 bg-[#050916]">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(255,255,255,0.55)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.55)_1px,transparent_1px)] [background-size:56px_56px]" />
         <div className="absolute left-[-10%] top-[20%] h-[24rem] w-[24rem] rounded-full bg-[radial-gradient(circle,rgba(124,58,237,0.2)_0%,transparent_70%)] blur-3xl" />
@@ -107,18 +96,19 @@ export function Steps() {
             # Cómo funciona
           </span>
           <h2 className="mt-4 font-[var(--font-display)] text-[1.85rem] font-black leading-[1.02] tracking-[-0.045em] text-white sm:text-[2.7rem] lg:text-[3.2rem]">
-            Así de fácil empiezas a vender con tu{' '}
+            Así transformas las mesas de tu{' '}
             <span className="bg-[linear-gradient(90deg,#c084fc_0%,#818cf8_48%,#38bdf8_100%)] bg-clip-text text-transparent">
-              menú digital
+              restaurante
             </span>
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-[0.95rem] leading-6 text-slate-300/88 sm:text-base sm:leading-7">
-            En pocos minutos tendrás tu menú listo y tus clientes podrán ver, elegir y ordenar desde su celular.
+            Creamos el menú, configuramos tu restaurante, instalas los portamenús y tus clientes escanean para
+            disfrutar la experiencia.
           </p>
         </div>
 
         <div className="relative mt-8 lg:mt-10">
-          <div className="hide-scrollbar flex snap-x snap-mandatory items-stretch gap-3 overflow-x-auto pb-3 lg:grid lg:grid-cols-5 lg:gap-4 lg:overflow-visible lg:pb-0">
+          <div className="hide-scrollbar flex snap-x snap-mandatory items-stretch gap-3 overflow-x-auto pb-3 lg:grid lg:grid-cols-4 lg:gap-4 lg:overflow-visible lg:pb-0">
             {steps.map((step, index) => {
               const Icon = step.icon;
 
@@ -158,7 +148,7 @@ export function Steps() {
                         src={step.previewSrc}
                         alt={step.previewAlt}
                         fill
-                        sizes="(max-width: 1024px) 220px, 180px"
+                        sizes="(max-width: 1024px) 220px, 220px"
                         className="object-contain object-center"
                         unoptimized
                       />

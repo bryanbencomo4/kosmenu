@@ -12,7 +12,7 @@ function buildContentSecurityPolicy({ allowAppFrame = false } = {}) {
     "img-src 'self' data: blob: https:",
     "font-src 'self' data: https://fonts.gstatic.com",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://maps.gstatic.com",
-    "frame-src 'self' https://*.supabase.co https://maps.googleapis.com https://maps.gstatic.com",
+    "frame-src 'self' https://*.supabase.co https://maps.googleapis.com https://maps.gstatic.com https://app.elmenuxfa.com http://localhost:5000 http://localhost:8080 http://127.0.0.1:5000 http://127.0.0.1:8080",
     frameAncestors,
     "base-uri 'self'",
     "form-action 'self'",

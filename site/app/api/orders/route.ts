@@ -7,17 +7,21 @@ import {
   normalizeIdempotencyKey,
   storeOrderIdempotency,
 } from '../_lib/order-idempotency';
-import {
-  createOrderId,
-} from '../_lib/order-utils';
+import { allocateOrderDisplayId } from '../_lib/allocate-order-display-id';
 import { publicSiteUrl } from '../_lib/public-site-url';
 import {
   generatePublicTrackingToken,
   hashPublicTrackingToken,
 } from '../_lib/order-tracking-token';
+import { dispatchOrderNotification } from '../_lib/dispatch-order-notification';
 import { consumeRateLimit, getClientIp } from '../_lib/rate-limit';
+import {
+  canSendMerchantNewOrderEmail,
+  sendMerchantNewOrderEmail,
+} from '../_lib/send-merchant-new-order-email';
 import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
 import { getServiceSupabaseClient } from '../_lib/supabase-server';
+import { appSiteUrl } from '../../_lib/public-site-config';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -358,18 +362,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
 
-    const orderId = createOrderId(resolvedComercioId);
+    const orderId = await allocateOrderDisplayId(supabase);
     const publicTrackingToken = generatePublicTrackingToken();
     const publicTrackingTokenHash = hashPublicTrackingToken(publicTrackingToken);
+    const trackingPath = resolvedComercioSlug
+      ? `${publicSiteUrl}/v/${encodeURIComponent(resolvedComercioSlug)}/orders/${encodeURIComponent(orderId)}`
+      : `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
+    const trackingUrl = `${trackingPath}?t=${encodeURIComponent(publicTrackingToken)}`;
 
     const detalles = {
       order_id: orderId,
+      tracking_url: trackingUrl,
       public_tracking_token_hash: publicTrackingTokenHash,
       cliente_nombre: clientName,
       cliente_email: clientEmail || null,
       telefono_cliente: clientWhatsapp,
       moneda_checkout: currency,
       tasa_cambio_snapshot: exchangeRate,
+      exchange_rate_source: normalizeText(incomingDetalles.exchange_rate_source) || null,
       metodo_pago: paymentMethod,
       notifications: {
         whatsapp_enabled: whatsappNotificationsEnabled,
@@ -402,7 +412,9 @@ export async function POST(request: Request) {
       public_tracking_token_hash: publicTrackingTokenHash,
     };
 
-    const insertResult = await supabase.from('pedidos').insert(payload);
+    let insertedOrder: Record<string, unknown> | null = null;
+
+    const insertResult = await supabase.from('pedidos').insert(payload).select('*').maybeSingle();
     const insertError = insertResult.error;
 
     if (insertError) {
@@ -415,16 +427,19 @@ export async function POST(request: Request) {
 
       const legacyPayload = { ...payload };
       delete (legacyPayload as { public_tracking_token_hash?: string }).public_tracking_token_hash;
-      const retry = await supabase.from('pedidos').insert(legacyPayload);
+      const retry = await supabase.from('pedidos').insert(legacyPayload).select('*').maybeSingle();
       if (retry.error) {
         throw new Error(retry.error.message ?? 'Failed to create order.');
       }
+      insertedOrder = (retry.data ?? null) as Record<string, unknown> | null;
+    } else {
+      insertedOrder = (insertResult.data ?? null) as Record<string, unknown> | null;
     }
 
-    const trackingPath = resolvedComercioSlug
-      ? `${publicSiteUrl}/v/${encodeURIComponent(resolvedComercioSlug)}/orders/${encodeURIComponent(orderId)}`
-      : `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
-    const trackingUrl = `${trackingPath}?t=${encodeURIComponent(publicTrackingToken)}`;
+    if (!insertedOrder) {
+      throw new Error('Failed to create order.');
+    }
+
     let emailStatus: 'queued' | 'skipped' = 'skipped';
     let whatsappStatus: 'queued' | 'skipped' = 'skipped';
 
@@ -443,6 +458,56 @@ export async function POST(request: Request) {
 
     if (clientWhatsapp) {
       whatsappStatus = 'queued';
+    }
+
+    void dispatchOrderNotification({
+      type: 'INSERT',
+      record: insertedOrder,
+    }).catch((error) => {
+      console.error('[orders] notify-order dispatch failed', {
+        orderId,
+        message: error instanceof Error ? error.message : 'unknown',
+      });
+    });
+
+    if (canSendMerchantNewOrderEmail()) {
+      void (async () => {
+        try {
+          const { data: comercioOwner, error: ownerError } = await supabase
+            .from('comercios')
+            .select('owner_id,nombre')
+            .eq('id', resolvedComercioId)
+            .maybeSingle();
+
+          const ownerId = comercioOwner?.owner_id?.toString().trim() ?? '';
+          if (ownerError || !ownerId) {
+            return;
+          }
+
+          const { data: ownerAuth, error: authError } = await supabase.auth.admin.getUserById(ownerId);
+          const merchantEmail = ownerAuth?.user?.email?.trim().toLowerCase() ?? '';
+          if (authError || !merchantEmail) {
+            return;
+          }
+
+          const currencySymbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency;
+          const totalLabel = `${currencySymbol} ${totalCheckout.toFixed(2)}`;
+
+          await sendMerchantNewOrderEmail({
+            merchantEmail,
+            comercioNombre: comercioOwner?.nombre?.toString().trim() || comercioNombre,
+            orderId,
+            customerName: clientName,
+            totalLabel,
+            appOrderUrl: `${appSiteUrl.replace(/\/$/, '')}/?order=${encodeURIComponent(orderId)}`,
+          });
+        } catch (error) {
+          console.error('[orders] merchant new-order email failed', {
+            orderId,
+            message: error instanceof Error ? error.message : 'unknown',
+          });
+        }
+      })();
     }
 
     const responseBody = {

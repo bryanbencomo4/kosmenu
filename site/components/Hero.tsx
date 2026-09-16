@@ -1,22 +1,21 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import {
+  Check,
   ChevronRight,
-  Layers,
-  PencilLine,
-  QrCode,
-  Rocket,
 } from 'lucide-react';
+
+import { MenuDirectorySearch } from './directory/MenuDirectorySearch';
+import { MerchantHeroNote, MerchantHeroPrimary } from './merchant/MerchantAuthControls';
 
 type HeroProps = {
   signupHref: string;
 };
 
 const heroHighlights = [
-  { label: 'Escaneo rápido', detail: 'sin apps para clientes', icon: QrCode },
-  { label: 'Menú actualizado', detail: 'sin reimprimir', icon: PencilLine },
-  { label: 'Table Tent incluido', detail: 'listo para tu mesa', icon: Layers },
-  { label: 'Más orden al vender', detail: 'menos errores', icon: Rocket },
+  { label: 'Sin esperar al mesero', detail: 'autoservicio desde el celular' },
+  { label: 'Sin imprimir nuevos menús', detail: 'el papel ya no te detiene' },
+  { label: 'Cambia precios y productos en segundos', detail: 'tu menú siempre actualizado' },
 ] as const;
 
 const orbitNodes = [
@@ -64,10 +63,11 @@ function HeroProductVisual() {
 
       <Image
         src="/branding/phone-and-tent.png"
-        alt="Table Tent físico y menú digital de elmenuxfa en un smartphone"
+        alt="Portamenú inteligente de elmenuxfa junto a un smartphone en un restaurante"
         width={1122}
         height={1402}
         priority
+        unoptimized
         className="animate-float-slow relative z-10 block h-auto w-full select-none drop-shadow-[0_40px_100px_rgba(0,0,0,0.55)]"
       />
     </div>
@@ -83,74 +83,79 @@ export function Hero({ signupHref }: HeroProps) {
         <div className="hero-glow-violet hero-glow-secondary absolute left-[72%] top-[22%] hidden h-[28rem] w-[28rem] -translate-x-1/2 opacity-70 lg:block" />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-[1240px] px-4 pb-10 pt-6 sm:px-6 sm:pb-12 sm:pt-8 lg:pb-14 lg:pt-10">
-        <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-6 xl:gap-8">
-          <div className="mx-auto min-w-0 max-w-[36rem] text-center lg:mx-0 lg:max-w-[36.5rem] lg:text-left xl:max-w-[38rem]">
-            <div className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl sm:px-4 sm:py-2 sm:text-[13px]">
+      <div className="hero-inner relative z-10 mx-auto max-w-[1240px] px-4 pb-10 pt-6 sm:px-6 sm:pb-12 sm:pt-8 lg:pb-14 lg:pt-10">
+        <div className="hero-layout grid items-center gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-6 xl:gap-8">
+          <div className="hero-copy mx-auto min-w-0 max-w-[36rem] text-center lg:mx-0 lg:max-w-[36.5rem] lg:text-left xl:max-w-[38rem]">
+            <div className="hero-badge animate-fade-up inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-[#221743]/45 px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_16px_34px_-24px_rgba(124,58,237,0.95)] backdrop-blur-xl sm:px-4 sm:py-2 sm:text-[13px]">
               <span className="text-violet-200">#</span>
-              Menú digital + QR + Table Tent{' '}
+              Menú Inteligente para restaurantes{' '}
               <span className="rounded-full bg-[#FACC15] px-1.5 py-0.5 text-[10px] font-bold text-[#0B0F1A] sm:px-2 sm:text-[11px]">
-                incluido
+                kit $10
               </span>
             </div>
 
-            <h1 className="mx-auto mt-4 max-w-[19rem] font-[var(--font-display)] text-[1.95rem] font-black leading-[1.03] tracking-[-0.04em] text-white sm:max-w-[30rem] sm:text-[2.6rem] lg:mx-0 lg:max-w-none lg:text-[3.05rem] xl:text-[3.35rem]">
-              Tu menú digital listo para que tus clientes escaneen, elijan y{' '}
-              <span className="text-[#FACC15]">ordenen.</span>
+            <h1 className="hero-mobile-title mx-auto mt-4 max-w-[21rem] font-[var(--font-display)] text-[1.85rem] font-black leading-[1.05] tracking-[-0.04em] text-white sm:max-w-[32rem] sm:text-[2.45rem] lg:mx-0 lg:max-w-none lg:text-[2.85rem] xl:text-[3.15rem]">
+              <span className="hero-title-desktop">
+                Convierte cada mesa de tu restaurante en un{' '}
+                <span className="text-[#FACC15]">vendedor inteligente.</span>
+              </span>
+              <span className="hero-title-mobile">
+                Tu menú ahora
+                <span className="hero-title-mobile-accent">vende por ti</span>
+              </span>
             </h1>
 
-            <p className="animate-fade-up animation-delay-300 mx-auto mt-5 max-w-[31rem] text-[0.95rem] leading-6 text-slate-300/88 sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[33rem] lg:text-[0.98rem] lg:leading-7">
-              Incluye menú online, QR personalizado y Table Tent físico para colocar en tus mesas. Sin apps, sin complicaciones y listo para usar.
+            <p className="hero-lead animate-fade-up animation-delay-300 mx-auto mt-5 max-w-[31rem] text-[0.95rem] leading-6 text-slate-300/88 sm:text-base sm:leading-7 lg:mx-0 lg:max-w-[33rem] lg:text-[0.98rem] lg:leading-7">
+              <span className="hero-lead-desktop">
+                Permite que tus clientes escaneen, exploren tu menú y disfruten una experiencia de autoservicio desde su celular.
+              </span>
+              <span className="hero-lead-mobile">Tus clientes escanean el QR y piden desde el celular.</span>
             </p>
 
-            <div className="mt-6 grid grid-cols-2 gap-2.5 sm:gap-3">
+            <div className="hero-benefits mt-6 grid gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-1 xl:grid-cols-3">
               {heroHighlights.map((item, index) => {
-                const Icon = item.icon;
-
                 return (
                   <div
                     key={item.label}
-                    className={`animate-fade-up flex min-h-[6.25rem] min-w-0 items-start gap-3 rounded-[1.15rem] border border-white/7 bg-[#0b101d]/78 px-3.5 py-3.5 text-left text-[0.86rem] font-medium text-slate-100 sm:min-h-[6.75rem] sm:px-4 sm:py-4 sm:text-[0.92rem] ${
-                      index === 0 ? 'animation-delay-300' : index < 3 ? 'animation-delay-500' : 'animation-delay-700'
+                    className={`animate-fade-up flex min-h-[5.75rem] min-w-0 items-start gap-3 rounded-[1.15rem] border border-white/7 bg-[#0b101d]/78 px-3.5 py-3.5 text-left text-[0.86rem] font-medium text-slate-100 sm:min-h-[7.25rem] sm:px-4 sm:py-4 sm:text-[0.9rem] ${
+                      index === 0 ? 'animation-delay-300' : index === 1 ? 'animation-delay-500' : 'animation-delay-700'
                     }`}
                   >
-                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-400/22 bg-violet-500/10 text-violet-300 shadow-[0_12px_24px_-20px_rgba(124,58,237,0.95)] sm:h-10 sm:w-10">
-                      <Icon className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
+                    <span className="hero-benefit-icon inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#FACC15]/30 bg-[#FACC15]/12 text-[#FACC15] sm:h-10 sm:w-10">
+                      <Check className="h-4 w-4" strokeWidth={3} />
                     </span>
-                    <span className="min-w-0 leading-tight">
+                    <span className="hero-benefit-copy min-w-0 flex-1 leading-tight">
                       <span className="block text-[1em] font-semibold text-white">{item.label}</span>
-                      <span className="mt-1 block text-[0.98em] leading-[1.25] text-slate-300/90">{item.detail}</span>
+                      <span className="hero-benefit-detail mt-1 block text-[0.95em] leading-[1.25] text-slate-300/90">
+                        {item.detail}
+                      </span>
                     </span>
                   </div>
                 );
               })}
             </div>
 
-            <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row lg:items-start lg:justify-start">
-              <Link
-                href={signupHref}
-                className="group animate-fade-up animation-delay-500 relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-full bg-[#FACC15] px-6 py-4 text-base font-bold text-[#0B0F1A] shadow-[0_34px_90px_-18px_rgba(250,204,21,1)] transition-all duration-300 hover:scale-[1.04] hover:bg-[#fde047] sm:min-w-[18.5rem] sm:w-auto sm:px-9"
-              >
-                <span className="animate-shine absolute inset-y-0 -left-1/3 w-1/3 -skew-x-12 bg-white/30 blur-md" />
-                Crear mi menú ahora
-                <ChevronRight className="h-4 w-4" />
-              </Link>
+            <div className="hero-cta-row mt-7 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap lg:items-start lg:justify-start">
+              <MerchantHeroPrimary signupHref={signupHref} />
+              <div className="hero-secondary-actions animate-fade-up animation-delay-500 scroll-mt-28">
+                <MenuDirectorySearch />
+              </div>
               <Link
                 href="#demo"
-                className="animate-fade-up animation-delay-500 inline-flex w-full items-center justify-center gap-1.5 rounded-full px-6 py-4 text-base font-semibold text-white/92 transition-all duration-300 hover:text-white sm:w-auto"
+                className="hero-secondary-actions animate-fade-up animation-delay-500 inline-flex w-full items-center justify-center gap-1.5 rounded-full px-6 py-4 text-base font-semibold text-white/92 transition-all duration-300 hover:text-white sm:w-auto"
               >
-                Ver demo del menú
+                Ver la experiencia
                 <ChevronRight className="h-4 w-4" />
               </Link>
             </div>
 
-            <p className="animate-fade-up animation-delay-700 mt-3 text-center text-xs font-medium text-slate-300/85 sm:text-sm lg:text-left">
-              <span className="text-[#FACC15]">$10/mes</span> · Crea tu cuenta y publica tu menú en pocos minutos.
-            </p>
+            <div className="hero-note">
+              <MerchantHeroNote />
+            </div>
           </div>
 
-          <div className="animate-fade-up animation-delay-300 relative mx-auto flex w-full min-w-0 justify-center lg:mx-0 lg:justify-end">
-            <div className="w-full max-w-[20rem] sm:max-w-[24rem] lg:max-w-[30rem] xl:max-w-[33rem]">
+          <div className="hero-product animate-fade-up animation-delay-300 relative mx-auto flex w-full min-w-0 justify-center lg:mx-0 lg:justify-end">
+            <div className="hero-mobile-product w-full max-w-[20rem] sm:max-w-[24rem] lg:max-w-[30rem] xl:max-w-[33rem]">
               <HeroProductVisual />
             </div>
           </div>

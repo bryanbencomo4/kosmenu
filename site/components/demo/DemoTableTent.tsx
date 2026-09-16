@@ -18,11 +18,12 @@ export function DemoTableTent({ demoPath, className = '' }: DemoTableTentProps) 
           className="pointer-events-none absolute left-1/2 top-[18%] h-[70%] w-[92%] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(116,70,255,0.4)_0%,rgba(116,70,255,0.1)_45%,transparent_75%)] blur-2xl"
         />
 
-        <div className="relative mx-auto aspect-[401/593] w-full">
+        <div className="relative mx-auto aspect-[1037/1516] w-full">
           <Image
-            src="/demo/table-tent-demo.png"
-            alt="Table Tent acrílico de ElMenúXFA con código QR para escanear y pedir"
+            src="/demo/table-tent-demo.webp"
+            alt="Portamenú de elmenuxfa con código QR para escanear y pedir"
             fill
+            unoptimized
             sizes="(min-width: 1024px) 23.5rem, (min-width: 640px) 21rem, 19.5rem"
             className="object-contain drop-shadow-[0_35px_70px_rgba(0,0,0,0.55)]"
             priority

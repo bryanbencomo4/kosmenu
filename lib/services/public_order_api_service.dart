@@ -287,6 +287,43 @@ class PublicOrderApiService {
     return _parseCreateOrderResponse(response);
   }
 
+  Future<String> _issueComprobantePermit(String comercioId) async {
+    final uri = ElmenuxfaApiConfig.uri('/api/orders/comprobantes/permit');
+    late http.Response response;
+    try {
+      response = await _client
+          .post(
+            uri,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({'comercioId': comercioId, 'slug': comercioId}),
+          )
+          .timeout(_timeout);
+    } on Exception {
+      throw const PublicOrderApiException(
+        message: 'No se pudo subir el comprobante. Revisa tu conexion.',
+        retryable: true,
+      );
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw PublicOrderApiException(
+        message: _userMessageForUploadStatus(response.statusCode),
+        statusCode: response.statusCode,
+        retryable: response.statusCode == 429 || response.statusCode >= 500,
+      );
+    }
+    final body = _decodeJson(response.body);
+    final data = body['data'];
+    final map = data is Map ? Map<String, dynamic>.from(data) : body;
+    final permit = (map['permit'] ?? '').toString().trim();
+    if (permit.isEmpty) {
+      throw const PublicOrderApiException(
+        message: 'No se pudo subir el comprobante de pago.',
+        statusCode: 500,
+      );
+    }
+    return permit;
+  }
+
   Future<ComprobanteUploadResult> uploadComprobante({
     required String comercioId,
     required String fileName,
@@ -303,9 +340,11 @@ class PublicOrderApiService {
       throw PublicOrderApiException(message: validationError, statusCode: 422);
     }
 
+    final permit = await _issueComprobantePermit(comercioId.trim());
     final uri = ElmenuxfaApiConfig.uri('/api/orders/comprobantes');
     final request = http.MultipartRequest('POST', uri)
       ..fields['comercioId'] = comercioId.trim()
+      ..fields['permit'] = permit
       ..files.add(
         http.MultipartFile.fromBytes('file', bytes, filename: fileName),
       );

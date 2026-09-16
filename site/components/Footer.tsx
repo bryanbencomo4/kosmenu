@@ -21,15 +21,15 @@ const footerGroups = [
   {
     title: 'Producto',
     links: [
-      { label: 'Inicio', href: '#inicio' },
+      { label: 'Kit', href: '#kit' },
       { label: 'Cómo funciona', href: '#como-funciona' },
-      { label: 'Demo', href: '#demo' },
+      { label: 'Precio', href: '#pricing' },
     ],
   },
   {
     title: 'Recursos',
     links: [
-      { label: 'Beneficios', href: '#beneficios' },
+      { label: 'La solución', href: '#solucion' },
       { label: 'Soporte', href: marketingWhatsappHref },
     ],
   },
@@ -64,8 +64,8 @@ export function Footer() {
               className="rounded-xl border border-white/10"
             />
             <div>
-              <p className="font-[var(--font-display)] text-lg font-extrabold text-white">elmenuxfa.com</p>
-              <p className="text-sm text-slate-400">Menú digital para negocios de comida</p>
+              <p className="font-[var(--font-display)] text-lg font-extrabold text-white">elmenuxfa</p>
+              <p className="text-sm text-slate-400">Menú inteligente para restaurantes</p>
             </div>
           </div>
         </div>

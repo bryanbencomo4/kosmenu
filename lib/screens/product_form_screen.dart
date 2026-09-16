@@ -12,6 +12,7 @@ import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/models/upsell_config.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
+import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -815,18 +816,27 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (confirmed != true) {
       return;
     }
-    final customPrompt = await _askAiImagePrompt(product.nombre);
+    final categoryName = widget.categories
+        .where((category) => category.id == _selectedCategoryId)
+        .map((category) => category.nombre)
+        .cast<String?>()
+        .firstWhere((name) => name != null, orElse: () => widget.product?.categoriaId)
+        ?.toString();
+    final customPrompt = await showAiImagePromptDialog(
+      context,
+      productName: _nameController.text.trim().isEmpty
+          ? product.nombre
+          : _nameController.text.trim(),
+      description: _descriptionController.text.trim().isEmpty
+          ? product.descripcion
+          : _descriptionController.text.trim(),
+      categoryName: categoryName,
+    );
     if (!mounted || customPrompt == null) {
       return;
     }
 
     try {
-      final categoryName = widget.categories
-          .where((category) => category.id == _selectedCategoryId)
-          .map((category) => category.nombre)
-          .cast<String?>()
-          .firstWhere((name) => name != null, orElse: () => widget.product?.categoriaId)
-          ?.toString();
       final response = await _aiImageService.enqueueProductImage(
         comercioId: comercioId,
         productId: product.id,
@@ -851,68 +861,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       if (!mounted) return;
       _showMessage('No se pudo generar la imagen IA: $error');
     }
-  }
-
-  Future<String?> _askAiImagePrompt(String productName) async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        final colorScheme = Theme.of(dialogContext).colorScheme;
-        return AlertDialog(
-          backgroundColor: colorScheme.surfaceContainerHigh,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          title: Text(
-            'Describe la imagen',
-            style: GoogleFonts.manrope(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Describe el fondo o escena para "$productName". Si es marca conocida (Netflix, HBO Max, Spotify, etc.), el logo oficial se agrega automáticamente; no pidas el logo en el texto.',
-                  style: TextStyle(color: colorScheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  maxLines: 4,
-                  minLines: 3,
-                  maxLength: 500,
-                  decoration: const InputDecoration(
-                    hintText:
-                        'Ej: Fondo oscuro premium, TV con ambiente de cine, sin audífonos, sin texto, estilo limpio.',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(null),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton.icon(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(controller.text.trim()),
-              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-              label: const Text('Generar imagen'),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-    return result;
   }
 
   String? _validateCategory(String? value) {
