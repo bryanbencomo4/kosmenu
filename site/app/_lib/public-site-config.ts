@@ -7,7 +7,7 @@ const DEFAULT_MARKETING_WHATSAPP_MESSAGE =
   'Hola, necesito ayuda con elmenuxfa.com (soporte).';
 const DEFAULT_CHAT_WHATSAPP_DIGITS = '584220451906';
 const DEFAULT_CHAT_WHATSAPP_MESSAGE =
-  'Hola, quiero información sobre el Kit Menú Inteligente de elmenuxfa.';
+  'Hola 👋 Me interesa adquirir el Kit Menú Inteligente 📦 para armar el menú digital de mi restaurante.';
 const DEVELOPMENT_PUBLIC_HOSTS = ['www.localhost', 'elmenuxfa.local', 'www.elmenuxfa.local'] as const;
 const DEVELOPMENT_ADMIN_HOSTS = ['admin.localhost', 'admin.elmenuxfa.local'] as const;
 
@@ -93,6 +93,12 @@ export const chatWhatsappMessage = resolveText(
 );
 
 export const chatWhatsappHref = `https://wa.me/${chatWhatsappDigits}?text=${encodeURIComponent(chatWhatsappMessage)}`;
+
+export const socialLinks = [
+  { label: 'Instagram', href: 'https://www.instagram.com/elmenuxfa' },
+  { label: 'TikTok', href: 'https://www.tiktok.com/@elmenuxfa.com' },
+  { label: 'Facebook', href: 'https://www.facebook.com/share/1dFdrXTans/' },
+] as const;
 
 /** Flutter web app — login (default). */
 export const appLoginHref = appSiteUrl;

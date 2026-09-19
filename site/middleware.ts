@@ -12,6 +12,7 @@ import {
 
 const EXCLUDED_PREFIXES = [
   '/api',
+  '/wp-json',
   '/_next',
   '/v',
   '/preview',
@@ -264,6 +265,9 @@ export function middleware(request: NextRequest) {
   }
 
   if (isAdminHost || isLocalAdminPath) {
+    if (pathname.startsWith('/api/') || pathname.startsWith('/wp-json/')) {
+      return applySecurityHeaders(NextResponse.next(), pathname);
+    }
     const internalAdminPath = isAdminHost ? resolveAdminInternalPath(pathname) : pathname;
     const requestHeaders = new Headers(request.headers);
     const hasAdminSession = Boolean(request.cookies.get(ADMIN_SESSION_COOKIE)?.value?.trim());

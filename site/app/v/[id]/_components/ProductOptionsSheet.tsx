@@ -97,7 +97,7 @@ export function ProductOptionsSheet({
 
   return (
     <div
-      className="fixed inset-0 z-[130] flex items-end justify-center bg-[#05070f]/72 p-3 backdrop-blur-md sm:items-center"
+      className="fixed inset-0 z-[130] flex items-end justify-center bg-black/35 p-4 sm:items-center"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
@@ -108,11 +108,11 @@ export function ProductOptionsSheet({
         role="dialog"
         aria-modal="true"
         aria-label={`Opciones de ${product.nombre}`}
-        className="flex max-h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-[1.35rem] border border-white/10 bg-white shadow-[0_30px_90px_-30px_rgba(0,0,0,0.45)]"
+        className="flex max-h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-[22px] bg-white shadow-[0_16px_40px_rgba(15,23,42,0.12)]"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5">
+        <div className="flex items-start justify-between gap-3 px-4 py-4 sm:px-5">
           <div className="min-w-0">
-            <h3 className="truncate text-lg font-black text-slate-950">{product.nombre}</h3>
+            <h3 className="truncate text-lg font-extrabold text-[#111827]">{product.nombre}</h3>
             {product.descripcion?.trim() ? (
               <p className="mt-1 text-sm leading-5 text-slate-500">{product.descripcion.trim()}</p>
             ) : null}
@@ -120,7 +120,7 @@ export function ProductOptionsSheet({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-slate-50 text-slate-500"
             aria-label="Cerrar"
           >
             <X className="h-4 w-4" />
@@ -235,12 +235,12 @@ export function ProductOptionsSheet({
           </section>
         </div>
 
-        <div className="border-t border-slate-200 px-4 py-4 sm:px-5">
+        <div className="px-4 py-4 sm:px-5">
           <button
             type="button"
             disabled={!canConfirm}
             onClick={() => onConfirm(selection, quantity)}
-            className="inline-flex min-h-12 w-full items-center justify-center rounded-full text-sm font-black text-white disabled:opacity-50"
+            className="inline-flex min-h-12 w-full items-center justify-center rounded-[16px] text-sm font-bold text-white disabled:opacity-50"
             style={{ backgroundColor: 'var(--primary-color)' }}
           >
             Agregar · {formatPrice(unitPrice * quantity)}

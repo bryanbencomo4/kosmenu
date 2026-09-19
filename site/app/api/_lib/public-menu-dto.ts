@@ -13,6 +13,7 @@ const PUBLIC_COMERCIO_KEYS = [
   'latitud',
   'longitud',
   'permite_delivery',
+  'recibe_pedidos_whatsapp',
   'en_linea',
   'menu_palette',
   'menu_palette_primary',

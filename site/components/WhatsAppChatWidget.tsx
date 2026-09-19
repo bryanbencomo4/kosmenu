@@ -9,6 +9,12 @@ import { adminSiteHost, chatWhatsappHref } from '../app/_lib/public-site-config'
 
 const AUTO_OPEN_STORAGE_KEY = 'elmenuxfa-wa-autochat';
 
+const CHAT_MESSAGES = [
+  '¿Listo para transformar tu restaurante?\u00A0🚀',
+  '¿Quieres adquirir el Kit Menú Inteligente\u00A0📦 o tienes alguna duda sobre la plataforma?\u00A0📲',
+  '¡Escríbenos y te ayudamos de inmediato!\u00A0✨',
+] as const;
+
 function WhatsAppGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" fill="currentColor" className={className} aria-hidden="true">
@@ -51,8 +57,7 @@ export function WhatsAppChatWidget() {
   const [open, setOpen] = useState(false);
   const [hostname, setHostname] = useState('');
   const [typing, setTyping] = useState(false);
-  const [showFirstMessage, setShowFirstMessage] = useState(false);
-  const [showSecondMessage, setShowSecondMessage] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(0);
 
   const hidden = shouldHideWidget(pathname, hostname);
 
@@ -81,46 +86,45 @@ export function WhatsAppChatWidget() {
   useEffect(() => {
     if (!open) {
       setTyping(false);
-      setShowFirstMessage(false);
-      setShowSecondMessage(false);
+      setVisibleCount(0);
       allowOutsideCloseRef.current = false;
       return;
     }
 
     if (prefersReducedMotion()) {
       setTyping(false);
-      setShowFirstMessage(true);
-      setShowSecondMessage(true);
+      setVisibleCount(CHAT_MESSAGES.length);
       allowOutsideCloseRef.current = true;
       return;
     }
 
     setTyping(true);
-    setShowFirstMessage(false);
-    setShowSecondMessage(false);
+    setVisibleCount(0);
     allowOutsideCloseRef.current = false;
 
-    const firstMessageTimer = window.setTimeout(() => {
-      setTyping(false);
-      setShowFirstMessage(true);
-    }, 1500);
-    const secondTypingTimer = window.setTimeout(() => {
-      setTyping(true);
-    }, 2300);
-    const secondMessageTimer = window.setTimeout(() => {
-      setTyping(false);
-      setShowSecondMessage(true);
-      allowOutsideCloseRef.current = true;
-    }, 3900);
-    const dismissTimer = window.setTimeout(() => {
-      allowOutsideCloseRef.current = true;
-    }, 2400);
+    const timers = [
+      window.setTimeout(() => {
+        setTyping(false);
+        setVisibleCount(1);
+      }, 1200),
+      window.setTimeout(() => setTyping(true), 1900),
+      window.setTimeout(() => {
+        setTyping(false);
+        setVisibleCount(2);
+      }, 3100),
+      window.setTimeout(() => setTyping(true), 3800),
+      window.setTimeout(() => {
+        setTyping(false);
+        setVisibleCount(3);
+        allowOutsideCloseRef.current = true;
+      }, 5000),
+      window.setTimeout(() => {
+        allowOutsideCloseRef.current = true;
+      }, 2600),
+    ];
 
     return () => {
-      window.clearTimeout(firstMessageTimer);
-      window.clearTimeout(secondTypingTimer);
-      window.clearTimeout(secondMessageTimer);
-      window.clearTimeout(dismissTimer);
+      timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [open]);
 
@@ -161,7 +165,7 @@ export function WhatsAppChatWidget() {
     return null;
   }
 
-  const statusLabel = typing ? 'escribiendo…' : showSecondMessage ? 'en línea' : 'escribiendo…';
+  const statusLabel = typing || visibleCount < CHAT_MESSAGES.length ? 'escribiendo…' : 'en línea';
 
   const closeChat = () => {
     setOpen(false);
@@ -211,7 +215,7 @@ export function WhatsAppChatWidget() {
               </button>
             </header>
 
-            <div className="relative min-h-[8.5rem] px-3.5 py-4">
+            <div className="relative min-h-[11.5rem] px-3.5 py-4">
               <div
                 aria-hidden="true"
                 className="absolute inset-0 opacity-[0.18]"
@@ -220,22 +224,21 @@ export function WhatsAppChatWidget() {
                     'radial-gradient(circle at 12% 18%, rgba(124,58,237,0.22), transparent 28%), radial-gradient(circle at 88% 82%, rgba(250,204,21,0.16), transparent 24%)',
                 }}
               />
-              <div className="relative flex max-w-[88%] flex-col gap-2">
-                {showFirstMessage ? (
-                  <div className="whatsapp-chat-message rounded-[1.1rem] rounded-tl-md bg-white px-3.5 py-3 text-[0.92rem] leading-5 text-slate-800 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.55)]">
-                    <p className="font-semibold text-[#1a1038]">Hola, bienvenido a elmenuxfa</p>
+              <div className="relative flex w-[min(100%,20.5rem)] flex-col gap-2">
+                {CHAT_MESSAGES.slice(0, visibleCount).map((message, index) => (
+                  <div
+                    key={message}
+                    className={`whatsapp-chat-message rounded-[1.1rem] rounded-tl-md bg-white px-3.5 py-3 text-[0.92rem] leading-5 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.55)] ${
+                      index === 0 ? 'font-semibold text-[#1a1038]' : 'text-slate-700'
+                    }`}
+                  >
+                    {message}
                   </div>
-                ) : null}
-
-                {showSecondMessage ? (
-                  <div className="whatsapp-chat-message rounded-[1.1rem] rounded-tl-md bg-white px-3.5 py-3 text-[0.92rem] leading-5 text-slate-600 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.55)]">
-                    ¿Quieres el Kit Menú Inteligente o tienes una duda de la plataforma? Escríbenos y te ayudamos.
-                  </div>
-                ) : null}
+                ))}
 
                 {typing ? <TypingDots /> : null}
 
-                {showSecondMessage ? (
+                {visibleCount === CHAT_MESSAGES.length ? (
                   <p className="whatsapp-chat-message px-1 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
                     Ahora
                   </p>

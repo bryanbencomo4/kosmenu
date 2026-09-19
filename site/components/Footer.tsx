@@ -1,10 +1,11 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { Mail, MessageCircle } from 'lucide-react';
+import { Facebook, Instagram, Mail, MessageCircle } from 'lucide-react';
 
 import {
   marketingWhatsappHref,
   privacyPagePath,
+  socialLinks,
   supportEmailHref,
   termsPagePath,
 } from '../app/_lib/public-site-config';
@@ -43,10 +44,30 @@ const footerGroups = [
   },
 ] as const;
 
+function TikTokIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 const channelLinks = [
   { label: 'Soporte', href: marketingWhatsappHref, icon: MessageCircle },
   { label: 'Correo', href: supportEmailHref, icon: Mail },
 ] as const;
+
+const socialIconByLabel = {
+  Instagram,
+  TikTok: TikTokIcon,
+  Facebook,
+} as const;
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
@@ -67,6 +88,26 @@ export function Footer() {
               <p className="font-[var(--font-display)] text-lg font-extrabold text-white">elmenuxfa</p>
               <p className="text-sm text-slate-400">Menú inteligente para restaurantes</p>
             </div>
+          </div>
+          <p className="mt-6 text-sm font-semibold text-white">Síguenos</p>
+          <div className="mt-3 flex items-center gap-3">
+            {socialLinks.map((social) => {
+              const Icon = socialIconByLabel[social.label];
+
+              return (
+                <a
+                  key={social.label}
+                  href={social.href}
+                  aria-label={`elmenuxfa en ${social.label}`}
+                  title={social.label}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition-all duration-300 hover:border-violet-400/30 hover:text-white"
+                >
+                  <Icon className="h-4 w-4" />
+                </a>
+              );
+            })}
           </div>
         </div>
 

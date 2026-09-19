@@ -23,7 +23,8 @@ export type AdminNavIcon =
   | 'analytics'
   | 'sectors'
   | 'settings'
-  | 'security';
+  | 'security'
+  | 'bank';
 
 export type AdminNavigationItem = {
   label: string;
@@ -67,6 +68,12 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
     label: 'Suscripciones',
     href: '/admin/suscripciones',
     icon: 'subscriptions',
+    permission: 'subscriptions.read',
+  },
+  {
+    label: 'Pagos BDV',
+    href: '/admin/pagos-bdv',
+    icon: 'bank',
     permission: 'subscriptions.read',
   },
   {

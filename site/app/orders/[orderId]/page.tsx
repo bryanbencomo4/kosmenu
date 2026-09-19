@@ -1,10 +1,12 @@
 'use client';
 
-import { CreditCard, MapPin, MessageCircle, Package, Phone, Store } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+
+import { OrderReceipt, OrderReceiptFrame } from './_components/OrderReceipt';
+import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
+import { writeRepeatOrder, type RepeatOrderLine } from '../../_lib/repeat-order';
 
 type OrderStatus =
   | 'pendiente'
@@ -98,6 +100,13 @@ type PedidoRow = {
       nombre?: string;
       cantidad?: number;
       precio?: number;
+      product_id?: string;
+      opciones?: {
+        tamanoId?: string;
+        tamanoLabel?: string;
+        servicioAdicional?: boolean;
+        ajusteIds?: string[];
+      };
     }>;
     delivery?: DeliveryPayload | null;
   } | null;
@@ -115,6 +124,9 @@ type ComercioRow = {
   telefonos?: string | null;
   celular?: string | null;
   logo_url?: string | null;
+  recibe_pedidos_whatsapp?: boolean | null;
+  en_linea?: boolean | null;
+  horarios?: unknown;
   branding_ia?: {
     color_principal?: string | null;
     color_secundario?: string | null;
@@ -163,7 +175,18 @@ type PublicTrackingPayload = {
   orderId: string;
   status: OrderStatus | string;
   createdAt: string;
-  items: Array<{ name: string; quantity: number; unitPrice?: number }>;
+  items: Array<{
+    name: string;
+    quantity: number;
+    unitPrice?: number;
+    productId?: string;
+    selection?: {
+      tamanoId?: string;
+      tamanoLabel?: string;
+      servicioAdicional?: boolean;
+      ajusteIds?: string[];
+    };
+  }>;
   subtotal?: number;
   deliveryCost?: number;
   total?: number;
@@ -186,6 +209,7 @@ type PublicTrackingPayload = {
     slug?: string | null;
     whatsapp?: string | null;
     pickupAddress?: string | null;
+    logoUrl?: string | null;
     branding?: ComercioRow['branding_ia'] | null;
   };
 };
@@ -213,6 +237,8 @@ function mapPublicTracking(pub: PublicTrackingPayload): {
           nombre: item.name,
           cantidad: item.quantity,
           precio: item.unitPrice,
+          product_id: item.productId,
+          opciones: item.selection,
         })),
         delivery: isDelivery ? { mode: 'delivery' } : { mode: 'pickup' },
         notifications: {
@@ -229,6 +255,7 @@ function mapPublicTracking(pub: PublicTrackingPayload): {
       slug: pub.comercio?.slug ?? null,
       direccion: pub.comercio?.pickupAddress ?? null,
       whatsapp: pub.comercio?.whatsapp ?? null,
+      logo_url: pub.comercio?.logoUrl ?? null,
       branding_ia: pub.comercio?.branding ?? null,
     },
     locationHint: (pub.locationHint ?? '').toString().trim(),
@@ -294,6 +321,16 @@ function normalizeHexColor(value: unknown, fallback: string) {
   return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized : fallback;
 }
 
+function readableOnColor(hex: string) {
+  const raw = hex.replace('#', '');
+  if (raw.length !== 6) return '#FFFFFF';
+  const r = Number.parseInt(raw.slice(0, 2), 16) / 255;
+  const g = Number.parseInt(raw.slice(2, 4), 16) / 255;
+  const b = Number.parseInt(raw.slice(4, 6), 16) / 255;
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return luminance > 0.62 ? '#111827' : '#FFFFFF';
+}
+
 function fontFamilyCssValue(primary: string | null | undefined, fallback: string) {
   const value = (primary ?? '').toString().trim();
   return value ? `${value}, ${fallback}` : fallback;
@@ -307,10 +344,13 @@ function convertFromCop(amountInCop: number, currency: string, exchangeRate: num
   return safeAmount / safeRate;
 }
 
-function buildWhatsAppLink(orderId: string, status: OrderStatus, comercio: ComercioRow | null) {
-  const phone = normalizePhone(
-    comercio?.whatsapp ?? comercio?.telefono ?? comercio?.telefonos ?? comercio?.celular,
-  );
+function buildWhatsAppLink(
+  orderId: string,
+  status: OrderStatus,
+  comercio: ComercioRow | null,
+) {
+  if (comercio?.recibe_pedidos_whatsapp === false) return '';
+  const phone = normalizePhone(comercio?.whatsapp);
   if (!phone) return '';
 
   const message =
@@ -336,6 +376,7 @@ function OrderTrackingPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<PedidoRow | null>(null);
   const [comercio, setComercio] = useState<ComercioRow | null>(null);
+  const [menuIdentity, setMenuIdentity] = useState<ComercioRow | null>(null);
   const [waReceiptUrl, setWaReceiptUrl] = useState('');
   const [notificationMessage, setNotificationMessage] = useState('');
   const [whatsappNotificationsEnabled, setWhatsappNotificationsEnabled] = useState(true);
@@ -351,6 +392,8 @@ function OrderTrackingPageInner() {
   const [tokenRecoveryChecked, setTokenRecoveryChecked] = useState(false);
   const lastStatusRef = useRef<OrderStatus | null>(null);
   const autoCancelAttemptedRef = useRef(false);
+  const whatsappPreferenceSavingRef = useRef(false);
+  const trackingFetchInFlightRef = useRef(false);
 
   const resolvedStatus = useMemo(() => normalizeStatus(order?.estado), [order?.estado]);
 
@@ -504,9 +547,10 @@ function OrderTrackingPageInner() {
   }
 
   async function updateWhatsappNotificationsPreference(enabled: boolean) {
-    if (!orderId || !trackingToken || whatsappPreferenceSaving) return;
+    if (!orderId || !trackingToken || whatsappPreferenceSavingRef.current) return;
 
     const previous = whatsappNotificationsEnabled;
+    whatsappPreferenceSavingRef.current = true;
     setWhatsappNotificationsEnabled(enabled);
     setWhatsappPreferenceSaving(true);
     setNotificationMessage('');
@@ -533,7 +577,6 @@ function OrderTrackingPageInner() {
       if (publicOrder?.orderId) {
         const mapped = mapPublicTracking(publicOrder);
         setOrder(mapped.order);
-        setComercio(mapped.comercio);
         setLocationHint(mapped.locationHint);
         setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
       }
@@ -544,6 +587,7 @@ function OrderTrackingPageInner() {
         : 'No se pudo actualizar la preferencia de WhatsApp.';
       setNotificationMessage(message);
     } finally {
+      whatsappPreferenceSavingRef.current = false;
       setWhatsappPreferenceSaving(false);
     }
   }
@@ -575,13 +619,20 @@ function OrderTrackingPageInner() {
       setOrder(mapped.order);
       setComercio(mapped.comercio);
       setLocationHint(mapped.locationHint);
-      setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
+      if (!whatsappPreferenceSavingRef.current) {
+        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
+      }
       lastStatusRef.current = normalizeStatus(mapped.order.estado);
       setLastSyncAt(Date.now());
       setSyncMode('polling');
     };
 
     const fetchOrder = async (mode: 'initial' | 'poll') => {
+      if (mode === 'poll' && (whatsappPreferenceSavingRef.current || trackingFetchInFlightRef.current)) {
+        return;
+      }
+      trackingFetchInFlightRef.current = true;
+
       try {
         if (mode === 'initial') {
           setLoading(true);
@@ -594,9 +645,9 @@ function OrderTrackingPageInner() {
         if (!active) return;
 
         if (!response.ok) {
-          setOrder(null);
-          setComercio(null);
           if (mode === 'initial') {
+            setOrder(null);
+            setComercio(null);
             setError('Este enlace de seguimiento no es valido o ha expirado.');
           } else {
             setSyncMode('sin-senal');
@@ -606,9 +657,11 @@ function OrderTrackingPageInner() {
 
         const publicOrder = (payload?.data ?? null) as PublicTrackingPayload | null;
         if (!publicOrder?.orderId) {
-          setOrder(null);
           if (mode === 'initial') {
+            setOrder(null);
             setError('Pedido no encontrado.');
+          } else {
+            setSyncMode('sin-senal');
           }
           return;
         }
@@ -622,6 +675,7 @@ function OrderTrackingPageInner() {
           setSyncMode('sin-senal');
         }
       } finally {
+        trackingFetchInFlightRef.current = false;
         if (active && mode === 'initial') {
           setLoading(false);
         }
@@ -634,7 +688,7 @@ function OrderTrackingPageInner() {
       if (!active) return;
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void fetchOrder('poll');
-    }, 8000);
+    }, 20_000);
 
     return () => {
       active = false;
@@ -700,37 +754,54 @@ function OrderTrackingPageInner() {
     };
   }).filter((item) => item.cantidad > 0);
 
+  const resolvedComercio = useMemo(() => {
+    const trackingName = (comercio?.nombre ?? '').trim();
+    const keepTrackingName = Boolean(trackingName) && trackingName.toLowerCase() !== 'comercio';
+    return {
+      id: comercio?.id ?? menuIdentity?.id ?? 'public',
+      nombre: keepTrackingName ? trackingName : ((menuIdentity?.nombre ?? trackingName).trim() || 'Comercio'),
+      slug: (comercio?.slug ?? menuIdentity?.slug ?? '').trim() || null,
+      logo_url: (comercio?.logo_url ?? '').trim() || (menuIdentity?.logo_url ?? '').trim() || null,
+      whatsapp: (comercio?.whatsapp ?? '').trim() || (menuIdentity?.whatsapp ?? '').trim() || null,
+      telefono: comercio?.telefono ?? menuIdentity?.telefono ?? null,
+      telefonos: comercio?.telefonos ?? null,
+      celular: comercio?.celular ?? null,
+      direccion: (comercio?.direccion ?? '').trim() || (menuIdentity?.direccion ?? '').trim() || null,
+      recibe_pedidos_whatsapp:
+        menuIdentity?.recibe_pedidos_whatsapp ?? comercio?.recibe_pedidos_whatsapp ?? true,
+      en_linea: menuIdentity?.en_linea ?? comercio?.en_linea ?? true,
+      horarios: menuIdentity?.horarios ?? comercio?.horarios,
+      branding_ia: comercio?.branding_ia ?? menuIdentity?.branding_ia ?? null,
+    } satisfies ComercioRow;
+  }, [comercio, menuIdentity]);
+
   const contactName = (order?.nombre_cliente ?? order?.detalles?.cliente_nombre ?? '').toString().trim();
   const contactPhone = (order?.telefono_cliente ?? order?.detalles?.telefono_cliente ?? '').toString().trim();
   const contactEmail = (order?.cliente_email ?? order?.detalles?.cliente_email ?? '').toString().trim();
   const businessName = (
-    comercio?.nombre ??
+    resolvedComercio.nombre ??
     order?.detalles?.comercio_nombre ??
     order?.detalles?.nombre_comercio ??
     order?.detalles?.business_name ??
     order?.detalles?.nombre_negocio ??
     ''
   ).toString().trim();
-  const businessAddress = (comercio?.direccion ?? '').toString().trim();
-  const businessPhoneRaw = (
-    comercio?.whatsapp ??
-    comercio?.telefono ??
-    comercio?.telefonos ??
-    comercio?.celular ??
-    ''
-  ).toString().trim();
+  const businessAddress = (resolvedComercio.direccion ?? '').toString().trim();
 
   const fallbackWaLink = useMemo(
-    () => buildWhatsAppLink(orderId, resolvedStatus, comercio),
-    [comercio, orderId, resolvedStatus],
+    () => buildWhatsAppLink(orderId, resolvedStatus, resolvedComercio),
+    [orderId, resolvedComercio, resolvedStatus],
   );
-  const finalWaLink = waReceiptUrl || fallbackWaLink;
-  const branding = comercio?.branding_ia ?? null;
+  const allowsWhatsapp = resolvedComercio.recibe_pedidos_whatsapp !== false;
+  const finalWaLink = allowsWhatsapp ? fallbackWaLink || waReceiptUrl : '';
+  const branding = resolvedComercio.branding_ia ?? null;
   const trackingPrimary = normalizeHexColor(branding?.color_principal, '#FF7A00');
   const trackingSecondary = normalizeHexColor(branding?.color_secundario, '#0F172A');
   const trackingBackground = normalizeHexColor(branding?.colores_personalizados?.background, '#F8FAFC');
   const trackingSurface = normalizeHexColor(branding?.colores_personalizados?.card_surface, '#FFFFFF');
-  const trackingOnPrimary = normalizeHexColor(branding?.colores_personalizados?.text_on_primary, '#FFFFFF');
+  const trackingOnPrimary = branding?.colores_personalizados?.text_on_primary
+    ? normalizeHexColor(branding.colores_personalizados.text_on_primary, readableOnColor(trackingPrimary))
+    : readableOnColor(trackingPrimary);
   const titleFontFamily = fontFamilyCssValue(branding?.fuente_titulos, 'Montserrat, sans-serif');
   const bodyFontFamily = fontFamilyCssValue(branding?.fuente_cuerpo, 'Roboto, sans-serif');
 
@@ -740,6 +811,48 @@ function OrderTrackingPageInner() {
     const next = `/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}?t=${encodeURIComponent(trackingToken)}`;
     router.replace(next);
   }, [comercio?.slug, orderId, pathname, router, trackingToken]);
+
+  useEffect(() => {
+    const match = pathname?.match(/\/v\/([^/]+)\/orders\//i);
+    const slug = decodeURIComponent(match?.[1] ?? '').trim();
+    if (!slug) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/menu/${encodeURIComponent(slug)}`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        const menuComercio = (payload?.data?.comercio ?? null) as Record<string, unknown> | null;
+        if (!menuComercio || cancelled) return;
+
+        const nextName = (menuComercio.nombre ?? '').toString().trim();
+        const nextLogo = (menuComercio.logo_url ?? '').toString().trim();
+        const nextPhone = (menuComercio.whatsapp ?? '').toString().trim();
+        const nextAddress = (menuComercio.direccion ?? '').toString().trim();
+        const nextPrimary = (menuComercio.color_principal ?? menuComercio.menu_palette_primary ?? '').toString().trim();
+        const allowsWhatsapp = menuComercio.recibe_pedidos_whatsapp !== false;
+
+        setMenuIdentity({
+          id: 'menu',
+          nombre: nextName || 'Comercio',
+          slug,
+          logo_url: nextLogo || null,
+          whatsapp: nextPhone || null,
+          direccion: nextAddress || null,
+          recibe_pedidos_whatsapp: allowsWhatsapp,
+          en_linea: menuComercio.en_linea !== false,
+          horarios: menuComercio.horarios,
+          branding_ia: nextPrimary ? { color_principal: nextPrimary } : null,
+        });
+      } catch {
+        // Decorative identity only; tracking still works without it.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   const displayStatus: OrderStatus = (!isDelivery && resolvedStatus === 'en_camino')
     ? 'preparando'
@@ -773,33 +886,27 @@ function OrderTrackingPageInner() {
 
   if (loading) {
     return (
-      <main className="grid min-h-screen place-items-center px-6 text-slate-900" style={{ background: trackingBackground, fontFamily: bodyFontFamily }}>
+      <OrderReceiptFrame background={trackingBackground} bodyFont={bodyFontFamily}>
         <div className="text-center">
           <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-slate-300" style={{ borderTopColor: trackingPrimary }} />
-          <p className="mt-3 text-sm text-slate-500">Cargando seguimiento...</p>
+          <p className="mt-3 text-sm text-slate-500">Cargando tu pedido...</p>
         </div>
-      </main>
+      </OrderReceiptFrame>
     );
   }
 
   if (error) {
     return (
-      <main className="grid min-h-screen place-items-center px-6 text-slate-900" style={{ background: trackingBackground, fontFamily: bodyFontFamily }}>
+      <OrderReceiptFrame background={trackingBackground} bodyFont={bodyFontFamily}>
         <p className="max-w-md text-center text-sm text-slate-600">{error}</p>
-      </main>
+      </OrderReceiptFrame>
     );
   }
 
   if (!order) {
-    const missingOrderStyle: CSSProperties & { '--tracking-primary': string } = {
-      backgroundColor: trackingSurface,
-      border: '1px solid color-mix(in srgb, var(--tracking-primary) 18%, white)',
-      '--tracking-primary': trackingPrimary,
-    };
-
     return (
-      <main className="grid min-h-screen place-items-center px-6 text-slate-900" style={{ background: trackingBackground, fontFamily: bodyFontFamily }}>
-        <section className="max-w-lg rounded-3xl p-8 text-center shadow-xl" style={missingOrderStyle}>
+      <OrderReceiptFrame background={trackingBackground} bodyFont={bodyFontFamily}>
+        <section className="max-w-lg rounded-[22px] bg-white p-8 text-center shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
           <p className="text-lg font-bold text-slate-950" style={{ fontFamily: titleFontFamily }}>Pedido no encontrado</p>
           <p className="mt-2 text-sm text-slate-600">Verifica el enlace o intenta de nuevo en unos minutos.</p>
           <Link
@@ -810,334 +917,165 @@ function OrderTrackingPageInner() {
             Ir al inicio
           </Link>
         </section>
-      </main>
+      </OrderReceiptFrame>
     );
   }
 
-  const createdAtTime = order?.created_at
+  const createdAtLabel = order?.created_at
     ? new Intl.DateTimeFormat('es-CO', {
-        hour: '2-digit',
+        day: 'numeric',
+        month: 'short',
+        hour: 'numeric',
         minute: '2-digit',
       }).format(new Date(order.created_at))
-    : '--:--';
-  const borderTone = `color-mix(in srgb, ${trackingSecondary} 12%, white)`;
-  const softTone = `color-mix(in srgb, ${trackingPrimary} 8%, white)`;
-  const mutedTone = `color-mix(in srgb, ${trackingSecondary} 8%, white)`;
-  const statusTitle =
-    displayStatus === 'entregado'
-      ? 'ENTREGADO'
-      : displayStatus === 'cancelado'
-        ? 'CANCELADO'
-      : displayStatus === 'en_camino'
-        ? 'EN CAMINO'
-        : displayStatus === 'preparando'
-          ? 'EN PREPARACION'
-          : displayStatus === 'confirmado'
-            ? 'CONFIRMADO'
-            : 'RECIBIDO';
-  const callPhone = normalizePhone(businessPhoneRaw);
-  const callHref = callPhone ? `tel:+${callPhone}` : '';
-  const syncLabel =
-    syncMode === 'polling' || syncMode === 'realtime'
-      ? 'Actualizacion activa'
-      : syncMode === 'sin-senal'
-        ? 'Sin senal'
-        : 'Conectando...';
-  const syncColor =
-    syncMode === 'polling' || syncMode === 'realtime'
-      ? '#16A34A'
-      : syncMode === 'sin-senal'
-        ? '#DC2626'
-        : '#64748B';
-  const lastSyncLabel = lastSyncAt
-    ? new Intl.DateTimeFormat('es-CO', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      }).format(new Date(lastSyncAt))
     : '';
   const timelineItemsBase = [
-    { key: 'pendiente', label: 'Peticion', icon: MessageCircle },
-    { key: 'confirmado', label: 'Confirmado', icon: CreditCard },
-    { key: 'preparando', label: 'En preparacion', icon: Store },
-    { key: 'en_camino', label: 'En camino', icon: MapPin },
-    { key: 'entregado', label: 'Entregado', icon: Package },
+    { key: 'pendiente', label: 'Recibido' },
+    { key: 'confirmado', label: 'Aceptado' },
+    { key: 'preparando', label: 'Preparando' },
+    { key: 'en_camino', label: 'En camino' },
+    { key: 'entregado', label: isDelivery ? 'Entregado' : 'Listo' },
   ] as const;
   const timelineItems = isDelivery
     ? timelineItemsBase
     : timelineItemsBase.filter((item) => item.key !== 'en_camino');
   const currentStep = Math.max(0, timelineItems.findIndex((item) => item.key === displayStatus));
+  const paymentLabel = paymentMethodName
+    ? paymentReference
+      ? `${paymentMethodName} · ****${paymentReference.slice(-4)}`
+      : paymentMethodName
+    : '';
+  const paymentDetails = paymentMethodDetails.slice(0, 2).join(' · ') || null;
+  const cancelDetail =
+    cancellationMeta?.reason === 'timeout_no_confirmacion'
+      ? 'El comercio no confirmó dentro de 15 minutos.'
+      : cancellationMeta?.reason === 'cancelado_por_cliente'
+        ? 'Cancelaste este pedido.'
+        : '';
+  const pathSlugMatch = pathname?.match(/\/v\/([^/]+)\/orders\//i);
+  const menuSlug = (
+    resolvedComercio.slug ??
+    decodeURIComponent(pathSlugMatch?.[1] ?? '')
+  ).trim();
+  const menuHref = menuSlug ? `/v/${encodeURIComponent(menuSlug)}` : null;
+  const scheduleStatus = resolveBusinessScheduleStatus(resolvedComercio.horarios);
+  const businessAcceptingOrders =
+    resolvedComercio.en_linea !== false &&
+    (!scheduleStatus.configured || scheduleStatus.isOpen);
+  const repeatableItems = (order?.detalles?.items ?? [])
+    .map((item): RepeatOrderLine | null => {
+      const productId = (item.product_id ?? '').toString().trim();
+      const quantity = Number(item.cantidad);
+      if (!productId || !Number.isFinite(quantity) || quantity <= 0) return null;
+      return {
+        productId,
+        quantity: Math.min(99, Math.round(quantity)),
+        selection: item.opciones,
+      };
+    })
+    .filter((item): item is RepeatOrderLine => item !== null);
+  const canRepeatOrder = Boolean(menuHref && menuIdentity && repeatableItems.length > 0 && businessAcceptingOrders);
+  const repeatClosedReason =
+    menuHref && menuIdentity && repeatableItems.length > 0 && !businessAcceptingOrders
+      ? scheduleStatus.nextOpenLabel
+        ? `El negocio está cerrado. Abrimos ${scheduleStatus.nextOpenLabel}`
+        : 'El negocio está cerrado ahora'
+      : null;
+  const formatStamp = (value: string) => {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? new Date(parsed).toLocaleString('es-CO') : '';
+  };
+  function handleRepeatOrder() {
+    if (!canRepeatOrder || !menuHref || !menuSlug || repeatableItems.length === 0) return;
+    writeRepeatOrder(menuSlug, {
+      items: repeatableItems,
+      fulfillment: isDelivery ? 'delivery' : 'takeaway',
+    });
+    router.push(menuHref);
+  }
 
   return (
-    <main
-      className="min-h-screen px-3 py-6 text-slate-900 sm:px-6"
-      style={{
-        background: `linear-gradient(180deg, color-mix(in srgb, ${trackingPrimary} 4%, white) 0%, #F3F4F6 32%, #F3F4F6 100%)`,
-        fontFamily: bodyFontFamily,
+    <OrderReceipt
+      businessName={businessName || 'Comercio'}
+      logoUrl={(resolvedComercio.logo_url ?? '').trim() || null}
+      menuHref={menuHref}
+      orderShortId={orderId ? `#${orderId.slice(-8).toUpperCase()}` : '#N/A'}
+      createdAtLabel={createdAtLabel}
+      status={displayStatus}
+      isDelivery={isDelivery}
+      locationHint={locationHint}
+      pickupAddress={!isDelivery ? businessAddress : ''}
+      timeline={timelineItems.map((item) => ({ key: item.key, label: item.label }))}
+      currentStep={currentStep}
+      pendingExpired={pendingExpired}
+      confirmTimeLeftLabel={formatCountdown(confirmTimeLeftMs)}
+      confirmProgress={CONFIRMATION_TIMEOUT_MS > 0 ? Math.min(1, pendingElapsedMs / CONFIRMATION_TIMEOUT_MS) : 0}
+      items={orderItems.map((item) => ({
+        name: item.nombre,
+        quantity: item.cantidad,
+        amountLabel: formatAmountByCurrency(item.subtotal, checkoutCurrency),
+      }))}
+      subtotalLabel={formatAmountByCurrency(subtotalCheckout, checkoutCurrency)}
+      deliveryLabel={isDelivery || deliveryCheckout > 0 ? formatAmountByCurrency(deliveryCheckout, checkoutCurrency) : null}
+      cashChangeLabel={cashChangeAmount > 0 ? formatAmountByCurrency(cashChangeAmount, checkoutCurrency) : null}
+      totalLabel={formatAmountByCurrency(totalCheckout, checkoutCurrency)}
+      paymentLabel={paymentLabel || null}
+      paymentDetails={paymentDetails}
+      orderNotes={orderNotes}
+      cancelDetail={
+        cancelDetail ||
+        (displayStatus === 'cancelado'
+          ? (cancelMessage || 'Si necesitas ayuda, escríbeles por WhatsApp.')
+          : '')
+      }
+      deliveryDelegateLabel={deliveryDelegateLabel}
+      deliveryDelegateAcceptedAt={formatStamp(deliveryDelegateAcceptedAt)}
+      deliveryDelegateArrivedAt={formatStamp(deliveryDelegateArrivedAt)}
+      deliveryDelegateCompletedAt={formatStamp(deliveryDelegateCompletedAt)}
+      contactName={contactName}
+      contactPhone={contactPhone}
+      contactEmail={contactEmail}
+      whatsappHref={finalWaLink}
+      showWhatsapp={allowsWhatsapp}
+      whatsappReady={displayStatus !== 'pendiente' && displayStatus !== 'cancelado'}
+      canRepeatOrder={canRepeatOrder}
+      repeatClosedReason={repeatClosedReason}
+      onRepeatOrder={handleRepeatOrder}
+      canCustomerConfirmDelegatedDelivery={canCustomerConfirmDelegatedDelivery}
+      deliveryConfirmationLoading={deliveryConfirmationLoading}
+      deliveryConfirmationMessage={deliveryConfirmationMessage}
+      onConfirmDelivery={() => {
+        if (typeof window !== 'undefined') {
+          const accepted = window.confirm('Confirma que recibiste todo correctamente para completar el pedido.');
+          if (!accepted) return;
+        }
+        void confirmDeliveryReceived();
       }}
-    >
-      <section className="mx-auto max-w-xl">
-        <div className="mx-auto w-full overflow-hidden rounded-[34px] bg-white shadow-[0_30px_80px_rgba(15,23,42,0.18)]" style={{ border: `1px solid ${borderTone}`, maxWidth: 400 }}>
-          <div className="h-2 w-full" style={{ backgroundColor: '#E5E7EB' }} />
-          <div className="px-4 pb-6 pt-2 sm:px-5">
-            <div className="rounded-t-[18px] rounded-b-md px-4 py-2 text-center text-lg font-black tracking-wide" style={{ backgroundColor: trackingPrimary, color: trackingOnPrimary, fontFamily: titleFontFamily }}>
-              {statusTitle}
-            </div>
-
-            <div className="mt-2 rounded-b-2xl border border-slate-200 px-4 py-3">
-              <p className="text-center text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Hora del pedido</p>
-              <p className="mt-1 text-center text-3xl font-black text-slate-950" style={{ fontFamily: titleFontFamily }}>
-                {createdAtTime}
-              </p>
-
-              <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  {comercio?.logo_url ? (
-                    <img src={comercio.logo_url} alt={comercio?.nombre ?? 'Comercio'} className="h-7 w-7 rounded-md object-cover" />
-                  ) : (
-                    <span className="grid h-7 w-7 place-items-center rounded-md bg-slate-100 text-[11px] font-black text-slate-600">KM</span>
-                  )}
-                  <p className="truncate text-base font-black text-slate-900">{businessName || 'Comercio'}</p>
-                </div>
-                <p className="text-sm font-semibold text-slate-700">{orderId ? `#${orderId.slice(-8).toUpperCase()}` : '#N/A'}</p>
-              </div>
-              <p className="mt-2 break-all text-[11px] text-slate-500">ID completo: {orderId || 'No disponible'}</p>
-
-              {displayStatus === 'pendiente' ? (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  <p className="font-bold">Esperando confirmacion del comercio (maximo 15 min)</p>
-                  <p className="mt-1">
-                    {pendingExpired
-                      ? 'Se alcanzo el limite de confirmacion. Estamos cerrando este pedido automaticamente.'
-                      : `Tiempo restante para confirmar: ${formatCountdown(confirmTimeLeftMs)}`}
-                  </p>
-                </div>
-              ) : null}
-
-              {displayStatus === 'cancelado' ? (
-                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                  <p className="font-bold">Este pedido fue cancelado.</p>
-                  {cancellationMeta?.reason === 'timeout_no_confirmacion'
-                    ? <p className="mt-1">Motivo: no fue confirmado por el comercio dentro de 15 minutos.</p>
-                    : null}
-                  {cancellationMeta?.reason === 'cancelado_por_cliente'
-                    ? <p className="mt-1">Motivo: cancelacion solicitada por el cliente.</p>
-                    : null}
-                </div>
-              ) : null}
-
-              <div className="mt-4 space-y-2">
-                {timelineItems.map((item, index) => {
-                  const isDone = index <= currentStep;
-                  const isCurrent = index === currentStep;
-                  const Icon = item.icon;
-                  return (
-                    <div key={item.key} className="flex items-center gap-3 text-sm">
-                      <span
-                        className="grid h-7 w-7 place-items-center rounded-full border text-xs font-black"
-                        style={{
-                          borderColor: isDone ? trackingPrimary : '#D1D5DB',
-                          backgroundColor: isCurrent ? softTone : '#FFFFFF',
-                          color: isDone ? trackingPrimary : '#64748B',
-                        }}
-                      >
-                        <Icon className="h-3.5 w-3.5" strokeWidth={2.4} />
-                      </span>
-                      <p className="font-semibold" style={{ color: isCurrent ? trackingPrimary : isDone ? '#111827' : '#6B7280' }}>
-                        {index + 1}. {item.label}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {locationHint ? (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Ubicacion</p>
-                <p className="mt-2 text-sm text-slate-700">{locationHint}</p>
-              </div>
-            ) : null}
-
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Contacto del comercio</p>
-              <div className="mt-3 flex items-center gap-3">
-                <div className="grid h-14 w-14 place-items-center rounded-full text-base font-black" style={{ backgroundColor: mutedTone, color: trackingPrimary }}>
-                  {(businessName || 'C').slice(0, 1).toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-2xl font-black text-slate-950" style={{ fontFamily: titleFontFamily }}>{businessName || 'Comercio'}</p>
-                  <p className="truncate text-sm text-slate-600">{businessPhoneRaw || 'Sin telefono de contacto'}</p>
-                </div>
-              </div>
-              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {callHref ? (
-                  <a href={callHref} className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black" style={{ backgroundColor: '#D97706', color: '#FFFFFF' }}>
-                    <Phone className="h-4 w-4" strokeWidth={2.2} />
-                    Llamar
-                  </a>
-                ) : null}
-                {finalWaLink ? (
-                  <a href={finalWaLink} target="_blank" rel="noopener noreferrer nofollow" referrerPolicy="no-referrer" className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black" style={{ backgroundColor: '#D97706', color: '#FFFFFF' }}>
-                    <MessageCircle className="h-4 w-4" strokeWidth={2.2} />
-                    Chat/WhatsApp
-                  </a>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Resumen de la orden</p>
-              <div className="mt-3 space-y-2 text-sm text-slate-700">
-                {orderItems.map((item, index) => (
-                  <div key={`order-item-${index}`} className="flex items-center justify-between gap-3">
-                    <p className="min-w-0 truncate">{item.cantidad}x {item.nombre}</p>
-                    <p className="whitespace-nowrap font-semibold">{formatAmountByCurrency(item.subtotal, checkoutCurrency)}</p>
-                  </div>
-                ))}
-                <div className="mt-2 border-t border-slate-200 pt-2">
-                  <p className="flex items-center justify-between"><span>Subtotal</span><span className="font-semibold">{formatAmountByCurrency(subtotalCheckout, checkoutCurrency)}</span></p>
-                  <p className="flex items-center justify-between"><span>Entrega</span><span className="font-semibold">{formatAmountByCurrency(deliveryCheckout, checkoutCurrency)}</span></p>
-                  {cashChangeAmount > 0 ? <p className="flex items-center justify-between"><span>Cambio de</span><span className="font-semibold">{formatAmountByCurrency(cashChangeAmount, checkoutCurrency)}</span></p> : null}
-                  <p className="mt-2 flex items-center justify-between text-base font-black text-slate-950"><span>TOTAL</span><span>{formatAmountByCurrency(totalCheckout, checkoutCurrency)}</span></p>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Metodo de pago</p>
-              <p className="mt-2 text-sm text-slate-700">{paymentMethodName || 'No especificado'} · {paymentReference ? `****${paymentReference.slice(-4)}` : 'Sin referencia'}</p>
-              {paymentMethodDetails.length > 0 ? <p className="mt-1 text-xs text-slate-500">{paymentMethodDetails.slice(0, 2).join(' · ')}</p> : null}
-            </div>
-
-            {!isDelivery && businessAddress ? (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Direccion del comercio</p>
-                <p className="mt-2 text-sm text-slate-700">{businessAddress}</p>
-              </div>
-            ) : null}
-
-            {deliveryDelegateLabel ? (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Delivery delegado</p>
-                <p className="mt-2 text-sm font-semibold text-slate-700">{deliveryDelegateLabel}</p>
-                {deliveryDelegateAcceptedAt ? <p className="mt-1 text-xs text-slate-500">Aceptado: {new Date(deliveryDelegateAcceptedAt).toLocaleString('es-CO')}</p> : null}
-                {deliveryDelegateArrivedAt ? <p className="mt-1 text-xs text-slate-500">Llegada reportada: {new Date(deliveryDelegateArrivedAt).toLocaleString('es-CO')}</p> : null}
-                {deliveryDelegateCompletedAt ? <p className="mt-1 text-xs text-slate-500">Completado: {new Date(deliveryDelegateCompletedAt).toLocaleString('es-CO')}</p> : null}
-              </div>
-            ) : null}
-
-            {(contactName || contactPhone || contactEmail) ? (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Datos del cliente</p>
-                {contactName ? <p className="mt-2 text-sm text-slate-700">{contactName}</p> : null}
-                {contactPhone ? <p className="mt-1 text-sm text-slate-700">{contactPhone}</p> : null}
-                {contactEmail ? <p className="mt-1 text-sm text-slate-700">{contactEmail}</p> : null}
-              </div>
-            ) : null}
-
-            {orderNotes ? (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-800">Notas del pedido</p>
-                <p className="mt-2 text-sm text-slate-700">{orderNotes}</p>
-              </div>
-            ) : null}
-
-            <div className="mt-4 rounded-2xl border border-slate-200 p-4" style={{ backgroundColor: softTone }}>
-              {canCustomerConfirmDelegatedDelivery ? (
-                <button
-                  type="button"
-                  disabled={deliveryConfirmationLoading}
-                  onClick={() => {
-                    if (typeof window !== 'undefined') {
-                      const accepted = window.confirm(
-                        'Confirma que recibiste todo correctamente para completar el pedido.',
-                      );
-                      if (!accepted) return;
-                    }
-                    void confirmDeliveryReceived();
-                  }}
-                  className="mb-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-black"
-                  style={{
-                    borderColor: '#86EFAC',
-                    color: '#166534',
-                    backgroundColor: '#ECFDF5',
-                    opacity: deliveryConfirmationLoading ? 0.7 : 1,
-                  }}
-                >
-                  {deliveryConfirmationLoading
-                    ? 'Confirmando entrega...'
-                    : 'Confirmar que recibi mi pedido'}
-                </button>
-              ) : null}
-
-              {deliveryConfirmationMessage ? (
-                <p className="mb-2 text-xs text-slate-600">{deliveryConfirmationMessage}</p>
-              ) : null}
-
-              {canCustomerCancel ? (
-                <button
-                  type="button"
-                  disabled={cancelLoading}
-                  onClick={() => {
-                    if (typeof window !== 'undefined') {
-                      const accepted = window.confirm('Vas a cancelar este pedido. Esta accion no se puede deshacer.');
-                      if (!accepted) return;
-                    }
-                    void cancelOrder('cliente');
-                  }}
-                  className="mb-2 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-black"
-                  style={{
-                    borderColor: '#FCA5A5',
-                    color: '#B91C1C',
-                    backgroundColor: '#FEF2F2',
-                    opacity: cancelLoading ? 0.7 : 1,
-                  }}
-                >
-                  {cancelLoading ? 'Cancelando pedido...' : 'Cancelar pedido'}
-                </button>
-              ) : null}
-
-              {displayStatus === 'pendiente' && !pendingExpired ? (
-                <p className="mb-2 text-xs text-slate-600">
-                  Este pedido solo puede cancelarse automaticamente si el comercio no confirma en 15 minutos.
-                </p>
-              ) : null}
-
-              <div className="mt-1 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                <div className="pr-3">
-                  <p className="text-xs font-black text-slate-800">Notificaciones WhatsApp</p>
-                  <p className="text-[11px] text-slate-500">
-                    {whatsappNotificationsEnabled ? 'Activadas' : 'Desactivadas'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={whatsappNotificationsEnabled}
-                  disabled={whatsappPreferenceSaving}
-                  onClick={() => void updateWhatsappNotificationsPreference(!whatsappNotificationsEnabled)}
-                  className="relative inline-flex h-7 w-12 items-center rounded-full transition-colors"
-                  style={{
-                    backgroundColor: whatsappNotificationsEnabled ? trackingPrimary : '#CBD5E1',
-                    opacity: whatsappPreferenceSaving ? 0.7 : 1,
-                  }}
-                >
-                  <span
-                    className="inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform"
-                    style={{
-                      translate: whatsappNotificationsEnabled ? '22px 0' : '3px 0',
-                    }}
-                  />
-                </button>
-              </div>
-              {notificationMessage ? <p className="mt-2 text-xs text-slate-600">{notificationMessage}</p> : null}
-              {cancelMessage ? <p className="mt-2 text-xs text-slate-600">{cancelMessage}</p> : null}
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
+      canCustomerCancel={canCustomerCancel}
+      cancelLoading={cancelLoading}
+      cancelMessage={displayStatus === 'cancelado' ? '' : cancelMessage}
+      onCancelOrder={() => {
+        if (typeof window !== 'undefined') {
+          const accepted = window.confirm('Vas a cancelar este pedido. Esta acción no se puede deshacer.');
+          if (!accepted) return;
+        }
+        void cancelOrder('cliente');
+      }}
+      showPendingCancelHint={displayStatus === 'pendiente' && !pendingExpired}
+      whatsappNotificationsEnabled={whatsappNotificationsEnabled}
+      whatsappPreferenceSaving={whatsappPreferenceSaving}
+      notificationMessage={notificationMessage}
+      onSetWhatsappNotifications={(enabled) => void updateWhatsappNotificationsPreference(enabled)}
+      colors={{
+        primary: trackingPrimary,
+        secondary: trackingSecondary,
+        background: trackingBackground,
+        surface: trackingSurface,
+        onPrimary: trackingOnPrimary,
+        titleFont: titleFontFamily,
+        bodyFont: bodyFontFamily,
+      }}
+    />
   );
 }
 

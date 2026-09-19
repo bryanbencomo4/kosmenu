@@ -45,6 +45,7 @@ const COMERCIO_SELECT = [
   'latitud',
   'longitud',
   'permite_delivery',
+  'recibe_pedidos_whatsapp',
   'en_linea',
   'owner_id',
   'menu_palette',
@@ -62,6 +63,7 @@ const COMERCIO_SELECT = [
   'exchange_rate_mode',
   'exchange_rate_source',
   'exchange_rate_quote_currency',
+  'horarios',
   'branding_ia',
 ].join(',');
 

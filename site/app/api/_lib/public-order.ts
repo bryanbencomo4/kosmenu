@@ -18,6 +18,13 @@ export type PublicOrderTrackingResponse = {
     name: string;
     quantity: number;
     unitPrice?: number;
+    productId?: string;
+    selection?: {
+      tamanoId?: string;
+      tamanoLabel?: string;
+      servicioAdicional?: boolean;
+      ajusteIds?: string[];
+    };
   }>;
   subtotal?: number;
   deliveryCost?: number;
@@ -43,6 +50,8 @@ export type PublicOrderTrackingResponse = {
     whatsapp?: string | null;
     /** Public business pickup address (menu-visible), only for pickup orders. */
     pickupAddress?: string | null;
+    /** Public menu logo — already shown on /v/[slug]. */
+    logoUrl?: string | null;
     /** Theme tokens only — no remote asset URLs. */
     branding?: Record<string, unknown> | null;
   };
@@ -64,6 +73,7 @@ type RawComercio = {
   whatsapp?: string | null;
   telefono?: string | null;
   direccion?: string | null;
+  logo_url?: string | null;
   branding_ia?: Record<string, unknown> | null;
 };
 
@@ -99,19 +109,37 @@ function buildLocationHint(
 ): string | null {
   if (deliveryType === 'pickup') {
     return status === 'preparando' || status === 'confirmado' || status === 'pendiente'
-      ? 'Retiro en el comercio cuando el pedido este listo.'
+      ? 'Retiro en el comercio cuando el pedido esté listo.'
       : null;
   }
 
   if (status === 'en_camino' || delegateStatus === 'accepted' || delegateStatus === 'arrived') {
-    return 'En camino a la direccion que indicaste al ordenar.';
+    return 'En camino a la dirección que indicaste al ordenar.';
   }
 
   if (status === 'entregado') {
     return 'Entrega completada.';
   }
 
-  return 'La direccion de entrega no se muestra en este enlace por seguridad.';
+  return 'La dirección de entrega no se muestra en este enlace por seguridad.';
+}
+
+function sanitizePublicSelection(raw: unknown): PublicOrderTrackingResponse['items'][number]['selection'] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const row = raw as Record<string, unknown>;
+  const tamanoId = (row.tamanoId ?? '').toString().trim();
+  const tamanoLabel = (row.tamanoLabel ?? '').toString().trim();
+  const servicioAdicional = row.servicioAdicional === true;
+  const ajusteIds = Array.isArray(row.ajusteIds)
+    ? row.ajusteIds.map((entry) => entry.toString().trim()).filter(Boolean).slice(0, 24)
+    : [];
+  if (!tamanoId && !tamanoLabel && !servicioAdicional && ajusteIds.length === 0) return undefined;
+  return {
+    ...(tamanoId ? { tamanoId } : {}),
+    ...(tamanoLabel ? { tamanoLabel } : {}),
+    ...(servicioAdicional ? { servicioAdicional } : {}),
+    ...(ajusteIds.length > 0 ? { ajusteIds } : {}),
+  };
 }
 
 export function toPublicOrderTrackingResponse(
@@ -128,10 +156,14 @@ export function toPublicOrderTrackingResponse(
       const quantity = Number(row.cantidad ?? row.quantity ?? 0);
       const unitPrice = Number(row.precio ?? row.price);
       if (!Number.isFinite(quantity) || quantity <= 0) return null;
+      const productId = (row.product_id ?? row.productId ?? '').toString().trim();
+      const selection = sanitizePublicSelection(row.opciones ?? row.selection);
       return {
         name,
         quantity,
         unitPrice: Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : undefined,
+        ...(productId ? { productId } : {}),
+        ...(selection ? { selection } : {}),
       };
     })
     .filter(Boolean) as PublicOrderTrackingResponse['items'];
@@ -193,9 +225,22 @@ export function toPublicOrderTrackingResponse(
       slug: comercio?.slug ?? null,
       whatsapp: (comercio?.whatsapp ?? comercio?.telefono ?? null) as string | null,
       pickupAddress: deliveryType === 'pickup' ? (comercio?.direccion ?? null) : null,
+      logoUrl: sanitizePublicAssetUrl(comercio?.logo_url),
       branding: sanitizePublicBranding(comercio?.branding_ia ?? null),
     },
   };
+}
+
+function sanitizePublicAssetUrl(value: unknown): string | null {
+  const raw = (value ?? '').toString().trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 function sanitizePublicBranding(value: Record<string, unknown> | null): Record<string, unknown> | null {

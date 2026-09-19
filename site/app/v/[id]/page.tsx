@@ -5,7 +5,6 @@ import { ArrowRight, ArrowUp, ChevronDown, Flame, Info, Mail, MapPin, Menu, Mess
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
-import { CurrencyTicker } from './_components/CurrencyTicker';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
 import type { Country } from 'react-phone-number-input';
 import {
@@ -27,8 +26,12 @@ import {
   type EngineSurface,
 } from './_lib/upsell-engine';
 import { getOrCreateUpsellSessionId, trackUpsellEvent, type UpsellSurface } from './_lib/upsell-session';
-import { UpsellMenuExperience } from './_components/upsell/UpsellMenuExperience';
 import { AddToCartUpsellSheet, type AddToCartSuggestion } from './_components/upsell/AddToCartUpsellSheet';
+import { ProductOptionsSheet } from './_components/ProductOptionsSheet';
+import { KioskMenuExperience } from './_components/kiosk/KioskMenuExperience';
+import { KioskCheckout } from './_components/kiosk/KioskCheckout';
+import { KioskImage } from './_components/kiosk/KioskImage';
+import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
 import type { BundleRailItem } from './_components/upsell/BundleRail';
 import { formatPaymentMethodDetails } from '../../_lib/payment-method-display';
@@ -49,7 +52,9 @@ import {
   summarizeCartLineSelection,
   type CartLineSelection,
 } from '../../_lib/menu-product-options';
-import { ProductOptionsSheet } from './_components/ProductOptionsSheet';
+import { consumeRepeatOrder } from '../../_lib/repeat-order';
+import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
+import { trackMenuFunnelEvent, trackPublicMenuVisit } from './_lib/track-menu-analytics';
 
 type CategoriaRow = {
   id: string;
@@ -187,6 +192,7 @@ type ComercioRow = {
   color_principal?: string | number | null;
   menu_layout?: string | null;
   menu_font?: string | null;
+  horarios?: unknown;
   /** Never exposed by public DTO; kept optional only for type compatibility. */
   branding_ia?: BrandingConfig | null;
 };
@@ -247,6 +253,11 @@ const publicBaseUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.co
 const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
 const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
 const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';
+const kioskFulfillmentStoragePrefix = 'elmenuxfa-kiosk-fulfillment:';
+
+function isKioskFulfillment(value: string | null | undefined): value is KioskFulfillment {
+  return value === 'dine_in' || value === 'takeaway' || value === 'delivery';
+}
 const selectedCurrencyStorageKeyPrefix = 'elmenuxfa:selected-currency:';
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
 const preferLeafletMapPicker = false;
@@ -1392,6 +1403,42 @@ function toNumberOrNull(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function currencyAllowsDecimals(currency: string) {
+  const code = (currency || '').trim().toUpperCase();
+  return code !== 'COP' && code !== 'SIN MONEDA';
+}
+
+function parseCashAmountInput(raw: string, currency: string) {
+  const allowDecimals = currencyAllowsDecimals(currency);
+  const cleaned = raw.replace(/[^\d.,]/g, '').replace(',', '.');
+  if (!cleaned) return '';
+  if (!allowDecimals) {
+    return cleaned.replace(/\./g, '').replace(/^0+(?=\d)/, '');
+  }
+  const [integerPart = '', ...fractionParts] = cleaned.split('.');
+  const safeInteger = integerPart.replace(/^0+(?=\d)/, '') || (cleaned.includes('.') ? '0' : '');
+  const fraction = fractionParts.join('').slice(0, 2);
+  return fraction.length > 0 || cleaned.endsWith('.') ? `${safeInteger}.${fraction}` : safeInteger;
+}
+
+function suggestCashTenders(total: number, currency: string) {
+  const code = (currency || 'COP').trim().toUpperCase();
+  const bills =
+    code === 'USD'
+      ? [1, 5, 10, 20, 50, 100]
+      : code === 'VES'
+        ? [20, 50, 100, 200, 500, 1000, 2000]
+        : [1000, 2000, 5000, 10000, 20000, 50000, 100000];
+  const suggestions = new Set<number>();
+  for (const bill of bills) {
+    if (bill > total) suggestions.add(bill);
+  }
+  const step = bills[0] ?? 1;
+  const roundedUp = Math.ceil((total + 0.0001) / step) * step;
+  if (roundedUp > total) suggestions.add(Number(roundedUp.toFixed(2)));
+  return [...suggestions].sort((left, right) => left - right).slice(0, 4);
+}
+
 function getBrowserCurrentPoint() {
   if (typeof window === 'undefined' || !navigator.geolocation) {
     return Promise.resolve<DeliveryPoint | null>(null);
@@ -1461,6 +1508,7 @@ export default function PublicMenuPage() {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [cashPaymentInput, setCashPaymentInput] = useState('');
+  const [needsCashChange, setNeedsCashChange] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
   const [digitalPaymentReference, setDigitalPaymentReference] = useState('');
@@ -1478,6 +1526,9 @@ export default function PublicMenuPage() {
   const [mapPickerError, setMapPickerError] = useState('');
   const [mapPickerProvider, setMapPickerProvider] = useState<'google' | 'leaflet'>('google');
   const [orderNotes, setOrderNotes] = useState('');
+  const [kioskFulfillment, setKioskFulfillment] = useState<KioskFulfillment | null>(null);
+  const [kioskAddedPrompt, setKioskAddedPrompt] = useState<{ productName: string } | null>(null);
+  const [kioskVoucher, setKioskVoucher] = useState<KioskVoucherData | null>(null);
   const [dismissedUpsellIds, setDismissedUpsellIds] = useState<Set<string>>(() => new Set());
   const [addToCartSheet, setAddToCartSheet] = useState<{
     open: boolean;
@@ -1491,6 +1542,8 @@ export default function PublicMenuPage() {
     Map<string, { ruleId?: string | null; bundleId?: string | null; surface: UpsellSurface }>
   >(new Map());
   const trackedImpressionsRef = useRef<Set<string>>(new Set());
+  const repeatOrderConsumedRef = useRef(false);
+  const menuReadyRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [expandedProductImage, setExpandedProductImage] = useState<{
@@ -1540,6 +1593,14 @@ export default function PublicMenuPage() {
   }, [commerceIdentifier]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !commerceIdentifier) return;
+    const saved = window.sessionStorage.getItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
+    if (!isKioskFulfillment(saved)) return;
+    setKioskFulfillment(saved);
+    setDeliveryMode(saved === 'delivery' ? 'delivery' : 'pickup');
+  }, [commerceIdentifier]);
+
+  useEffect(() => {
     if (!isConfirmOpen) {
       setIsCheckoutFooterExpanded(false);
     }
@@ -1586,7 +1647,9 @@ export default function PublicMenuPage() {
       }
 
       try {
-        setLoading(true);
+        if (!menuReadyRef.current) {
+          setLoading(true);
+        }
         setError(null);
 
         const encodedIdentifier = encodeURIComponent(commerceIdentifier);
@@ -1645,14 +1708,15 @@ export default function PublicMenuPage() {
         }
 
         if (!cancelled) {
+          menuReadyRef.current = true;
           setIsDraftMode(false);
           setMenuData(data);
           setCachedSplashName(nextCommerceName);
           setCachedSplashLogoUrl(nextLogoUrl);
+          setLoading(false);
           if (nextLogoUrl) {
-            await preloadImageAsset(nextLogoUrl, 1200);
+            void preloadImageAsset(nextLogoUrl, 1200);
           }
-          await new Promise((resolve) => window.setTimeout(resolve, 260));
         }
       } catch (err) {
         if (!cancelled) {
@@ -1675,6 +1739,11 @@ export default function PublicMenuPage() {
     ownerPreviewToken,
     ownerPreviewTokenReady,
   ]);
+
+  useEffect(() => {
+    if (!menuData?.comercio?.id || isOwnerPreview) return;
+    void trackPublicMenuVisit(String(menuData.comercio.slug || menuData.comercio.id), isOwnerPreview);
+  }, [menuData?.comercio?.id, menuData?.comercio?.slug, isOwnerPreview]);
 
   const categoriasConProductos = useMemo(() => {
     if (!menuData) return [];
@@ -1754,6 +1823,33 @@ export default function PublicMenuPage() {
       return changed ? next : prev;
     });
   }, [categoryByProductId, productById]);
+
+  useEffect(() => {
+    if (repeatOrderConsumedRef.current || productById.size === 0) return;
+    const payload = consumeRepeatOrder(commerceIdentifier);
+    repeatOrderConsumedRef.current = true;
+    if (!payload) return;
+
+    const nextCart: Record<string, number> = {};
+    for (const item of payload.items) {
+      if (!productById.has(item.productId)) continue;
+      const key = buildCartLineKey(item.productId, item.selection ?? {});
+      nextCart[key] = (nextCart[key] ?? 0) + item.quantity;
+    }
+    if (Object.keys(nextCart).length === 0) return;
+
+    setCart(nextCart);
+    if (payload.fulfillment) {
+      setKioskFulfillment(payload.fulfillment);
+      setDeliveryMode(payload.fulfillment === 'delivery' ? 'delivery' : 'pickup');
+      if (typeof window !== 'undefined' && commerceIdentifier) {
+        window.sessionStorage.setItem(
+          `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+          payload.fulfillment,
+        );
+      }
+    }
+  }, [commerceIdentifier, productById]);
 
   const cartItems = useMemo(() => {
     return Object.entries(cart)
@@ -2534,6 +2630,18 @@ export default function PublicMenuPage() {
     return active.length ? active : source;
   }, [activeCategoryId, formatUpsellPrice, visibleCategorias]);
   const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
+  const checkoutFlowSteps = isDeliveryOrder
+    ? [
+        { id: 0, title: 'Pedido' },
+        { id: 1, title: 'Tus datos' },
+        { id: 2, title: 'Direccion' },
+        { id: 3, title: 'Pago' },
+      ]
+    : [
+        { id: 0, title: 'Pedido' },
+        { id: 1, title: 'Tus datos' },
+        { id: 3, title: 'Pago' },
+      ];
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
   const isCashPayment = selectedPaymentLabel.toLowerCase().includes('efectivo');
@@ -2542,10 +2650,17 @@ export default function PublicMenuPage() {
   const isPaymentReferenceValid = !isDigitalPayment || /^\d{4}$/.test(paymentReferenceLast4);
   const hasPaymentProof = !isDigitalPayment || paymentProofFile !== null;
   const paymentWithAmount = toNumberOrNull(cashPaymentInput);
+  const cashChangeRequired = isDeliveryOrder && isCashPayment && needsCashChange;
+  const isCashTenderValid =
+    !cashChangeRequired ||
+    (paymentWithAmount !== null && paymentWithAmount > orderGrandTotalConverted);
   const changeAmount =
-    isCashPayment && paymentWithAmount !== null && paymentWithAmount > orderGrandTotalConverted
+    cashChangeRequired && isCashTenderValid && paymentWithAmount !== null
       ? paymentWithAmount - orderGrandTotalConverted
       : 0;
+  const cashTenderSuggestions = cashChangeRequired
+    ? suggestCashTenders(orderGrandTotalConverted, selectedCurrencyCode)
+    : [];
   const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
   const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
   const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint;
@@ -2585,9 +2700,89 @@ export default function PublicMenuPage() {
   const canGoNextFromStep0 = checkoutItemsCount > 0;
   const canGoNextFromStep1 = isClientNameValid && isClientWhatsappValid && isClientEmailValid;
   const canGoNextFromStep2 = isDeliveryReady;
+  const scheduleStatus = useMemo(
+    () => resolveBusinessScheduleStatus(menuData?.comercio?.horarios),
+    [menuData?.comercio?.horarios],
+  );
+  const scheduleClosed = scheduleStatus.configured && !scheduleStatus.isOpen;
+  const kioskOpenCaption =
+    scheduleStatus.closesAtLabel === '24 horas'
+      ? 'Abierto las 24 horas'
+      : scheduleStatus.closesAtLabel
+        ? `Abierto hasta las ${scheduleStatus.closesAtLabel}`
+        : 'Abierto ahora';
+  const kioskClosedCaption = scheduleStatus.nextOpenLabel
+    ? `Cerrado · Abrimos ${scheduleStatus.nextOpenLabel}`
+    : 'Cerrado ahora';
+  const kioskCategories = useMemo(
+    () =>
+      categoriasConProductos.map((categoria) => {
+        const cover =
+          categoria.productos
+            .map((producto) => displayProductImage(producto.imagen_url, comercioLogoUrl))
+            .find(Boolean) ?? null;
+        return {
+          id: categoria.id,
+          name: formatCategoryDisplayName(categoria.nombre),
+          glyph: resolveCategoryVisual(categoria).glyph,
+          coverUrl: cover,
+          productCount: categoria.productos.length,
+        };
+      }),
+    [categoriasConProductos, comercioLogoUrl],
+  );
+  const kioskProductsByCategory = useMemo(() => {
+    const map: Record<string, Array<{
+      id: string;
+      name: string;
+      description: string;
+      priceLabel: string;
+      imageUrl: string | null;
+      available: boolean;
+    }>> = {};
+    for (const categoria of categoriasConProductos) {
+      map[categoria.id] = categoria.productos.map((producto) => ({
+        id: producto.id,
+        name: producto.nombre,
+        description: (producto.descripcion ?? '').trim(),
+        priceLabel: formatProductPriceLabel(producto, formatUpsellPrice),
+        imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl),
+        available: producto.disponible !== false,
+      }));
+    }
+    return map;
+  }, [categoriasConProductos, comercioLogoUrl, formatUpsellPrice]);
+
+  function selectKioskFulfillment(next: KioskFulfillment) {
+    setKioskFulfillment(next);
+    setDeliveryMode(next === 'delivery' ? 'delivery' : 'pickup');
+    setSearchQuery('');
+    if (typeof window !== 'undefined' && commerceIdentifier) {
+      window.sessionStorage.setItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`, next);
+    }
+  }
+
+  function resetKioskFulfillment() {
+    setKioskFulfillment(null);
+    setDeliveryMode('pickup');
+    setSearchQuery('');
+    if (typeof window !== 'undefined' && commerceIdentifier) {
+      window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
+    }
+  }
+
+  function handleKioskAddProduct(productId: string) {
+    if (scheduleClosed) {
+      window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
+      return;
+    }
+    setProductOptionsSheet({ open: true, productId });
+  }
+
   const canSubmitStep3 =
-    (menuData?.metodosPago.length ?? 0) === 0 ||
-    (selectedPaymentMethodId !== null && isPaymentReferenceValid && hasPaymentProof);
+    ((menuData?.metodosPago.length ?? 0) === 0 ||
+      (selectedPaymentMethodId !== null && isPaymentReferenceValid && hasPaymentProof)) &&
+    isCashTenderValid;
   const canAdvanceCurrentStep =
     checkoutStep === 0
       ? canGoNextFromStep0
@@ -2600,7 +2795,8 @@ export default function PublicMenuPage() {
     canGoNextFromStep0 &&
     canGoNextFromStep1 &&
     canGoNextFromStep2 &&
-    canSubmitStep3;
+    canSubmitStep3 &&
+    !scheduleClosed;
   const currentCheckoutStepTitle = checkoutStepTitles[checkoutStep] ?? 'Confirmar pedido';
   const currentCheckoutStepDescription = checkoutStepDescriptions[checkoutStep] ?? checkoutStepDescriptions[0];
   const selectedPaymentSummary = selectedPaymentLabel || 'Por seleccionar';
@@ -2780,7 +2976,7 @@ export default function PublicMenuPage() {
       const savedEmail = (parsed.clientEmail ?? '').trim();
       const savedWhatsapp = (parsed.clientWhatsapp ?? '').trim();
 
-      if (savedName) setClientName(savedName);
+      if (savedName && /\s/.test(savedName)) setClientName(savedName);
       if (savedEmail) setClientEmail(savedEmail);
 
       if (savedWhatsapp) {
@@ -2796,10 +2992,11 @@ export default function PublicMenuPage() {
   }, []);
 
   useEffect(() => {
-    if (!isCashPayment) {
+    if (!isDeliveryOrder || !isCashPayment) {
+      setNeedsCashChange(false);
       setCashPaymentInput('');
     }
-  }, [isCashPayment]);
+  }, [isCashPayment, isDeliveryOrder]);
 
   useEffect(() => {
     if (!isDigitalPayment) {
@@ -3199,6 +3396,10 @@ export default function PublicMenuPage() {
     selection: CartLineSelection,
     quantity = 1,
   ) {
+    if (scheduleClosed) {
+      window.alert('El restaurante está cerrado actualmente');
+      return;
+    }
     const product = productById.get(productId);
     if (!product) return;
 
@@ -3211,15 +3412,23 @@ export default function PublicMenuPage() {
       ...prev,
       [cartKey]: (prev[cartKey] ?? 0) + quantity,
     }));
+    const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
+    void trackMenuFunnelEvent(comercioKey, 'add_to_cart', { product_id: productId });
   }
 
   function incrementProduct(productId: string) {
+    if (scheduleClosed) {
+      window.alert('El restaurante está cerrado actualmente');
+      return;
+    }
     const product = productById.get(productId);
     const category = categoryByProductId.get(productId) ?? null;
     if (!product) return;
 
     if (productRequiresConfiguration(product, category)) {
       setProductOptionsSheet({ open: true, productId });
+      const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
+      void trackMenuFunnelEvent(comercioKey, 'product_view', { product_id: productId }, productId);
       return;
     }
 
@@ -3230,6 +3439,8 @@ export default function PublicMenuPage() {
       ...prev,
       [cartKey]: (prev[cartKey] ?? 0) + 1,
     }));
+    const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
+    void trackMenuFunnelEvent(comercioKey, 'add_to_cart', { product_id: productId });
   }
 
   function incrementCartLine(cartKey: string) {
@@ -3555,7 +3766,12 @@ export default function PublicMenuPage() {
       referencia_pago: paymentMeta.referenceLast4 || null,
       comprobante_url: paymentProofUrl || null,
       delivery,
-      order_notes: normalizedOrderNotes,
+      order_notes: [
+        kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
+        normalizedOrderNotes,
+      ]
+        .filter(Boolean)
+        .join('. '),
       pago_con: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
       cambio_de: isCashPayment && changeAmount > 0 ? changeAmount : 0,
       subtotal: orderSubtotal,
@@ -3594,7 +3810,12 @@ export default function PublicMenuPage() {
         paymentProofUrl: paymentProofUrl || null,
         cashPaymentAmount: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
         cashChangeAmount: isCashPayment && changeAmount > 0 ? changeAmount : 0,
-        orderNotes: normalizedOrderNotes,
+        orderNotes: [
+          kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
+          normalizedOrderNotes,
+        ]
+          .filter(Boolean)
+          .join('. '),
         detalles,
       }),
     });
@@ -3692,6 +3913,12 @@ export default function PublicMenuPage() {
       );
       return;
     }
+    if (scheduleClosed) {
+      window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
+      return;
+    }
+    const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
+    void trackMenuFunnelEvent(comercioKey, 'checkout_started', {}, 'checkout');
     setCheckoutError(null);
     setCheckoutStep(0);
     setIsConfirmOpen(true);
@@ -3702,6 +3929,10 @@ export default function PublicMenuPage() {
       setCheckoutError(
         'Vista previa. Los pedidos no se pueden confirmar aqui.',
       );
+      return;
+    }
+    if (scheduleClosed) {
+      setCheckoutError(scheduleStatus.caption);
       return;
     }
 
@@ -3780,7 +4011,22 @@ export default function PublicMenuPage() {
         );
       }
 
+      const voucherItems = cartItems.map((item) => ({
+        name: buildOrderLineLabel(item.product, item.selection, item.category),
+        quantity: item.quantity,
+        priceLabel: formatAmountByCurrency(
+          convertFromBaseCurrency(
+            item.unitPrice * item.quantity,
+            businessBaseCurrency,
+            selectedCurrencyCode,
+            selectedExchangeRate,
+          ),
+          selectedCurrencyCode,
+        ),
+      }));
       setCart({});
+      const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
+      void trackMenuFunnelEvent(comercioKey, 'order_completed', {}, persisted.orderId);
       setClientName('');
       setClientWhatsapp('');
       setClientEmail('');
@@ -3795,15 +4041,15 @@ export default function PublicMenuPage() {
       setDeliveryMode('pickup');
       setCheckoutStep(0);
       setIsConfirmOpen(false);
-      if (typeof window !== 'undefined') {
-        const absoluteTrackingUrl = new URL(
-          persisted.orderUrl || `/orders/${encodeURIComponent(persisted.orderId)}`,
-          window.location.origin,
-        ).toString();
-        window.location.assign(absoluteTrackingUrl);
-        return;
-      }
-      router.push(`/orders/${encodeURIComponent(persisted.orderId)}`);
+      setKioskAddedPrompt(null);
+      setKioskVoucher({
+        orderId: persisted.orderId,
+        orderUrl: persisted.orderUrl,
+        fulfillment: kioskFulfillment ?? 'takeaway',
+        totalLabel: formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode),
+        items: voucherItems,
+      });
+      return;
     } catch (persistError) {
       const message =
         persistError instanceof Error
@@ -3829,22 +4075,24 @@ export default function PublicMenuPage() {
       return;
     }
     setCheckoutError(null);
+    if (checkoutStep === 1 && !isDeliveryOrder) {
+      setCheckoutStep(3);
+      return;
+    }
     setCheckoutStep((prev) => Math.min(3, prev + 1));
   }
 
   function goToPreviousStep() {
     setCheckoutError(null);
+    if (checkoutStep === 3 && !isDeliveryOrder) {
+      setCheckoutStep(1);
+      return;
+    }
     setCheckoutStep((prev) => Math.max(0, prev - 1));
   }
 
   if (loading) {
-    return (
-      <PublicMenuSkeletonLoader
-        businessName={comercioNombre}
-        logoUrl={comercioLogoUrl}
-        initialLetter={comercioInitialLetter}
-      />
-    );
+    return <PublicMenuSkeletonLoader businessName={comercioNombre} />;
   }
 
   if (isDraftMode) {
@@ -4195,15 +4443,7 @@ export default function PublicMenuPage() {
         }
       `}</style>
       <main
-        className={`min-h-screen ${
-          isOwnerPreview && tickerDisplayEntries.length > 0
-            ? 'pt-[5.5rem]'
-            : isOwnerPreview
-              ? 'pt-12'
-              : tickerDisplayEntries.length > 0
-                ? 'pt-9'
-                : ''
-        }`}
+        className={`min-h-screen ${isOwnerPreview ? 'pt-12' : ''}`}
         data-menu-theme={themeMode}
         style={{
           ...containerStyle,
@@ -4216,256 +4456,46 @@ export default function PublicMenuPage() {
             Vista previa. Este menú aún no está publicado.
           </div>
         ) : null}
-        {tickerDisplayEntries.length > 0 ? (
-        <section className={`fixed inset-x-0 z-50 border-b border-slate-900/10 bg-slate-950 text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)] ${isOwnerPreview ? 'top-10' : 'top-0'}`}>
-          <div className="mx-auto flex h-9 max-w-6xl items-center overflow-hidden px-4 sm:px-6">
-            <div className="mr-3 shrink-0 rounded-full bg-white/12 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/90">
-              Divisas
-            </div>
-            <CurrencyTicker entries={tickerDisplayEntries} accentColor="var(--primary-color)" />
-            <div className="ml-3 shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70">
-              {exchangeSourceLabel(businessExchangeSource)}
-            </div>
-          </div>
-        </section>
-        ) : null}
-
-        <section
-          className="sticky z-40 backdrop-blur-sm"
-          style={{
-            top: `${
-              (tickerDisplayEntries.length > 0 ? activeTopTickerHeightPx : 0) +
-              (isOwnerPreview ? 40 : 0)
-            }px`,
-            backgroundColor: 'color-mix(in srgb, var(--menu-surface) 95%, transparent)',
-            borderBottom: '1px solid var(--menu-border)',
-          }}
-        >
-          <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-            <div className="flex min-w-0 items-center gap-3">
-              {comercioLogoUrl ? (
-                <img
-                  src={comercioLogoUrl}
-                  alt={`Logo de ${comercioNombre}`}
-                  className="h-9 w-9 shrink-0 rounded-xl border border-slate-200 bg-white object-cover"
-                  onError={(event) => {
-                    event.currentTarget.style.display = 'none';
-                  }}
-                />
-              ) : (
-                <div
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-xs font-black text-white"
-                  style={{ backgroundColor: 'var(--primary-color)' }}
-                >
-                  {comercioInitialLetter}
-                </div>
-              )}
-              <div className="min-w-0">
-                <h1 className="truncate text-[15px] font-black tracking-[-0.02em] sm:text-base" style={{ ...titleFontStyle, color: 'var(--menu-text)' }}>
-                  {comercioNombre}
-                </h1>
-                <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-                  <MapPin className="h-3 w-3 shrink-0" strokeWidth={2.2} />
-                  <p className="truncate">{heroLocation || `@${resolvedSlug}`}</p>
-                </div>
-              </div>
-            </div>
-            <div className="relative flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsQuickActionsOpen((prev) => !prev)}
-                aria-expanded={isQuickActionsOpen}
-                aria-label="Abrir menu de acciones"
-                className="kos-surface-motion kos-pressable kos-hover-subtle inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm"
-              >
-                <Menu className="h-4 w-4" strokeWidth={2.5} />
-                <ChevronDown className={`absolute bottom-1 right-1 h-3 w-3 transition-transform duration-200 ${isQuickActionsOpen ? 'rotate-180' : ''}`} strokeWidth={2.4} />
-              </button>
-
-              <button
-                type="button"
-                onClick={openCheckoutSheet}
-                aria-label={cartCount > 0 ? 'Ver pedido' : 'Carrito vacio'}
-                className="kos-surface-motion kos-pressable kos-hover-subtle relative inline-flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-slate-800 shadow-sm"
-              >
-                <ShoppingCart className="h-4 w-4" strokeWidth={2.4} />
-                {cartCount > 0 ? (
-                  <span
-                    className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full px-1 text-[10px] font-black text-white"
-                    style={{ backgroundColor: 'var(--primary-color)' }}
-                  >
-                    {cartCount}
-                  </span>
-                ) : null}
-              </button>
-
-            </div>
-          </div>
-        </section>
-
-        {isQuickActionsOpen ? (
-          <div className="fixed inset-0 z-[72]">
-            <button
-              type="button"
-              aria-label="Cerrar menu de acciones"
-              onClick={() => setIsQuickActionsOpen(false)}
-              className="kos-drawer-backdrop absolute inset-0 bg-slate-950/38 backdrop-blur-[2px]"
-            />
-
-            <aside className="kos-drawer-panel absolute right-0 top-0 flex h-full w-[min(88vw,360px)] flex-col border-l border-white/60 bg-white/96 shadow-[-24px_0_60px_rgba(15,23,42,0.2)] backdrop-blur-xl">
-              <div className="flex items-center justify-between border-b border-slate-200/80 px-5 py-4">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Menu</p>
-                  <h2 className="mt-1 text-lg font-black tracking-[-0.03em] text-slate-900" style={titleFontStyle}>
-                    Acciones rapidas
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsQuickActionsOpen(false)}
-                  aria-label="Cerrar drawer"
-                  className="kos-surface-motion kos-pressable kos-hover-subtle grid h-10 w-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm"
-                >
-                  <X className="h-4.5 w-4.5" strokeWidth={2.4} />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-4 py-4">
-                <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
-                  <p className="px-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Acciones</p>
-                  <div className="mt-3 space-y-2">
-                    {callNumber ? (
-                      <a
-                        href={`tel:+${callNumber}`}
-                        onClick={() => setIsQuickActionsOpen(false)}
-                        className="kos-surface-motion kos-pressable kos-hover-subtle flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700"
-                      >
-                        <span className="flex items-center gap-2">
-                          <Phone className="h-4 w-4" strokeWidth={2.2} />
-                          Llamar
-                        </span>
-                        <ArrowRight className="h-4 w-4 text-slate-400" strokeWidth={2.2} />
-                      </a>
-                    ) : null}
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsQuickActionsOpen(false);
-                        void shareMenu();
-                      }}
-                      className="kos-surface-motion kos-pressable kos-hover-subtle flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Share2 className="h-4 w-4" strokeWidth={2.2} />
-                        Compartir
-                      </span>
-                      <ArrowRight className="h-4 w-4 text-slate-400" strokeWidth={2.2} />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsQuickActionsOpen(false);
-                        setIsInfoOpen(true);
-                      }}
-                      className="kos-surface-motion kos-pressable kos-hover-subtle flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700"
-                    >
-                      <span className="flex items-center gap-2">
-                        <Info className="h-4 w-4" strokeWidth={2.2} />
-                        Informacion
-                      </span>
-                      <ArrowRight className="h-4 w-4 text-slate-400" strokeWidth={2.2} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-4 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
-                  <p className="px-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Divisa</p>
-                  <select
-                    value={selectedCurrencyCode}
-                    onChange={(event) => selectMenuCurrency(event.target.value)}
-                    className="mt-3 h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-xs font-black uppercase tracking-[0.08em] text-slate-700 outline-none transition focus:border-slate-300 focus:bg-white"
-                  >
-                    {(paymentMethodsByCurrency.length > 0
-                      ? paymentMethodsByCurrency.map((group) => group.currency)
-                      : [businessBaseCurrency]
-                    ).map((currency) => (
-                      <option key={`appbar-currency-${currency}`} value={currency}>
-                        {currency}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </aside>
-          </div>
-        ) : null}
-
-        {shareMessage ? (
-          <div className="fixed left-1/2 z-[70] -translate-x-1/2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm" style={{ top: `${topTickerHeightPx + topAppBarHeightPx + 8}px` }}>
-            {shareMessage}
-          </div>
-        ) : null}
-
-        <UpsellMenuExperience
+        <KioskMenuExperience
           businessName={comercioNombre}
-          subtitle={heroSubtitle}
-          coverUrl={upsellHeroCover}
           logoUrl={comercioLogoUrl || null}
+          initialLetter={comercioInitialLetter}
           locationLabel={heroLocation || null}
-          stickyTopPx={stickySearchTopPx}
-          stickySearchCardRef={stickySearchCardRef}
+          tagline={menuData?.comercio.descripcion?.trim() || null}
+          isOpen={!scheduleClosed}
+          openCaption={kioskOpenCaption}
+          closedCaption={kioskClosedCaption}
+          supportsDelivery={supportsDelivery}
+          fulfillment={kioskFulfillment}
+          onSelectFulfillment={selectKioskFulfillment}
+          onResetFulfillment={resetKioskFulfillment}
+          categories={kioskCategories}
+          productsByCategory={kioskProductsByCategory}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          onClearSearch={() => setSearchQuery('')}
-          categories={visibleCategorias.map((categoria) => ({
-            id: categoria.id,
-            label: categoria.displayName,
-            glyph: categoria.visual.glyph,
-          }))}
-          activeCategoryId={activeCategoryId}
-          onSelectCategory={scrollToCategory}
-          setChipRef={(id) => (element) => {
-            categoryChipRefs.current[id] = element;
-          }}
-          bundleItems={bundleRailItems}
-          onAddBundle={handleAddBundle}
-          gridTitle={
-            searchQuery.trim()
-              ? 'Resultados'
-              : visibleCategorias.find((c) => c.id === activeCategoryId)?.displayName ||
-                visibleCategorias[0]?.displayName ||
-                'Menú'
-          }
-          gridProducts={upsellGridProducts}
-          getQuantity={(id) => getProductCartQuantity(id)}
-          formatPrice={formatUpsellPrice}
-          resolveImage={(url) => displayProductImage(url, comercioLogoUrl) ?? safeImageSrc(url, comercioLogoUrl)}
-          onAdd={handleAddToCartFromGrid}
-          onIncrement={incrementProduct}
-          onDecrement={decrementProductById}
           cartCount={cartCount}
           cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
-          showDeliveryProgress={cartCount > 0 && deliveryProgress.enabled}
-          freeUnlocked={deliveryProgress.unlocked}
-          progressRatio={deliveryProgress.ratio}
-          remainingToFreeLabel={
-            deliveryProgress.unlocked
-              ? null
-              : formatUpsellPrice(deliveryProgress.remaining)
-          }
-          onContinue={openCheckoutSheet}
-          continueDisabled={isSubmittingOrder}
-          isPreview={isOwnerPreview}
-          emptyMessage={
-            hasProducts
-              ? null
-              : searchQuery.trim()
-                ? 'No encontramos productos con ese término.'
-                : 'Estamos preparando el menú digital'
-          }
-          titleStyle={titleFontStyle}
+          onAddProduct={handleKioskAddProduct}
+          onPay={() => {
+            setKioskAddedPrompt(null);
+            openCheckoutSheet();
+          }}
+          addedPrompt={kioskAddedPrompt}
+          onContinueAdding={() => setKioskAddedPrompt(null)}
+          onPayFromPrompt={() => {
+            setKioskAddedPrompt(null);
+            openCheckoutSheet();
+          }}
+          voucher={kioskVoucher}
+          onTrackVoucher={() => {
+            if (!kioskVoucher?.orderUrl) return;
+            window.location.assign(kioskVoucher.orderUrl);
+          }}
+          onNewOrder={() => {
+            setKioskVoucher(null);
+            resetKioskFulfillment();
+            setCart({});
+          }}
         />
 
         <AddToCartUpsellSheet
@@ -4477,7 +4507,7 @@ export default function PublicMenuPage() {
         />
 
         <ProductOptionsSheet
-          open={productOptionsSheet.open}
+          open={productOptionsSheet.open && !kioskVoucher}
           product={
             productOptionsSheet.productId
               ? productById.get(productOptionsSheet.productId) ?? null
@@ -4492,14 +4522,12 @@ export default function PublicMenuPage() {
           onClose={() => setProductOptionsSheet({ open: false, productId: null })}
           onConfirm={(selection, quantity) => {
             if (!productOptionsSheet.productId) return;
+            const addedProduct = productById.get(productOptionsSheet.productId);
             addConfiguredProductToCart(productOptionsSheet.productId, selection, quantity);
             setProductOptionsSheet({ open: false, productId: null });
-            const suggestions = suggestionsToViewItems(
-              resolveSuggestions('add_to_cart', productOptionsSheet.productId),
-            );
-            if (suggestions.length > 0) {
-              setAddToCartSheet({ open: true, suggestions });
-            }
+            setKioskAddedPrompt({
+              productName: addedProduct?.nombre ?? 'Producto',
+            });
           }}
         />
 
@@ -4907,100 +4935,68 @@ export default function PublicMenuPage() {
           </section>
         ) : null}
 
-        {isConfirmOpen ? (
-          <section className="checkout-overlay-enter fixed inset-0 z-[60] bg-[rgba(241,245,249,0.96)] backdrop-blur-sm">
-            <div className="checkout-sheet-enter mx-auto flex h-full max-w-6xl flex-col bg-[#f8fafc]">
-              <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/96 px-4 py-3 backdrop-blur-xl sm:px-6">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Checkout</p>
-                    <h3 className="mt-0.5 text-xl font-black tracking-[-0.03em] text-slate-950" style={titleFontStyle}>Finaliza tu pedido</h3>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsConfirmOpen(false)}
-                    className="grid h-10 w-10 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm"
-                    aria-label="Cerrar checkout"
-                  >
-                    <X className="h-4 w-4" strokeWidth={2.4} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-                <div className="mx-auto max-w-3xl">
-                  <div className="min-w-0">
-                    <div className="checkout-panel-enter rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5">
-                      <div className="h-1 overflow-hidden rounded-full bg-slate-200">
-                        <div
-                          className="h-full origin-left rounded-full transition-transform duration-300"
-                          style={{
-                            transform: `scaleX(${Math.max(checkoutProgress, 0.08)})`,
-                            backgroundColor: 'var(--primary-color)',
-                          }}
-                        />
-                      </div>
-                      <div className="mt-4 grid grid-cols-4 items-start">
-                        {checkoutStepTitles.map((title, index) => {
-                          const isActive = checkoutStep === index;
-                          const isDone = index < checkoutStep;
-                          return (
-                            <div key={`checkout-step-${title}`} className="relative flex min-w-0 justify-center">
-                              {index < checkoutStepTitles.length - 1 ? (
-                                <div
-                                  className="absolute left-1/2 top-[18px] h-[2px] w-full"
-                                  style={{ backgroundColor: isDone ? 'var(--primary-color)' : '#CBD5E1' }}
-                                />
-                              ) : null}
-                              <div className="relative z-[1] flex flex-col items-center bg-white px-2">
-                                <div
-                                  className={`grid h-9 w-9 place-items-center rounded-full border text-sm font-black transition-[transform,background-color,border-color,color] duration-300 ${isActive ? 'checkout-step-active' : ''}`}
-                                  style={
-                                    isActive
-                                      ? {
-                                          backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
-                                          borderColor: 'color-mix(in srgb, var(--primary-color) 48%, white)',
-                                          color: 'var(--primary-color)',
-                                        }
-                                      : isDone
-                                        ? { backgroundColor: '#F0FDF4', borderColor: '#86EFAC', color: '#15803D' }
-                                        : { backgroundColor: '#FFFFFF', borderColor: '#CBD5E1', color: '#94A3B8' }
-                                  }
-                                >
-                                  {isDone ? '✓' : index + 1}
-                                </div>
-                                <p className={`mt-2 text-center text-[10px] font-black uppercase tracking-[0.12em] ${isActive ? 'text-slate-900' : 'text-slate-400'}`}>
-                                  {title}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="checkout-panel-enter mt-4 rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_16px_42px_rgba(15,23,42,0.08)] sm:p-5" style={{ animationDelay: '70ms' }}>
-                      <div className="mb-5 border-b border-slate-200 pb-4">
-                        <h4 className="text-xl font-black text-slate-950" style={titleFontStyle}>{currentCheckoutStepTitle}</h4>
-                      </div>
-
-                      <div key={`checkout-step-panel-${checkoutStep}`} className="checkout-panel-enter sm:px-1">
+        {isConfirmOpen && !kioskVoucher ? (
+          <KioskCheckout
+            fulfillment={kioskFulfillment}
+            steps={checkoutFlowSteps}
+            currentStepId={checkoutStep}
+            title={
+              checkoutStep === 0
+                ? 'Tu pedido'
+                : checkoutStep === 1
+                  ? 'Tus datos'
+                  : checkoutStep === 2
+                    ? 'Direccion'
+                    : 'Pago'
+            }
+            subtitle={
+              checkoutStep === 0
+                ? 'Revisa cantidades. El tipo de pedido ya esta elegido.'
+                : checkoutStep === 1
+                  ? 'Te avisamos cuando el pedido este listo.'
+                  : checkoutStep === 2
+                    ? 'Indica a donde enviamos tu pedido.'
+                    : 'Elige como vas a pagar.'
+            }
+            totalLabel={formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+            itemsLabel={`${checkoutItemsCount} unid. · ${selectedCurrencyCode}`}
+            error={checkoutError}
+            backLabel={checkoutStep === 0 ? 'Seguir pidiendo' : 'Atras'}
+            nextLabel={
+              isSubmittingOrder
+                ? 'Guardando pedido...'
+                : checkoutStep === 3
+                  ? 'Confirmar pedido'
+                  : checkoutStep === 1 && !isDeliveryOrder
+                    ? 'Ir a pagar'
+                    : checkoutStep === 2
+                      ? 'Ir a pagar'
+                      : 'Continuar'
+            }
+            nextDisabled={
+              isSubmittingOrder ||
+              (checkoutStep === 3 ? !canSubmitCheckout : !canAdvanceCurrentStep)
+            }
+            submitting={isSubmittingOrder}
+            onClose={() => setIsConfirmOpen(false)}
+            onBack={checkoutStep === 0 ? () => setIsConfirmOpen(false) : goToPreviousStep}
+            onNext={checkoutStep === 3 ? () => void confirmOrder() : goToNextStep}
+          >
                   {checkoutStep === 0 ? (
                     <div className="space-y-4">
-                      <div className="checkout-item-enter px-1">
-                        <h5 className="text-lg font-black text-slate-950" style={titleFontStyle}>Revisa tus productos</h5>
-                        <p className="mt-1 text-sm font-medium text-slate-500">Ajusta cantidades o deja una nota.</p>
-                      </div>
-
                       {checkoutSummaryItems.length > 0 ? (
                         <div className="space-y-3">
                           {checkoutSummaryItems.map((item, index) => (
-                            <article key={`checkout-step-order-${item.id}`} className="checkout-item-enter rounded-[28px] border border-slate-200 bg-white p-4 sm:p-5" style={{ animationDelay: `${index * 50}ms` }}>
+                            <article
+                              key={`checkout-step-order-${item.id}`}
+                              className="checkout-item-enter rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)] sm:p-5"
+                              style={{ animationDelay: `${index * 50}ms` }}
+                            >
                               <div className="flex items-start gap-4">
-                                <img
+                                <KioskImage
                                   src={item.imageUrl}
                                   alt={item.name}
-                                  className="h-20 w-20 shrink-0 rounded-[22px] bg-slate-100 object-cover"
+                                  className="h-20 w-20 shrink-0 rounded-[22px] bg-slate-100"
                                 />
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-start justify-between gap-3">
@@ -5106,9 +5102,9 @@ export default function PublicMenuPage() {
                       ) : null}
 
                       {checkoutSummaryItems.length > 0 ? (
-                        <div className="checkout-item-enter rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '120ms' }}>
+                        <div className="checkout-item-enter rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '120ms' }}>
                         <label htmlFor="order-notes" className="block">
-                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                             <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
                             Nota para el negocio
                           </span>
@@ -5117,8 +5113,8 @@ export default function PublicMenuPage() {
                             value={orderNotes}
                             onChange={(event) => setOrderNotes(event.target.value)}
                             placeholder="Sin cebolla, tocar timbre, empaquetar aparte"
-                            rows={4}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                            rows={3}
+                            className="w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3 text-sm outline-none"
                           />
                         </label>
                         <p className="mt-2 text-[11px] font-medium text-slate-500">
@@ -5131,22 +5127,31 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 1 ? (
                     <div className="space-y-4">
-                      <div className="checkout-item-enter px-1">
-                        <h5 className="text-lg font-black text-slate-950" style={titleFontStyle}>¿Quien recibe el pedido?</h5>
-                        <p className="mt-1 text-sm font-medium text-slate-500">Completa los datos para contactarte.</p>
+                      <div className="checkout-item-enter rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          Pedido
+                        </p>
+                        <p className="mt-1 text-base font-black">
+                          {kioskFulfillment ? FULFILLMENT_LABEL[kioskFulfillment] : 'Pedido en local'}
+                          {' · '}
+                          {checkoutItemsCount} unid.
+                        </p>
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2">
-                        <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '40ms' }}>
-                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                        <label className="checkout-item-enter block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '40ms' }}>
+                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                             <User className="h-3.5 w-3.5" strokeWidth={2.4} />
                             Nombre completo
                           </span>
                           <input
+                            id="client-full-name"
+                            name="name"
                             type="text"
                             value={clientName}
                             onChange={(event) => setClientName(event.target.value)}
                             placeholder="Maria Fernanda Lopez"
+                            autoComplete="name"
                             className="h-12 w-full rounded-2xl border bg-slate-50 px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
                             style={{
                               borderColor: isClientNameValid || clientName.trim().length === 0 ? '#E2E8F0' : '#F43F5E',
@@ -5155,8 +5160,8 @@ export default function PublicMenuPage() {
                           />
                         </label>
 
-                        <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '90ms' }}>
-                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                        <label className="checkout-item-enter block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '90ms' }}>
+                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                             <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
                             Correo electronico
                           </span>
@@ -5180,8 +5185,8 @@ export default function PublicMenuPage() {
                         </label>
                       </div>
 
-                      <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '140ms' }}>
-                        <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                      <label className="checkout-item-enter block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '140ms' }}>
+                        <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                           <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
                           WhatsApp
                         </span>
@@ -5214,188 +5219,68 @@ export default function PublicMenuPage() {
                   ) : null}
 
                   {checkoutStep === 2 ? (
-                    <div className="space-y-4">
-                      <div className="checkout-item-enter px-1">
-                        <h5 className="text-lg font-black text-slate-950" style={titleFontStyle}>Define la entrega</h5>
-                        <p className="mt-1 text-sm font-medium text-slate-500">Elige si retiras en el local o si quieres enviar el pedido a una direccion.</p>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <button
-                          type="button"
-                          onClick={() => setDeliveryMode('pickup')}
-                          className="checkout-item-enter rounded-[24px] border p-4 text-left"
-                          style={{
-                            animationDelay: '40ms',
-                            borderColor:
-                              !isDeliveryOrder
-                                ? 'color-mix(in srgb, var(--primary-color) 42%, white)'
-                                : '#E2E8F0',
-                            backgroundColor:
-                              !isDeliveryOrder
-                                ? 'color-mix(in srgb, var(--primary-color) 8%, white)'
-                                : '#FFFFFF',
-                          }}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                                <Store className="h-5 w-5" strokeWidth={2.2} />
-                              </span>
-                              <p className="mt-3 text-base font-black text-slate-950">Retiro en local</p>
-                              <p className="mt-1 text-sm leading-5 text-slate-500">Recoges el pedido directamente en el negocio.</p>
-                            </div>
-                            {!isDeliveryOrder ? (
-                              <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 shadow-sm">Activo</span>
-                            ) : null}
-                          </div>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={!supportsDelivery}
-                          onClick={() => setDeliveryMode('delivery')}
-                          className="checkout-item-enter rounded-[24px] border p-4 text-left disabled:cursor-not-allowed disabled:opacity-70"
-                          style={{
-                            animationDelay: '80ms',
-                            borderColor:
-                              isDeliveryOrder
-                                ? 'color-mix(in srgb, var(--primary-color) 42%, white)'
-                                : '#E2E8F0',
-                            backgroundColor:
-                              isDeliveryOrder
-                                ? 'color-mix(in srgb, var(--primary-color) 8%, white)'
-                                : '#FFFFFF',
-                          }}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                                <Truck className="h-5 w-5" strokeWidth={2.2} />
-                              </span>
-                              <p className="mt-3 text-base font-black text-slate-950">Delivery</p>
-                              <p className="mt-1 text-sm leading-5 text-slate-500">
-                                {supportsDelivery
-                                  ? 'Enviamos el pedido a tu ubicacion.'
-                                  : 'Este negocio no tiene delivery activo.'}
-                              </p>
-                            </div>
-                            {isDeliveryOrder ? (
-                              <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 shadow-sm">Activo</span>
-                            ) : supportsDelivery ? (
-                              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
-                                {formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}
-                              </span>
-                            ) : null}
-                          </div>
-                        </button>
-                      </div>
-
-                      {isDeliveryOrder ? (
-                        <div className="space-y-3">
-                          <button
-                            type="button"
-                            onClick={() => setIsMapPickerOpen(true)}
-                            className="checkout-item-enter w-full rounded-[24px] border bg-white p-4 text-left shadow-sm"
-                            style={{
-                              animationDelay: '120ms',
-                              borderColor: isDeliveryAddressValid ? '#CBD5E1' : '#F43F5E',
-                            }}
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex min-w-0 gap-3">
-                                <span className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                                  <MapPin className="h-5 w-5" strokeWidth={2.2} />
-                                </span>
-                                <div className="min-w-0">
-                                  <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Direccion de entrega</p>
-                                  <p className={`mt-2 text-sm leading-6 ${normalizedDeliveryAddress ? 'text-slate-900' : 'text-slate-500'}`}>
-                                    {normalizedDeliveryAddress || 'Selecciona la direccion exacta en el mapa para continuar'}
-                                  </p>
-                                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${hasDeliveryPoint ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                      {hasDeliveryPoint ? 'Punto confirmado' : 'Falta ubicar el punto'}
-                                    </span>
-                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
-                                      Costo {formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                              <span className="shrink-0 text-lg font-black text-slate-300">›</span>
-                            </div>
-                          </button>
-
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '160ms' }}>
-                              <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
-                                <MapPin className="h-3.5 w-3.5" strokeWidth={2.4} />
-                                Referencia
-                              </span>
-                              <input
-                                type="text"
-                                value={deliveryReference}
-                                onChange={(event) => setDeliveryReference(event.target.value)}
-                                placeholder="Apartamento, porton, piso, torre"
-                                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                              />
-                              <p className="mt-2 text-[11px] font-medium text-slate-500">Opcional, pero ayuda a ubicarte mas rapido.</p>
-                            </label>
-
-                            <div className="checkout-item-enter rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '200ms' }}>
-                              <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
-                                <Truck className="h-3.5 w-3.5" strokeWidth={2.4} />
-                                Estado
-                              </p>
-                              <div className="mt-3 space-y-2">
-                                <div className={`rounded-2xl px-3 py-2 text-sm font-semibold ${isDeliveryAddressValid ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'}`}>
-                                  {isDeliveryAddressValid ? 'Direccion valida' : 'Agrega una direccion mas precisa'}
-                                </div>
-                                <div className={`rounded-2xl px-3 py-2 text-sm font-semibold ${hasDeliveryPoint ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                  {hasDeliveryPoint ? 'Punto en mapa confirmado' : 'Falta marcar el punto en el mapa'}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <label className="checkout-item-enter block rounded-[24px] border border-slate-200 bg-white p-4" style={{ animationDelay: '240ms' }}>
-                            <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
-                              <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
-                              Indicaciones para entregar
-                            </span>
-                            <textarea
-                              value={deliveryInstructions}
-                              onChange={(event) => setDeliveryInstructions(event.target.value)}
-                              placeholder="Ejemplo: tocar timbre, llamar al llegar, dejar en recepcion"
-                              rows={3}
-                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                            />
-                            <p className="mt-2 text-[11px] font-medium text-slate-500">Opcional.</p>
-                          </label>
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsMapPickerOpen(true)}
+                        className="w-full rounded-[22px] bg-white p-4 text-left shadow-[0_8px_30px_rgba(15,23,42,0.06)]"
+                        style={{ boxShadow: isDeliveryAddressValid ? '0 8px 30px rgba(15,23,42,0.06)' : '0 0 0 1px #F43F5E' }}
+                      >
+                        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                          Direccion de entrega
+                        </p>
+                        <p className="mt-2 text-sm font-semibold">
+                          {normalizedDeliveryAddress || 'Toca para marcar la direccion en el mapa'}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${hasDeliveryPoint ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                            {hasDeliveryPoint ? 'Punto confirmado' : 'Falta el punto en el mapa'}
+                          </span>
+                          <span className="rounded-full bg-[var(--menu-surface-alt)] px-2.5 py-1 text-[11px] font-black">
+                            Envio {formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}
+                          </span>
                         </div>
-                      ) : (
-                        <div className="checkout-item-enter rounded-[24px] border border-emerald-200 bg-[linear-gradient(180deg,#F0FDF4_0%,#ECFDF5_100%)] p-4" style={{ animationDelay: '120ms' }}>
-                          <div className="flex items-start gap-3">
-                            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-emerald-700 shadow-sm">
-                              <Store className="h-5 w-5" strokeWidth={2.2} />
-                            </span>
-                            <div className="min-w-0">
-                              <p className="text-base font-black text-emerald-900">Retiras en el local</p>
-                              <p className="mt-1 text-sm leading-6 text-emerald-800">
-                                {comercioAddress || 'Podras retirar directamente en el negocio una vez el pedido este listo.'}
-                              </p>
-                              <div className="mt-3 inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-black text-emerald-700 shadow-sm">
-                                Sin costo de entrega
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      </button>
+                      <label className="block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
+                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Referencia
+                        </span>
+                        <input
+                          type="text"
+                          value={deliveryReference}
+                          onChange={(event) => setDeliveryReference(event.target.value)}
+                          placeholder="Apartamento, porton, piso, torre"
+                          className="h-12 w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 text-sm outline-none"
+                        />
+                      </label>
+                      <label className="block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
+                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                          Indicaciones
+                        </span>
+                        <textarea
+                          value={deliveryInstructions}
+                          onChange={(event) => setDeliveryInstructions(event.target.value)}
+                          placeholder="Tocar timbre, llamar al llegar..."
+                          rows={3}
+                          className="w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3 text-sm outline-none"
+                        />
+                      </label>
                     </div>
                   ) : null}
 
                   {checkoutStep === 3 ? (
                     <div className="space-y-3">
+                      <div className="rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          Resumen
+                        </p>
+                        <p className="mt-1 text-base font-black">
+                          {kioskFulfillment ? FULFILLMENT_LABEL[kioskFulfillment] : 'Pedido en local'}
+                        </p>
+                        <p className="mt-1 text-sm font-medium text-[var(--menu-text-muted)]">
+                          {normalizedClientName || 'Cliente'} · {checkoutItemsCount} unid.
+                        </p>
+                      </div>
                       {checkoutUpsellSuggestions.length > 0 ? (
                         <div className="checkout-item-enter">
                           <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -5410,7 +5295,9 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
-                      <p className="checkout-item-enter text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Pago y total final</p>
+                      <p className="checkout-item-enter text-[11px] font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
+                        Como vas a pagar
+                      </p>
 
                       {selectedCurrencyGroup?.methods.length ? (
                         <div className="space-y-2">
@@ -5422,14 +5309,14 @@ export default function PublicMenuPage() {
                                 key={method.id}
                                 type="button"
                                 onClick={() => setSelectedPaymentMethodId(method.id)}
-                                className="checkout-item-enter w-full rounded-[22px] border px-4 py-3 text-left shadow-sm"
+                                className="checkout-item-enter w-full rounded-[22px] px-4 py-4 text-left shadow-[0_8px_30px_rgba(15,23,42,0.06)]"
                                 style={{
                                   ...(isSelected
                                     ? {
-                                        borderColor: 'color-mix(in srgb, var(--primary-color) 42%, white)',
-                                        backgroundColor: 'color-mix(in srgb, var(--primary-color) 10%, white)',
+                                        boxShadow: '0 0 0 1px var(--menu-primary), 0 8px 30px rgba(15,23,42,0.06)',
+                                        backgroundColor: 'color-mix(in srgb, var(--menu-primary) 10%, white)',
                                       }
-                                    : { borderColor: '#E2E8F0', backgroundColor: '#FFFFFF' }),
+                                    : { backgroundColor: '#FFFFFF' }),
                                   animationDelay: `${index * 45}ms`,
                                 }}
                               >
@@ -5449,37 +5336,107 @@ export default function PublicMenuPage() {
                           })}
                         </div>
                       ) : (
-                        <div className="checkout-item-enter rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
+                        <div className="checkout-item-enter rounded-[22px] bg-white p-3 text-sm text-slate-600 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
                           Este comercio no tiene metodos de pago configurados.
                         </div>
                       )}
 
-                      {isCashPayment ? (
-                        <div className="checkout-item-enter rounded-2xl border border-slate-200 bg-white p-3" style={{ animationDelay: '90ms' }}>
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                              ¿Con cuanto pagaras? (Opcional)
-                            </span>
-                            <input
-                              type="number"
-                              min={0}
-                              step="100"
-                              value={cashPaymentInput}
-                              onChange={(event) => setCashPaymentInput(event.target.value)}
-                              placeholder="Ejemplo: 100000"
-                              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none"
-                            />
-                          </label>
-                          {changeAmount > 0 ? (
-                            <p className="mt-2 text-xs font-semibold text-emerald-700">
-                              Tu cambio sera de: {formatAmountByCurrency(changeAmount, selectedCurrencyCode)}
+                      {isDeliveryOrder && isCashPayment ? (
+                        <div className="checkout-item-enter rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '90ms' }}>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            ¿Necesitas cambio?
+                          </p>
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNeedsCashChange(false);
+                                setCashPaymentInput('');
+                              }}
+                              className="min-h-11 rounded-[14px] text-sm font-bold"
+                              style={
+                                !needsCashChange
+                                  ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary, #fff)' }
+                                  : { backgroundColor: '#F8FAFC', color: '#475569' }
+                              }
+                            >
+                              No, pago exacto
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setNeedsCashChange(true)}
+                              className="min-h-11 rounded-[14px] text-sm font-bold"
+                              style={
+                                needsCashChange
+                                  ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary, #fff)' }
+                                  : { backgroundColor: '#F8FAFC', color: '#475569' }
+                              }
+                            >
+                              Sí, necesito cambio
+                            </button>
+                          </div>
+
+                          {needsCashChange ? (
+                            <label className="mt-4 block">
+                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                ¿Con cuánto vas a pagar?
+                              </span>
+                              <div
+                                className="flex h-12 items-center rounded-xl border bg-slate-50 px-3"
+                                style={{
+                                  borderColor:
+                                    cashPaymentInput && !isCashTenderValid ? '#F43F5E' : '#E2E8F0',
+                                }}
+                              >
+                                <span className="pr-2 text-sm font-semibold text-slate-400">
+                                  {selectedCurrencyCode}
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode={currencyAllowsDecimals(selectedCurrencyCode) ? 'decimal' : 'numeric'}
+                                  value={cashPaymentInput}
+                                  onChange={(event) =>
+                                    setCashPaymentInput(parseCashAmountInput(event.target.value, selectedCurrencyCode))
+                                  }
+                                  placeholder={`Mayor a ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`}
+                                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                                />
+                              </div>
+                              {cashTenderSuggestions.length > 0 ? (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {cashTenderSuggestions.map((amount) => (
+                                    <button
+                                      key={amount}
+                                      type="button"
+                                      onClick={() => setCashPaymentInput(String(amount))}
+                                      className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600"
+                                    >
+                                      {formatAmountByCurrency(amount, selectedCurrencyCode)}
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {cashPaymentInput && !isCashTenderValid ? (
+                                <p className="mt-2 text-xs font-semibold text-rose-500">
+                                  El efectivo debe ser mayor al total ({formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}).
+                                </p>
+                              ) : null}
+                              {changeAmount > 0 ? (
+                                <p className="mt-2 text-xs font-semibold text-emerald-700">
+                                  Te devolvemos {formatAmountByCurrency(changeAmount, selectedCurrencyCode)}.
+                                </p>
+                              ) : null}
+                            </label>
+                          ) : (
+                            <p className="mt-3 text-xs font-medium text-slate-500">
+                              El rider llevará el pedido para pago exacto, sin cambio.
                             </p>
-                          ) : null}
+                          )}
                         </div>
                       ) : null}
 
                       {isDigitalPayment ? (
-                        <div className="checkout-item-enter space-y-2 rounded-2xl border border-slate-200 bg-white p-3" style={{ animationDelay: '120ms' }}>
+                        <div className="checkout-item-enter space-y-2 rounded-[22px] bg-white p-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '120ms' }}>
                           <label className="block">
                             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                               Referencia (ultimos 4 digitos)
@@ -5521,7 +5478,7 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
-                      <div className="checkout-item-enter rounded-2xl border border-slate-200 bg-white px-4 py-3" style={{ animationDelay: '150ms' }}>
+                      <div className="checkout-item-enter rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '150ms' }}>
                         <p className="flex items-center justify-between text-sm text-slate-700">
                           <span>Subtotal</span>
                           <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
@@ -5544,124 +5501,7 @@ export default function PublicMenuPage() {
                       </div>
                     </div>
                   ) : null}
-                      </div>
-                    </div>
-
-                    {checkoutError ? (
-                      <div className="mt-4 rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 shadow-sm">
-                        {checkoutError}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-slate-200 bg-white/98 px-4 py-2 backdrop-blur-xl sm:px-6">
-                <div className="checkout-panel-enter rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-2.5 sm:px-4" style={{ animationDelay: '120ms' }}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Total</p>
-                      <p className="mt-0.5 truncate text-lg font-black tracking-[-0.03em] text-slate-950 sm:text-xl" style={titleFontStyle}>
-                        {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
-                      </p>
-                      <p className="mt-1 text-xs font-semibold text-slate-500">
-                        {checkoutItemsCount} unid. · {selectedCurrencyCode}
-                      </p>
-                    </div>
-
-                    {paymentMethodsByCurrency.length > 1 ? (
-                      <button
-                        type="button"
-                        onClick={() => setIsCheckoutFooterExpanded((prev) => !prev)}
-                        aria-expanded={isCheckoutFooterExpanded}
-                        aria-label={isCheckoutFooterExpanded ? 'Ocultar opciones del checkout' : 'Mostrar opciones del checkout'}
-                        className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-600"
-                      >
-                        <ChevronDown
-                          className={`h-4 w-4 transition-transform duration-300 ${isCheckoutFooterExpanded ? 'rotate-180' : 'rotate-0'}`}
-                          strokeWidth={2.4}
-                        />
-                      </button>
-                    ) : null}
-                  </div>
-
-                  <div
-                    className={`overflow-hidden ${isCheckoutFooterExpanded && paymentMethodsByCurrency.length > 1 ? 'mt-3 opacity-100' : 'hidden opacity-0'}`}
-                  >
-                    <div className="min-h-0">
-                      <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Moneda</p>
-                        <div className="mt-2 flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                          {paymentMethodsByCurrency.map((group) => (
-                            <button
-                              key={`footer-currency-chip-${group.currency}`}
-                              type="button"
-                              onClick={() => selectMenuCurrency(group.currency)}
-                              className="shrink-0 rounded-full px-3 py-1.5 text-[11px] font-black transition-colors duration-200"
-                              style={
-                                selectedCurrency === group.currency
-                                  ? {
-                                      backgroundColor: 'color-mix(in srgb, var(--primary-color) 14%, white)',
-                                      color: 'var(--primary-color)',
-                                    }
-                                  : { backgroundColor: '#F8FAFC', color: '#475569' }
-                              }
-                            >
-                              {group.currency}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-2 gap-2 sm:min-w-[300px]">
-                    <button
-                      type="button"
-                      onClick={checkoutStep === 0 ? () => setIsConfirmOpen(false) : goToPreviousStep}
-                      disabled={isSubmittingOrder}
-                      className="h-11 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-black text-slate-700 disabled:opacity-45"
-                    >
-                      {checkoutStep === 0 ? 'Seguir viendo' : 'Atras'}
-                    </button>
-
-                    {checkoutStep < 3 ? (
-                      <button
-                        type="button"
-                        onClick={goToNextStep}
-                        disabled={isSubmittingOrder || !canAdvanceCurrentStep}
-                        className="h-11 rounded-2xl px-5 text-sm font-black tracking-[0.01em]"
-                        style={
-                          isSubmittingOrder || !canAdvanceCurrentStep
-                            ? { backgroundColor: '#E2E8F0', color: '#64748B' }
-                            : { backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }
-                        }
-                      >
-                        {nextStepCtaLabels[checkoutStep] ?? 'Siguiente'}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => void confirmOrder()}
-                        disabled={isSubmittingOrder || !canSubmitCheckout}
-                        className="h-11 rounded-2xl px-5 text-sm font-black tracking-[0.01em]"
-                        style={
-                          isSubmittingOrder || !canSubmitCheckout
-                            ? { backgroundColor: '#E2E8F0', color: '#64748B' }
-                            : { backgroundColor: '#12B886', color: '#FFFFFF', boxShadow: '0 16px 32px rgba(18,184,134,0.28)' }
-                        }
-                      >
-                        {isSubmittingOrder ? 'Guardando pedido...' : 'Confirmar pedido'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {isSubmittingOrder ? (
-                  <p className="mt-2 text-center text-xs font-semibold text-slate-500">Estamos guardando tu pedido. No cierres esta ventana.</p>
-                ) : null}
-              </div>
-            </div>
-          </section>
+          </KioskCheckout>
         ) : null}
 
       </main>

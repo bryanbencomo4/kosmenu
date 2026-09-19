@@ -53,7 +53,7 @@ function buildPedido(overrides?: {
         cliente_email: overrides?.email ?? 'secret@example.com',
         telefono_cliente: overrides?.phone ?? '+573001112233',
         subtotal: 23,
-        items: [{ nombre: 'Arepa', cantidad: 2, precio: 10 }],
+        items: [{ nombre: 'Arepa', cantidad: 2, precio: 10, product_id: 'prod-arepa' }],
         delivery: {
           mode: 'delivery',
           address: overrides?.address ?? 'Calle secreta 123',
@@ -84,6 +84,7 @@ describe('public order response scrubbing', () => {
       slug: 'demo',
       whatsapp: '+57000000000',
       direccion: 'Pickup',
+      logo_url: 'javascript:alert(1)',
     });
 
     const serialized = JSON.stringify(publicOrder);
@@ -93,11 +94,19 @@ describe('public order response scrubbing', () => {
     expect(serialized).not.toContain(token);
     expect(serialized).not.toContain(row.public_tracking_token_hash);
     expect(serialized).not.toContain('comprobante');
-    expect(serialized).not.toMatch(/"lat"\s*:/);
-    expect(serialized).not.toMatch(/"lng"\s*:/);
+    expect(serialized).not.toContain('javascript:');
+    expect(publicOrder.comercio.logoUrl).toBeNull();
     expect('delivery' in publicOrder).toBe(false);
     expect(publicOrder.locationHint).toBeTruthy();
     expect(publicOrder.items[0]?.name).toBe('Arepa');
+    expect(publicOrder.items[0]?.productId).toBe('prod-arepa');
+
+    const withLogo = toPublicOrderTrackingResponse(row, 'comercio-demo-1710000000000', {
+      nombre: 'Demo',
+      slug: 'demo',
+      logo_url: 'https://cdn.example.com/logo.png',
+    });
+    expect(withLogo.comercio.logoUrl).toBe('https://cdn.example.com/logo.png');
   });
 });
 
@@ -154,19 +163,28 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
     };
 
     const pedidosListResult = { data: rows, error: null };
+    const maybeSingle = vi.fn(async () => ({ data: null, error: null }));
+    const limitQuery = {
+      maybeSingle,
+      then: (resolve: (value: typeof pedidosListResult) => unknown) => resolve(pedidosListResult),
+    };
+    const orderQuery = {
+      limit: vi.fn(() => limitQuery),
+    };
+    const eqQuery = {
+      order: vi.fn(() => orderQuery),
+      maybeSingle,
+    };
     const listQuery = {
-      eq: vi.fn(async () => pedidosListResult),
+      eq: vi.fn(() => eqQuery),
+      order: vi.fn(() => orderQuery),
       then: (resolve: (value: typeof pedidosListResult) => unknown) => resolve(pedidosListResult),
     };
 
     const from = vi.fn((table: string) => {
       if (table === 'pedidos') {
         return {
-          select: vi.fn(() => ({
-            order: vi.fn(() => ({
-              limit: vi.fn(() => listQuery),
-            })),
-          })),
+          select: vi.fn(() => listQuery),
           update: vi.fn(() => updateChain),
         };
       }
@@ -176,7 +194,14 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { nombre: 'Demo', slug: 'demo', whatsapp: null, telefono: null, direccion: null },
+                data: {
+                  nombre: 'Demo',
+                  slug: 'demo',
+                  whatsapp: null,
+                  telefono: null,
+                  direccion: null,
+                  logo_url: null,
+                },
                 error: null,
               })),
             })),

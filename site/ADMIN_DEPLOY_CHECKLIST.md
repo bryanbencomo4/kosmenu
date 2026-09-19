@@ -16,6 +16,7 @@ NEXT_PUBLIC_PUBLIC_SITE_URL=https://elmenuxfa.com
 NEXT_PUBLIC_SITE_URL=https://elmenuxfa.com
 NEXT_PUBLIC_ADMIN_SITE_URL=https://admin.elmenuxfa.com
 ADMIN_SITE_URL=https://admin.elmenuxfa.com
+BDV_SHARED_SECRET=
 ```
 
 ## B. SQL For The First Super Admin

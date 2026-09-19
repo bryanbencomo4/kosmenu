@@ -6,6 +6,8 @@ import {
   canReviewPayments,
   isManualMethodReady,
   normalizeAccountFields,
+  buildPagoMovilAccountFields,
+  textToAccountFields,
 } from '../app/admin/_lib/admin-billing';
 
 describe('admin billing roles', () => {
@@ -49,5 +51,24 @@ describe('account fields', () => {
         accountFields: [],
       }),
     ).toBe(true);
+  });
+
+  it('acepta lineas Banco: valor y Banco - valor', () => {
+    expect(textToAccountFields('Banco: BDV\nTeléfono - 04121234567\nCédula = V-1')).toEqual([
+      { label: 'Banco', value: 'BDV', copyable: true },
+      { label: 'Teléfono', value: '04121234567', copyable: true },
+      { label: 'Cédula', value: 'V-1', copyable: true },
+    ]);
+  });
+
+  it('arma los campos de pago movil sin filas vacias', () => {
+    expect(
+      buildPagoMovilAccountFields({
+        banco: 'Banco de Venezuela',
+        telefono: '0412-0000000',
+        cedula: '',
+        titular: 'ElMenúXFA',
+      }).map((item) => item.label),
+    ).toEqual(['Banco', 'Teléfono', 'Titular']);
   });
 });

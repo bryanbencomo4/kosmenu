@@ -14,13 +14,17 @@ import {
   hashPublicTrackingToken,
 } from '../_lib/order-tracking-token';
 import { dispatchOrderNotification } from '../_lib/dispatch-order-notification';
-import { consumeRateLimit, getClientIp } from '../_lib/rate-limit';
+import {
+  consumeRateLimit,
+  getClientIp,
+} from '../_lib/rate-limit';
 import {
   canSendMerchantNewOrderEmail,
   sendMerchantNewOrderEmail,
 } from '../_lib/send-merchant-new-order-email';
 import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
 import { getServiceSupabaseClient } from '../_lib/supabase-server';
+import { evaluateBusinessOrdering } from '../_lib/business-hours';
 import { appSiteUrl } from '../../_lib/public-site-config';
 
 const UUID_PATTERN =
@@ -344,22 +348,46 @@ export async function POST(request: Request) {
     const totalCheckout = convertFromCop(total, currency, exchangeRate);
     const supabase = getServiceSupabaseClient();
 
-    const comercioQuery = supabase
-      .from('comercios')
-      .select('id,slug')
-      .limit(1);
-    const { data: comercios, error: comercioError } = isUuid(comercioId)
-      ? await comercioQuery.eq('id', comercioId)
-      : await comercioQuery.eq('slug', comercioId);
+    async function loadComercioRow() {
+      const full = supabase.from('comercios').select('id,slug,en_linea,horarios').limit(1);
+      const fullResult = isUuid(comercioId)
+        ? await full.eq('id', comercioId)
+        : await full.eq('slug', comercioId);
+      if (!fullResult.error) return fullResult;
+      const missingSchedule =
+        (fullResult.error.message ?? '').toLowerCase().includes('horarios') ||
+        (fullResult.error.message ?? '').toLowerCase().includes('en_linea');
+      if (!missingSchedule) return fullResult;
+      const legacy = supabase.from('comercios').select('id,slug').limit(1);
+      return isUuid(comercioId)
+        ? await legacy.eq('id', comercioId)
+        : await legacy.eq('slug', comercioId);
+    }
+
+    const { data: comercios, error: comercioError } = await loadComercioRow();
 
     if (comercioError) {
       throw new Error(comercioError.message);
     }
 
-    const resolvedComercioId = (comercios ?? [])[0]?.id?.toString().trim() ?? '';
-    const resolvedComercioSlug = (comercios ?? [])[0]?.slug?.toString().trim() ?? '';
+    const comercioRow = (comercios ?? [])[0] as
+      | { id?: string; slug?: string; en_linea?: boolean | null; horarios?: unknown }
+      | undefined;
+    const resolvedComercioId = comercioRow?.id?.toString().trim() ?? '';
+    const resolvedComercioSlug = comercioRow?.slug?.toString().trim() ?? '';
     if (!resolvedComercioId) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
+    }
+
+    const ordering = evaluateBusinessOrdering({
+      enLinea: comercioRow?.en_linea,
+      horarios: comercioRow?.horarios,
+    });
+    if (ordering.allowed === false) {
+      return NextResponse.json(
+        { error: ordering.error, message: ordering.message },
+        { status: 403 },
+      );
     }
 
     const orderId = await allocateOrderDisplayId(supabase);

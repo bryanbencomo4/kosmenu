@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Gift, RefreshCw, ShieldCheck, UserRound, WalletCards } from 'lucide-react';
 
 import type { CurrentAdmin } from '../_lib/admin-auth';
@@ -10,6 +10,10 @@ import {
   canReviewPayments,
   isManualMethodReady,
   parseAccountFields,
+  accountFieldValue,
+  accountFieldsToText,
+  buildPagoMovilAccountFields,
+  textToAccountFields,
   type PaymentAccountField,
 } from '../_lib/admin-billing';
 
@@ -354,22 +358,60 @@ function MethodEditor({
   saving: boolean;
   onSave: (updates: Record<string, unknown>) => Promise<void>;
 }) {
+  const parsed = parseAccountFields(method.account_fields);
+  const isPagoMovil = method.code === 'pago_movil';
   const [instructions, setInstructions] = useState(method.instructions ?? '');
   const [tagline, setTagline] = useState(method.tagline ?? '');
-  const [fieldsText, setFieldsText] = useState(() => fieldsToText(parseAccountFields(method.account_fields)));
+  const [fieldsText, setFieldsText] = useState(() => accountFieldsToText(parsed));
+  const [banco, setBanco] = useState(() => accountFieldValue(parsed, ['banco', 'bank']));
+  const [telefono, setTelefono] = useState(() =>
+    accountFieldValue(parsed, ['telefono', 'teléfono', 'phone', 'celular']),
+  );
+  const [cedula, setCedula] = useState(() =>
+    accountFieldValue(parsed, ['cedula', 'cédula', 'rif', 'ci', 'documento']),
+  );
+  const [titular, setTitular] = useState(() =>
+    accountFieldValue(parsed, ['titular', 'nombre', 'beneficiario']),
+  );
+  const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
+    const next = parseAccountFields(method.account_fields);
     setInstructions(method.instructions ?? '');
     setTagline(method.tagline ?? '');
-    setFieldsText(fieldsToText(parseAccountFields(method.account_fields)));
+    setFieldsText(accountFieldsToText(next));
+    setBanco(accountFieldValue(next, ['banco', 'bank']));
+    setTelefono(accountFieldValue(next, ['telefono', 'teléfono', 'phone', 'celular']));
+    setCedula(accountFieldValue(next, ['cedula', 'cédula', 'rif', 'ci', 'documento']));
+    setTitular(accountFieldValue(next, ['titular', 'nombre', 'beneficiario']));
   }, [method]);
 
-  const fields = useMemo(() => textToFields(fieldsText), [fieldsText]);
+  const fields = isPagoMovil
+    ? buildPagoMovilAccountFields({ banco, telefono, cedula, titular })
+    : textToAccountFields(fieldsText);
   const ready = isManualMethodReady({
     verification: method.verification,
     requiresAdvisorCode: method.requires_advisor_code,
     accountFields: fields,
   });
+  const needsAccount = method.verification === 'manual' && !method.requires_advisor_code;
+
+  async function save() {
+    setLocalError(null);
+    if (needsAccount && fields.length === 0) {
+      setLocalError(
+        isPagoMovil
+          ? 'Completa banco, teléfono, cédula/RIF o titular. El ejemplo gris no se guarda solo.'
+          : 'Escribe cada dato en una línea con el formato Banco: valor.',
+      );
+      return;
+    }
+    await onSave({
+      tagline,
+      instructions,
+      account_fields: fields,
+    });
+  }
 
   return (
     <article className="rounded-[1.8rem] border border-slate-200/80 bg-white p-6">
@@ -379,8 +421,10 @@ function MethodEditor({
             {method.verification === 'automatic' ? 'Automatica' : 'Manual'} · {method.code}
           </p>
           <h3 className="mt-1 text-lg font-black text-slate-950">{method.name}</h3>
-          {!ready && method.verification === 'manual' ? (
-            <p className="mt-1 text-sm text-amber-700">Faltan datos de la cuenta. El comerciante no vera este metodo.</p>
+          {!ready && needsAccount ? (
+            <p className="mt-1 text-sm text-amber-700">
+              Faltan datos de la cuenta. El comerciante no verá a dónde transferir.
+            </p>
           ) : null}
         </div>
         <span
@@ -407,25 +451,61 @@ function MethodEditor({
             placeholder="Instrucciones para el comerciante"
             className="min-h-24 rounded-[1rem] border border-slate-200 px-3 py-2 text-sm"
           />
-          {method.verification === 'manual' && !method.requires_advisor_code ? (
-            <textarea
-              value={fieldsText}
-              onChange={(event) => setFieldsText(event.target.value)}
-              placeholder={'Banco: Bancolombia\nCuenta: 123456789\nTipo: Ahorros'}
-              className="min-h-28 rounded-[1rem] border border-slate-200 px-3 py-2 font-mono text-sm"
-            />
+          {needsAccount && isPagoMovil ? (
+            <div className="grid gap-2 rounded-[1.2rem] border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-semibold text-slate-800">Datos que verá el comerciante</p>
+              <input
+                value={banco}
+                onChange={(event) => setBanco(event.target.value)}
+                placeholder="Banco, ej. Banco de Venezuela"
+                className="rounded-[1rem] border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+              <input
+                value={telefono}
+                onChange={(event) => setTelefono(event.target.value)}
+                placeholder="Teléfono, ej. 0412-0000000"
+                className="rounded-[1rem] border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+              <input
+                value={cedula}
+                onChange={(event) => setCedula(event.target.value)}
+                placeholder="Cédula / RIF, ej. V-12345678"
+                className="rounded-[1rem] border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+              <input
+                value={titular}
+                onChange={(event) => setTitular(event.target.value)}
+                placeholder="Titular de la cuenta"
+                className="rounded-[1rem] border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            </div>
           ) : null}
+          {needsAccount && !isPagoMovil ? (
+            <label className="grid gap-1 text-sm">
+              <span className="font-semibold text-slate-700">Datos de la cuenta (una línea por dato)</span>
+              <textarea
+                value={fieldsText}
+                onChange={(event) => setFieldsText(event.target.value)}
+                placeholder={'Banco: valor\nCuenta: valor'}
+                className="min-h-28 rounded-[1rem] border border-slate-200 px-3 py-2 font-mono text-sm"
+              />
+            </label>
+          ) : null}
+          {fields.length > 0 ? (
+            <div className="rounded-[1rem] border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+              {fields.map((field) => (
+                <p key={`${field.label}-${field.value}`}>
+                  <span className="font-semibold">{field.label}:</span> {field.value}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {localError ? <p className="text-sm font-semibold text-rose-700">{localError}</p> : null}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               disabled={saving}
-              onClick={() =>
-                void onSave({
-                  tagline,
-                  instructions,
-                  account_fields: fields,
-                })
-              }
+              onClick={() => void save()}
               className="rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
               Guardar
@@ -654,24 +734,4 @@ function AdvisorsTab({ canEdit }: { canEdit: boolean }) {
       </div>
     </section>
   );
-}
-
-function fieldsToText(fields: PaymentAccountField[]) {
-  return fields.map((field) => `${field.label}: ${field.value}`).join('\n');
-}
-
-function textToFields(value: string): PaymentAccountField[] {
-  return value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [label, ...rest] = line.split(':');
-      return {
-        label: (label ?? '').trim(),
-        value: rest.join(':').trim(),
-        copyable: true,
-      };
-    })
-    .filter((field) => field.label && field.value);
 }

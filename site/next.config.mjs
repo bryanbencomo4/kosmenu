@@ -92,6 +92,18 @@ const nextConfig = {
       },
     ];
   },
+  async rewrites() {
+    return [
+      {
+        source: '/wp-json/bdv-autopay/v1/payment',
+        destination: '/api/bdv/payment',
+      },
+      {
+        source: '/wp-json/bdv-autopay/v1/ping',
+        destination: '/api/bdv/ping',
+      },
+    ];
+  },
 };
 
 export default nextConfig;

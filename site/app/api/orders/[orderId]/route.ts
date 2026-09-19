@@ -48,6 +48,7 @@ type ComercioSummary = {
   longitud?: number | string | null;
   whatsapp?: string | null;
   telefono?: string | null;
+  logo_url?: string | null;
   branding_ia?: Record<string, unknown> | null;
 };
 
@@ -118,7 +119,7 @@ async function loadComercio(
   if (!comercioId) return null;
   const result = await supabase
     .from('comercios')
-    .select('nombre,slug,direccion,whatsapp,telefono,branding_ia')
+    .select('nombre,slug,direccion,whatsapp,telefono,logo_url,branding_ia')
     .eq('id', comercioId)
     .maybeSingle();
   if (result.error) return null;

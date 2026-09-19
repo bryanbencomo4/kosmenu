@@ -25,7 +25,7 @@ const updateSchema = z.object({
     .array(
       z.object({
         label: z.string().trim().min(1).max(80),
-        value: z.string().trim().min(1).max(160),
+        value: z.string().trim().min(1).max(200),
         copyable: z.boolean().optional(),
       }),
     )
