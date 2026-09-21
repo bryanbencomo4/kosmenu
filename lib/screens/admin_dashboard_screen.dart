@@ -102,7 +102,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   bool get _hasComercioId => SupabaseConfig.hasCurrentComercioId;
 
-  bool _canShowAssistedOrderFab(_DashboardSnapshot? dashboardData, double screenWidth) {
+  bool _canShowAssistedOrderFab(
+    _DashboardSnapshot? dashboardData,
+    double screenWidth,
+  ) {
     return dashboardData != null &&
         screenWidth < 720 &&
         _selectedNav == MerchantNavDestination.home &&
@@ -418,21 +421,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .where((pedido) => !pedido.hasParseError)
         .toList(growable: false);
 
-    final lastDayRevenue = yesterdayOrders.fold<double>(
+    final yesterdayActiveOrders = yesterdayOrders
+        .where((pedido) => pedido.statusBucket != OrderStatusBucket.canceled)
+        .toList(growable: false);
+    final lastDayRevenue = yesterdayActiveOrders.fold<double>(
       0,
       (sum, pedido) => sum + (pedido.total ?? 0),
     );
-    final yesterdayTotalOrders = yesterdayOrders.length;
-    final yesterdayCompletedOrders = yesterdayOrders
+    final yesterdayTotalOrders = yesterdayActiveOrders.length;
+    final yesterdayCompletedOrders = yesterdayActiveOrders
         .where((pedido) => pedido.statusBucket == OrderStatusBucket.completed)
         .length;
-    final yesterdayPendingOrders = yesterdayOrders
+    final yesterdayPendingOrders = yesterdayActiveOrders
         .where((pedido) => pedido.statusBucket == OrderStatusBucket.pending)
         .length;
     final yesterdayCanceledOrders = yesterdayOrders
         .where((pedido) => pedido.statusBucket == OrderStatusBucket.canceled)
         .length;
-    final yesterdayUniqueCustomers = _uniqueCustomerCount(yesterdayOrders);
+    final yesterdayUniqueCustomers = _uniqueCustomerCount(
+      yesterdayActiveOrders,
+    );
     final productRows = results[2] as List<dynamic>;
     final productsWithImages = productRows.where((row) {
       final map = Map<String, dynamic>.from(row as Map);
@@ -479,7 +487,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .stream(primaryKey: ['id'])
         .eq('comercio_id', SupabaseConfig.currentComercioId)
         .order('created_at', ascending: false)
-        .limit(250)
         .map(
           (rows) => rows
               .map((row) => PedidoModel.fromMap(Map<String, dynamic>.from(row)))
@@ -654,7 +661,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
-    for (var i = 0; i < 10 && mounted && _contentNavKey.currentState == null; i++) {
+    for (
+      var i = 0;
+      i < 10 && mounted && _contentNavKey.currentState == null;
+      i++
+    ) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
     if (!mounted) return;
@@ -927,14 +938,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(
-            'Tu menú está listo. Activa tu plan para publicarlo.',
-          ),
+          content: Text('Tu menú está listo. Activa tu plan para publicarlo.'),
         ),
       );
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const BillingPlanScreen()),
-      );
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const BillingPlanScreen()));
       if (mounted) await _refreshBillingGate();
       return;
     }
@@ -967,7 +976,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final message = error.message.toLowerCase();
       final missingOnlineColumn =
           code == 'PGRST204' || message.contains('en_linea');
-      final paymentRequired = message.contains('payment_required') ||
+      final paymentRequired =
+          message.contains('payment_required') ||
           message.contains('active subscription required');
 
       if (mounted) {
@@ -984,9 +994,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
             ),
           );
-          await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const BillingPlanScreen()),
-          );
+          await Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const BillingPlanScreen()));
           await _refreshBillingGate();
         }
       } else if (missingOnlineColumn) {
@@ -1047,7 +1057,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _billingPlanName = (snap.plan?.name ?? '').trim().isEmpty
             ? 'Profesional'
             : snap.plan!.name.trim();
-        if (snap.businessOnline != _businessOnline && !_isUpdatingBusinessOnline) {
+        if (snap.businessOnline != _businessOnline &&
+            !_isUpdatingBusinessOnline) {
           _businessOnline = snap.businessOnline;
         }
       });
@@ -1162,16 +1173,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _customSalesRange = picked;
         _selectedSalesRange = _SalesRange.custom;
       });
+      // The sales card lives inside a nested Navigator route that only
+      // rebuilds on `_shellRevision` ticks, not on a plain setState.
+      _bumpShell();
+      await _refreshOrdersForMetrics();
       return;
     }
 
-    if (_selectedSalesRange == range) return;
     setState(() => _selectedSalesRange = range);
+    _bumpShell();
+    await _refreshOrdersForMetrics();
+  }
+
+  Future<void> _refreshOrdersForMetrics() async {
+    if (!mounted) return;
+    setState(() {
+      _ordersStream = _buildOrdersStream();
+    });
+    _subscribeToOrders();
   }
 
   _SalesRangeWindow _resolveSalesRangeWindow(Iterable<PedidoModel> orders) {
-    final todayStart = _startOfDay(DateTime.now());
-    final tomorrow = _endOfDayExclusive(DateTime.now());
+    final now = DateTime.now();
+    final todayStart = _startOfDay(now);
+    final tomorrow = _endOfDayExclusive(now);
     final currentMonthStart = DateTime(todayStart.year, todayStart.month);
 
     switch (_selectedSalesRange) {
@@ -1466,7 +1491,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     for (final pedido in orders) {
       if (pedido.statusBucket == OrderStatusBucket.canceled) continue;
       for (final item in pedido.items) {
-        final name = item.nombre.trim().isEmpty ? 'Producto' : item.nombre.trim();
+        final name = item.nombre.trim().isEmpty
+            ? 'Producto'
+            : item.nombre.trim();
         final current = counts[name];
         counts[name] = (
           quantity: (current?.quantity ?? 0) + item.cantidad,
@@ -1753,709 +1780,1094 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           onSelect: _selectNav,
           onResetContent: _resetContentNavigator,
           child: Scaffold(
-          key: _scaffoldKey,
-          backgroundColor: _dashboardBg,
-          drawer: isWideShell ? null : Drawer(child: sidebar),
-          floatingActionButton: !_canShowAssistedOrderFab(dashboardData, screenWidth)
-              ? null
-              : FloatingActionButton.extended(
-                  heroTag: 'assisted-order-fab',
-                  tooltip: 'Pedido asistido',
-                  backgroundColor: _purple,
-                  foregroundColor: Colors.white,
-                  elevation: 3,
-                  onPressed: () =>
-                      _openAssistedPublicMenu(dashboardData!.comercio),
-                  icon: const Icon(Icons.point_of_sale_rounded, size: 20),
-                  label: const Text('Nuevo pedido'),
-                ),
-          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-          body: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (isWideShell)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  width: _sidebarCollapsed
-                      ? MerchantDashboardSidebar.collapsedWidth
-                      : MerchantDashboardSidebar.expandedWidth,
-                  child: sidebar,
-                ),
-              if (isWideShell)
-                const VerticalDivider(
-                  width: 1,
-                  thickness: 1,
-                  color: Color(0xFFEEEFF5),
-                ),
-              Expanded(
-                child: Column(
-                  children: [
-                    if (dashboardData != null)
-                      MerchantShellHeader(
-                        title: _selectedNav.title,
-                        commerceName: dashboardData.comercio.nombre,
-                        businessOnline: _businessOnline,
-                        isUpdatingOnline: _isUpdatingBusinessOnline,
-                        onToggleOnline: _updateBusinessOnline,
-                        onOpenNotifications: _openNotificationsSheet,
-                        onOpenProfile: _openProfile,
-                        onScanWithAi: _openMagicOnboarding,
-                        showMenuButton: !isWideShell,
-                        onOpenMenu: () =>
-                            _scaffoldKey.currentState?.openDrawer(),
-                      ),
-                    Expanded(
-                      child: Navigator(
-                        key: _contentNavKey,
-                        observers: [_contentNavObserver],
-                        onGenerateRoute: (_) {
-                          return merchantShellRoute(
-                            ListenableBuilder(
-                              listenable: _shellRevision,
-                              builder: (context, _) {
-                                return SafeArea(
-                                  top: false,
-                                  child: Builder(
-              builder: (context) {
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.error_outline_rounded, size: 44),
-                          const SizedBox(height: 10),
-                          Text(
-                            'No se pudo cargar el dashboard.',
-                            style: theme.textTheme.titleMedium,
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '${snapshot.error}',
-                            style: theme.textTheme.bodySmall,
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 14),
-                          FilledButton.icon(
-                            onPressed: _refreshDashboard,
-                            icon: const Icon(Icons.refresh_rounded),
-                            label: const Text('Intentar de nuevo'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-
-                final data = snapshot.data;
-                if (data == null) {
-                  return const Center(child: Text('No hay datos disponibles.'));
-                }
-
-                if (!_didPrimeOnlineSwitch) {
-                  _businessOnline = data.comercio.enLinea;
-                  _didPrimeOnlineSwitch = true;
-                }
-
-                return StreamBuilder<List<PedidoModel>>(
-                  stream: _ordersStream,
-                  builder: (context, ordersSnapshot) {
-                    final allOrders = _applyOptimisticStatuses(
-                      ordersSnapshot.data ?? const <PedidoModel>[],
-                    );
-                    final malformedOrders = allOrders
-                        .where((pedido) => pedido.hasParseError)
-                        .toList(growable: false);
-                    final validOrders = allOrders
-                        .where((pedido) => !pedido.hasParseError)
-                        .toList(growable: false);
-
-                    final recentOrders = validOrders
-                        .take(3)
-                        .toList(growable: false);
-
-                    final todayStart = _startOfDay(DateTime.now());
-                    final todayOrders = validOrders
-                        .where((pedido) => _isOnLocalDay(pedido.createdAt, todayStart))
-                        .toList(growable: false);
-                    final todayActiveOrders = todayOrders
-                        .where(
-                          (pedido) =>
-                              pedido.statusBucket != OrderStatusBucket.canceled,
-                        )
-                        .toList(growable: false);
-                    final todayRevenue = todayActiveOrders.fold<double>(
-                      0,
-                      (sum, o) => sum + _resolvePedidoTotal(o),
-                    );
-                    final todayCustomers = _uniqueCustomerCount(todayActiveOrders);
-                    final topProducts = _topProducts(validOrders);
-                    final publicUrl = getPublicMenuUrl(data.comercio);
-                    final displayUrl = _displayPublicUrl(data.comercio);
-                    final selectedOrders = validOrders
-                        .where(
-                          (o) => _isWithinSelectedSalesRange(
-                            o.createdAt,
-                            validOrders,
-                          ),
-                        )
-                        .where(
-                          (o) => o.statusBucket != OrderStatusBucket.canceled,
-                        )
-                        .toList(growable: false);
-                    final selectedCount = selectedOrders.length;
-                    final selectedRevenue = selectedOrders.fold<double>(
-                      0,
-                      (sum, o) => sum + _resolvePedidoTotal(o),
-                    );
-                    final double ticketPromedio = selectedCount == 0
-                        ? 0.0
-                        : (selectedRevenue / selectedCount);
-                    final salesSeries = _buildSalesHistoryForSelectedRange(
-                      validOrders,
-                    );
-                    final ordersLabel = _selectedSalesRange.ordersLabel;
-                    final incomeLabel = _selectedSalesRange.incomeLabel;
-                    final kpiCards = <_CompactKpiCardData>[
-                      _CompactKpiCardData(
-                        title: 'Pedidos hoy',
-                        value: todayOrders.isEmpty ? '—' : '${todayOrders.length}',
-                        hasData: todayOrders.isNotEmpty,
-                        icon: Icons.shopping_bag_outlined,
-                        color: _purple,
-                        deltaPercent: _deltaPercentVsYesterday(
-                          todayValue: todayOrders.length,
-                          yesterdayValue: data.yesterdayTotalOrders,
+            key: _scaffoldKey,
+            backgroundColor: _dashboardBg,
+            drawer: isWideShell ? null : Drawer(child: sidebar),
+            floatingActionButton:
+                !_canShowAssistedOrderFab(dashboardData, screenWidth)
+                ? null
+                : FloatingActionButton.extended(
+                    heroTag: 'assisted-order-fab',
+                    tooltip: 'Pedido asistido',
+                    backgroundColor: _purple,
+                    foregroundColor: Colors.white,
+                    elevation: 3,
+                    onPressed: () =>
+                        _openAssistedPublicMenu(dashboardData!.comercio),
+                    icon: const Icon(Icons.point_of_sale_rounded, size: 20),
+                    label: const Text('Nuevo pedido'),
+                  ),
+            floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+            body: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (isWideShell)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    width: _sidebarCollapsed
+                        ? MerchantDashboardSidebar.collapsedWidth
+                        : MerchantDashboardSidebar.expandedWidth,
+                    child: sidebar,
+                  ),
+                if (isWideShell)
+                  const VerticalDivider(
+                    width: 1,
+                    thickness: 1,
+                    color: Color(0xFFEEEFF5),
+                  ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      if (dashboardData != null)
+                        MerchantShellHeader(
+                          title: _selectedNav.title,
+                          commerceName: dashboardData.comercio.nombre,
+                          businessOnline: _businessOnline,
+                          isUpdatingOnline: _isUpdatingBusinessOnline,
+                          onToggleOnline: _updateBusinessOnline,
+                          onOpenNotifications: _openNotificationsSheet,
+                          onOpenProfile: _openProfile,
+                          onScanWithAi: _openMagicOnboarding,
+                          showMenuButton: !isWideShell,
+                          onOpenMenu: () =>
+                              _scaffoldKey.currentState?.openDrawer(),
                         ),
-                      ),
-                      if (MerchantSession.canSeeSalesKpis) ...[
-                        _CompactKpiCardData(
-                          title: 'Ventas hoy',
-                          value: todayOrders.isEmpty
-                              ? '—'
-                              : '\$${todayRevenue.toStringAsFixed(2)}',
-                          hasData: todayOrders.isNotEmpty,
-                          icon: Icons.attach_money_rounded,
-                          color: _green,
-                          deltaPercent: _deltaPercentVsYesterday(
-                            todayValue: todayRevenue,
-                            yesterdayValue: data.lastDayRevenue,
-                          ),
-                        ),
-                        _CompactKpiCardData(
-                          title: 'Clientes hoy',
-                          value: todayCustomers == 0 ? '—' : '$todayCustomers',
-                          hasData: todayCustomers > 0,
-                          icon: Icons.groups_outlined,
-                          color: _orange,
-                          deltaPercent: _deltaPercentVsYesterday(
-                            todayValue: todayCustomers,
-                            yesterdayValue: data.yesterdayUniqueCustomers,
-                          ),
-                        ),
-                        _CompactKpiCardData(
-                          title: 'Ticket promedio',
-                          value: selectedCount == 0
-                              ? '—'
-                              : '\$${ticketPromedio.toStringAsFixed(2)}',
-                          hasData: selectedCount > 0,
-                          icon: Icons.receipt_long_outlined,
-                          color: _purple,
-                          deltaPercent: _deltaPercentVsYesterday(
-                            todayValue: ticketPromedio,
-                            yesterdayValue: data.yesterdayTotalOrders == 0
-                                ? 0
-                                : data.lastDayRevenue /
-                                    data.yesterdayTotalOrders,
-                          ),
-                        ),
-                      ],
-                    ];
-
-                    if (_selectedNav != MerchantNavDestination.home) {
-                      return MerchantShellSwitcher(
-                        child: KeyedSubtree(
-                          key: ValueKey(_selectedNav),
-                          child: _buildWorkspace(
-                            data: data,
-                            validOrders: validOrders,
-                            ordersSnapshot: ordersSnapshot,
-                            selectedRevenue: selectedRevenue,
-                            selectedCount: selectedCount,
-                            ticketPromedio: ticketPromedio,
-                            salesSeries: salesSeries,
-                            ordersLabel: ordersLabel,
-                            incomeLabel: incomeLabel,
-                            topProducts: topProducts,
-                            publicUrl: publicUrl,
-                            displayUrl: displayUrl,
-                            todayOrders: todayActiveOrders,
-                          ),
-                        ),
-                      );
-                    }
-
-                    return MerchantShellSwitcher(
-                      child: KeyedSubtree(
-                        key: const ValueKey(MerchantNavDestination.home),
-                        child: RefreshIndicator(
-                      onRefresh: _refreshDashboard,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final viewportWidth = constraints.maxWidth;
-                          final isDesktop = screenWidth >= 1024;
-                          final contentMaxWidth = viewportWidth >= 1200 ? 1320.0 : double.infinity;
-                          final horizontalPadding = viewportWidth >= 1200
-                              ? 28.0
-                              : (viewportWidth >= 720 ? 22.0 : 16.0);
-                          final isMobile = viewportWidth < 720;
-                          final bottomPadding = (isMobile
-                                  ? 96
-                                  : (isSmallScreen ? 88 : 96)) +
-                              bottomInset;
-
-                          final list = ListView(
-                            padding: EdgeInsets.fromLTRB(
-                              horizontalPadding,
-                              12,
-                              horizontalPadding,
-                              bottomPadding,
-                            ),
-                            children: [
-                          MerchantHomeHeader(
-                            commerceName: data.comercio.nombre,
-                            businessOnline: _businessOnline,
-                            isUpdatingOnline: _isUpdatingBusinessOnline,
-                            onToggleOnline: _updateBusinessOnline,
-                            onOpenNotifications: _openNotificationsSheet,
-                            onOpenProfile: _openProfile,
-                            hoursCaption: data.schedule.statusAt().caption,
-                            showActions: false,
-                          ),
-                          const SizedBox(height: 16),
-                          if (_recentCatalogResult != null)
-                            _CatalogUpdateBanner(result: _recentCatalogResult!),
-                          if (_didLoadBillingGate && _requiresPaymentToPublish) ...[
-                            _PublishPaywallBanner(onActivate: _openBilling),
-                            const SizedBox(height: 16),
-                          ],
-                          _DashboardKpiGrid(
-                            cards: kpiCards,
-                            columns: isDesktop ? 4 : 2,
-                            useVerticalLayout: isMobile,
-                          ),
-                          SizedBox(height: isDesktop ? 18 : 14),
-                          MerchantQuickActions(
-                            onAddProduct: _openAddProduct,
-                            onEditMenu: () =>
-                                _selectNav(MerchantNavDestination.products),
-                            onShareQr: () =>
-                                _selectNav(MerchantNavDestination.digitalMenu),
-                            onImprovePhotos: () =>
-                                _selectNav(MerchantNavDestination.products),
-                            onConfigureHours: () => _openHours(data.schedule),
-                          ),
-                          SizedBox(height: isDesktop ? 18 : 14),
-                          if (isDesktop)
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  flex: 7,
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                                    children: [
-                                      Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: MerchantSmartMenuCard(
-                                              publicUrl: publicUrl,
-                                              displayUrl: displayUrl,
-                                              visits: data.analytics.visits,
-                                              scans: data.analytics.scans,
-                                              menuOrders: validOrders.length,
-                                              onCopy: _copyPublicMenuUrl,
-                                              onDownloadQr: _openQrGenerator,
-                                              onOpenUrl: _openPublicMenu,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 16),
-                                          Expanded(
-                                            child: KeyedSubtree(
-                                              key: _salesSectionKey,
-                                              child: _CompactSalesSummaryCard(
-                                                title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
-                                                salesToday: selectedRevenue,
-                                                ordersToday: selectedCount,
-                                                averageTicket: ticketPromedio,
-                                                darkText: _darkText,
-                                                mutedText: _mutedText,
-                                                purple: _purple,
-                                                salesHistory: salesSeries.values,
-                                                salesLabels: salesSeries.labels,
-                                                salesTooltipLabels: salesSeries.tooltipLabels,
-                                                rangeLabel: _activeRangeLabel(),
-                                                ordersLabel: ordersLabel,
-                                                incomeLabel: incomeLabel,
-                                                deltaPercent: _deltaPercentVsYesterday(
-                                                  todayValue: selectedRevenue,
-                                                  yesterdayValue: data.lastDayRevenue,
-                                                ),
-                                                showMiniMetrics: false,
-                                                emptyMessage:
-                                                    'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
-                                                onRangeSelected: (range) =>
-                                                    _onSalesRangeSelected(range, validOrders),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 16),
-                                      Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                                              children: [
-                                                _SectionTitle(
-                                                  title: 'Pedidos recientes',
-                                                  actionLabel: 'Ver todos',
-                                                  onActionTap: () =>
-                                                      _selectNav(MerchantNavDestination.orders),
-                                                ),
-                                                const SizedBox(height: 10),
-                                                if (ordersSnapshot.hasError)
-                                                  _EmptyStateCard(
-                                                    title: 'No se pudieron cargar los pedidos',
-                                                    subtitle: _ordersErrorSubtitle(
-                                                      ordersSnapshot.error,
-                                                    ),
-                                                    icon: Icons.error_outline_rounded,
-                                                    actionLabel: 'Reintentar',
-                                                    onAction: _refreshDashboard,
-                                                  )
-                                                else if (recentOrders.isEmpty &&
-                                                    malformedOrders.isEmpty)
-                                                  MerchantEmptyPanel(
-                                                    title: 'Sin pedidos recientes',
-                                                    subtitle:
-                                                        'Aquí aparecerán tus últimos pedidos cuando empiecen a llegar.',
-                                                    icon: Icons.description_outlined,
-                                                    actionLabel: 'Compartir tu menú',
-                                                    onAction: _sharePublicMenu,
-                                                  )
-                                                else ...[
-                                                  ...malformedOrders.map(
-                                                    (pedido) => _MalformedOrderTile(pedido: pedido),
+                      Expanded(
+                        child: Navigator(
+                          key: _contentNavKey,
+                          observers: [_contentNavObserver],
+                          onGenerateRoute: (_) {
+                            return merchantShellRoute(
+                              ListenableBuilder(
+                                listenable: _shellRevision,
+                                builder: (context, _) {
+                                  return SafeArea(
+                                    top: false,
+                                    child: Builder(
+                                      builder: (context) {
+                                        if (snapshot.hasError) {
+                                          return Center(
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(24),
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.error_outline_rounded,
+                                                    size: 44,
                                                   ),
-                                                  ...recentOrders.map(
-                                                    (pedido) => _CompactRecentOrderTile(
-                                                      pedido: pedido,
-                                                      onTap: () => _openOrderDetail(pedido),
-                                                      darkText: _darkText,
-                                                      mutedText: _mutedText,
+                                                  const SizedBox(height: 10),
+                                                  Text(
+                                                    'No se pudo cargar el dashboard.',
+                                                    style: theme
+                                                        .textTheme
+                                                        .titleMedium,
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  Text(
+                                                    '${snapshot.error}',
+                                                    style: theme
+                                                        .textTheme
+                                                        .bodySmall,
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                  const SizedBox(height: 14),
+                                                  FilledButton.icon(
+                                                    onPressed:
+                                                        _refreshDashboard,
+                                                    icon: const Icon(
+                                                      Icons.refresh_rounded,
+                                                    ),
+                                                    label: const Text(
+                                                      'Intentar de nuevo',
                                                     ),
                                                   ),
                                                 ],
-                                              ],
+                                              ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 16),
-                                          Expanded(
-                                            child: MerchantTopProductsCard(
-                                              products: topProducts,
-                                              onSeeAll: _openCurrentMenuManager,
-                                              onAddProduct: _openAddProduct,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      if (!_hideGrowBanner) ...[
-                                        const SizedBox(height: 16),
-                                        MerchantGrowBanner(
-                                          onSeePlans: _openBilling,
-                                          onDismiss: () =>
-                                              setState(() => _hideGrowBanner = true),
-                                        ),
-                                      ],
-                                      if (viewportWidth < 1180) ...[
-                                        const SizedBox(height: 16),
-                                        MerchantTipCard(
-                                          onImprovePhotos: _openCurrentMenuManager,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        MerchantAiCreditsCard(
-                                          balance: data.aiCreditsBalance,
-                                          onHistory: () => _openAiCredits(balance: data.aiCreditsBalance),
-                                          onReload: () => _openAiCredits(balance: data.aiCreditsBalance),
-                                        ),
-                                        const SizedBox(height: 16),
-                                        MerchantProfileProgressCard(
-                                          steps: [
-                                            MerchantProfileStep(
-                                              label: 'Nombre del negocio',
-                                              done: data.comercio.nombre.trim().isNotEmpty &&
-                                                  data.comercio.nombre.trim().toLowerCase() !=
-                                                      'comercio',
-                                              onTap: () => _editBusinessInfo(data.comercio),
-                                            ),
-                                            MerchantProfileStep(
-                                              label: 'WhatsApp configurado',
-                                              done: (data.comercio.whatsapp ?? '')
-                                                  .trim()
-                                                  .isNotEmpty,
-                                              onTap: () => _editBusinessInfo(data.comercio),
-                                            ),
-                                            MerchantProfileStep(
-                                              label: 'Menú con productos',
-                                              done: data.productCount > 0,
-                                              onTap: _openCurrentMenuManager,
-                                            ),
-                                            MerchantProfileStep(
-                                              label: 'Horarios de atención',
-                                              done: data.schedule.isConfigured,
-                                              onTap: () => _openHours(data.schedule),
-                                            ),
-                                            MerchantProfileStep(
-                                              label: 'Fotos profesionales',
-                                              done: data.productsWithImages > 0,
-                                              onTap: _openCurrentMenuManager,
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                if (viewportWidth >= 1180) ...[
-                                const SizedBox(width: 16),
-                                SizedBox(
-                                  width: 300,
-                                  child: Column(
-                                    children: [
-                                      MerchantTipCard(
-                                        onImprovePhotos: _openCurrentMenuManager,
-                                      ),
-                                      const SizedBox(height: 16),
-                                      MerchantAiCreditsCard(
-                                        balance: data.aiCreditsBalance,
-                                        onHistory: () => _openAiCredits(balance: data.aiCreditsBalance),
-                                        onReload: () => _openAiCredits(balance: data.aiCreditsBalance),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      MerchantProfileProgressCard(
-                                        steps: [
-                                          MerchantProfileStep(
-                                            label: 'Nombre del negocio',
-                                            done: data.comercio.nombre.trim().isNotEmpty &&
-                                                data.comercio.nombre.trim().toLowerCase() !=
-                                                    'comercio',
-                                            onTap: () => _editBusinessInfo(data.comercio),
-                                          ),
-                                          MerchantProfileStep(
-                                            label: 'WhatsApp configurado',
-                                            done: (data.comercio.whatsapp ?? '')
-                                                .trim()
-                                                .isNotEmpty,
-                                            onTap: () => _editBusinessInfo(data.comercio),
-                                          ),
-                                          MerchantProfileStep(
-                                            label: 'Menú con productos',
-                                            done: data.productCount > 0,
-                                            onTap: _openCurrentMenuManager,
-                                          ),
-                                          MerchantProfileStep(
-                                            label: 'Horarios de atención',
-                                            done: data.schedule.isConfigured,
-                                            onTap: () => _openHours(data.schedule),
-                                          ),
-                                          MerchantProfileStep(
-                                            label: 'Fotos profesionales',
-                                            done: data.productsWithImages > 0,
-                                            onTap: _openCurrentMenuManager,
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                ],
-                              ],
-                            )
-                          else ...[
-                            MerchantSmartMenuCard(
-                              publicUrl: publicUrl,
-                              displayUrl: displayUrl,
-                              visits: data.analytics.visits,
-                              scans: data.analytics.scans,
-                              menuOrders: validOrders.length,
-                              onCopy: _copyPublicMenuUrl,
-                              onDownloadQr: _openQrGenerator,
-                              onOpenUrl: _openPublicMenu,
-                            ),
-                            const SizedBox(height: 12),
-                            KeyedSubtree(
-                              key: _salesSectionKey,
-                              child: _CompactSalesSummaryCard(
-                                title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
-                                salesToday: selectedRevenue,
-                                ordersToday: selectedCount,
-                                averageTicket: ticketPromedio,
-                                darkText: _darkText,
-                                mutedText: _mutedText,
-                                purple: _purple,
-                                salesHistory: salesSeries.values,
-                                salesLabels: salesSeries.labels,
-                                salesTooltipLabels: salesSeries.tooltipLabels,
-                                rangeLabel: _activeRangeLabel(),
-                                ordersLabel: ordersLabel,
-                                incomeLabel: incomeLabel,
-                                deltaPercent: _deltaPercentVsYesterday(
-                                  todayValue: selectedRevenue,
-                                  yesterdayValue: data.lastDayRevenue,
-                                ),
-                                showMiniMetrics: false,
-                                emptyMessage:
-                                    'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
-                                onRangeSelected: (range) =>
-                                    _onSalesRangeSelected(range, validOrders),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            MerchantAiCreditsCard(
-                              balance: data.aiCreditsBalance,
-                              onHistory: () => _openAiCredits(balance: data.aiCreditsBalance),
-                              onReload: () => _openAiCredits(balance: data.aiCreditsBalance),
-                            ),
-                            const SizedBox(height: 12),
-                            MerchantTipCard(
-                              onImprovePhotos: _openCurrentMenuManager,
-                            ),
-                            const SizedBox(height: 12),
-                            MerchantProfileProgressCard(
-                              steps: [
-                                MerchantProfileStep(
-                                  label: 'Nombre del negocio',
-                                  done: data.comercio.nombre.trim().isNotEmpty &&
-                                      data.comercio.nombre.trim().toLowerCase() !=
-                                          'comercio',
-                                  onTap: () => _editBusinessInfo(data.comercio),
-                                ),
-                                MerchantProfileStep(
-                                  label: 'WhatsApp configurado',
-                                  done: (data.comercio.whatsapp ?? '').trim().isNotEmpty,
-                                  onTap: () => _editBusinessInfo(data.comercio),
-                                ),
-                                MerchantProfileStep(
-                                  label: 'Menú con productos',
-                                  done: data.productCount > 0,
-                                  onTap: _openCurrentMenuManager,
-                                ),
-                                MerchantProfileStep(
-                                  label: 'Horarios de atención',
-                                  done: data.schedule.isConfigured,
-                                  onTap: () => _openHours(data.schedule),
-                                ),
-                                MerchantProfileStep(
-                                  label: 'Fotos profesionales',
-                                  done: data.productsWithImages > 0,
-                                  onTap: _openCurrentMenuManager,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            _SectionTitle(
-                              title: 'Pedidos recientes',
-                              actionLabel: 'Ver todos',
-                              onActionTap: () => _selectNav(MerchantNavDestination.orders),
-                            ),
-                            const SizedBox(height: 10),
-                            if (ordersSnapshot.hasError)
-                              _EmptyStateCard(
-                                title: 'No se pudieron cargar los pedidos',
-                                subtitle: _ordersErrorSubtitle(
-                                  ordersSnapshot.error,
-                                ),
-                                icon: Icons.error_outline_rounded,
-                                actionLabel: 'Reintentar',
-                                onAction: _refreshDashboard,
-                              )
-                            else if (recentOrders.isEmpty &&
-                                malformedOrders.isEmpty)
-                              MerchantEmptyPanel(
-                                title: 'Sin pedidos recientes',
-                                subtitle:
-                                    'Aquí aparecerán tus últimos pedidos cuando empiecen a llegar.',
-                                icon: Icons.description_outlined,
-                                actionLabel: 'Compartir tu menú',
-                                onAction: _sharePublicMenu,
-                              )
-                            else ...[
-                              ...malformedOrders.map(
-                                (pedido) => _MalformedOrderTile(pedido: pedido),
-                              ),
-                              ...recentOrders.map(
-                                (pedido) => _CompactRecentOrderTile(
-                                  pedido: pedido,
-                                  onTap: () => _openOrderDetail(pedido),
-                                  darkText: _darkText,
-                                  mutedText: _mutedText,
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: 12),
-                            MerchantTopProductsCard(
-                              products: topProducts,
-                              onSeeAll: _openCurrentMenuManager,
-                              onAddProduct: _openAddProduct,
-                            ),
-                            if (!_hideGrowBanner) ...[
-                              const SizedBox(height: 12),
-                              MerchantGrowBanner(
-                                onSeePlans: _openBilling,
-                                onDismiss: () =>
-                                    setState(() => _hideGrowBanner = true),
-                              ),
-                            ],
-                          ],
-                            ],
-                          );
+                                          );
+                                        }
 
-                          return Align(
-                            alignment: Alignment.topCenter,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(maxWidth: contentMaxWidth),
-                              child: list,
-                            ),
-                          );
-                        },
+                                        final data = snapshot.data;
+                                        if (data == null) {
+                                          return const Center(
+                                            child: Text(
+                                              'No hay datos disponibles.',
+                                            ),
+                                          );
+                                        }
+
+                                        if (!_didPrimeOnlineSwitch) {
+                                          _businessOnline =
+                                              data.comercio.enLinea;
+                                          _didPrimeOnlineSwitch = true;
+                                        }
+
+                                        return StreamBuilder<List<PedidoModel>>(
+                                          stream: _ordersStream,
+                                          builder: (context, ordersSnapshot) {
+                                            final allOrders =
+                                                _applyOptimisticStatuses(
+                                                  ordersSnapshot.data ??
+                                                      const <PedidoModel>[],
+                                                );
+                                            final malformedOrders = allOrders
+                                                .where(
+                                                  (pedido) =>
+                                                      pedido.hasParseError,
+                                                )
+                                                .toList(growable: false);
+                                            final validOrders = allOrders
+                                                .where(
+                                                  (pedido) =>
+                                                      !pedido.hasParseError,
+                                                )
+                                                .toList(growable: false);
+
+                                            final recentOrders = validOrders
+                                                .take(3)
+                                                .toList(growable: false);
+
+                                            final todayStart = _startOfDay(
+                                              DateTime.now(),
+                                            );
+                                            final todayOrders = validOrders
+                                                .where(
+                                                  (pedido) => _isOnLocalDay(
+                                                    pedido.createdAt,
+                                                    todayStart,
+                                                  ),
+                                                )
+                                                .where(
+                                                  (pedido) =>
+                                                      pedido.statusBucket !=
+                                                      OrderStatusBucket
+                                                          .canceled,
+                                                )
+                                                .toList(growable: false);
+                                            final todayActiveOrders =
+                                                todayOrders;
+                                            final todayRevenue =
+                                                todayActiveOrders.fold<double>(
+                                                  0,
+                                                  (sum, o) =>
+                                                      sum +
+                                                      _resolvePedidoTotal(o),
+                                                );
+                                            final todayCustomers =
+                                                _uniqueCustomerCount(
+                                                  todayActiveOrders,
+                                                );
+                                            final topProducts = _topProducts(
+                                              validOrders,
+                                            );
+                                            final publicUrl = getPublicMenuUrl(
+                                              data.comercio,
+                                            );
+                                            final displayUrl =
+                                                _displayPublicUrl(
+                                                  data.comercio,
+                                                );
+                                            final selectedOrders = validOrders
+                                                .where(
+                                                  (o) =>
+                                                      _isWithinSelectedSalesRange(
+                                                        o.createdAt,
+                                                        validOrders,
+                                                      ),
+                                                )
+                                                .where(
+                                                  (o) =>
+                                                      o.statusBucket !=
+                                                      OrderStatusBucket
+                                                          .canceled,
+                                                )
+                                                .toList(growable: false);
+                                            final selectedCount =
+                                                selectedOrders.length;
+                                            final selectedRevenue =
+                                                selectedOrders.fold<double>(
+                                                  0,
+                                                  (sum, o) =>
+                                                      sum +
+                                                      _resolvePedidoTotal(o),
+                                                );
+                                            final double ticketPromedio =
+                                                selectedCount == 0
+                                                ? 0.0
+                                                : (selectedRevenue /
+                                                      selectedCount);
+                                            final salesSeries =
+                                                _buildSalesHistoryForSelectedRange(
+                                                  validOrders,
+                                                );
+                                            final ordersLabel =
+                                                _selectedSalesRange.ordersLabel;
+                                            final incomeLabel =
+                                                _selectedSalesRange.incomeLabel;
+                                            final kpiCards = <_CompactKpiCardData>[
+                                              _CompactKpiCardData(
+                                                title: 'Pedidos hoy',
+                                                value: todayOrders.isEmpty
+                                                    ? '—'
+                                                    : '${todayOrders.length}',
+                                                hasData: todayOrders.isNotEmpty,
+                                                icon:
+                                                    Icons.shopping_bag_outlined,
+                                                color: _purple,
+                                                deltaPercent:
+                                                    _deltaPercentVsYesterday(
+                                                      todayValue:
+                                                          todayOrders.length,
+                                                      yesterdayValue: data
+                                                          .yesterdayTotalOrders,
+                                                    ),
+                                              ),
+                                              if (MerchantSession
+                                                  .canSeeSalesKpis) ...[
+                                                _CompactKpiCardData(
+                                                  title: 'Ventas hoy',
+                                                  value: todayOrders.isEmpty
+                                                      ? '—'
+                                                      : '\$${todayRevenue.toStringAsFixed(2)}',
+                                                  hasData:
+                                                      todayOrders.isNotEmpty,
+                                                  icon: Icons
+                                                      .attach_money_rounded,
+                                                  color: _green,
+                                                  deltaPercent:
+                                                      _deltaPercentVsYesterday(
+                                                        todayValue:
+                                                            todayRevenue,
+                                                        yesterdayValue:
+                                                            data.lastDayRevenue,
+                                                      ),
+                                                ),
+                                                _CompactKpiCardData(
+                                                  title: 'Clientes hoy',
+                                                  value: todayCustomers == 0
+                                                      ? '—'
+                                                      : '$todayCustomers',
+                                                  hasData: todayCustomers > 0,
+                                                  icon: Icons.groups_outlined,
+                                                  color: _orange,
+                                                  deltaPercent:
+                                                      _deltaPercentVsYesterday(
+                                                        todayValue:
+                                                            todayCustomers,
+                                                        yesterdayValue: data
+                                                            .yesterdayUniqueCustomers,
+                                                      ),
+                                                ),
+                                                _CompactKpiCardData(
+                                                  title: 'Ticket promedio',
+                                                  value: selectedCount == 0
+                                                      ? '—'
+                                                      : '\$${ticketPromedio.toStringAsFixed(2)}',
+                                                  hasData: selectedCount > 0,
+                                                  icon: Icons
+                                                      .receipt_long_outlined,
+                                                  color: _purple,
+                                                  deltaPercent: _deltaPercentVsYesterday(
+                                                    todayValue: ticketPromedio,
+                                                    yesterdayValue:
+                                                        data.yesterdayTotalOrders ==
+                                                            0
+                                                        ? 0
+                                                        : data.lastDayRevenue /
+                                                              data.yesterdayTotalOrders,
+                                                  ),
+                                                ),
+                                              ],
+                                            ];
+
+                                            if (_selectedNav !=
+                                                MerchantNavDestination.home) {
+                                              return MerchantShellSwitcher(
+                                                child: KeyedSubtree(
+                                                  key: ValueKey(_selectedNav),
+                                                  child: _buildWorkspace(
+                                                    data: data,
+                                                    validOrders: validOrders,
+                                                    ordersSnapshot:
+                                                        ordersSnapshot,
+                                                    selectedRevenue:
+                                                        selectedRevenue,
+                                                    selectedCount:
+                                                        selectedCount,
+                                                    ticketPromedio:
+                                                        ticketPromedio,
+                                                    salesSeries: salesSeries,
+                                                    ordersLabel: ordersLabel,
+                                                    incomeLabel: incomeLabel,
+                                                    topProducts: topProducts,
+                                                    publicUrl: publicUrl,
+                                                    displayUrl: displayUrl,
+                                                    todayOrders:
+                                                        todayActiveOrders,
+                                                  ),
+                                                ),
+                                              );
+                                            }
+
+                                            return MerchantShellSwitcher(
+                                              child: KeyedSubtree(
+                                                key: const ValueKey(
+                                                  MerchantNavDestination.home,
+                                                ),
+                                                child: RefreshIndicator(
+                                                  onRefresh: _refreshDashboard,
+                                                  child: LayoutBuilder(
+                                                    builder: (context, constraints) {
+                                                      final viewportWidth =
+                                                          constraints.maxWidth;
+                                                      final isDesktop =
+                                                          screenWidth >= 1024;
+                                                      final contentMaxWidth =
+                                                          viewportWidth >= 1200
+                                                          ? 1320.0
+                                                          : double.infinity;
+                                                      final horizontalPadding =
+                                                          viewportWidth >= 1200
+                                                          ? 28.0
+                                                          : (viewportWidth >=
+                                                                    720
+                                                                ? 22.0
+                                                                : 16.0);
+                                                      final isMobile =
+                                                          viewportWidth < 720;
+                                                      final bottomPadding =
+                                                          (isMobile
+                                                              ? 96
+                                                              : (isSmallScreen
+                                                                    ? 88
+                                                                    : 96)) +
+                                                          bottomInset;
+
+                                                      final list = ListView(
+                                                        padding:
+                                                            EdgeInsets.fromLTRB(
+                                                              horizontalPadding,
+                                                              12,
+                                                              horizontalPadding,
+                                                              bottomPadding,
+                                                            ),
+                                                        children: [
+                                                          MerchantHomeHeader(
+                                                            commerceName: data
+                                                                .comercio
+                                                                .nombre,
+                                                            businessOnline:
+                                                                _businessOnline,
+                                                            isUpdatingOnline:
+                                                                _isUpdatingBusinessOnline,
+                                                            onToggleOnline:
+                                                                _updateBusinessOnline,
+                                                            onOpenNotifications:
+                                                                _openNotificationsSheet,
+                                                            onOpenProfile:
+                                                                _openProfile,
+                                                            hoursCaption: data
+                                                                .schedule
+                                                                .statusAt()
+                                                                .caption,
+                                                            showActions: false,
+                                                          ),
+                                                          const SizedBox(
+                                                            height: 16,
+                                                          ),
+                                                          if (_recentCatalogResult !=
+                                                              null)
+                                                            _CatalogUpdateBanner(
+                                                              result:
+                                                                  _recentCatalogResult!,
+                                                            ),
+                                                          if (_didLoadBillingGate &&
+                                                              _requiresPaymentToPublish) ...[
+                                                            _PublishPaywallBanner(
+                                                              onActivate:
+                                                                  _openBilling,
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 16,
+                                                            ),
+                                                          ],
+                                                          _DashboardKpiGrid(
+                                                            cards: kpiCards,
+                                                            columns: isDesktop
+                                                                ? 4
+                                                                : 2,
+                                                            useVerticalLayout:
+                                                                isMobile,
+                                                          ),
+                                                          SizedBox(
+                                                            height: isDesktop
+                                                                ? 18
+                                                                : 14,
+                                                          ),
+                                                          MerchantQuickActions(
+                                                            onAddProduct:
+                                                                _openAddProduct,
+                                                            onEditMenu: () =>
+                                                                _selectNav(
+                                                                  MerchantNavDestination
+                                                                      .products,
+                                                                ),
+                                                            onShareQr: () =>
+                                                                _selectNav(
+                                                                  MerchantNavDestination
+                                                                      .digitalMenu,
+                                                                ),
+                                                            onImprovePhotos:
+                                                                () => _selectNav(
+                                                                  MerchantNavDestination
+                                                                      .products,
+                                                                ),
+                                                            onConfigureHours:
+                                                                () => _openHours(
+                                                                  data.schedule,
+                                                                ),
+                                                          ),
+                                                          SizedBox(
+                                                            height: isDesktop
+                                                                ? 18
+                                                                : 14,
+                                                          ),
+                                                          if (isDesktop)
+                                                            Row(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                Expanded(
+                                                                  flex: 7,
+                                                                  child: Column(
+                                                                    crossAxisAlignment:
+                                                                        CrossAxisAlignment
+                                                                            .stretch,
+                                                                    children: [
+                                                                      Row(
+                                                                        crossAxisAlignment:
+                                                                            CrossAxisAlignment.start,
+                                                                        children: [
+                                                                          Expanded(
+                                                                            child: MerchantSmartMenuCard(
+                                                                              publicUrl: publicUrl,
+                                                                              displayUrl: displayUrl,
+                                                                              visits: data.analytics.visits,
+                                                                              scans: data.analytics.scans,
+                                                                              menuOrders: validOrders.length,
+                                                                              onCopy: _copyPublicMenuUrl,
+                                                                              onDownloadQr: _openQrGenerator,
+                                                                              onOpenUrl: _openPublicMenu,
+                                                                            ),
+                                                                          ),
+                                                                          const SizedBox(
+                                                                            width:
+                                                                                16,
+                                                                          ),
+                                                                          Expanded(
+                                                                            child: KeyedSubtree(
+                                                                              key: _salesSectionKey,
+                                                                              child: _CompactSalesSummaryCard(
+                                                                                title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+                                                                                salesToday: selectedRevenue,
+                                                                                ordersToday: selectedCount,
+                                                                                averageTicket: ticketPromedio,
+                                                                                darkText: _darkText,
+                                                                                mutedText: _mutedText,
+                                                                                purple: _purple,
+                                                                                salesHistory: salesSeries.values,
+                                                                                salesLabels: salesSeries.labels,
+                                                                                salesTooltipLabels: salesSeries.tooltipLabels,
+                                                                                selectedRange: _selectedSalesRange,
+                                                                                rangeLabel: _activeRangeLabel(),
+                                                                                ordersLabel: ordersLabel,
+                                                                                incomeLabel: incomeLabel,
+                                                                                deltaPercent: _deltaPercentVsYesterday(
+                                                                                  todayValue: selectedRevenue,
+                                                                                  yesterdayValue: data.lastDayRevenue,
+                                                                                ),
+                                                                                showMiniMetrics: false,
+                                                                                emptyMessage: 'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                                                                                onRangeSelected:
+                                                                                    (
+                                                                                      range,
+                                                                                    ) => _onSalesRangeSelected(
+                                                                                      range,
+                                                                                      validOrders,
+                                                                                    ),
+                                                                              ),
+                                                                            ),
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                      const SizedBox(
+                                                                        height:
+                                                                            16,
+                                                                      ),
+                                                                      Row(
+                                                                        crossAxisAlignment:
+                                                                            CrossAxisAlignment.start,
+                                                                        children: [
+                                                                          Expanded(
+                                                                            child: Column(
+                                                                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                                                                              children: [
+                                                                                _SectionTitle(
+                                                                                  title: 'Pedidos recientes',
+                                                                                  actionLabel: 'Ver todos',
+                                                                                  onActionTap: () => _selectNav(
+                                                                                    MerchantNavDestination.orders,
+                                                                                  ),
+                                                                                ),
+                                                                                const SizedBox(
+                                                                                  height: 10,
+                                                                                ),
+                                                                                if (ordersSnapshot.hasError)
+                                                                                  _EmptyStateCard(
+                                                                                    title: 'No se pudieron cargar los pedidos',
+                                                                                    subtitle: _ordersErrorSubtitle(
+                                                                                      ordersSnapshot.error,
+                                                                                    ),
+                                                                                    icon: Icons.error_outline_rounded,
+                                                                                    actionLabel: 'Reintentar',
+                                                                                    onAction: _refreshDashboard,
+                                                                                  )
+                                                                                else if (recentOrders.isEmpty &&
+                                                                                    malformedOrders.isEmpty)
+                                                                                  MerchantEmptyPanel(
+                                                                                    title: 'Sin pedidos recientes',
+                                                                                    subtitle: 'Aquí aparecerán tus últimos pedidos cuando empiecen a llegar.',
+                                                                                    icon: Icons.description_outlined,
+                                                                                    actionLabel: 'Compartir tu menú',
+                                                                                    onAction: _sharePublicMenu,
+                                                                                  )
+                                                                                else ...[
+                                                                                  ...malformedOrders.map(
+                                                                                    (
+                                                                                      pedido,
+                                                                                    ) => _MalformedOrderTile(
+                                                                                      pedido: pedido,
+                                                                                    ),
+                                                                                  ),
+                                                                                  ...recentOrders.map(
+                                                                                    (
+                                                                                      pedido,
+                                                                                    ) => _CompactRecentOrderTile(
+                                                                                      pedido: pedido,
+                                                                                      onTap: () => _openOrderDetail(
+                                                                                        pedido,
+                                                                                      ),
+                                                                                      darkText: _darkText,
+                                                                                      mutedText: _mutedText,
+                                                                                    ),
+                                                                                  ),
+                                                                                ],
+                                                                              ],
+                                                                            ),
+                                                                          ),
+                                                                          const SizedBox(
+                                                                            width:
+                                                                                16,
+                                                                          ),
+                                                                          Expanded(
+                                                                            child: MerchantTopProductsCard(
+                                                                              products: topProducts,
+                                                                              onSeeAll: _openCurrentMenuManager,
+                                                                              onAddProduct: _openAddProduct,
+                                                                            ),
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                      if (!_hideGrowBanner) ...[
+                                                                        const SizedBox(
+                                                                          height:
+                                                                              16,
+                                                                        ),
+                                                                        MerchantGrowBanner(
+                                                                          onSeePlans:
+                                                                              _openBilling,
+                                                                          onDismiss: () => setState(
+                                                                            () =>
+                                                                                _hideGrowBanner = true,
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                      if (viewportWidth <
+                                                                          1180) ...[
+                                                                        const SizedBox(
+                                                                          height:
+                                                                              16,
+                                                                        ),
+                                                                        MerchantTipCard(
+                                                                          onImprovePhotos:
+                                                                              _openCurrentMenuManager,
+                                                                        ),
+                                                                        const SizedBox(
+                                                                          height:
+                                                                              16,
+                                                                        ),
+                                                                        MerchantAiCreditsCard(
+                                                                          balance:
+                                                                              data.aiCreditsBalance,
+                                                                          onHistory: () => _openAiCredits(
+                                                                            balance:
+                                                                                data.aiCreditsBalance,
+                                                                          ),
+                                                                          onReload: () => _openAiCredits(
+                                                                            balance:
+                                                                                data.aiCreditsBalance,
+                                                                          ),
+                                                                        ),
+                                                                        const SizedBox(
+                                                                          height:
+                                                                              16,
+                                                                        ),
+                                                                        MerchantProfileProgressCard(
+                                                                          steps: [
+                                                                            MerchantProfileStep(
+                                                                              label: 'Nombre del negocio',
+                                                                              done:
+                                                                                  data.comercio.nombre.trim().isNotEmpty &&
+                                                                                  data.comercio.nombre.trim().toLowerCase() !=
+                                                                                      'comercio',
+                                                                              onTap: () => _editBusinessInfo(
+                                                                                data.comercio,
+                                                                              ),
+                                                                            ),
+                                                                            MerchantProfileStep(
+                                                                              label: 'WhatsApp configurado',
+                                                                              done:
+                                                                                  (data.comercio.whatsapp ??
+                                                                                          '')
+                                                                                      .trim()
+                                                                                      .isNotEmpty,
+                                                                              onTap: () => _editBusinessInfo(
+                                                                                data.comercio,
+                                                                              ),
+                                                                            ),
+                                                                            MerchantProfileStep(
+                                                                              label: 'Menú con productos',
+                                                                              done:
+                                                                                  data.productCount >
+                                                                                  0,
+                                                                              onTap: _openCurrentMenuManager,
+                                                                            ),
+                                                                            MerchantProfileStep(
+                                                                              label: 'Horarios de atención',
+                                                                              done: data.schedule.isConfigured,
+                                                                              onTap: () => _openHours(
+                                                                                data.schedule,
+                                                                              ),
+                                                                            ),
+                                                                            MerchantProfileStep(
+                                                                              label: 'Fotos profesionales',
+                                                                              done:
+                                                                                  data.productsWithImages >
+                                                                                  0,
+                                                                              onTap: _openCurrentMenuManager,
+                                                                            ),
+                                                                          ],
+                                                                        ),
+                                                                      ],
+                                                                    ],
+                                                                  ),
+                                                                ),
+                                                                if (viewportWidth >=
+                                                                    1180) ...[
+                                                                  const SizedBox(
+                                                                    width: 16,
+                                                                  ),
+                                                                  SizedBox(
+                                                                    width: 300,
+                                                                    child: Column(
+                                                                      children: [
+                                                                        MerchantTipCard(
+                                                                          onImprovePhotos:
+                                                                              _openCurrentMenuManager,
+                                                                        ),
+                                                                        const SizedBox(
+                                                                          height:
+                                                                              16,
+                                                                        ),
+                                                                        MerchantAiCreditsCard(
+                                                                          balance:
+                                                                              data.aiCreditsBalance,
+                                                                          onHistory: () => _openAiCredits(
+                                                                            balance:
+                                                                                data.aiCreditsBalance,
+                                                                          ),
+                                                                          onReload: () => _openAiCredits(
+                                                                            balance:
+                                                                                data.aiCreditsBalance,
+                                                                          ),
+                                                                        ),
+                                                                        const SizedBox(
+                                                                          height:
+                                                                              16,
+                                                                        ),
+                                                                        MerchantProfileProgressCard(
+                                                                          steps: [
+                                                                            MerchantProfileStep(
+                                                                              label: 'Nombre del negocio',
+                                                                              done:
+                                                                                  data.comercio.nombre.trim().isNotEmpty &&
+                                                                                  data.comercio.nombre.trim().toLowerCase() !=
+                                                                                      'comercio',
+                                                                              onTap: () => _editBusinessInfo(
+                                                                                data.comercio,
+                                                                              ),
+                                                                            ),
+                                                                            MerchantProfileStep(
+                                                                              label: 'WhatsApp configurado',
+                                                                              done:
+                                                                                  (data.comercio.whatsapp ??
+                                                                                          '')
+                                                                                      .trim()
+                                                                                      .isNotEmpty,
+                                                                              onTap: () => _editBusinessInfo(
+                                                                                data.comercio,
+                                                                              ),
+                                                                            ),
+                                                                            MerchantProfileStep(
+                                                                              label: 'Menú con productos',
+                                                                              done:
+                                                                                  data.productCount >
+                                                                                  0,
+                                                                              onTap: _openCurrentMenuManager,
+                                                                            ),
+                                                                            MerchantProfileStep(
+                                                                              label: 'Horarios de atención',
+                                                                              done: data.schedule.isConfigured,
+                                                                              onTap: () => _openHours(
+                                                                                data.schedule,
+                                                                              ),
+                                                                            ),
+                                                                            MerchantProfileStep(
+                                                                              label: 'Fotos profesionales',
+                                                                              done:
+                                                                                  data.productsWithImages >
+                                                                                  0,
+                                                                              onTap: _openCurrentMenuManager,
+                                                                            ),
+                                                                          ],
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ],
+                                                            )
+                                                          else ...[
+                                                            MerchantSmartMenuCard(
+                                                              publicUrl:
+                                                                  publicUrl,
+                                                              displayUrl:
+                                                                  displayUrl,
+                                                              visits: data
+                                                                  .analytics
+                                                                  .visits,
+                                                              scans: data
+                                                                  .analytics
+                                                                  .scans,
+                                                              menuOrders:
+                                                                  validOrders
+                                                                      .length,
+                                                              onCopy:
+                                                                  _copyPublicMenuUrl,
+                                                              onDownloadQr:
+                                                                  _openQrGenerator,
+                                                              onOpenUrl:
+                                                                  _openPublicMenu,
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 12,
+                                                            ),
+                                                            KeyedSubtree(
+                                                              key:
+                                                                  _salesSectionKey,
+                                                              child: _CompactSalesSummaryCard(
+                                                                title:
+                                                                    'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+                                                                salesToday:
+                                                                    selectedRevenue,
+                                                                ordersToday:
+                                                                    selectedCount,
+                                                                averageTicket:
+                                                                    ticketPromedio,
+                                                                darkText:
+                                                                    _darkText,
+                                                                mutedText:
+                                                                    _mutedText,
+                                                                purple: _purple,
+                                                                salesHistory:
+                                                                    salesSeries
+                                                                        .values,
+                                                                salesLabels:
+                                                                    salesSeries
+                                                                        .labels,
+                                                                salesTooltipLabels:
+                                                                    salesSeries
+                                                                        .tooltipLabels,
+                                                                selectedRange:
+                                                                    _selectedSalesRange,
+                                                                rangeLabel:
+                                                                    _activeRangeLabel(),
+                                                                ordersLabel:
+                                                                    ordersLabel,
+                                                                incomeLabel:
+                                                                    incomeLabel,
+                                                                deltaPercent: _deltaPercentVsYesterday(
+                                                                  todayValue:
+                                                                      selectedRevenue,
+                                                                  yesterdayValue:
+                                                                      data.lastDayRevenue,
+                                                                ),
+                                                                showMiniMetrics:
+                                                                    false,
+                                                                emptyMessage:
+                                                                    'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                                                                onRangeSelected:
+                                                                    (
+                                                                      range,
+                                                                    ) => _onSalesRangeSelected(
+                                                                      range,
+                                                                      validOrders,
+                                                                    ),
+                                                              ),
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 12,
+                                                            ),
+                                                            MerchantAiCreditsCard(
+                                                              balance: data
+                                                                  .aiCreditsBalance,
+                                                              onHistory: () =>
+                                                                  _openAiCredits(
+                                                                    balance: data
+                                                                        .aiCreditsBalance,
+                                                                  ),
+                                                              onReload: () =>
+                                                                  _openAiCredits(
+                                                                    balance: data
+                                                                        .aiCreditsBalance,
+                                                                  ),
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 12,
+                                                            ),
+                                                            MerchantTipCard(
+                                                              onImprovePhotos:
+                                                                  _openCurrentMenuManager,
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 12,
+                                                            ),
+                                                            MerchantProfileProgressCard(
+                                                              steps: [
+                                                                MerchantProfileStep(
+                                                                  label:
+                                                                      'Nombre del negocio',
+                                                                  done:
+                                                                      data
+                                                                          .comercio
+                                                                          .nombre
+                                                                          .trim()
+                                                                          .isNotEmpty &&
+                                                                      data.comercio.nombre
+                                                                              .trim()
+                                                                              .toLowerCase() !=
+                                                                          'comercio',
+                                                                  onTap: () =>
+                                                                      _editBusinessInfo(
+                                                                        data.comercio,
+                                                                      ),
+                                                                ),
+                                                                MerchantProfileStep(
+                                                                  label:
+                                                                      'WhatsApp configurado',
+                                                                  done:
+                                                                      (data.comercio.whatsapp ??
+                                                                              '')
+                                                                          .trim()
+                                                                          .isNotEmpty,
+                                                                  onTap: () =>
+                                                                      _editBusinessInfo(
+                                                                        data.comercio,
+                                                                      ),
+                                                                ),
+                                                                MerchantProfileStep(
+                                                                  label:
+                                                                      'Menú con productos',
+                                                                  done:
+                                                                      data.productCount >
+                                                                      0,
+                                                                  onTap:
+                                                                      _openCurrentMenuManager,
+                                                                ),
+                                                                MerchantProfileStep(
+                                                                  label:
+                                                                      'Horarios de atención',
+                                                                  done: data
+                                                                      .schedule
+                                                                      .isConfigured,
+                                                                  onTap: () =>
+                                                                      _openHours(
+                                                                        data.schedule,
+                                                                      ),
+                                                                ),
+                                                                MerchantProfileStep(
+                                                                  label:
+                                                                      'Fotos profesionales',
+                                                                  done:
+                                                                      data.productsWithImages >
+                                                                      0,
+                                                                  onTap:
+                                                                      _openCurrentMenuManager,
+                                                                ),
+                                                              ],
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 12,
+                                                            ),
+                                                            _SectionTitle(
+                                                              title:
+                                                                  'Pedidos recientes',
+                                                              actionLabel:
+                                                                  'Ver todos',
+                                                              onActionTap: () =>
+                                                                  _selectNav(
+                                                                    MerchantNavDestination
+                                                                        .orders,
+                                                                  ),
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 10,
+                                                            ),
+                                                            if (ordersSnapshot
+                                                                .hasError)
+                                                              _EmptyStateCard(
+                                                                title:
+                                                                    'No se pudieron cargar los pedidos',
+                                                                subtitle:
+                                                                    _ordersErrorSubtitle(
+                                                                      ordersSnapshot
+                                                                          .error,
+                                                                    ),
+                                                                icon: Icons
+                                                                    .error_outline_rounded,
+                                                                actionLabel:
+                                                                    'Reintentar',
+                                                                onAction:
+                                                                    _refreshDashboard,
+                                                              )
+                                                            else if (recentOrders
+                                                                    .isEmpty &&
+                                                                malformedOrders
+                                                                    .isEmpty)
+                                                              MerchantEmptyPanel(
+                                                                title:
+                                                                    'Sin pedidos recientes',
+                                                                subtitle:
+                                                                    'Aquí aparecerán tus últimos pedidos cuando empiecen a llegar.',
+                                                                icon: Icons
+                                                                    .description_outlined,
+                                                                actionLabel:
+                                                                    'Compartir tu menú',
+                                                                onAction:
+                                                                    _sharePublicMenu,
+                                                              )
+                                                            else ...[
+                                                              ...malformedOrders.map(
+                                                                (pedido) =>
+                                                                    _MalformedOrderTile(
+                                                                      pedido:
+                                                                          pedido,
+                                                                    ),
+                                                              ),
+                                                              ...recentOrders.map(
+                                                                (
+                                                                  pedido,
+                                                                ) => _CompactRecentOrderTile(
+                                                                  pedido:
+                                                                      pedido,
+                                                                  onTap: () =>
+                                                                      _openOrderDetail(
+                                                                        pedido,
+                                                                      ),
+                                                                  darkText:
+                                                                      _darkText,
+                                                                  mutedText:
+                                                                      _mutedText,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                            const SizedBox(
+                                                              height: 12,
+                                                            ),
+                                                            MerchantTopProductsCard(
+                                                              products:
+                                                                  topProducts,
+                                                              onSeeAll:
+                                                                  _openCurrentMenuManager,
+                                                              onAddProduct:
+                                                                  _openAddProduct,
+                                                            ),
+                                                            if (!_hideGrowBanner) ...[
+                                                              const SizedBox(
+                                                                height: 12,
+                                                              ),
+                                                              MerchantGrowBanner(
+                                                                onSeePlans:
+                                                                    _openBilling,
+                                                                onDismiss: () =>
+                                                                    setState(
+                                                                      () => _hideGrowBanner =
+                                                                          true,
+                                                                    ),
+                                                              ),
+                                                            ],
+                                                          ],
+                                                        ],
+                                                      );
+
+                                                      return Align(
+                                                        alignment:
+                                                            Alignment.topCenter,
+                                                        child: ConstrainedBox(
+                                                          constraints:
+                                                              BoxConstraints(
+                                                                maxWidth:
+                                                                    contentMaxWidth,
+                                                              ),
+                                                          child: list,
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                );
-                  },
-                );
-              },
-            ),
-                                );
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         );
       },
     );
@@ -2482,6 +2894,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       salesHistory: salesSeries.values,
       salesLabels: salesSeries.labels,
       salesTooltipLabels: salesSeries.tooltipLabels,
+      selectedRange: _selectedSalesRange,
       rangeLabel: _activeRangeLabel(),
       ordersLabel: ordersLabel,
       incomeLabel: incomeLabel,
@@ -2782,10 +3195,7 @@ class _DashboardHeader extends StatelessWidget {
         children: [
           greetingBlock,
           const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: actionButtons,
-          ),
+          Align(alignment: Alignment.centerRight, child: actionButtons),
         ],
       );
     }
@@ -2977,9 +3387,7 @@ class _CompactKpiCard extends StatelessWidget {
       mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
       children: [
         Icon(
-          isUp
-              ? Icons.arrow_drop_up_rounded
-              : Icons.arrow_drop_down_rounded,
+          isUp ? Icons.arrow_drop_up_rounded : Icons.arrow_drop_down_rounded,
           size: iconSize,
           color: trendColor,
         ),
@@ -3215,8 +3623,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
     final hasLogo = (businessLogoUrl ?? '').trim().isNotEmpty;
     final statusColor = businessOnline ? success : danger;
     final statusBackground = businessOnline
-      ? const Color(0xFFDDF7E7)
-      : const Color(0xFFFEE2E2);
+        ? const Color(0xFFDDF7E7)
+        : const Color(0xFFFEE2E2);
     final statusLabel = businessOnline ? 'Abierto' : 'Pausado';
 
     return LayoutBuilder(
@@ -3252,8 +3660,8 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
           padding: denseDesktop
               ? const EdgeInsets.fromLTRB(16, 14, 16, 14)
               : (isMobile
-                  ? const EdgeInsets.fromLTRB(14, 14, 14, 12)
-                  : const EdgeInsets.fromLTRB(18, 18, 18, 16)),
+                    ? const EdgeInsets.fromLTRB(14, 14, 14, 12)
+                    : const EdgeInsets.fromLTRB(18, 18, 18, 16)),
           decoration: BoxDecoration(
             color: background,
             borderRadius: BorderRadius.circular(22),
@@ -3375,9 +3783,7 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                           ),
                           Icon(
                             Icons.store_mall_directory_rounded,
-                            size: compactHeader
-                                ? 42
-                                : (denseDesktop ? 44 : 56),
+                            size: compactHeader ? 42 : (denseDesktop ? 44 : 56),
                             color: purple.withValues(alpha: 0.72),
                           ),
                         ],
@@ -3570,11 +3976,7 @@ class _BusinessActionTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 16,
-                color: accent,
-              ),
+              Icon(Icons.arrow_forward_ios_rounded, size: 16, color: accent),
             ],
           ),
         ),
@@ -3594,6 +3996,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
     this.salesHistory,
     this.salesLabels,
     this.salesTooltipLabels,
+    required this.selectedRange,
     required this.rangeLabel,
     required this.ordersLabel,
     required this.incomeLabel,
@@ -3613,6 +4016,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   final List<double>? salesHistory;
   final List<String>? salesLabels;
   final List<String>? salesTooltipLabels;
+  final _SalesRange selectedRange;
   final String rangeLabel;
   final String ordersLabel;
   final String incomeLabel;
@@ -3625,10 +4029,9 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasSalesData = salesToday > 0 || ordersToday > 0;
-    final chartData =
-        salesHistory == null || salesHistory!.isEmpty
-            ? const <double>[0, 0, 0, 0, 0, 0, 0]
-            : salesHistory!;
+    final chartData = salesHistory == null || salesHistory!.isEmpty
+        ? const <double>[0, 0, 0, 0, 0, 0, 0]
+        : salesHistory!;
     final labels =
         salesLabels ?? const <String>['L', 'M', 'X', 'J', 'V', 'S', 'D'];
     final tooltipLabels = salesTooltipLabels ?? labels;
@@ -3646,54 +4049,34 @@ class _CompactSalesSummaryCard extends StatelessWidget {
       builder: (context, constraints) {
         final isMobile = MediaQuery.sizeOf(context).width < 720;
 
-        final rangeSelector = PopupMenuButton<_SalesRange>(
-          onSelected: onRangeSelected,
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: _SalesRange.today, child: Text('Hoy')),
-            PopupMenuItem(
-              value: _SalesRange.yesterday,
-              child: Text('Ayer'),
-            ),
-            PopupMenuItem(
-              value: _SalesRange.lastWeek,
-              child: Text('Última semana'),
-            ),
-            PopupMenuItem(
-              value: _SalesRange.lastFortnight,
-              child: Text('Última quincena'),
-            ),
-            PopupMenuItem(
-              value: _SalesRange.thisMonth,
-              child: Text('Este mes'),
-            ),
-            PopupMenuItem(
-              value: _SalesRange.lastMonth,
-              child: Text('Último mes'),
-            ),
-            PopupMenuItem(
-              value: _SalesRange.last3Months,
-              child: Text('Últimos 3 meses'),
-            ),
-            PopupMenuItem(
-              value: _SalesRange.last6Months,
-              child: Text('Últimos 6 meses'),
-            ),
-            PopupMenuItem(
-              value: _SalesRange.lastYear,
-              child: Text('Último año'),
-            ),
-            PopupMenuItem(
-              value: _SalesRange.allTime,
-              child: Text('Desde el principio'),
-            ),
-            PopupMenuDivider(),
-            PopupMenuItem(
-              value: _SalesRange.custom,
-              child: Text('Personalizado'),
-            ),
-          ],
+        final rangeSelector = InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () async {
+            final selected = await showModalBottomSheet<_SalesRange>(
+              context: context,
+              showDragHandle: true,
+              builder: (sheetContext) => SafeArea(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: 12),
+                  children: _SalesRange.values
+                      .map(
+                        (range) => ListTile(
+                          title: Text(range.label),
+                          trailing: range == selectedRange
+                              ? const Icon(Icons.check_rounded)
+                              : null,
+                          onTap: () => Navigator.of(sheetContext).pop(range),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ),
+            );
+            if (selected != null) onRangeSelected(selected);
+          },
           child: Container(
-            height: 30,
+            height: 34,
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
               color: const Color(0xFFF8F8FD),
@@ -3701,6 +4084,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
               border: Border.all(color: const Color(0xFFE9EAF4)),
             ),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   rangeLabel,
@@ -3734,9 +4118,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              hasSalesData
-                  ? '\$${salesToday.toStringAsFixed(2)}'
-                  : '—',
+              hasSalesData ? '\$${salesToday.toStringAsFixed(2)}' : '—',
               style: GoogleFonts.poppins(
                 fontSize: isMobile ? 32 : 38,
                 height: 0.98,
@@ -3797,9 +4179,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
         final ticketCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: 'Ticket promedio',
-            value: hasSalesData
-                ? '\$${averageTicket.toStringAsFixed(2)}'
-                : '—',
+            value: hasSalesData ? '\$${averageTicket.toStringAsFixed(2)}' : '—',
             color: const Color(0xFF8B5CF6),
             icon: Icons.receipt_rounded,
           ),
@@ -3815,9 +4195,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
         final incomeCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: incomeLabel,
-            value: hasSalesData
-                ? '\$${salesToday.toStringAsFixed(2)}'
-                : '—',
+            value: hasSalesData ? '\$${salesToday.toStringAsFixed(2)}' : '—',
             color: const Color(0xFF22C55E),
             icon: Icons.attach_money_rounded,
           ),
@@ -3900,7 +4278,9 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                               salesToday <= 0 &&
                               ordersToday <= 0)
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
                               child: Text(
                                 emptyMessage!,
                                 textAlign: TextAlign.center,
@@ -3915,10 +4295,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                     ),
                   ],
                 ),
-              if (showMiniMetrics) ...[
-                const SizedBox(height: 12),
-                miniMetrics,
-              ],
+              if (showMiniMetrics) ...[const SizedBox(height: 12), miniMetrics],
             ],
           ),
         );
@@ -4289,7 +4666,7 @@ class _CompactBusinessInfoCard extends StatelessWidget {
       aiCreditsBalance % 1 == 0 ? 0 : 2,
     );
     final creditsLabel =
-      '$balanceText disponibles · Has usado ${aiCreditsUsed.toStringAsFixed(aiCreditsUsed % 1 == 0 ? 0 : 2)}';
+        '$balanceText disponibles · Has usado ${aiCreditsUsed.toStringAsFixed(aiCreditsUsed % 1 == 0 ? 0 : 2)}';
 
     Widget detailCard({
       required String label,
@@ -4355,9 +4732,7 @@ class _CompactBusinessInfoCard extends StatelessWidget {
       );
     }
 
-    Widget buildDetailFieldsLayout({
-      required double maxWidth,
-    }) {
+    Widget buildDetailFieldsLayout({required double maxWidth}) {
       const gap = 10.0;
       final canUseTwoColumns =
           maxWidth >= 520 && MediaQuery.sizeOf(context).width >= 720;
@@ -4494,9 +4869,7 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: const Color(0xFFF3EDFF),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: purple.withValues(alpha: 0.14),
-                  ),
+                  border: Border.all(color: purple.withValues(alpha: 0.14)),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -4636,7 +5009,8 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(16),
                                   ),
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
                                 ),
                                 label: Text(
                                   isLowCredits
@@ -4658,7 +5032,10 @@ class _CompactBusinessInfoCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
@@ -4670,10 +5047,11 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: (businessOnline
-                                ? const Color(0xFF16A34A)
-                                : const Color(0xFFEF4444))
-                            .withValues(alpha: 0.12),
+                        color:
+                            (businessOnline
+                                    ? const Color(0xFF16A34A)
+                                    : const Color(0xFFEF4444))
+                                .withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
