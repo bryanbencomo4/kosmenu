@@ -7,6 +7,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { OrderReceipt, OrderReceiptFrame } from './_components/OrderReceipt';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
 import { writeRepeatOrder, type RepeatOrderLine } from '../../_lib/repeat-order';
+import { nextPollDelayMs } from '../../_lib/poll-backoff';
 
 type OrderStatus =
   | 'pendiente'
@@ -629,7 +630,7 @@ function OrderTrackingPageInner() {
 
     const fetchOrder = async (mode: 'initial' | 'poll') => {
       if (mode === 'poll' && (whatsappPreferenceSavingRef.current || trackingFetchInFlightRef.current)) {
-        return;
+        return true;
       }
       trackingFetchInFlightRef.current = true;
 
@@ -639,7 +640,10 @@ function OrderTrackingPageInner() {
           setError(null);
         }
 
-        const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), { cache: 'no-store' });
+        const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(8_000),
+        });
         const payload = await response.json().catch(() => ({}));
 
         if (!active) return;
@@ -652,7 +656,7 @@ function OrderTrackingPageInner() {
           } else {
             setSyncMode('sin-senal');
           }
-          return;
+          return false;
         }
 
         const publicOrder = (payload?.data ?? null) as PublicTrackingPayload | null;
@@ -663,17 +667,19 @@ function OrderTrackingPageInner() {
           } else {
             setSyncMode('sin-senal');
           }
-          return;
+          return false;
         }
 
         applyPublic(publicOrder);
+        return true;
       } catch {
-        if (!active) return;
+        if (!active) return false;
         if (mode === 'initial') {
           setError('No se pudo cargar el pedido.');
         } else {
           setSyncMode('sin-senal');
         }
+        return false;
       } finally {
         trackingFetchInFlightRef.current = false;
         if (active && mode === 'initial') {
@@ -682,17 +688,33 @@ function OrderTrackingPageInner() {
       }
     };
 
-    void fetchOrder('initial');
+    let consecutiveFailures = 0;
+    let pollingTimer: number | undefined;
 
-    const pollingIntervalId = window.setInterval(() => {
-      if (!active) return;
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      void fetchOrder('poll');
-    }, 20_000);
+    const schedulePoll = (mode: 'initial' | 'poll') => {
+      void fetchOrder(mode).then((ok) => {
+        if (!active) return;
+        consecutiveFailures = ok ? 0 : consecutiveFailures + 1;
+        const delay = nextPollDelayMs(consecutiveFailures, 20_000);
+        const arm = () => {
+          pollingTimer = window.setTimeout(() => {
+            if (!active) return;
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+              arm();
+              return;
+            }
+            schedulePoll('poll');
+          }, delay);
+        };
+        arm();
+      });
+    };
+
+    schedulePoll('initial');
 
     return () => {
       active = false;
-      window.clearInterval(pollingIntervalId);
+      if (pollingTimer) window.clearTimeout(pollingTimer);
     };
   }, [orderId, tokenRecoveryChecked, trackingToken]);
 

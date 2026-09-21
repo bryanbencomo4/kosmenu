@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { CircuitOpenError } from '../../_lib/supabase-circuit';
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 import {
   isOwnerEmailVerified,
@@ -7,9 +8,15 @@ import {
   toPublicMenuResponseBody,
 } from '../_lib/load-public-menu';
 
+export const runtime = 'edge';
+export const maxDuration = 8;
+
 type Params = {
   params: Promise<{ comercioId: string }>;
 };
+
+const MENU_UNAVAILABLE =
+  'Estamos actualizando el menú. Intenta nuevamente en unos segundos.';
 
 export async function GET(_: Request, { params }: Params) {
   try {
@@ -53,9 +60,24 @@ export async function GET(_: Request, { params }: Params) {
       }
     }
 
-    return NextResponse.json(toPublicMenuResponseBody(menu), { status: 200 });
+    return NextResponse.json(toPublicMenuResponseBody(menu), {
+      status: 200,
+      headers: {
+        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+      },
+    });
   } catch (error) {
+    if (error instanceof CircuitOpenError) {
+      return NextResponse.json(
+        { error: MENU_UNAVAILABLE, code: 'MENU_UNAVAILABLE' },
+        { status: 503, headers: { 'Retry-After': '30' } },
+      );
+    }
     const message = error instanceof Error ? error.message : 'Failed to load menu.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const unavailable = /timeout|aborted|fetch failed/i.test(message);
+    return NextResponse.json(
+      { error: unavailable ? MENU_UNAVAILABLE : message, code: unavailable ? 'MENU_UNAVAILABLE' : undefined },
+      { status: unavailable ? 503 : 500 },
+    );
   }
 }

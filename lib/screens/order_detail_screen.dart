@@ -1734,6 +1734,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     ? 'Estado de tu pedido'
                     : 'Detalle de pedido',
               ),
+              leading: Navigator.of(context).canPop()
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.arrow_back),
+                      tooltip: 'Volver al panel',
+                      onPressed: () {
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          '/',
+                          (route) => false,
+                        );
+                      },
+                    ),
               actions: showPendingClock
                   ? [
                       Padding(

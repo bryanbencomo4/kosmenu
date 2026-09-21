@@ -46,7 +46,7 @@ class _QrGeneratorScreenState extends State<QrGeneratorScreen> {
   bool get _isProcessing => _busyAction != null;
 
   String get _menuUrl {
-    final resolved = getPublicMenuUrl(widget.comercio).trim();
+    final resolved = getPublicMenuQrUrl(widget.comercio).trim();
     if (resolved.isNotEmpty) {
       return resolved;
     }

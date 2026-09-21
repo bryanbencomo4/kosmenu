@@ -13,9 +13,8 @@ on:
 # Android/iOS runners are intentionally omitted from this gate.
 
 env:
-  # Pin explicitly — do not float on latest stable.
-  # Flutter 3.41+ ships Dart 3.11; pin a post-3.41 stable for sdk ^3.11.4.
-  FLUTTER_VERSION: "3.44.0"
+  # Pin to the same SDK as local FVM and production web deploy.
+  FLUTTER_VERSION: "3.41.6"
 
 jobs:
   flutter-preview:

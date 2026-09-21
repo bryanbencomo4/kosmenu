@@ -38,6 +38,24 @@ const DIRECTORY_SELECT =
 
 const FEATURED_ORDER_LOOKBACK_DAYS = 90;
 const FEATURED_CANDIDATE_LIMIT = 120;
+const FEATURED_CACHE_TTL_MS = 60_000;
+const VERIFY_BATCH_SIZE = 8;
+
+type Cached<T> = { exp: number; value: T };
+const featuredCache = new Map<number, Cached<PublicDirectoryBusiness[]>>();
+
+async function mapInBatches<T, R>(
+  items: T[],
+  size: number,
+  mapper: (item: T) => Promise<R>,
+) {
+  const out: R[] = [];
+  for (let index = 0; index < items.length; index += size) {
+    const chunk = items.slice(index, index + size);
+    out.push(...(await Promise.all(chunk.map(mapper))));
+  }
+  return out;
+}
 
 function toDirectoryBusiness(row: RawComercioRow): PublicDirectoryBusiness | null {
   const id = (row.id ?? '').toString().trim();
@@ -60,24 +78,19 @@ function toDirectoryBusiness(row: RawComercioRow): PublicDirectoryBusiness | nul
 
 async function filterVerifiedBusinesses(rows: RawComercioRow[]) {
   const supabase = getServiceSupabaseClient();
-  const verified: PublicDirectoryBusiness[] = [];
-
-  for (const row of rows) {
+  const mapped = await mapInBatches(rows, VERIFY_BATCH_SIZE, async (row) => {
     const ownerId = (row.owner_id ?? '').toString().trim();
     if (ownerId) {
       try {
         const ok = await isOwnerEmailVerified(supabase, ownerId);
-        if (!ok) continue;
+        if (!ok) return null;
       } catch {
         // Keep listing resilient if auth admin lookup is temporarily unavailable.
       }
     }
-
-    const mapped = toDirectoryBusiness(row);
-    if (mapped) verified.push(mapped);
-  }
-
-  return verified;
+    return toDirectoryBusiness(row);
+  });
+  return mapped.filter((entry): entry is PublicDirectoryBusiness => entry != null);
 }
 
 async function loadRecentOrderCounts(comercioIds: string[]) {
@@ -103,6 +116,11 @@ async function loadRecentOrderCounts(comercioIds: string[]) {
 }
 
 async function loadFeaturedDirectoryBusinesses(limit: number) {
+  const cached = featuredCache.get(limit);
+  if (cached && cached.exp > Date.now()) {
+    return cached.value;
+  }
+
   const supabase = getServiceSupabaseClient();
 
   const { data, error } = await supabase
@@ -118,8 +136,13 @@ async function loadFeaturedDirectoryBusinesses(limit: number) {
 
   const verified = await filterVerifiedBusinesses((data ?? []) as RawComercioRow[]);
   const orderCounts = await loadRecentOrderCounts(verified.map((entry) => entry.id));
-
-  return pickFeaturedDirectoryBusinesses(verified, orderCounts, limit);
+  const featured = pickFeaturedDirectoryBusinesses(
+    verified,
+    orderCounts,
+    limit,
+  ) as PublicDirectoryBusiness[];
+  featuredCache.set(limit, { exp: Date.now() + FEATURED_CACHE_TTL_MS, value: featured });
+  return featured;
 }
 
 export async function searchPublicDirectory(options: {

@@ -13,6 +13,7 @@ import 'package:kosmenu_app/models/upsell_config.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
+import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -966,6 +967,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   Future<void> _save() async {
     if (_isSaving) return;
+    if (!MerchantSession.canManageCatalog) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(MerchantSession.deniedMessage('modificar productos'))),
+      );
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isSaving = true);

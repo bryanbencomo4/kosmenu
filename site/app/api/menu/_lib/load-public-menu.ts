@@ -7,9 +7,47 @@ import {
   toPublicMetodosPagoDto,
 } from '../../_lib/public-menu-dto';
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
+import {
+  CircuitOpenError,
+  isTransientSupabaseFailure,
+  supabaseReadCircuit,
+} from '../../_lib/supabase-circuit';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const MENU_FRESH_MS = 30_000;
+const MENU_STALE_MS = 15 * 60_000;
+const MARKET_RATES_TTL_MS = 60_000;
+const OWNER_VERIFY_TTL_MS = 5 * 60_000;
+
+const CATEGORIA_SELECT = 'id,comercio_id,nombre,orden,icono,opciones_menu';
+const PRODUCTO_SELECT = [
+  'id',
+  'comercio_id',
+  'categoria_id',
+  'nombre',
+  'descripcion',
+  'precio',
+  'imagen_url',
+  'disponible',
+  'upsell_badge',
+  'precio_comparacion',
+  'upsell_enabled',
+  'orden',
+  'opciones_menu',
+].join(',');
+
+type Cached<T> = { exp: number; value: T };
+type MenuCacheEntry = {
+  freshUntil: number;
+  staleUntil: number;
+  value: LoadedPublicMenu | null;
+};
+
+const menuCache = new Map<string, MenuCacheEntry>();
+const ownerVerifiedCache = new Map<string, Cached<boolean>>();
+let marketRatesCache: Cached<unknown> | null = null;
 
 export function isMenuUuid(value: string) {
   return UUID_PATTERN.test(value);
@@ -35,7 +73,7 @@ export type LoadedPublicMenu = {
   bundles: unknown[];
 };
 
-const COMERCIO_SELECT = [
+const COMERCIO_COLUMNS = [
   'id',
   'slug',
   'nombre',
@@ -64,8 +102,98 @@ const COMERCIO_SELECT = [
   'exchange_rate_source',
   'exchange_rate_quote_currency',
   'horarios',
-  'branding_ia',
-].join(',');
+];
+
+function comercioSelect(includeFullBranding: boolean) {
+  return [
+    ...COMERCIO_COLUMNS,
+    includeFullBranding ? 'branding_ia' : 'branding_ia->config_negocio',
+  ].join(',');
+}
+
+function brandingForCheckout(row: Record<string, unknown>) {
+  if (row.branding_ia && typeof row.branding_ia === 'object') {
+    return row.branding_ia;
+  }
+  if (row.config_negocio != null) {
+    return { config_negocio: row.config_negocio };
+  }
+  return null;
+}
+
+function slimMarketRates(row: Record<string, unknown> | null | undefined) {
+  if (!row) return null;
+  const payload =
+    row.payload && typeof row.payload === 'object'
+      ? (row.payload as Record<string, unknown>)
+      : {};
+  return {
+    bcv_rate: row.bcv_rate ?? null,
+    p2p_binance_rate: row.p2p_binance_rate ?? null,
+    updated_at: row.updated_at ?? null,
+    payload: {
+      google_rates: payload.google_rates ?? row.google_rates ?? null,
+      bcv_rates: payload.bcv_rates ?? row.bcv_rates ?? null,
+    },
+  };
+}
+
+async function loadMarketRates(
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
+) {
+  if (marketRatesCache && marketRatesCache.exp > Date.now()) {
+    return marketRatesCache.value;
+  }
+
+  const slim = await supabase
+    .from('global_market_rates')
+    .select('bcv_rate, p2p_binance_rate, updated_at, payload->google_rates, payload->bcv_rates')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (slim.error) {
+    const full = await supabase
+      .from('global_market_rates')
+      .select('bcv_rate, p2p_binance_rate, payload, updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (full.error) {
+      throw new Error(full.error.message);
+    }
+    const value = slimMarketRates((full.data ?? null) as Record<string, unknown> | null);
+    marketRatesCache = { exp: Date.now() + MARKET_RATES_TTL_MS, value };
+    return value;
+  }
+
+  const value = slimMarketRates((slim.data ?? null) as Record<string, unknown> | null);
+  marketRatesCache = { exp: Date.now() + MARKET_RATES_TTL_MS, value };
+  return value;
+}
+
+async function loadComercioRow(
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
+  comercioId: string,
+) {
+  const query = (select: string) => {
+    const builder = supabase.from('comercios').select(select).limit(1);
+    return isMenuUuid(comercioId)
+      ? builder.eq('id', comercioId)
+      : builder.eq('slug', comercioId);
+  };
+
+  const slim = await query(comercioSelect(false));
+  if (!slim.error) {
+    return ((slim.data ?? [])[0] ?? null) as unknown as Record<string, unknown> | null;
+  }
+
+  const full = await query(comercioSelect(true));
+  if (full.error) {
+    throw new Error(full.error.message);
+  }
+  return ((full.data ?? [])[0] ?? null) as unknown as Record<string, unknown> | null;
+}
 
 export async function isOwnerEmailVerified(
   supabase: ReturnType<typeof getServiceSupabaseClient>,
@@ -76,12 +204,22 @@ export async function isOwnerEmailVerified(
     return false;
   }
 
+  const cached = ownerVerifiedCache.get(safeOwnerId);
+  if (cached && cached.exp > Date.now()) {
+    return cached.value;
+  }
+
   const { data, error } = await supabase.auth.admin.getUserById(safeOwnerId);
   if (error) {
     throw new Error(error.message);
   }
 
-  return Boolean(data.user?.email_confirmed_at);
+  const verified = Boolean(data.user?.email_confirmed_at);
+  ownerVerifiedCache.set(safeOwnerId, {
+    exp: Date.now() + OWNER_VERIFY_TTL_MS,
+    value: verified,
+  });
+  return verified;
 }
 
 /**
@@ -91,21 +229,45 @@ export async function isOwnerEmailVerified(
 export async function loadPublicMenuByIdentifier(
   comercioId: string,
 ): Promise<LoadedPublicMenu | null> {
-  const supabase = getServiceSupabaseClient();
-
-  const comercioQuery = supabase.from('comercios').select(COMERCIO_SELECT).limit(1);
-  const { data: comercios, error: comercioError } = isMenuUuid(comercioId)
-    ? await comercioQuery.eq('id', comercioId)
-    : await comercioQuery.eq('slug', comercioId);
-
-  if (comercioError) {
-    throw new Error(comercioError.message);
+  const cacheKey = comercioId.trim().toLowerCase();
+  const cached = menuCache.get(cacheKey);
+  if (cached && cached.freshUntil > Date.now()) {
+    return cached.value;
   }
 
-  const comercioRow = ((comercios ?? [])[0] ?? null) as unknown as Record<
-    string,
-    unknown
-  > | null;
+  if (!supabaseReadCircuit.allow()) {
+    if (cached && cached.staleUntil > Date.now()) {
+      return cached.value;
+    }
+    throw new CircuitOpenError();
+  }
+
+  try {
+    const loaded = await loadPublicMenuByIdentifierUncached(comercioId.trim());
+    supabaseReadCircuit.recordSuccess();
+    const now = Date.now();
+    menuCache.set(cacheKey, {
+      freshUntil: now + MENU_FRESH_MS,
+      staleUntil: now + MENU_STALE_MS,
+      value: loaded,
+    });
+    return loaded;
+  } catch (error) {
+    if (isTransientSupabaseFailure(error)) {
+      supabaseReadCircuit.recordFailure();
+      if (cached && cached.staleUntil > Date.now()) {
+        return cached.value;
+      }
+    }
+    throw error;
+  }
+}
+
+async function loadPublicMenuByIdentifierUncached(
+  comercioId: string,
+): Promise<LoadedPublicMenu | null> {
+  const supabase = getServiceSupabaseClient();
+  const comercioRow = await loadComercioRow(supabase, comercioId);
   if (!comercioRow) {
     return null;
   }
@@ -114,37 +276,32 @@ export async function loadPublicMenuByIdentifier(
   const ownerId = (comercioRow.owner_id ?? '').toString().trim();
   const isOnline = comercioRow.en_linea !== false;
   const comercio = toPublicComercioDto(comercioRow);
-  const checkoutExchange = extractPublicCheckoutExchange(comercioRow.branding_ia);
+  const checkoutExchange = extractPublicCheckoutExchange(brandingForCheckout(comercioRow));
 
   const [
     categoriasResult,
     productosResult,
     metodosPagoResult,
-    marketRatesResult,
+    marketRates,
     upsellSettingsResult,
     upsellRulesResult,
     bundlesResult,
   ] = await Promise.all([
     supabase
       .from('categorias')
-      .select('*')
+      .select(CATEGORIA_SELECT)
       .eq('comercio_id', resolvedComercioId)
       .order('orden', { ascending: true }),
     supabase
       .from('productos')
-      .select('*')
+      .select(PRODUCTO_SELECT)
       .eq('comercio_id', resolvedComercioId)
       .order('nombre', { ascending: true }),
     supabase
       .from('metodos_pago')
       .select('id,comercio_id,nombre,tipo,descripcion,detalles')
       .eq('comercio_id', resolvedComercioId),
-    supabase
-      .from('global_market_rates')
-      .select('bcv_rate, p2p_binance_rate, payload, updated_at')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    loadMarketRates(supabase).catch(() => marketRatesCache?.value ?? null),
     supabase
       .from('upsell_settings')
       .select('*')
@@ -171,20 +328,8 @@ export async function loadPublicMenuByIdentifier(
   if (metodosPagoResult.error) {
     throw new Error(metodosPagoResult.error.message);
   }
-  if (marketRatesResult.error) {
-    throw new Error(marketRatesResult.error.message);
-  }
-  if (upsellSettingsResult.error) {
-    throw new Error(upsellSettingsResult.error.message);
-  }
-  if (upsellRulesResult.error) {
-    throw new Error(upsellRulesResult.error.message);
-  }
-  if (bundlesResult.error) {
-    throw new Error(bundlesResult.error.message);
-  }
 
-  const productos = (productosResult.data ?? []).filter((producto: ProductoRow) => {
+  const productos = ((productosResult.data ?? []) as ProductoRow[]).filter((producto) => {
     if (typeof producto?.disponible === 'boolean') {
       return producto.disponible;
     }
@@ -201,10 +346,12 @@ export async function loadPublicMenuByIdentifier(
     productos,
     metodosPago: toPublicMetodosPagoDto(metodosPagoResult.data ?? []),
     checkoutExchange,
-    marketRates: marketRatesResult.data ?? null,
-    upsellSettings: (upsellSettingsResult.data ?? null) as Record<string, unknown> | null,
-    upsellRules: upsellRulesResult.data ?? [],
-    bundles: bundlesResult.data ?? [],
+    marketRates,
+    upsellSettings: upsellSettingsResult.error
+      ? null
+      : ((upsellSettingsResult.data ?? null) as Record<string, unknown> | null),
+    upsellRules: upsellRulesResult.error ? [] : upsellRulesResult.data ?? [],
+    bundles: bundlesResult.error ? [] : bundlesResult.data ?? [],
   };
 }
 

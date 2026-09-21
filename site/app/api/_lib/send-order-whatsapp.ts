@@ -21,54 +21,37 @@ type WasenderErrorPayload = {
 
 const DEFAULT_WASENDER_ENDPOINT = 'https://www.wasenderapi.com/api/send-message';
 
-function normalizeStatusLabel(status: string) {
-  const value = (status ?? '').toString().trim();
-  if (!value) return 'Pendiente';
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function messageLinesByStatus(status: string) {
-  const normalized = (status ?? '').toString().trim().toLowerCase();
-
-  switch (normalized) {
+export function statusNotificationTitle(status: string) {
+  switch ((status ?? '').toString().trim().toLowerCase()) {
     case 'confirmado':
-      return {
-        emoji: '✅',
-        headline: 'Tu pedido fue confirmado y ya entro en preparacion.',
-        detail: 'Muy pronto tendras una nueva actualizacion con el siguiente avance.',
-      };
+      return { emoji: '✅', label: 'Confirmado' };
     case 'preparando':
-      return {
-        emoji: '👨‍🍳',
-        headline: 'Tu pedido ya se esta preparando.',
-        detail: 'Estamos afinando los ultimos detalles para que todo salga perfecto.',
-      };
+      return { emoji: '👨‍🍳', label: 'Preparando' };
     case 'en_camino':
-      return {
-        emoji: '🛵',
-        headline: 'Tu pedido ya va en camino.',
-        detail: 'Te recomendamos estar atento al telefono o al punto de entrega.',
-      };
+      return { emoji: '🛵', label: 'En camino' };
     case 'entregado':
-      return {
-        emoji: '🎉',
-        headline: 'Tu pedido fue entregado con exito.',
-        detail: 'Gracias por confiar en elmenuxfa.com. Esperamos verte de nuevo pronto.',
-      };
+      return { emoji: '🎉', label: 'Entregado' };
     case 'cancelado':
-      return {
-        emoji: '⚠️',
-        headline: 'Tu pedido fue cancelado.',
-        detail: 'Si necesitas ayuda adicional, puedes comunicarte con el negocio desde el seguimiento.',
-      };
+      return { emoji: '⚠️', label: 'Cancelado' };
     case 'pendiente':
     default:
-      return {
-        emoji: '🧾',
-        headline: 'Recibimos tu pedido y ya quedo registrado correctamente.',
-        detail: 'Te avisaremos por aqui apenas cambie de estado.',
-      };
+      return { emoji: '🧾', label: 'Recibido' };
   }
+}
+
+export function buildCustomerOrderWhatsappText(input: {
+  orderId: string;
+  status: string;
+  trackingUrl: string;
+}) {
+  const title = statusNotificationTitle(input.status);
+  const orderId = (input.orderId ?? '').toString().trim();
+  const trackingUrl = (input.trackingUrl ?? '').toString().trim();
+
+  return [`${title.emoji} *${title.label}*`, orderId ? `#${orderId}` : '', '', trackingUrl]
+    .filter((line, index, lines) => line !== '' || lines[index + 1])
+    .join('\n')
+    .trim();
 }
 
 export function canSendOrderNotification() {
@@ -111,16 +94,8 @@ export async function sendOrderNotification(
   status: string,
   options?: SendOrderNotificationOptions,
 ): Promise<SendOrderNotificationResult> {
-  const apiKey = process.env.WASENDER_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error('WASENDER_API_KEY not configured.');
-  }
-
-  const endpoint = process.env.WASENDER_API_ENDPOINT?.trim() || DEFAULT_WASENDER_ENDPOINT;
   const recipient = normalizePhoneToE164(phone);
-  const safeCustomerName = (customerName ?? '').toString().trim() || 'cliente';
   const safeOrderId = (orderId ?? '').toString().trim();
-  const safeBusinessName = (options?.businessName ?? 'elmenuxfa.com').toString().trim() || 'elmenuxfa.com';
   const safeBusinessSlug = (options?.businessSlug ?? '').toString().trim();
 
   if (!safeOrderId) {
@@ -130,53 +105,67 @@ export async function sendOrderNotification(
   const businessUrl = safeBusinessSlug
     ? `${publicSiteUrl}/v/${encodeURIComponent(safeBusinessSlug)}`
     : publicSiteUrl;
-  const trackingUrl = (options?.trackingUrl ?? '').toString().trim() || `${businessUrl}/orders/${encodeURIComponent(safeOrderId)}`;
-  const statusLabel = normalizeStatusLabel(status);
-  const messageVariant = messageLinesByStatus(status);
-
-  const text = [
-    `Hola ${safeCustomerName} 👋`,
-    '',
-    `${messageVariant.emoji} *${safeBusinessName}*`,
-    `Pedido #${safeOrderId}`,
-    '',
-    `${messageVariant.headline}`,
-    `Estado actual: *${statusLabel}*.`,
-    `${messageVariant.detail}`,
-    '',
-    `🛍️ Negocio: ${businessUrl}`,
-    `🔎 Sigue tu pedido aqui: ${trackingUrl}`,
-    '',
-    'Gracias por ordenar con elmenuxfa.com ✨',
-  ].join('\n');
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      to: recipient,
-      text,
-    }),
+  const trackingUrl =
+    (options?.trackingUrl ?? '').toString().trim() ||
+    `${businessUrl}/orders/${encodeURIComponent(safeOrderId)}`;
+  const text = buildCustomerOrderWhatsappText({
+    orderId: safeOrderId,
+    status,
+    trackingUrl,
   });
 
-  const rawBody = await response.text();
-  let payload: unknown = null;
+  return sendWhatsappText(recipient, text);
+}
 
-  try {
-    payload = rawBody ? JSON.parse(rawBody) : null;
-  } catch {
-    payload = rawBody;
+export async function sendWhatsappText(
+  phone: string,
+  text: string,
+): Promise<SendOrderNotificationResult> {
+  const apiKey = process.env.WASENDER_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error('WASENDER_API_KEY not configured.');
   }
 
-  if (!response.ok) {
+  const endpoint = process.env.WASENDER_API_ENDPOINT?.trim() || DEFAULT_WASENDER_ENDPOINT;
+  const recipient = normalizePhoneToE164(phone);
+  let lastError = `WASenderAPI request failed.`;
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        to: recipient,
+        text,
+      }),
+    });
+
+    const rawBody = await response.text();
+    let payload: unknown = null;
+
+    try {
+      payload = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+      payload = rawBody;
+    }
+
+    if (response.ok) {
+      return {
+        ok: true,
+        recipient,
+        response: payload,
+      };
+    }
+
     const message = typeof payload === 'object' && payload !== null
       ? (((payload as WasenderErrorPayload).message ?? (payload as WasenderErrorPayload).error ?? '').toString())
       : String(payload ?? '');
     const normalizedMessage = message.toLowerCase();
+    lastError = message || `WASenderAPI request failed with status ${response.status}.`;
 
     if (response.status === 401 || response.status === 403) {
       throw new Error('WASenderAPI rejected the credentials. Check or renew the API key.');
@@ -192,12 +181,10 @@ export async function sendOrderNotification(
       throw new Error(`Invalid WhatsApp number: ${recipient}.`);
     }
 
-    throw new Error(message || `WASenderAPI request failed with status ${response.status}.`);
+    if (attempt === 2 || (response.status !== 429 && response.status < 500)) {
+      break;
+    }
   }
 
-  return {
-    ok: true,
-    recipient,
-    response: payload,
-  };
+  throw new Error(lastError);
 }

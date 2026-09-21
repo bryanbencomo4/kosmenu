@@ -13,19 +13,21 @@ import {
   generatePublicTrackingToken,
   hashPublicTrackingToken,
 } from '../_lib/order-tracking-token';
-import { dispatchOrderNotification } from '../_lib/dispatch-order-notification';
 import {
   consumeRateLimit,
   getClientIp,
 } from '../_lib/rate-limit';
-import {
-  canSendMerchantNewOrderEmail,
-  sendMerchantNewOrderEmail,
-} from '../_lib/send-merchant-new-order-email';
+import { ensureNewOrderMerchantNotify } from '../_lib/ensure-new-order-merchant-notify';
 import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
 import { getServiceSupabaseClient } from '../_lib/supabase-server';
 import { evaluateBusinessOrdering } from '../_lib/business-hours';
-import { appSiteUrl } from '../../_lib/public-site-config';
+import { merchantPanelOrderHref } from '../../_lib/public-site-config';
+import {
+  isTransientSupabaseFailure,
+  supabaseWriteCircuit,
+} from '../_lib/supabase-circuit';
+
+export const maxDuration = 10;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -227,6 +229,17 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!supabaseWriteCircuit.allow()) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'service_unavailable',
+          message: 'Estamos actualizando el sistema. Intenta el pedido de nuevo en unos segundos.',
+        },
+        { status: 503, headers: { 'Retry-After': '30' } },
+      );
+    }
+
     const body = (await request.json()) as CreateOrderPayload;
 
     const incomingDetalles = (body.detalles ?? {}) as Record<string, unknown>;
@@ -308,6 +321,33 @@ export async function POST(request: Request) {
         );
       }
       if (existing.status === 'hit') {
+        const cached = existing.response as {
+          data?: { orderId?: string; comercioId?: string };
+        };
+        const cachedOrderId = (cached.data?.orderId ?? '').toString().trim();
+        const cachedComercioId = (cached.data?.comercioId ?? '').toString().trim();
+        if (cachedOrderId && cachedComercioId) {
+          const supabase = getServiceSupabaseClient();
+          const currency = validated.moneda_checkout;
+          const currencySymbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency;
+          const replayTotal = validated.items.reduce((sum, item) => sum + item.cantidad * item.precio, 0)
+            + (Number.isFinite(validated.costo_delivery) ? Math.max(validated.costo_delivery, 0) : 0);
+          const replayTotalCheckout = convertFromCop(replayTotal, currency, validated.tasa_cambio_snapshot);
+          await ensureNewOrderMerchantNotify({
+            supabase,
+            comercioId: cachedComercioId,
+            orderId: cachedOrderId,
+            customerName: validated.cliente_nombre,
+            totalLabel: `${currencySymbol} ${replayTotalCheckout.toFixed(2)}`,
+            comercioNombreFallback: (body.comercioNombre ?? 'Kosmenu').trim() || 'Kosmenu',
+            appOrderUrl: merchantPanelOrderHref(cachedOrderId),
+          }).catch((error) => {
+            console.error('[orders] merchant notify replay failed', {
+              orderId: cachedOrderId,
+              message: error instanceof Error ? error.message : 'unknown',
+            });
+          });
+        }
         return NextResponse.json(existing.response, { status: 200 });
       }
     }
@@ -488,56 +528,6 @@ export async function POST(request: Request) {
       whatsappStatus = 'queued';
     }
 
-    void dispatchOrderNotification({
-      type: 'INSERT',
-      record: insertedOrder,
-    }).catch((error) => {
-      console.error('[orders] notify-order dispatch failed', {
-        orderId,
-        message: error instanceof Error ? error.message : 'unknown',
-      });
-    });
-
-    if (canSendMerchantNewOrderEmail()) {
-      void (async () => {
-        try {
-          const { data: comercioOwner, error: ownerError } = await supabase
-            .from('comercios')
-            .select('owner_id,nombre')
-            .eq('id', resolvedComercioId)
-            .maybeSingle();
-
-          const ownerId = comercioOwner?.owner_id?.toString().trim() ?? '';
-          if (ownerError || !ownerId) {
-            return;
-          }
-
-          const { data: ownerAuth, error: authError } = await supabase.auth.admin.getUserById(ownerId);
-          const merchantEmail = ownerAuth?.user?.email?.trim().toLowerCase() ?? '';
-          if (authError || !merchantEmail) {
-            return;
-          }
-
-          const currencySymbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency;
-          const totalLabel = `${currencySymbol} ${totalCheckout.toFixed(2)}`;
-
-          await sendMerchantNewOrderEmail({
-            merchantEmail,
-            comercioNombre: comercioOwner?.nombre?.toString().trim() || comercioNombre,
-            orderId,
-            customerName: clientName,
-            totalLabel,
-            appOrderUrl: `${appSiteUrl.replace(/\/$/, '')}/?order=${encodeURIComponent(orderId)}`,
-          });
-        } catch (error) {
-          console.error('[orders] merchant new-order email failed', {
-            orderId,
-            message: error instanceof Error ? error.message : 'unknown',
-          });
-        }
-      })();
-    }
-
     const responseBody = {
       ok: true as const,
       data: {
@@ -563,9 +553,34 @@ export async function POST(request: Request) {
       });
     }
 
+    const currencySymbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency;
+    const totalLabel = `${currencySymbol} ${totalCheckout.toFixed(2)}`;
+    await ensureNewOrderMerchantNotify({
+      supabase,
+      record: insertedOrder,
+      comercioId: resolvedComercioId,
+      orderId,
+      customerName: clientName,
+      totalLabel,
+      comercioNombreFallback: comercioNombre,
+      appOrderUrl: merchantPanelOrderHref(orderId),
+    });
+
+    supabaseWriteCircuit.recordSuccess();
     return NextResponse.json(responseBody, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create order.';
+    if (isTransientSupabaseFailure(error)) {
+      supabaseWriteCircuit.recordFailure();
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'service_unavailable',
+          message: 'Estamos actualizando el sistema. Intenta el pedido de nuevo en unos segundos.',
+        },
+        { status: 503, headers: { 'Retry-After': '30' } },
+      );
+    }
     if (message.includes('Missing environment variable: SUPABASE_SERVICE_ROLE_KEY')) {
       console.error('[orders] privileged supabase client unavailable');
       return NextResponse.json({ ok: false, error: 'unavailable' }, { status: 503 });

@@ -114,6 +114,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   static const String _exchangeModeAuto = 'auto';
   static const String _exchangeModeManual = 'manual';
   static const String _exchangeSourceBcv = 'bcv';
+  static const String _exchangeSourceBcvEur = 'bcv_eur';
+  static const String _exchangeSourceBcvUsd = 'bcv_usd';
   static const String _exchangeSourceP2pBinance = 'p2p_binance';
   static const String _exchangeSourceGoogle = 'google';
   static const String _menuAiModeScan = 'scan';
@@ -245,11 +247,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String? _exchangeRateMessage;
   bool _exchangeRateIsError = false;
   String _exchangeRateMode = _exchangeModeAuto;
-  String _exchangeRateSource = _exchangeSourceBcv;
+  String _exchangeRateSource = _exchangeSourceBcvEur;
   final Map<String, String> _exchangeRateModeByCurrency = <String, String>{};
   final Map<String, String> _exchangeRateSourceByCurrency = <String, String>{};
   final Map<String, double> _marketRates = <String, double>{
-    _exchangeSourceBcv: 477.1488,
+    _exchangeSourceBcv: 300.2144,
+    _exchangeSourceBcvUsd: 300.2144,
+    _exchangeSourceBcvEur: 351.2262,
     _exchangeSourceP2pBinance: 630.6,
   };
   final Map<String, double> _googleAnchorRates = Map<String, double>.from(
@@ -795,11 +799,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
     final source =
         (raw?['exchange_rate_source']?.toString().trim().toLowerCase() ?? '');
-    if (source == _exchangeSourceBcv ||
-        source == _exchangeSourceP2pBinance ||
-        source == _exchangeSourceGoogle) {
-      _exchangeRateSource = source;
-      _exchangeRateSourceByCurrency[_activeCheckoutCurrency] = source;
+    if (source == _exchangeSourceP2pBinance ||
+        source == _exchangeSourceGoogle ||
+        _isBcvSource(source)) {
+      _exchangeRateSource = _canonicalExchangeSource(source);
+      _exchangeRateSourceByCurrency[_activeCheckoutCurrency] =
+          _exchangeRateSource;
     }
 
     if (dynamicRate > 0) {
@@ -842,6 +847,50 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return direct || reverse;
   }
 
+  bool _isBcvSource(String source) {
+    final normalized = source.trim().toLowerCase();
+    return normalized == _exchangeSourceBcv ||
+        normalized == _exchangeSourceBcvEur ||
+        normalized == _exchangeSourceBcvUsd;
+  }
+
+  String _canonicalExchangeSource(String source) {
+    final normalized = source.trim().toLowerCase();
+    if (normalized == _exchangeSourceBcvEur) {
+      return _exchangeSourceBcvEur;
+    }
+    if (normalized == _exchangeSourceBcv ||
+        normalized == _exchangeSourceBcvUsd) {
+      return _exchangeSourceBcvUsd;
+    }
+    return normalized;
+  }
+
+  bool _isKnownExchangeSource(String source) {
+    final canonical = _canonicalExchangeSource(source);
+    return canonical == _exchangeSourceBcvEur ||
+        canonical == _exchangeSourceBcvUsd ||
+        canonical == _exchangeSourceP2pBinance ||
+        canonical == _exchangeSourceGoogle;
+  }
+
+  String _providerStatusKey(String source) {
+    return _isBcvSource(source) ? _exchangeSourceBcv : source;
+  }
+
+  double _bcvVesRate(String source) {
+    final canonical = _canonicalExchangeSource(source);
+    if (canonical == _exchangeSourceBcvEur) {
+      final eur = _marketRates[_exchangeSourceBcvEur] ?? 0;
+      if (eur > 0) {
+        return eur;
+      }
+    }
+    return _marketRates[_exchangeSourceBcvUsd] ??
+        _marketRates[_exchangeSourceBcv] ??
+        0;
+  }
+
   bool _canUseBcvSourceForPair({
     required String quoteCurrency,
     String? baseCurrency,
@@ -860,10 +909,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   bool _isBcvPairAvailable(String quoteCurrency) {
     return _canUseBcvSourceForPair(quoteCurrency: quoteCurrency) &&
-        _canDeriveExchangeRateFromSource(
-          _exchangeSourceBcv,
-          quoteCurrency: quoteCurrency,
-        );
+        (_bcvVesRate(_exchangeSourceBcvEur) > 0 ||
+            _bcvVesRate(_exchangeSourceBcvUsd) > 0);
   }
 
   bool _isP2pPairAvailable(String quoteCurrency) {
@@ -885,7 +932,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   List<String> _availableAutoSourcesForCurrency(String quoteCurrency) {
     final sources = <String>[];
     if (_isBcvPairAvailable(quoteCurrency)) {
-      sources.add(_exchangeSourceBcv);
+      sources.add(_exchangeSourceBcvEur);
+      sources.add(_exchangeSourceBcvUsd);
     }
     if (_isP2pPairAvailable(quoteCurrency)) {
       sources.add(_exchangeSourceP2pBinance);
@@ -909,6 +957,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final available = _availableAutoSourcesForCurrency(currency);
     final savedMode = _exchangeRateModeByCurrency[currency];
     final savedSource = _exchangeRateSourceByCurrency[currency];
+    final canonicalSaved = savedSource == null
+        ? null
+        : _canonicalExchangeSource(savedSource);
 
     _exchangeRateMode =
         (savedMode == _exchangeModeAuto || savedMode == _exchangeModeManual)
@@ -917,8 +968,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               ? _exchangeModeAuto
               : _exchangeModeManual);
 
-    if (savedSource != null && available.contains(savedSource)) {
-      _exchangeRateSource = savedSource;
+    if (canonicalSaved != null && available.contains(canonicalSaved)) {
+      _exchangeRateSource = canonicalSaved;
       return;
     }
 
@@ -927,7 +978,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return;
     }
 
-    _exchangeRateSource = _exchangeSourceBcv;
+    _exchangeRateSource = _exchangeSourceBcvEur;
   }
 
   void _enforceExchangeRulesForCurrency(String currency) {
@@ -1295,10 +1346,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final draftSource = (map['exchangeRateSource'] as String? ?? '')
           .trim()
           .toLowerCase();
-      if (draftSource == _exchangeSourceBcv ||
-          draftSource == _exchangeSourceP2pBinance ||
-          draftSource == _exchangeSourceGoogle) {
-        _exchangeRateSource = draftSource;
+      if (draftSource == _exchangeSourceP2pBinance ||
+          draftSource == _exchangeSourceGoogle ||
+          _isBcvSource(draftSource)) {
+        _exchangeRateSource = _canonicalExchangeSource(draftSource);
       }
 
       _exchangeRateModeByCurrency.clear();
@@ -1329,12 +1380,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           if (!_currencies.contains(currencyCode)) {
             continue;
           }
-          if (source != _exchangeSourceBcv &&
-              source != _exchangeSourceP2pBinance &&
-              source != _exchangeSourceGoogle) {
+          if (!_isKnownExchangeSource(source)) {
             continue;
           }
-          _exchangeRateSourceByCurrency[currencyCode] = source;
+          _exchangeRateSourceByCurrency[currencyCode] =
+              _canonicalExchangeSource(source);
         }
       } else {
         _exchangeRateSourceByCurrency[_activeCheckoutCurrency] =
@@ -1344,6 +1394,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final draftBcv = _parseExchangeRate(map['marketRateBcv']);
       if (draftBcv > 0) {
         _marketRates[_exchangeSourceBcv] = draftBcv;
+        _marketRates[_exchangeSourceBcvUsd] = draftBcv;
+      }
+      final draftBcvEur = _parseExchangeRate(map['marketRateBcvEur']);
+      if (draftBcvEur > 0) {
+        _marketRates[_exchangeSourceBcvEur] = draftBcvEur;
       }
       final draftP2p = _parseExchangeRate(map['marketRateP2p']);
       if (draftP2p > 0) {
@@ -1573,7 +1628,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'exchangeRateSource': _exchangeRateSource,
       'exchangeRateModes': _exchangeRateModeByCurrency,
       'exchangeRateSources': _exchangeRateSourceByCurrency,
-      'marketRateBcv': _marketRates[_exchangeSourceBcv],
+      'marketRateBcv': _marketRates[_exchangeSourceBcvUsd] ??
+          _marketRates[_exchangeSourceBcv],
+      'marketRateBcvEur': _marketRates[_exchangeSourceBcvEur],
       'marketRateP2p': _marketRates[_exchangeSourceP2pBinance],
       'marketRateGoogleUsdCop': _googleAnchorRates['USD/COP'],
       'marketRateGoogleUsdEur': _googleAnchorRates['USD/EUR'],

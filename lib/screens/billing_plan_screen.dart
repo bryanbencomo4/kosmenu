@@ -8,19 +8,22 @@ import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/billing_gift_card_screen.dart';
-import 'package:kosmenu_app/screens/billing_manual_payment_screen.dart';
+import 'package:kosmenu_app/screens/billing_pago_movil_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/payment_catalog.dart';
-import 'package:kosmenu_app/widgets/payment_method_mark.dart';
+import 'package:kosmenu_app/widgets/billing_plan_checkout.dart';
+import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
+import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Plan selection + pay with crypto (Zeno hosted checkout).
 class BillingPlanScreen extends StatefulWidget {
-  const BillingPlanScreen({super.key, this.initialSnapshot});
+  const BillingPlanScreen({super.key, this.initialSnapshot, this.embedded = false});
 
   final BillingSnapshot? initialSnapshot;
+  final bool embedded;
 
   @override
   State<BillingPlanScreen> createState() => _BillingPlanScreenState();
@@ -32,6 +35,8 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
   bool _paying = false;
   bool _cancelling = false;
   String? _error;
+  String? _selectedCode;
+  Timer? _activationPoll;
 
   @override
   void initState() {
@@ -39,7 +44,9 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
     _future = _loadContext(initial: widget.initialSnapshot);
   }
 
-  Future<BillingCheckoutContext> _loadContext({BillingSnapshot? initial}) async {
+  Future<BillingCheckoutContext> _loadContext({
+    BillingSnapshot? initial,
+  }) async {
     if (initial != null && !initial.requiresPaymentToPublish) {
       return _billing.loadCheckoutContext();
     }
@@ -56,6 +63,42 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
       } catch (_) {}
     }
     return _billing.loadCheckoutContext();
+  }
+
+  @override
+  void dispose() {
+    _activationPoll?.cancel();
+    super.dispose();
+  }
+
+  void _watchActivation(BillingCheckoutContext checkout) {
+    final pending = checkout.pendingSubmission;
+    final shouldPoll =
+        pending != null &&
+        pending.methodCode == 'pago_movil' &&
+        checkout.snapshot.requiresPaymentToPublish;
+    if (!shouldPoll) {
+      _activationPoll?.cancel();
+      _activationPoll = null;
+      return;
+    }
+    if (_activationPoll != null) return;
+    _activationPoll = Timer.periodic(const Duration(seconds: 4), (_) async {
+      try {
+        final next = await _billing.loadCheckoutContext();
+        if (!mounted) return;
+        if (next.snapshot.hasActiveSubscription) {
+          _activationPoll?.cancel();
+          await Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => const BillingPaymentSuccessScreen(),
+            ),
+          );
+          return;
+        }
+        setState(() => _future = Future.value(next));
+      } catch (_) {}
+    });
   }
 
   Future<void> _reload() async {
@@ -79,15 +122,16 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
     await _reload();
   }
 
-  Future<void> _openManual(
+  Future<void> _openPagoMovil(
     PaymentMethodCatalog method,
     BillingCheckoutContext contextData,
   ) async {
     final sent = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => BillingManualPaymentScreen(
+        builder: (_) => BillingPagoMovilScreen(
           method: method,
           plan: contextData.snapshot.plan,
+          bcvRate: contextData.bcvRate,
           hasPendingSubmission: contextData.pendingSubmission != null,
         ),
       ),
@@ -96,11 +140,56 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
     if (sent == true) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Pago enviado. Te avisamos cuando lo revisemos.'),
+          content: Text(
+            'Pago registrado. Estamos confirmándolo automáticamente.',
+          ),
         ),
       );
     }
     await _reload();
+  }
+
+  Future<void> _continueWith(BillingCheckoutContext checkout) async {
+    PaymentMethodCatalog? method;
+    for (final item in checkoutPaymentMethods(checkout.methods)) {
+      if (item.code == _selectedCode) {
+        method = item;
+        break;
+      }
+    }
+    if (method == null) {
+      setState(() => _error = 'Elige un método de pago para continuar.');
+      return;
+    }
+    if (method.isCrypto) {
+      await _pay(checkout.snapshot);
+      return;
+    }
+    if (method.isGiftCard) {
+      await _openGiftCard(method);
+      return;
+    }
+    if (method.isPagoMovil) {
+      if (checkout.bcvRate == null || checkout.bcvRate! <= 0) {
+        setState(
+          () =>
+              _error = 'No pudimos leer la tasa BCV. Reintenta en un momento.',
+        );
+        return;
+      }
+      await _openPagoMovil(method, checkout);
+    }
+  }
+
+  Future<void> _openHelp() async {
+    final uri = Uri.parse(
+      'https://wa.me/584148216433?text=${Uri.encodeComponent('Hola, necesito ayuda con Plan y facturación en elmenuxfa.com.')}',
+    );
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  void _goToDashboard() {
+    goToMerchantDashboard(context);
   }
 
   Future<void> _cancelPending(PaymentSubmission submission) async {
@@ -154,281 +243,72 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       backgroundColor: AppColors.canvas,
-      appBar: AppBar(
-        title: Text(
-          'Plan y facturación',
-          style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
-        ),
+      body: FutureBuilder<BillingCheckoutContext>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return _ErrorState(message: '${snapshot.error}', onRetry: _reload);
+          }
+
+          final checkout = snapshot.data!;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _watchActivation(checkout);
+          });
+
+          return BillingPlanCheckoutView(
+            checkout: checkout,
+            showAppHeader: !widget.embedded,
+            selectedCode: _selectedCode,
+            paying: _paying,
+            cancelling: _cancelling,
+            error: _error,
+            onSelectMethod: (code) {
+              setState(() {
+                _selectedCode = code;
+                _error = null;
+              });
+            },
+            onContinue: () => _continueWith(checkout),
+            onCancelPending: () {
+              final pending = checkout.pendingSubmission;
+              if (pending != null) _cancelPending(pending);
+            },
+            onDashboard: _goToDashboard,
+            onHelp: _openHelp,
+            onRetryCrypto: () => _pay(checkout.snapshot),
+          );
+        },
       ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: FutureBuilder<BillingCheckoutContext>(
-              future: _future,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return _ErrorState(
-                    message: '${snapshot.error}',
-                    onRetry: _reload,
-                  );
-                }
+    );
+  }
+}
 
-                final checkout = snapshot.data!;
-                final data = checkout.snapshot;
-                final plan = data.plan;
-                final sub = data.subscription;
-                final payment = data.latestPayment;
-                final automatic = automaticPaymentMethods(checkout.methods);
-                final manual = manualPaymentMethods(checkout.methods);
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.message, required this.onRetry});
 
-                return ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    _SectionCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            plan?.name ?? 'Menú Digital',
-                            style: GoogleFonts.manrope(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textStrong,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            plan?.description ??
-                                'Publica tu menú con QR y panel de administración.',
-                            style: GoogleFonts.manrope(
-                              color: AppColors.textSoft,
-                              height: 1.4,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            plan?.priceLabel ?? '\$10 USD',
-                            style: GoogleFonts.manrope(
-                              fontSize: 32,
-                              fontWeight: FontWeight.w800,
-                              color: colorScheme.primary,
-                            ),
-                          ),
-                          Text(
-                            '/ mes · elige como pagar',
-                            style: GoogleFonts.manrope(
-                              color: AppColors.textSoft,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _SectionCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Estado de suscripción',
-                            style: GoogleFonts.manrope(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          _StatusChip(
-                            label: _statusLabel(data),
-                            tone: _statusTone(data),
-                          ),
-                          if (sub?.currentPeriodEnd != null) ...[
-                            const SizedBox(height: 10),
-                            Text(
-                              'Próxima renovación: ${_formatDate(sub!.currentPeriodEnd!)}',
-                              style: GoogleFonts.manrope(
-                                color: AppColors.textSoft,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                          if (data.requiresPaymentToPublish) ...[
-                            const SizedBox(height: 10),
-                            Text(
-                              'Tu menú está deshabilitado hasta que actives el plan. '
-                              'Elige un metodo de verificacion automatica o envia un pago para revision.',
-                              style: GoogleFonts.manrope(
-                                color: AppColors.textSoft,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                          if (payment?.status == 'partially_paid') ...[
-                            const SizedBox(height: 10),
-                            Text(
-                              'Recibimos un pago parcial. Contacta soporte para completar la activación.',
-                              style: GoogleFonts.manrope(
-                                color: AppColors.warning,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (_error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Text(
-                          _error!,
-                          style: GoogleFonts.manrope(
-                            color: AppColors.danger,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    if (checkout.pendingSubmission != null) ...[
-                      _PendingReviewCard(
-                        submission: checkout.pendingSubmission!,
-                        methods: checkout.methods,
-                        cancelling: _cancelling,
-                        onCancel: () =>
-                            _cancelPending(checkout.pendingSubmission!),
-                      ),
-                      const SizedBox(height: 16),
-                    ] else if (checkout.latestSubmission?.isRejected == true) ...[
-                      _RejectedReviewCard(
-                        submission: checkout.latestSubmission!,
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                    _MethodGroup(
-                      title: 'Verificacion automatica',
-                      subtitle:
-                          'Se activa solo. No subas comprobante ni esperes revision.',
-                      tone: AppColors.success,
-                      children: automatic
-                          .map(
-                            (method) => _MethodTile(
-                              method: method,
-                              busy: _paying,
-                              onTap: () {
-                                if (method.isCrypto) {
-                                  _pay(data);
-                                  return;
-                                }
-                                if (method.isGiftCard) {
-                                  _openGiftCard(method);
-                                }
-                              },
-                            ),
-                          )
-                          .toList(growable: false),
-                    ),
-                    const SizedBox(height: 14),
-                    _MethodGroup(
-                      title: 'Verificacion manual',
-                      subtitle:
-                          'Paga, envia el comprobante y un administrador lo revisa.',
-                      tone: AppColors.warning,
-                      children: manual
-                          .map(
-                            (method) => _MethodTile(
-                              method: method,
-                              busy: _paying || checkout.pendingSubmission != null,
-                              onTap: () => _openManual(method, checkout),
-                            ),
-                          )
-                          .toList(growable: false),
-                    ),
-                    if (manual.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          'Los metodos manuales aparecen cuando un administrador carga los datos de la cuenta.',
-                          style: GoogleFonts.manrope(
-                            color: AppColors.textSoft,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 16),
-                    if (data.hasActiveSubscription) ...[
-                      FilledButton(
-                        onPressed: () {
-                          Navigator.of(context).pushAndRemoveUntil(
-                            MaterialPageRoute(
-                              builder: (_) => const AdminDashboardScreen(),
-                            ),
-                            (route) => false,
-                          );
-                        },
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(52),
-                        ),
-                        child: Text(
-                          'Ir al panel',
-                          style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                    ],
-                    if (data.requiresPaymentToPublish) ...[
-                      const SizedBox(height: 10),
-                      OutlinedButton(
-                        onPressed: () {
-                          Navigator.of(context).pushAndRemoveUntil(
-                            MaterialPageRoute(
-                              builder: (_) => const AdminDashboardScreen(),
-                            ),
-                            (route) => false,
-                          );
-                        },
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(48),
-                        ),
-                        child: Text(
-                          'Continuar editando borrador',
-                          style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ],
-                    if (payment != null &&
-                        (payment.status == 'expired' ||
-                            payment.status == 'failed' ||
-                            payment.status == 'partially_paid')) ...[
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: _paying ? null : () => _pay(data),
-                        child: Text(
-                          'Generar nuevo checkout de Binance Pay',
-                          style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Text(
-                      'Binance Pay y las tarjetas de regalo se confirman solas. '
-                      'Los demas metodos los revisa un administrador. WhatsApp es solo soporte.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.manrope(
-                        color: AppColors.textSoft,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.manrope(color: AppColors.danger),
           ),
-        ),
+          const SizedBox(height: 12),
+          FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
+        ],
       ),
     );
   }
@@ -496,7 +376,8 @@ class _BillingPaymentPendingScreenState
         });
       } else if (payment?.status == 'expired') {
         setState(() {
-          _message = 'El checkout venció. Genera uno nuevo desde Plan y facturación.';
+          _message =
+              'El checkout venció. Genera uno nuevo desde Plan y facturación.';
         });
       } else {
         setState(() => _message = 'Esperando confirmación del pago…');
@@ -758,7 +639,13 @@ class _BillingPaymentSuccessScreenState
                     ),
                     TextButton(
                       onPressed: () {
-                        Navigator.of(context).pushAndRemoveUntil(
+                        final scope = MerchantShellScope.maybeOf(context);
+                        if (scope != null) {
+                          scope.onSelect(MerchantNavDestination.plan);
+                          scope.onResetContent();
+                          return;
+                        }
+                        Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
                           MaterialPageRoute(
                             builder: (_) => const BillingPlanScreen(),
                           ),
@@ -807,8 +694,9 @@ class _BillingPaymentSuccessScreenState
                         icon: const Icon(Icons.copy_rounded, size: 18),
                         label: Text(
                           'Copiar URL',
-                          style:
-                              GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                          style: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
@@ -829,8 +717,9 @@ class _BillingPaymentSuccessScreenState
                         icon: const Icon(Icons.qr_code_2_rounded),
                         label: Text(
                           'Ver código QR',
-                          style:
-                              GoogleFonts.manrope(fontWeight: FontWeight.w800),
+                          style: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     if (_menuUrl != null) ...[
@@ -844,20 +733,16 @@ class _BillingPaymentSuccessScreenState
                         },
                         child: Text(
                           'Abrir menú público',
-                          style:
-                              GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                          style: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () {
-                        Navigator.of(context).pushAndRemoveUntil(
-                          MaterialPageRoute(
-                            builder: (_) => const AdminDashboardScreen(),
-                          ),
-                          (route) => false,
-                        );
+                        goToMerchantDashboard(context);
                       },
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(48),
@@ -875,315 +760,6 @@ class _BillingPaymentSuccessScreenState
         ),
       ),
     );
-  }
-}
-
-class _MethodGroup extends StatelessWidget {
-  const _MethodGroup({
-    required this.title,
-    required this.subtitle,
-    required this.tone,
-    required this.children,
-  });
-
-  final String title;
-  final String subtitle;
-  final Color tone;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: GoogleFonts.manrope(
-              fontWeight: FontWeight.w800,
-              fontSize: 16,
-              color: tone,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: GoogleFonts.manrope(
-              color: AppColors.textSoft,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (children.isEmpty)
-            Text(
-              'No hay metodos activos en este grupo.',
-              style: GoogleFonts.manrope(color: AppColors.textSoft),
-            )
-          else
-            ...children,
-        ],
-      ),
-    );
-  }
-}
-
-class _MethodTile extends StatelessWidget {
-  const _MethodTile({
-    required this.method,
-    required this.onTap,
-    this.busy = false,
-  });
-
-  final PaymentMethodCatalog method;
-  final VoidCallback onTap;
-  final bool busy;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: AppColors.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: busy ? null : onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                PaymentMethodMark(method: method, size: 44),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        method.name,
-                        style: GoogleFonts.manrope(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
-                        ),
-                      ),
-                      Text(
-                        method.tagline,
-                        style: GoogleFonts.manrope(
-                          color: AppColors.textSoft,
-                          fontSize: 12,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.textSoft.withValues(alpha: busy ? 0.4 : 1),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PendingReviewCard extends StatelessWidget {
-  const _PendingReviewCard({
-    required this.submission,
-    required this.methods,
-    required this.cancelling,
-    required this.onCancel,
-  });
-
-  final PaymentSubmission submission;
-  final List<PaymentMethodCatalog> methods;
-  final bool cancelling;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    PaymentMethodCatalog? method;
-    for (final item in methods) {
-      if (item.code == submission.methodCode) {
-        method = item;
-        break;
-      }
-    }
-    return _SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Pago en revision',
-            style: GoogleFonts.manrope(
-              fontWeight: FontWeight.w800,
-              color: AppColors.warning,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Enviamos ${method?.name ?? submission.methodCode} '
-            '(\$${submission.amountUsd.toStringAsFixed(0)} USD'
-            '${submission.months == 1 ? '' : ' · ${submission.months} meses'}). '
-            'Un administrador lo confirma. No envies otro comprobante mientras tanto.',
-            style: GoogleFonts.manrope(
-              color: AppColors.textSoft,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextButton(
-            onPressed: cancelling ? null : onCancel,
-            child: Text(
-              cancelling ? 'Cancelando…' : 'Cancelar esta solicitud',
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RejectedReviewCard extends StatelessWidget {
-  const _RejectedReviewCard({required this.submission});
-
-  final PaymentSubmission submission;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'El ultimo pago fue rechazado',
-            style: GoogleFonts.manrope(
-              fontWeight: FontWeight.w800,
-              color: AppColors.danger,
-            ),
-          ),
-          if (submission.reviewNote != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              submission.reviewNote!,
-              style: GoogleFonts.manrope(
-                color: AppColors.textSoft,
-                height: 1.4,
-              ),
-            ),
-          ],
-          const SizedBox(height: 6),
-          Text(
-            'Puedes enviar otro pago con los datos correctos.',
-            style: GoogleFonts.manrope(color: AppColors.textSoft),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: child,
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.label, required this.tone});
-
-  final String label;
-  final Color tone;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.manrope(
-          color: tone,
-          fontWeight: FontWeight.w800,
-          fontSize: 13,
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.manrope(color: AppColors.danger),
-          ),
-          const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
-        ],
-      ),
-    );
-  }
-}
-
-String _statusLabel(BillingSnapshot data) {
-  if (data.hasActiveSubscription) return 'Activa';
-  switch (data.subscription?.status) {
-    case 'pending':
-      return 'Pendiente de pago';
-    case 'past_due':
-      return 'Vencida (período de gracia)';
-    case 'suspended':
-      return 'Suspendida';
-    case 'cancelled':
-      return 'Cancelada';
-    default:
-      return 'Sin suscripción';
-  }
-}
-
-Color _statusTone(BillingSnapshot data) {
-  if (data.hasActiveSubscription) return AppColors.success;
-  switch (data.subscription?.status) {
-    case 'past_due':
-      return AppColors.warning;
-    case 'suspended':
-    case 'cancelled':
-      return AppColors.danger;
-    default:
-      return AppColors.textSoft;
   }
 }
 

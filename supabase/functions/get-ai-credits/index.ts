@@ -47,12 +47,29 @@ Deno.serve(async (req: Request) => {
     });
 
     const wallet = await getCredits(supabase, commerceId);
+    const url = new URL(req.url);
+    const includeHistory =
+      normalizeString(url.searchParams.get('include_history')) === '1' ||
+      body.include_history === true ||
+      body.include_history === '1';
+
+    let transactions: unknown[] = [];
+    if (includeHistory) {
+      const { data: rows } = await supabase
+        .from('ai_credits_transactions')
+        .select('id, type, amount, reason, metadata, created_at')
+        .eq('commerce_id', commerceId)
+        .order('created_at', { ascending: false })
+        .limit(80);
+      transactions = rows ?? [];
+    }
 
     return jsonResponse(
       {
         commerce_id: commerceId,
         credits_balance: wallet.credits_balance,
         credits_used: wallet.credits_used,
+        transactions,
       },
       200,
     );

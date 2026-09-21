@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -26,12 +25,22 @@ describe('order idempotency key contract', () => {
     const a = hashOrderIdempotencyPayload(payload);
     const b = hashOrderIdempotencyPayload(payload);
     expect(a).toBe(b);
-    expect(a).toBe(createHash('sha256').update(JSON.stringify(payload)).digest('hex'));
+    expect(a).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('ignores exchange-rate snapshot so a ticker update is not a different order', () => {
+    const base = {
+      comercioId: 'c1',
+      items: [{ product_id: 'p1', cantidad: 1, precio: 2 }],
+    };
+    const a = hashOrderIdempotencyPayload({ ...base, tasa_cambio_snapshot: 100 });
+    const b = hashOrderIdempotencyPayload({ ...base, tasa_cambio_snapshot: 101 });
+    expect(a).toBe(b);
   });
 
   it('different payload yields different hash (same key conflict case)', () => {
-    const a = hashOrderIdempotencyPayload({ total: 1 });
-    const b = hashOrderIdempotencyPayload({ total: 2 });
+    const a = hashOrderIdempotencyPayload({ comercioId: 'c1', items: [{ cantidad: 1 }] });
+    const b = hashOrderIdempotencyPayload({ comercioId: 'c1', items: [{ cantidad: 2 }] });
     expect(a).not.toBe(b);
   });
 

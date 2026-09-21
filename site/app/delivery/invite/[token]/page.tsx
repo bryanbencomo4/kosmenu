@@ -18,6 +18,7 @@ import {
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { nextPollDelayMs } from '../../../_lib/poll-backoff';
 
 type InvitePayload = {
   invitation?: {
@@ -289,7 +290,7 @@ export default function DeliveryInvitePage() {
     if (!token) {
       setError('Enlace de delivery invalido.');
       setLoading(false);
-      return;
+      return false;
     }
 
     try {
@@ -300,16 +301,19 @@ export default function DeliveryInvitePage() {
       const response = await fetch(`/api/delivery/invite/${encodeURIComponent(token)}`, {
         method: 'GET',
         cache: 'no-store',
+        signal: AbortSignal.timeout(8_000),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data?.ok || !data?.data) {
         setPayload(null);
         setError((data?.message ?? data?.error ?? 'No se pudo abrir el enlace de delivery.').toString());
-        return;
+        return false;
       }
       setPayload(data.data as InvitePayload);
+      return true;
     } catch {
       setError('No se pudo cargar la informacion del delivery.');
+      return false;
     } finally {
       if (!silent) {
         setLoading(false);
@@ -318,20 +322,34 @@ export default function DeliveryInvitePage() {
   }, [token]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
     if (!token) return;
+    let active = true;
+    let consecutiveFailures = 0;
+    let timer: number | undefined;
 
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
+    const tick = async (silent: boolean) => {
       if (submitting) return;
-      void refresh({ silent: true });
-    }, 10000);
+      const ok = await refresh({ silent });
+      if (!active) return;
+      consecutiveFailures = ok ? 0 : consecutiveFailures + 1;
+      const delay = nextPollDelayMs(consecutiveFailures, 10_000);
+      const arm = () => {
+        timer = window.setTimeout(() => {
+          if (!active) return;
+          if (document.visibilityState !== 'visible') {
+            arm();
+            return;
+          }
+          void tick(true);
+        }, delay);
+      };
+      arm();
+    };
 
+    void tick(false);
     return () => {
-      window.clearInterval(intervalId);
+      active = false;
+      if (timer) window.clearTimeout(timer);
     };
   }, [refresh, submitting, token]);
 

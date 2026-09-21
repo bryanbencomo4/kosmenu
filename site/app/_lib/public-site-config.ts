@@ -106,6 +106,16 @@ export const appLoginHref = appSiteUrl;
 /** Flutter web app — open the Registrarse tab. */
 export const appSignupHref = `${appSiteUrl.replace(/\/$/, '')}/?tab=register`;
 
+/** Flutter web app — merchant order management screen. */
+export function merchantPanelOrderHref(orderId: string) {
+  const origin = appSiteUrl.replace(/\/$/, '');
+  const id = orderId.trim();
+  if (!id) {
+    return origin;
+  }
+  return `${origin}/orders/view/${encodeURIComponent(id)}`;
+}
+
 export const termsPagePath = '/terminos';
 export const privacyPagePath = '/privacidad';
 export const legalPagePaths = [termsPagePath, privacyPagePath] as const;

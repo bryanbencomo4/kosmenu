@@ -5,6 +5,7 @@ vi.mock('server-only', () => ({}));
 import {
   dispatchOrderNotification,
   extractOrderCode,
+  merchantWhatsappDelivered,
 } from '../app/api/_lib/dispatch-order-notification';
 
 describe('extractOrderCode', () => {
@@ -76,5 +77,41 @@ describe('dispatchOrderNotification', () => {
     const body = JSON.parse(String(init.body));
     expect(body.type).toBe('INSERT');
     expect(body.record).toEqual(record);
+  });
+});
+
+describe('merchantWhatsappDelivered', () => {
+  it('is true only when this dispatch actually sent the merchant WhatsApp', () => {
+    expect(
+      merchantWhatsappDelivered({
+        ok: true,
+        body: { merchantWhatsapp: { ok: true, skipped: false } },
+      }),
+    ).toBe(true);
+  });
+
+  it('treats a claimed slot as delivered so checkout does not double-send', () => {
+    expect(
+      merchantWhatsappDelivered({
+        ok: true,
+        body: { merchantWhatsapp: { ok: true, skipped: true, reason: 'merchant-whatsapp-already-sent' } },
+      }),
+    ).toBe(true);
+  });
+
+  it('falls back when the edge function timed out or failed', () => {
+    expect(merchantWhatsappDelivered({ ok: false, reason: 'notify-order-timeout' })).toBe(false);
+    expect(
+      merchantWhatsappDelivered({
+        ok: true,
+        body: { merchantWhatsapp: { ok: false, error: 'WASender request failed.' } },
+      }),
+    ).toBe(false);
+    expect(
+      merchantWhatsappDelivered({
+        ok: true,
+        body: { merchantWhatsapp: { ok: true, skipped: true, reason: 'merchant-whatsapp-missing' } },
+      }),
+    ).toBe(false);
   });
 });

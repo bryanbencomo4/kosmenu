@@ -668,8 +668,8 @@ select {
   align-items: center;
   gap: 8px;
   padding: 0 12px;
-  border-right: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border-right: 1px solid var(--menu-border, #e2e8f0);
+  background: var(--menu-surface-alt, #f8fafc);
   border-top-left-radius: 16px;
   border-bottom-left-radius: 16px;
 }
@@ -678,7 +678,7 @@ select {
   cursor: pointer;
   border: 0;
   background: transparent;
-  color: #0f172a;
+  color: var(--menu-text, #0f172a);
   outline: none;
 }
 
@@ -692,7 +692,7 @@ select {
 
 .checkout-phone-field .PhoneInputCountrySelectArrow {
   margin-left: 4px;
-  color: #64748b;
+  color: var(--menu-text-muted, #64748b);
 }
 
 .checkout-phone-field .PhoneInputInput {
@@ -701,11 +701,11 @@ select {
   border: 0;
   background: transparent;
   padding: 0 12px;
-  color: #0f172a;
+  color: var(--menu-text, #0f172a);
   font-size: 14px;
   outline: none;
 }
 
 .checkout-phone-field .PhoneInputInput::placeholder {
-  color: #94a3b8;
+  color: var(--menu-text-muted, #94a3b8);
 }

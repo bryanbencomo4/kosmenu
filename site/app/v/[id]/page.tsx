@@ -11,6 +11,7 @@ import {
   buildMenuTheme,
   menuThemeCssVars,
   normalizeMenuThemeMode,
+  type MenuThemeMode,
 } from './_lib/menu-theme';
 import {
   displayProductImage,
@@ -55,6 +56,18 @@ import {
 import { consumeRepeatOrder } from '../../_lib/repeat-order';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
 import { trackMenuFunnelEvent, trackPublicMenuVisit } from './_lib/track-menu-analytics';
+import {
+  loadPublicMenuFromBrowser,
+  readStalePublicMenu,
+  shouldFallbackToBrowserMenu,
+  writeStalePublicMenu,
+} from './_lib/load-public-menu-client';
+import {
+  checkoutAttemptFingerprint,
+  humanizeOrderSubmitError,
+  resolveCheckoutAttempt,
+  type CheckoutAttempt,
+} from './_lib/checkout-idempotency';
 
 type CategoriaRow = {
   id: string;
@@ -240,6 +253,10 @@ type MarketRatesRow = {
   p2p_binance_rate?: number | string | null;
   payload?: {
     google_rates?: Record<string, number | string | null> | null;
+    bcv_rates?: {
+      USD?: number | string | null;
+      EUR?: number | string | null;
+    } | null;
   } | null;
 };
 
@@ -259,6 +276,7 @@ function isKioskFulfillment(value: string | null | undefined): value is KioskFul
   return value === 'dine_in' || value === 'takeaway' || value === 'delivery';
 }
 const selectedCurrencyStorageKeyPrefix = 'elmenuxfa:selected-currency:';
+const kioskThemeStoragePrefix = 'elmenuxfa-kiosk-theme:';
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
 const preferLeafletMapPicker = false;
 const topTickerHeightPx = 36;
@@ -1000,6 +1018,31 @@ function adjustedP2pRateForBuyer(rate: number) {
   return rate > 0 ? rate * 1.006 : 0;
 }
 
+function isBcvExchangeSource(source: string) {
+  const normalized = (source ?? '').trim().toLowerCase();
+  return normalized === 'bcv' || normalized === 'bcv_usd' || normalized === 'bcv_eur';
+}
+
+function canonicalizeBcvSource(source: string) {
+  const normalized = (source ?? '').trim().toLowerCase();
+  if (normalized === 'bcv_eur') return 'bcv_eur';
+  if (normalized === 'bcv' || normalized === 'bcv_usd') return 'bcv_usd';
+  return normalized;
+}
+
+function bcvVesRateForSource(
+  source: string,
+  marketRates: MarketRatesRow | null | undefined,
+) {
+  const rates = marketRates?.payload?.bcv_rates;
+  const usdRate = parseExchangeRate(rates?.USD) ?? parseExchangeRate(marketRates?.bcv_rate) ?? 0;
+  const eurRate = parseExchangeRate(rates?.EUR) ?? 0;
+  if (canonicalizeBcvSource(source) === 'bcv_eur') {
+    return eurRate > 0 ? eurRate : usdRate;
+  }
+  return usdRate;
+}
+
 function usdToCurrencyRateForSource(source: string, currency: string, marketRates: MarketRatesRow | null | undefined) {
   const normalizedCurrency = normalizeCurrencyCode(currency);
   if (normalizedCurrency === 'USD') return 1;
@@ -1039,7 +1082,15 @@ function derivedExchangeRateForCurrency(
     if (rate > 0) return rate;
   }
 
-  if ((source === 'bcv' || source === 'p2p_binance' || source === 'google') && isTrackedVesPair(base, quote)) {
+  if (isBcvExchangeSource(source) && (quote === 'VES' || base === 'VES')) {
+    const vesRate = bcvVesRateForSource(source, marketRates);
+    if (vesRate > 0) {
+      if (quote === 'VES') return vesRate;
+      return 1 / vesRate;
+    }
+  }
+
+  if ((source === 'p2p_binance' || source === 'google') && isTrackedVesPair(base, quote)) {
     const usdToBase = usdToCurrencyRateForSource(source, base, marketRates);
     const usdToQuote = usdToCurrencyRateForSource(source, quote, marketRates);
     if (usdToBase > 0 && usdToQuote > 0) {
@@ -1154,6 +1205,50 @@ function businessCheckoutCurrenciesFromData(
   return Array.from(currencies).sort((left, right) => left.localeCompare(right));
 }
 
+function resolveTickerExchangeRate(
+  currency: string,
+  options: {
+    baseCurrency: string;
+    paymentExchangeRate?: number | null;
+    checkoutExchange: {
+      exchangeRates: Record<string, number | null>;
+      exchangeRateModes: Record<string, string>;
+      exchangeRateSources: Record<string, string>;
+    };
+    businessExchangeRate: number | null | undefined;
+    businessQuoteCurrency: string | null;
+    businessExchangeSource: string;
+    businessExchangeMode: string;
+    marketRates: MarketRatesRow | null | undefined;
+  },
+) {
+  const resolved = resolveCheckoutCurrencyRate(currency, {
+    baseCurrency: options.baseCurrency,
+    paymentExchangeRate: options.paymentExchangeRate,
+    checkoutExchange: options.checkoutExchange,
+    businessExchangeRate: options.businessExchangeRate,
+    businessQuoteCurrency: options.businessQuoteCurrency,
+    businessExchangeSource: options.businessExchangeSource,
+    businessExchangeMode: options.businessExchangeMode,
+    marketRates: options.marketRates,
+  });
+  if (Number.isFinite(resolved) && resolved > 0 && resolved !== 1) {
+    return resolved;
+  }
+  const live = derivedExchangeRateForCurrency(
+    options.baseCurrency,
+    currency,
+    options.businessExchangeSource,
+    options.marketRates,
+    options.businessExchangeRate,
+    options.businessQuoteCurrency,
+  );
+  if (Number.isFinite(live) && live > 0 && live !== 1) {
+    return live;
+  }
+  return resolved;
+}
+
 function buildConfiguredTickerEntries(
   baseCurrency: string,
   checkoutCurrencies: string[],
@@ -1171,7 +1266,7 @@ function buildConfiguredTickerEntries(
 
   for (const currency of checkoutCurrencies) {
     const paymentGroup = options.paymentMethodsByCurrency.find((group) => group.currency === currency);
-    const rate = resolveCheckoutCurrencyRate(currency, {
+    const rate = resolveTickerExchangeRate(currency, {
       baseCurrency,
       paymentExchangeRate: paymentGroup?.exchangeRate,
       checkoutExchange: options.brandingConfig,
@@ -1186,7 +1281,11 @@ function buildConfiguredTickerEntries(
       continue;
     }
 
-    lines.push(`1 ${baseCurrency} = ${formatTickerRate(rate)} ${currency}`);
+    if (rate < 1) {
+      lines.push(`1 ${currency} = ${formatTickerRate(1 / rate)} ${baseCurrency}`);
+    } else {
+      lines.push(`1 ${baseCurrency} = ${formatTickerRate(rate)} ${currency}`);
+    }
   }
 
   return lines;
@@ -1510,6 +1609,7 @@ export default function PublicMenuPage() {
   const [cashPaymentInput, setCashPaymentInput] = useState('');
   const [needsCashChange, setNeedsCashChange] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
+  const [themeOverride, setThemeOverride] = useState<MenuThemeMode | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
   const [digitalPaymentReference, setDigitalPaymentReference] = useState('');
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
@@ -1566,6 +1666,7 @@ export default function PublicMenuPage() {
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
   const shouldReturnToMenuOnEmptyCartRef = useRef(false);
   const userChangedCurrencyRef = useRef(false);
+  const checkoutAttemptRef = useRef<CheckoutAttempt | null>(null);
   const [infoSections, setInfoSections] = useState({
     location: true,
     delivery: true,
@@ -1598,6 +1699,19 @@ export default function PublicMenuPage() {
     if (!isKioskFulfillment(saved)) return;
     setKioskFulfillment(saved);
     setDeliveryMode(saved === 'delivery' ? 'delivery' : 'pickup');
+  }, [commerceIdentifier]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !commerceIdentifier) return;
+    const savedTheme = window.localStorage.getItem(`${kioskThemeStoragePrefix}${commerceIdentifier}`);
+    if (savedTheme === 'dark' || savedTheme === 'light') {
+      setThemeOverride(savedTheme);
+    }
+    const savedCurrency = window.sessionStorage.getItem(`${selectedCurrencyStorageKeyPrefix}${commerceIdentifier}`);
+    if (savedCurrency) {
+      userChangedCurrencyRef.current = true;
+      setSelectedCurrency(normalizeCurrencyCode(savedCurrency));
+    }
   }, [commerceIdentifier]);
 
   useEffect(() => {
@@ -1658,28 +1772,32 @@ export default function PublicMenuPage() {
           : `/api/menu/${encodedIdentifier}`;
         const requestInit: RequestInit = {
           method: 'GET',
-          cache: 'no-store',
+          cache: isOwnerPreview ? 'no-store' : 'default',
           headers: isOwnerPreview
             ? { Authorization: `Bearer ${ownerPreviewToken}` }
             : undefined,
+          signal: AbortSignal.timeout(6_000),
         };
-        let response: Response;
+        let response: Response | null = null;
+        let payload: { error?: string; code?: string; data?: MenuData } = {};
 
         try {
-          response = await fetch(requestPath, requestInit);
+          try {
+            response = await fetch(requestPath, requestInit);
+          } catch {
+            response = await fetch(`${publicBaseUrl}${requestPath}`, requestInit);
+          }
+          payload = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            code?: string;
+            data?: MenuData;
+          };
         } catch {
-          // Fallback to absolute URL when relative fetch fails on edge/proxy clients.
-          response = await fetch(`${publicBaseUrl}${requestPath}`, requestInit);
+          response = null;
         }
 
-        const payload = (await response.json().catch(() => ({}))) as {
-          error?: string;
-          code?: string;
-          data?: MenuData;
-        };
-
-        if (!response.ok) {
-          if (!isOwnerPreview && response.status === 403) {
+        if (!response || !response.ok) {
+          if (response && !isOwnerPreview && response.status === 403) {
             const code = (payload.code ?? '').trim();
             if (code === 'MENU_DRAFT_MODE' || code === 'OWNER_EMAIL_NOT_VERIFIED') {
               if (!cancelled) {
@@ -1689,7 +1807,29 @@ export default function PublicMenuPage() {
               return;
             }
           }
-          throw new Error(payload.error ?? 'No se pudo cargar el menu.');
+          if (!isOwnerPreview && (!response || shouldFallbackToBrowserMenu(response.status))) {
+            try {
+              const fallback = await loadPublicMenuFromBrowser(commerceIdentifier);
+              payload = fallback as unknown as { error?: string; code?: string; data?: MenuData };
+              response = { ok: true, status: 200 } as Response;
+            } catch {
+              const stale = readStalePublicMenu<MenuData>(commerceIdentifier);
+              if (stale?.comercio) {
+                payload = { data: stale };
+                response = { ok: true, status: 200 } as Response;
+              } else {
+                throw new Error(
+                  'Estamos actualizando el menú. Intenta nuevamente en unos segundos.',
+                );
+              }
+            }
+          } else {
+            throw new Error(
+              payload.code === 'MENU_UNAVAILABLE'
+                ? 'Estamos actualizando el menú. Intenta nuevamente en unos segundos.'
+                : payload.error ?? 'No se pudo cargar el menu.',
+            );
+          }
         }
 
         const data = payload.data;
@@ -1705,6 +1845,7 @@ export default function PublicMenuPage() {
           if (nextLogoUrl) {
             window.sessionStorage.setItem(`${splashLogoCacheKeyPrefix}${commerceIdentifier}`, nextLogoUrl);
           }
+          writeStalePublicMenu(commerceIdentifier, data);
         }
 
         if (!cancelled) {
@@ -1720,8 +1861,19 @@ export default function PublicMenuPage() {
         }
       } catch (err) {
         if (!cancelled) {
-          const message = err instanceof Error ? err.message : 'Error cargando menu.';
-          setError(message);
+          const raw = err instanceof Error ? err.message : '';
+          const stale = !isOwnerPreview ? readStalePublicMenu<MenuData>(commerceIdentifier) : null;
+          if (stale?.comercio) {
+            setIsDraftMode(false);
+            setMenuData(stale);
+            menuReadyRef.current = true;
+            setError(null);
+          } else {
+            const message = /timeout|aborted|signal|unavailable/i.test(raw)
+              ? 'Estamos actualizando el menú. Intenta nuevamente en unos segundos.'
+              : raw || 'Error cargando menu.';
+            setError(message);
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -2161,12 +2313,13 @@ export default function PublicMenuPage() {
   const menuTheme = useMemo(
     () =>
       buildMenuTheme({
-        themeMode: menuData?.comercio.menu_theme_mode,
+        themeMode: themeOverride ?? menuData?.comercio.menu_theme_mode,
         menuPalettePrimary: menuData?.comercio.menu_palette_primary,
         menuPaletteAccent: menuData?.comercio.menu_palette_accent,
         colorPrincipal: menuData?.comercio.color_principal,
       }),
     [
+      themeOverride,
       menuData?.comercio.menu_theme_mode,
       menuData?.comercio.menu_palette_primary,
       menuData?.comercio.menu_palette_accent,
@@ -2361,6 +2514,20 @@ export default function PublicMenuPage() {
     ],
   );
   const tickerDisplayEntries = tickerRateEntries;
+  const kioskCurrencyOptions = useMemo(() => {
+    const codes = new Set<string>([businessBaseCurrency]);
+    for (const group of paymentMethodsByCurrency) {
+      if (group.currency) codes.add(group.currency);
+    }
+    for (const code of businessCheckoutCurrencies) {
+      if (code) codes.add(code);
+    }
+    return Array.from(codes).sort((left, right) => {
+      if (left === businessBaseCurrency) return -1;
+      if (right === businessBaseCurrency) return 1;
+      return left.localeCompare(right);
+    });
+  }, [businessBaseCurrency, businessCheckoutCurrencies, paymentMethodsByCurrency]);
   const activeTopTickerHeightPx = topTickerHeightPx;
   const selectedCurrencyCode = normalizeCurrencyCode(
     selectedCurrency || selectedCurrencyGroup?.currency || businessBaseCurrency,
@@ -2369,7 +2536,7 @@ export default function PublicMenuPage() {
     () =>
       selectedCurrencyCode === businessBaseCurrency
         ? 1
-        : resolveCheckoutCurrencyRate(selectedCurrencyCode, {
+        : resolveTickerExchangeRate(selectedCurrencyCode, {
             baseCurrency: businessBaseCurrency,
             paymentExchangeRate: selectedCurrencyGroup?.exchangeRate,
             checkoutExchange: checkoutExchangeConfig,
@@ -2754,6 +2921,7 @@ export default function PublicMenuPage() {
   }, [categoriasConProductos, comercioLogoUrl, formatUpsellPrice]);
 
   function selectKioskFulfillment(next: KioskFulfillment) {
+    if (scheduleClosed) return;
     setKioskFulfillment(next);
     setDeliveryMode(next === 'delivery' ? 'delivery' : 'pickup');
     setSearchQuery('');
@@ -2770,6 +2938,18 @@ export default function PublicMenuPage() {
       window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     }
   }
+
+  useEffect(() => {
+    if (!scheduleClosed) return;
+    setKioskFulfillment(null);
+    setDeliveryMode('pickup');
+    setKioskAddedPrompt(null);
+    setIsConfirmOpen(false);
+    setProductOptionsSheet({ open: false, productId: null });
+    if (typeof window !== 'undefined' && commerceIdentifier) {
+      window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
+    }
+  }, [scheduleClosed, commerceIdentifier]);
 
   function handleKioskAddProduct(productId: string) {
     if (scheduleClosed) {
@@ -3006,30 +3186,48 @@ export default function PublicMenuPage() {
   }, [isDigitalPayment]);
 
   useEffect(() => {
-    userChangedCurrencyRef.current = false;
-  }, [resolvedComercioId]);
-
-  useEffect(() => {
-    if (paymentMethodsByCurrency.length === 0) {
-      setSelectedCurrency('');
+    if (paymentMethodsByCurrency.length === 0 && kioskCurrencyOptions.length === 0) {
       return;
     }
 
-    if (userChangedCurrencyRef.current) {
+    const availableCurrencies = new Set(kioskCurrencyOptions);
+    const current = normalizeCurrencyCode(selectedCurrency);
+    if (current && availableCurrencies.has(current)) {
       return;
     }
 
-    const availableCurrencies = new Set(paymentMethodsByCurrency.map((group) => group.currency));
-  const defaultCurrency = availableCurrencies.has(businessBaseCurrency)
+    const saved =
+      typeof window !== 'undefined' && commerceIdentifier
+        ? window.sessionStorage.getItem(`${selectedCurrencyStorageKeyPrefix}${commerceIdentifier}`)
+        : null;
+    const savedCode = saved ? normalizeCurrencyCode(saved) : '';
+    if (savedCode && availableCurrencies.has(savedCode)) {
+      userChangedCurrencyRef.current = true;
+      setSelectedCurrency(savedCode);
+      return;
+    }
+
+    const defaultCurrency = availableCurrencies.has(businessBaseCurrency)
       ? businessBaseCurrency
-      : paymentMethodsByCurrency[0].currency;
-
+      : kioskCurrencyOptions[0] || businessBaseCurrency;
     setSelectedCurrency(defaultCurrency);
-  }, [businessBaseCurrency, paymentMethodsByCurrency, resolvedComercioId]);
+  }, [businessBaseCurrency, commerceIdentifier, kioskCurrencyOptions, paymentMethodsByCurrency.length, selectedCurrency]);
 
   function selectMenuCurrency(currency: string) {
+    const next = normalizeCurrencyCode(currency);
     userChangedCurrencyRef.current = true;
-    setSelectedCurrency(normalizeCurrencyCode(currency));
+    setSelectedCurrency(next);
+    if (typeof window !== 'undefined' && commerceIdentifier) {
+      window.sessionStorage.setItem(`${selectedCurrencyStorageKeyPrefix}${commerceIdentifier}`, next);
+    }
+  }
+
+  function toggleKioskTheme() {
+    const next: MenuThemeMode = themeMode === 'dark' ? 'light' : 'dark';
+    setThemeOverride(next);
+    if (typeof window !== 'undefined' && commerceIdentifier) {
+      window.localStorage.setItem(`${kioskThemeStoragePrefix}${commerceIdentifier}`, next);
+    }
   }
 
   useEffect(() => {
@@ -3783,50 +3981,86 @@ export default function PublicMenuPage() {
       items: orderItems,
     };
 
-    const response = await fetch('/api/orders', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        comercioId: resolvedComercioId,
-        comercioNombre,
-        clientName: customerName,
-        clientWhatsapp: customerWhatsapp,
-        clientEmail: email,
-        currency: normalizeCurrencyCode(paymentMeta.currency),
-        exchangeRate: paymentMeta.exchangeRate,
-        costoDelivery: deliveryCost,
-        items: orderItems,
-        delivery,
-        paymentMethod: paymentMethod
-          ? {
-              id: paymentMethod.id,
-              nombre: paymentLabel,
-              datos: paymentMethodDetails(paymentMethod),
-            }
-          : null,
-        paymentReferenceLast4: paymentMeta.referenceLast4 || null,
-        paymentProofUrl: paymentProofUrl || null,
-        cashPaymentAmount: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
-        cashChangeAmount: isCashPayment && changeAmount > 0 ? changeAmount : 0,
-        orderNotes: [
-          kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
-          normalizedOrderNotes,
-        ]
-          .filter(Boolean)
-          .join('. '),
-        detalles,
-      }),
-    });
+    const requestBody = {
+      comercioId: resolvedComercioId,
+      comercioNombre,
+      clientName: customerName,
+      clientWhatsapp: customerWhatsapp,
+      clientEmail: email,
+      currency: normalizeCurrencyCode(paymentMeta.currency),
+      exchangeRate: paymentMeta.exchangeRate,
+      costoDelivery: deliveryCost,
+      items: orderItems,
+      delivery,
+      paymentMethod: paymentMethod
+        ? {
+            id: paymentMethod.id,
+            nombre: paymentLabel,
+            datos: paymentMethodDetails(paymentMethod),
+          }
+        : null,
+      paymentReferenceLast4: paymentMeta.referenceLast4 || null,
+      paymentProofUrl: paymentProofUrl || null,
+      cashPaymentAmount: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
+      cashChangeAmount: isCashPayment && changeAmount > 0 ? changeAmount : 0,
+      orderNotes: [
+        kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
+        normalizedOrderNotes,
+      ]
+        .filter(Boolean)
+        .join('. '),
+      detalles,
+    };
 
-    const responsePayload = await response.json().catch(() => ({}));
+    const fingerprint = checkoutAttemptFingerprint({
+      comercioId: resolvedComercioId,
+      customerName,
+      customerWhatsapp,
+      customerEmail: email,
+      currency: normalizeCurrencyCode(paymentMeta.currency),
+      paymentMethodId: paymentMethod?.id?.toString() ?? '',
+      paymentReferenceLast4: paymentMeta.referenceLast4 || '',
+      notes: requestBody.orderNotes,
+      deliveryMode: delivery.mode,
+      totalCents: Math.round(orderGrandTotal * 100),
+      items: orderItems,
+    });
+    checkoutAttemptRef.current = resolveCheckoutAttempt(checkoutAttemptRef.current, fingerprint);
+
+    const postOrder = (idempotencyKey: string) =>
+      fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-idempotency-key': idempotencyKey,
+        },
+        signal: AbortSignal.timeout(12_000),
+        body: JSON.stringify(requestBody),
+      });
+
+    let response = await postOrder(checkoutAttemptRef.current.key);
+    let responsePayload = await response.json().catch(() => ({}));
+
+    if (
+      response.status === 409 &&
+      responsePayload?.error === 'idempotency_key_reuse_with_different_payload'
+    ) {
+      checkoutAttemptRef.current = {
+        key: resolveCheckoutAttempt(null, `${fingerprint}:${Date.now()}`).key,
+        fingerprint,
+      };
+      response = await postOrder(checkoutAttemptRef.current.key);
+      responsePayload = await response.json().catch(() => ({}));
+    }
+
     if (!response.ok || !responsePayload?.ok || !responsePayload?.data?.orderId) {
       const validationDetails = Array.isArray(responsePayload?.details)
         ? responsePayload.details
         : [];
 
-      let message = responsePayload?.error ?? 'No se pudo guardar el pedido.';
+      let message = humanizeOrderSubmitError(
+        (responsePayload?.error ?? 'No se pudo guardar el pedido.').toString(),
+      );
       if (response.status === 400 && validationDetails.length > 0) {
         const fieldMessages = validationDetails.map((detail: ValidationDetail) => {
           const path = (detail?.path ?? '').toString();
@@ -3897,6 +4131,7 @@ export default function PublicMenuPage() {
       `Total: ${formatAmountByCurrency(totalConverted, paymentMeta.currency)}.\n` +
       `Seguimiento: ${orderUrl}`;
 
+    checkoutAttemptRef.current = null;
     return {
       orderId,
       orderUrl,
@@ -4371,6 +4606,16 @@ export default function PublicMenuPage() {
           outline: 0;
         }
 
+        .checkout-phone-field .PhoneInputCountry {
+          border-right-color: var(--menu-border);
+          background: var(--menu-surface-alt);
+        }
+
+        .checkout-phone-field .PhoneInputCountrySelect,
+        .checkout-phone-field .PhoneInputCountrySelectArrow {
+          color: var(--menu-text-muted);
+        }
+
         main[data-menu-theme] :focus-visible {
           outline: 2px solid var(--menu-primary);
           outline-offset: 2px;
@@ -4480,7 +4725,7 @@ export default function PublicMenuPage() {
             setKioskAddedPrompt(null);
             openCheckoutSheet();
           }}
-          addedPrompt={kioskAddedPrompt}
+          addedPrompt={scheduleClosed ? null : kioskAddedPrompt}
           onContinueAdding={() => setKioskAddedPrompt(null)}
           onPayFromPrompt={() => {
             setKioskAddedPrompt(null);
@@ -4496,6 +4741,13 @@ export default function PublicMenuPage() {
             resetKioskFulfillment();
             setCart({});
           }}
+          tickerEntries={tickerDisplayEntries}
+          currencies={kioskCurrencyOptions}
+          selectedCurrency={selectedCurrencyCode}
+          onSelectCurrency={selectMenuCurrency}
+          themeMode={themeMode}
+          onToggleTheme={toggleKioskTheme}
+          stickyOffsetClass={isOwnerPreview ? 'top-12' : 'top-0'}
         />
 
         <AddToCartUpsellSheet
@@ -4775,17 +5027,17 @@ export default function PublicMenuPage() {
         ) : null}
 
         {isMapPickerOpen ? (
-          <section className="kos-modal-backdrop fixed inset-0 z-[61] bg-white">
-            <div className="kos-sheet-panel mx-auto flex h-full max-w-2xl flex-col bg-white">
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm sm:px-6">
+          <section className="kos-modal-backdrop fixed inset-0 z-[61] bg-[var(--menu-background)] text-[var(--menu-text)]">
+            <div className="kos-sheet-panel mx-auto flex h-full max-w-2xl flex-col bg-[var(--menu-background)]">
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--menu-border)] bg-[color-mix(in_srgb,var(--menu-background)_88%,var(--menu-surface))] px-4 py-3 backdrop-blur-sm sm:px-6">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Mapa</p>
-                  <h3 className="text-xl font-black text-slate-900" style={titleFontStyle}>Punto de entrega</h3>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--menu-text-muted)]">Mapa</p>
+                  <h3 className="text-xl font-black text-[var(--menu-text)]" style={titleFontStyle}>Punto de entrega</h3>
                 </div>
                 <button
                   type="button"
                   onClick={() => setIsMapPickerOpen(false)}
-                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600"
+                  className="rounded-full border border-[var(--menu-border)] px-3 py-1 text-xs font-semibold text-[var(--menu-text-muted)]"
                 >
                   Cerrar
                 </button>
@@ -4798,7 +5050,7 @@ export default function PublicMenuPage() {
                     type="text"
                     placeholder="Buscar direccion o lugar"
                     defaultValue={deliveryAddress}
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none"
+                    className="h-10 w-full rounded-xl border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
                     disabled={mapPickerProvider !== 'google'}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter') return;
@@ -4852,7 +5104,7 @@ export default function PublicMenuPage() {
                         setIsMapPickerLoading(false);
                       });
                     }}
-                    className="rounded-xl border border-slate-300 bg-white px-3 text-xs font-bold uppercase tracking-[0.08em] text-slate-700 disabled:opacity-50"
+                    className="rounded-xl border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 text-xs font-bold uppercase tracking-[0.08em] text-[var(--menu-text)] disabled:opacity-50"
                   >
                     Buscar
                   </button>
@@ -4871,18 +5123,18 @@ export default function PublicMenuPage() {
                   </div>
                 </div>
                 {isMapPickerLoading ? (
-                  <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm">
+                  <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 py-1 text-xs font-semibold text-[var(--menu-text)] shadow-sm">
                     Buscando direccion...
                   </div>
                 ) : null}
               </div>
 
-              <div className="space-y-2 border-t border-slate-200 bg-white px-4 py-3 sm:px-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Direccion detectada</p>
-                <p className="text-sm font-semibold text-slate-800">
+              <div className="space-y-2 border-t border-[var(--menu-border)] bg-[var(--menu-surface)] px-4 py-3 sm:px-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">Direccion detectada</p>
+                <p className="text-sm font-semibold text-[var(--menu-text)]">
                   {mapPickerAddress || 'Mueve el mapa para colocar el pin en el punto exacto.'}
                 </p>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
                   Mapa: {mapPickerProvider === 'google' ? 'Google Maps' : 'OpenStreetMap'}
                 </p>
                 {mapPickerError ? (
@@ -4909,7 +5161,7 @@ export default function PublicMenuPage() {
                         mapPickerResolveAddressRef.current?.(point);
                       });
                     }}
-                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-[0.08em] text-slate-700"
+                    className="rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--menu-text)]"
                   >
                     Mi ubicacion
                   </button>
@@ -4989,44 +5241,44 @@ export default function PublicMenuPage() {
                           {checkoutSummaryItems.map((item, index) => (
                             <article
                               key={`checkout-step-order-${item.id}`}
-                              className="checkout-item-enter rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)] sm:p-5"
+                              className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)] sm:p-5"
                               style={{ animationDelay: `${index * 50}ms` }}
                             >
                               <div className="flex items-start gap-4">
                                 <KioskImage
                                   src={item.imageUrl}
                                   alt={item.name}
-                                  className="h-20 w-20 shrink-0 rounded-[22px] bg-slate-100"
+                                  className="h-20 w-20 shrink-0 rounded-[22px] bg-[var(--menu-surface-alt)]"
                                 />
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
-                                      <p className="truncate text-[15px] font-black text-slate-950">{item.name}</p>
+                                      <p className="truncate text-[15px] font-black text-[var(--menu-text)]">{item.name}</p>
                                       {item.description ? (
-                                        <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">{item.description}</p>
+                                        <p className="mt-1 line-clamp-2 text-sm leading-5 text-[var(--menu-text-muted)]">{item.description}</p>
                                       ) : null}
                                     </div>
-                                    <p className="whitespace-nowrap text-sm font-black text-slate-950">
+                                    <p className="whitespace-nowrap text-sm font-black text-[var(--menu-text)]">
                                       {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
                                     </p>
                                   </div>
 
                                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                                    <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-1">
+                                    <div className="inline-flex items-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] p-1">
                                       <button
                                         type="button"
                                         onClick={() => decrementProduct(item.id)}
-                                        className="grid h-9 w-9 place-items-center rounded-full bg-white text-base font-black text-slate-700"
+                                        className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
                                         aria-label={`Reducir cantidad de ${item.name}`}
                                       >
                                         −
                                       </button>
-                                      <span className="min-w-10 px-2 text-center text-sm font-black text-slate-900">{item.quantity}</span>
+                                      <span className="min-w-10 px-2 text-center text-sm font-black text-[var(--menu-text)]">{item.quantity}</span>
                                       <button
                                         type="button"
                                         onClick={() => incrementCartLine(item.id)}
                                         disabled={!item.canIncrease}
-                                        className="grid h-9 w-9 place-items-center rounded-full bg-white text-base font-black text-slate-700 disabled:opacity-40"
+                                        className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)] disabled:opacity-40"
                                         aria-label={`Aumentar cantidad de ${item.name}`}
                                       >
                                         +
@@ -5047,7 +5299,7 @@ export default function PublicMenuPage() {
                           ))}
                         </div>
                       ) : (
-                        <div className="rounded-[24px] border border-dashed border-slate-300 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-4 shadow-[0_14px_34px_rgba(15,23,42,0.05)] sm:p-5">
+                        <div className="rounded-[24px] border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)] sm:p-5">
                           <div className="flex items-start gap-3">
                             <div
                               className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] text-white shadow-[0_16px_32px_rgba(15,23,42,0.16)]"
@@ -5056,11 +5308,11 @@ export default function PublicMenuPage() {
                               <ShoppingCart className="h-5 w-5" strokeWidth={2.4} />
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Pedido</p>
-                              <h6 className="mt-1.5 text-[1.1rem] font-black leading-tight tracking-[-0.03em] text-slate-950 sm:text-[1.2rem]" style={titleFontStyle}>
+                              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Pedido</p>
+                              <h6 className="mt-1.5 text-[1.1rem] font-black leading-tight tracking-[-0.03em] text-[var(--menu-text)] sm:text-[1.2rem]" style={titleFontStyle}>
                                 Tu carrito está vacío
                               </h6>
-                              <p className="mt-2 text-sm leading-5 text-slate-600">
+                              <p className="mt-2 text-sm leading-5 text-[var(--menu-text-muted)]">
                                 Agrega un producto para continuar con tu pedido.
                               </p>
 
@@ -5102,7 +5354,7 @@ export default function PublicMenuPage() {
                       ) : null}
 
                       {checkoutSummaryItems.length > 0 ? (
-                        <div className="checkout-item-enter rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '120ms' }}>
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '120ms' }}>
                         <label htmlFor="order-notes" className="block">
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                             <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
@@ -5117,7 +5369,7 @@ export default function PublicMenuPage() {
                             className="w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3 text-sm outline-none"
                           />
                         </label>
-                        <p className="mt-2 text-[11px] font-medium text-slate-500">
+                        <p className="mt-2 text-[11px] font-medium text-[var(--menu-text-muted)]">
                           Opcional.
                         </p>
                         </div>
@@ -5127,8 +5379,8 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 1 ? (
                     <div className="space-y-4">
-                      <div className="checkout-item-enter rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
                           Pedido
                         </p>
                         <p className="mt-1 text-base font-black">
@@ -5139,7 +5391,7 @@ export default function PublicMenuPage() {
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2">
-                        <label className="checkout-item-enter block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '40ms' }}>
+                        <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '40ms' }}>
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                             <User className="h-3.5 w-3.5" strokeWidth={2.4} />
                             Nombre completo
@@ -5152,15 +5404,15 @@ export default function PublicMenuPage() {
                             onChange={(event) => setClientName(event.target.value)}
                             placeholder="Maria Fernanda Lopez"
                             autoComplete="name"
-                            className="h-12 w-full rounded-2xl border bg-slate-50 px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                            className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
                             style={{
-                              borderColor: isClientNameValid || clientName.trim().length === 0 ? '#E2E8F0' : '#F43F5E',
+                              borderColor: isClientNameValid || clientName.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
                             }}
                             required
                           />
                         </label>
 
-                        <label className="checkout-item-enter block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '90ms' }}>
+                        <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                             <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
                             Correo electronico
@@ -5173,9 +5425,9 @@ export default function PublicMenuPage() {
                             placeholder="correo@ejemplo.com"
                             value={clientEmail}
                             onChange={(event) => setClientEmail(event.target.value)}
-                            className="h-12 w-full rounded-2xl border bg-slate-50 px-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                            className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
                             style={{
-                              borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? '#E2E8F0' : '#F43F5E',
+                              borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
                             }}
                             required
                           />
@@ -5185,16 +5437,16 @@ export default function PublicMenuPage() {
                         </label>
                       </div>
 
-                      <label className="checkout-item-enter block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '140ms' }}>
+                      <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '140ms' }}>
                         <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                           <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
                           WhatsApp
                         </span>
                         <div
-                          className="checkout-phone-field rounded-2xl border bg-slate-50"
+                          className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface-alt)]"
                           style={{
                             borderColor:
-                              isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? '#E2E8F0' : '#F43F5E',
+                              isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
                           }}
                         >
                           <PhoneInput
@@ -5223,7 +5475,7 @@ export default function PublicMenuPage() {
                       <button
                         type="button"
                         onClick={() => setIsMapPickerOpen(true)}
-                        className="w-full rounded-[22px] bg-white p-4 text-left shadow-[0_8px_30px_rgba(15,23,42,0.06)]"
+                        className="w-full rounded-[22px] bg-[var(--menu-surface)] p-4 text-left shadow-[var(--menu-shadow)]"
                         style={{ boxShadow: isDeliveryAddressValid ? '0 8px 30px rgba(15,23,42,0.06)' : '0 0 0 1px #F43F5E' }}
                       >
                         <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
@@ -5233,7 +5485,20 @@ export default function PublicMenuPage() {
                           {normalizedDeliveryAddress || 'Toca para marcar la direccion en el mapa'}
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${hasDeliveryPoint ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                          <span
+                            className="rounded-full px-2.5 py-1 text-[11px] font-black"
+                            style={
+                              hasDeliveryPoint
+                                ? {
+                                    backgroundColor: 'color-mix(in srgb, #10B981 16%, var(--menu-surface))',
+                                    color: 'color-mix(in srgb, #059669 70%, var(--menu-text))',
+                                  }
+                                : {
+                                    backgroundColor: 'color-mix(in srgb, #F59E0B 16%, var(--menu-surface))',
+                                    color: 'color-mix(in srgb, #D97706 72%, var(--menu-text))',
+                                  }
+                            }
+                          >
                             {hasDeliveryPoint ? 'Punto confirmado' : 'Falta el punto en el mapa'}
                           </span>
                           <span className="rounded-full bg-[var(--menu-surface-alt)] px-2.5 py-1 text-[11px] font-black">
@@ -5241,8 +5506,8 @@ export default function PublicMenuPage() {
                           </span>
                         </div>
                       </button>
-                      <label className="block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
-                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      <label className="block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
+                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                           Referencia
                         </span>
                         <input
@@ -5253,8 +5518,8 @@ export default function PublicMenuPage() {
                           className="h-12 w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 text-sm outline-none"
                         />
                       </label>
-                      <label className="block rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
-                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      <label className="block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
+                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                           Indicaciones
                         </span>
                         <textarea
@@ -5270,8 +5535,8 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 3 ? (
                     <div className="space-y-3">
-                      <div className="rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <div className="rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
                           Resumen
                         </p>
                         <p className="mt-1 text-base font-black">
@@ -5283,7 +5548,7 @@ export default function PublicMenuPage() {
                       </div>
                       {checkoutUpsellSuggestions.length > 0 ? (
                         <div className="checkout-item-enter">
-                          <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
                             Antes de terminar
                           </p>
                           <CartUpsellSection
@@ -5309,25 +5574,25 @@ export default function PublicMenuPage() {
                                 key={method.id}
                                 type="button"
                                 onClick={() => setSelectedPaymentMethodId(method.id)}
-                                className="checkout-item-enter w-full rounded-[22px] px-4 py-4 text-left shadow-[0_8px_30px_rgba(15,23,42,0.06)]"
+                                className="checkout-item-enter w-full rounded-[22px] px-4 py-4 text-left shadow-[var(--menu-shadow)]"
                                 style={{
                                   ...(isSelected
                                     ? {
-                                        boxShadow: '0 0 0 1px var(--menu-primary), 0 8px 30px rgba(15,23,42,0.06)',
-                                        backgroundColor: 'color-mix(in srgb, var(--menu-primary) 10%, white)',
+                                        boxShadow: '0 0 0 1px var(--menu-primary), var(--menu-shadow)',
+                                        backgroundColor: 'color-mix(in srgb, var(--menu-primary) 12%, var(--menu-surface))',
                                       }
-                                    : { backgroundColor: '#FFFFFF' }),
+                                    : { backgroundColor: 'var(--menu-surface)' }),
                                   animationDelay: `${index * 45}ms`,
                                 }}
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
-                                    <p className="text-sm font-bold text-slate-900">{paymentMethodLabel(method)}</p>
+                                    <p className="text-sm font-bold text-[var(--menu-text)]">{paymentMethodLabel(method)}</p>
                                     {details.length > 0 ? (
-                                      <p className="mt-1 text-xs text-slate-600">{details.slice(0, 2).join(' · ')}</p>
+                                      <p className="mt-1 text-xs text-[var(--menu-text-muted)]">{details.slice(0, 2).join(' · ')}</p>
                                     ) : null}
                                   </div>
-                                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${isSelected ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${isSelected ? 'bg-emerald-500 text-white' : 'bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]'}`}>
                                     {isSelected ? '✓' : ''}
                                   </span>
                                 </div>
@@ -5336,14 +5601,14 @@ export default function PublicMenuPage() {
                           })}
                         </div>
                       ) : (
-                        <div className="checkout-item-enter rounded-[22px] bg-white p-3 text-sm text-slate-600 shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-3 text-sm text-[var(--menu-text-muted)] shadow-[var(--menu-shadow)]">
                           Este comercio no tiene metodos de pago configurados.
                         </div>
                       )}
 
                       {isDeliveryOrder && isCashPayment ? (
-                        <div className="checkout-item-enter rounded-[22px] bg-white p-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '90ms' }}>
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
                             ¿Necesitas cambio?
                           </p>
                           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -5357,7 +5622,7 @@ export default function PublicMenuPage() {
                               style={
                                 !needsCashChange
                                   ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary, #fff)' }
-                                  : { backgroundColor: '#F8FAFC', color: '#475569' }
+                                  : { backgroundColor: 'var(--menu-surface-alt)', color: 'var(--menu-text-muted)' }
                               }
                             >
                               No, pago exacto
@@ -5369,7 +5634,7 @@ export default function PublicMenuPage() {
                               style={
                                 needsCashChange
                                   ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary, #fff)' }
-                                  : { backgroundColor: '#F8FAFC', color: '#475569' }
+                                  : { backgroundColor: 'var(--menu-surface-alt)', color: 'var(--menu-text-muted)' }
                               }
                             >
                               Sí, necesito cambio
@@ -5378,17 +5643,17 @@ export default function PublicMenuPage() {
 
                           {needsCashChange ? (
                             <label className="mt-4 block">
-                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
                                 ¿Con cuánto vas a pagar?
                               </span>
                               <div
-                                className="flex h-12 items-center rounded-xl border bg-slate-50 px-3"
+                                className="flex h-12 items-center rounded-xl border bg-[var(--menu-surface-alt)] px-3"
                                 style={{
                                   borderColor:
-                                    cashPaymentInput && !isCashTenderValid ? '#F43F5E' : '#E2E8F0',
+                                    cashPaymentInput && !isCashTenderValid ? '#F43F5E' : 'var(--menu-border)',
                                 }}
                               >
-                                <span className="pr-2 text-sm font-semibold text-slate-400">
+                                <span className="pr-2 text-sm font-semibold text-[var(--menu-text-muted)]">
                                   {selectedCurrencyCode}
                                 </span>
                                 <input
@@ -5399,7 +5664,7 @@ export default function PublicMenuPage() {
                                     setCashPaymentInput(parseCashAmountInput(event.target.value, selectedCurrencyCode))
                                   }
                                   placeholder={`Mayor a ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`}
-                                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
                                 />
                               </div>
                               {cashTenderSuggestions.length > 0 ? (
@@ -5409,7 +5674,7 @@ export default function PublicMenuPage() {
                                       key={amount}
                                       type="button"
                                       onClick={() => setCashPaymentInput(String(amount))}
-                                      className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600"
+                                      className="rounded-full bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold text-[var(--menu-text-muted)]"
                                     >
                                       {formatAmountByCurrency(amount, selectedCurrencyCode)}
                                     </button>
@@ -5422,13 +5687,16 @@ export default function PublicMenuPage() {
                                 </p>
                               ) : null}
                               {changeAmount > 0 ? (
-                                <p className="mt-2 text-xs font-semibold text-emerald-700">
+                                <p
+                                  className="mt-2 text-xs font-semibold"
+                                  style={{ color: 'color-mix(in srgb, #10B981 72%, var(--menu-text))' }}
+                                >
                                   Te devolvemos {formatAmountByCurrency(changeAmount, selectedCurrencyCode)}.
                                 </p>
                               ) : null}
                             </label>
                           ) : (
-                            <p className="mt-3 text-xs font-medium text-slate-500">
+                            <p className="mt-3 text-xs font-medium text-[var(--menu-text-muted)]">
                               El rider llevará el pedido para pago exacto, sin cambio.
                             </p>
                           )}
@@ -5436,9 +5704,9 @@ export default function PublicMenuPage() {
                       ) : null}
 
                       {isDigitalPayment ? (
-                        <div className="checkout-item-enter space-y-2 rounded-[22px] bg-white p-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '120ms' }}>
+                        <div className="checkout-item-enter space-y-2 rounded-[22px] bg-[var(--menu-surface)] p-3 shadow-[var(--menu-shadow)]" style={{ animationDelay: '120ms' }}>
                           <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
                               Referencia (ultimos 4 digitos)
                             </span>
                             <input
@@ -5448,14 +5716,14 @@ export default function PublicMenuPage() {
                               value={paymentReferenceLast4}
                               onChange={(event) => setDigitalPaymentReference(normalizePhone(event.target.value).slice(0, 4))}
                               placeholder="1234"
-                              className="h-11 w-full rounded-xl border bg-white px-4 text-sm text-slate-900 outline-none"
-                              style={{ borderColor: isPaymentReferenceValid || !digitalPaymentReference ? '#CBD5E1' : '#F43F5E' }}
+                              className="h-11 w-full rounded-xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none"
+                              style={{ borderColor: isPaymentReferenceValid || !digitalPaymentReference ? 'var(--menu-border)' : '#F43F5E' }}
                               required
                             />
                           </label>
 
                           <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
                               Cargar comprobante
                             </span>
                             <input
@@ -5470,7 +5738,7 @@ export default function PublicMenuPage() {
                             />
                             <label
                               htmlFor="payment-proof-upload"
-                              className="inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 text-sm font-semibold text-slate-700"
+                              className="inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)]"
                             >
                               {paymentProofFile ? `Comprobante: ${paymentProofFile.name}` : 'Seleccionar captura'}
                             </label>
@@ -5478,23 +5746,23 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
-                      <div className="checkout-item-enter rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]" style={{ animationDelay: '150ms' }}>
-                        <p className="flex items-center justify-between text-sm text-slate-700">
+                      <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]" style={{ animationDelay: '150ms' }}>
+                        <p className="flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
                           <span>Subtotal</span>
                           <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
                         </p>
                         {isDeliveryOrder ? (
-                          <p className="mt-1 flex items-center justify-between text-sm text-slate-700">
+                          <p className="mt-1 flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
                             <span>Costo de envio</span>
                             <span className="font-semibold">{formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}</span>
                           </p>
                         ) : null}
-                        <p className="mt-2 flex items-center justify-between border-t border-slate-200 pt-2 text-sm font-semibold text-slate-900">
+                        <p className="mt-2 flex items-center justify-between border-t border-[var(--menu-border)] pt-2 text-sm font-semibold text-[var(--menu-text)]">
                           <span>Total en {selectedCurrencyCode}</span>
                           <span style={titleFontStyle}>{formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}</span>
                         </p>
                         {selectedCurrencyCode !== businessBaseCurrency ? (
-                          <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                          <p className="mt-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
                             Tasa snapshot ({exchangeSourceLabel(selectedExchangeSource)}): {selectedExchangeRate} {selectedCurrencyCode} por 1 {businessBaseCurrency}
                           </p>
                         ) : null}

@@ -4,6 +4,7 @@ import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
+import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -109,6 +110,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       await Supabase.instance.client.auth.signOut();
       SupabaseConfig.clearCurrentComercioId();
+      MerchantSession.clear();
       clearMerchantPresence();
       if (!mounted) return;
       returnToAuthGate(context);

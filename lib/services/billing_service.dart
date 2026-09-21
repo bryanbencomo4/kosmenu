@@ -141,12 +141,18 @@ class BillingCheckoutContext {
     required this.methods,
     this.pendingSubmission,
     this.latestSubmission,
+    this.bcvRate,
   });
 
   final BillingSnapshot snapshot;
   final List<PaymentMethodCatalog> methods;
   final PaymentSubmission? pendingSubmission;
   final PaymentSubmission? latestSubmission;
+  final double? bcvRate;
+
+  double? vesAmountForUsd(double usd) {
+    return vesAmountFromUsd(usd: usd, bcvRate: bcvRate);
+  }
 }
 
 class BillingSnapshot {
@@ -406,11 +412,26 @@ class BillingService {
       // Manual-review table is optional until the migration is applied.
     }
 
+    double? bcvRate;
+    try {
+      final rateRow = await client
+          .from('global_market_rates')
+          .select('bcv_rate')
+          .order('updated_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      final parsed = _asDouble(rateRow?['bcv_rate']);
+      if (parsed > 0) bcvRate = parsed;
+    } catch (_) {
+      bcvRate = null;
+    }
+
     return BillingCheckoutContext(
       snapshot: snapshot,
       methods: mergePaymentCatalog(methods),
       pendingSubmission: pending,
       latestSubmission: latest,
+      bcvRate: bcvRate,
     );
   }
 

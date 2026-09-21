@@ -59,11 +59,18 @@ String getPublicMenuUrl(ComercioModel comercio) {
   return AppLinks.publicMenuByComercio(identifier);
 }
 
+String getPublicMenuQrUrl(ComercioModel comercio) {
+  final slug = (comercio.slug ?? '').trim();
+  final identifier = slug.isNotEmpty ? slug : comercio.id.trim();
+  return AppLinks.publicMenuQrByComercio(identifier);
+}
+
 class AppLinks {
   const AppLinks._();
 
   // Keep base URL without trailing slash to avoid //v/... routes.
   static const String productionUrl = 'https://elmenuxfa.com';
+  static const String merchantAppUrl = 'https://app.elmenuxfa.com';
   static const String brandIsotipoUrl = '$productionUrl/branding/isotipo.png';
 
   /// Next.js API origin. Required via `--dart-define=API_BASE_URL=...`.
@@ -98,6 +105,10 @@ class AppLinks {
         : productionUrl;
     final encodedId = Uri.encodeComponent(comercioId.trim());
     return '$base/v/$encodedId';
+  }
+
+  static String publicMenuQrByComercio(String comercioId) {
+    return '${publicMenuByComercio(comercioId)}?src=qr';
   }
 
   static String publicMenuByIdentifier({
@@ -138,6 +149,11 @@ class AppLinks {
     final encodedId = Uri.encodeComponent(orderId.trim());
     final suffix = forceWebView ? '?view=web' : '';
     return '$base/orders/$encodedId$suffix';
+  }
+
+  static String merchantOrderById(String orderId) {
+    final encodedId = Uri.encodeComponent(orderId.trim());
+    return '$merchantAppUrl/orders/view/$encodedId';
   }
 
   static String deliveryInviteByToken(String token) {

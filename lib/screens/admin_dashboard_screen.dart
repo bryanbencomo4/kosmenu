@@ -5,24 +5,47 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/comercio.dart';
+import 'package:kosmenu_app/models/business_schedule.dart';
+import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
+import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/services/order_notification_service.dart';
+import 'package:kosmenu_app/screens/ai_credits_screen.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
-import 'package:kosmenu_app/screens/business_setup_screen.dart';
-import 'package:kosmenu_app/screens/category_screen.dart';
+import 'package:kosmenu_app/screens/business_hours_screen.dart';
+import 'package:kosmenu_app/screens/comercio_staff_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
+import 'package:kosmenu_app/screens/merchant_client_profile_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
-import 'package:kosmenu_app/screens/profile_screen.dart';
+import 'package:kosmenu_app/services/merchant_deep_link.dart';
+import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
+import 'package:kosmenu_app/widgets/merchant_dashboard_pages.dart';
+import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+void goToMerchantDashboard(BuildContext context) {
+  final scope = MerchantShellScope.maybeOf(context);
+  if (scope != null) {
+    scope.goHome(resetContent: true);
+    return;
+  }
+
+  Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+    MaterialPageRoute<void>(builder: (_) => const AdminDashboardScreen()),
+    (route) => false,
+  );
+}
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -39,7 +62,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   static const Color _mutedText = Color(0xFF6B6F92);
   static const Color _green = Color(0xFF16A34A);
   static const Color _orange = Color(0xFFF97316);
-  static const Color _red = Color(0xFFEF4444);
 
   late Future<_DashboardSnapshot> _snapshotFuture;
   late Stream<List<PedidoModel>> _ordersStream;
@@ -67,18 +89,39 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _isRestartingOrdersStream = false;
   _SalesRange _selectedSalesRange = _SalesRange.today;
   DateTimeRange? _customSalesRange;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+  final GlobalKey _salesSectionKey = GlobalKey();
+  final ValueNotifier<int> _shellRevision = ValueNotifier<int>(0);
+  String _billingPlanName = 'Profesional';
+  bool _hideGrowBanner = false;
+  bool _sidebarCollapsed = false;
+  MerchantNavDestination _selectedNav = MerchantNavDestination.home;
+  bool _shellHasPushedRoute = false;
+  late final NavigatorObserver _contentNavObserver;
 
   bool get _hasComercioId => SupabaseConfig.hasCurrentComercioId;
+
+  bool _canShowAssistedOrderFab(_DashboardSnapshot? dashboardData, double screenWidth) {
+    return dashboardData != null &&
+        screenWidth < 720 &&
+        _selectedNav == MerchantNavDestination.home &&
+        !_shellHasPushedRoute;
+  }
 
   @override
   void initState() {
     super.initState();
+    _contentNavObserver = _DashboardContentNavObserver(_syncShellStack);
     _snapshotFuture = _fetchSnapshot();
     _ordersStream = _buildOrdersStream();
     _bindAuthStateRecovery();
     _subscribeToOrders();
     _startPendingAutoCancelTicker();
     unawaited(_refreshBillingGate());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_openPendingMerchantOrder());
+    });
   }
 
   void _bindAuthStateRecovery() {
@@ -292,6 +335,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _authStateSubscription?.cancel();
     _recentCatalogTimer?.cancel();
     _pendingAutoCancelTicker?.cancel();
+    _shellRevision.dispose();
     super.dispose();
   }
 
@@ -321,7 +365,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .eq('comercio_id', SupabaseConfig.currentComercioId);
     final productosFuture = client
         .from('productos')
-        .select('id')
+        .select('id, imagen_url')
         .eq('comercio_id', SupabaseConfig.currentComercioId);
     final creditsFuture = client.functions.invoke(
       'get-ai-credits',
@@ -330,6 +374,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         'commerce_id': SupabaseConfig.currentComercioId,
       },
     );
+    final analyticsFuture = _loadAnalytics(client);
     final yesterdayOrdersFuture = client
         .from('pedidos')
         .select('id, comercio_id, total, detalles, estado, created_at')
@@ -343,6 +388,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       productosFuture,
       creditsFuture,
       yesterdayOrdersFuture,
+      analyticsFuture,
     ]);
 
     final comercio = ComercioModel.fromMap(
@@ -386,11 +432,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final yesterdayCanceledOrders = yesterdayOrders
         .where((pedido) => pedido.statusBucket == OrderStatusBucket.canceled)
         .length;
+    final yesterdayUniqueCustomers = _uniqueCustomerCount(yesterdayOrders);
+    final productRows = results[2] as List<dynamic>;
+    final productsWithImages = productRows.where((row) {
+      final map = Map<String, dynamic>.from(row as Map);
+      return (map['imagen_url']?.toString().trim() ?? '').isNotEmpty;
+    }).length;
+    final comercioRow = Map<String, dynamic>.from(
+      (results[0] as Map?) ?? const <String, dynamic>{},
+    );
+    final hasLocation =
+        comercioRow['latitud'] != null ||
+        comercioRow['longitud'] != null ||
+        (comercioRow['direccion']?.toString().trim() ?? '').isNotEmpty;
+    final schedule = BusinessSchedule.fromJson(comercioRow['horarios']);
+    final analytics = results[5] is MenuAnalyticsSummary
+        ? results[5] as MenuAnalyticsSummary
+        : const MenuAnalyticsSummary();
 
     return _DashboardSnapshot(
       comercio: comercio,
       categoryCount: (results[1] as List<dynamic>).length,
-      productCount: (results[2] as List<dynamic>).length,
+      productCount: productRows.length,
+      productsWithImages: productsWithImages,
+      hasLocation: hasLocation,
+      schedule: schedule,
+      analytics: analytics,
       aiCreditsBalance: aiCreditsBalance,
       aiCreditsUsed: aiCreditsUsed,
       lastDayRevenue: lastDayRevenue,
@@ -398,6 +465,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       yesterdayCompletedOrders: yesterdayCompletedOrders,
       yesterdayPendingOrders: yesterdayPendingOrders,
       yesterdayCanceledOrders: yesterdayCanceledOrders,
+      yesterdayUniqueCustomers: yesterdayUniqueCustomers,
     );
   }
 
@@ -491,17 +559,70 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     await _refreshBillingGate();
   }
 
+  Future<MenuAnalyticsSummary> _loadAnalytics(SupabaseClient client) async {
+    try {
+      final payload = await client.rpc(
+        'get_menu_analytics_summary',
+        params: {
+          'p_comercio_id': SupabaseConfig.currentComercioId,
+          'p_days': 30,
+        },
+      );
+      if (payload is Map) {
+        return MenuAnalyticsSummary.fromMap(Map<String, dynamic>.from(payload));
+      }
+    } catch (_) {}
+    return const MenuAnalyticsSummary();
+  }
+
+  Uri _ownerPreviewUri(ComercioModel comercio) {
+    final identifier = (comercio.slug ?? '').trim().isNotEmpty
+        ? comercio.slug!.trim()
+        : comercio.id.trim();
+    final token =
+        Supabase.instance.client.auth.currentSession?.accessToken ?? '';
+    return AppLinks.ownerMenuPreviewUri(
+      comercioId: identifier,
+      accessToken: token,
+    );
+  }
+
+  Future<void> _openAiCredits({double balance = 0}) async {
+    await _pushInShell(AiCreditsScreen(initialBalance: balance));
+    if (!mounted) return;
+    await _refreshDashboard();
+  }
+
+  Future<void> _openHours(BusinessSchedule schedule) async {
+    await _pushInShell(BusinessHoursScreen(initial: schedule));
+    if (!mounted) return;
+    await _refreshDashboard();
+  }
+
+  Future<void> _openStaff() async {
+    await _pushInShell(const ComercioStaffScreen());
+  }
+
+  Future<void> _openClient(MerchantClient client) async {
+    await _pushInShell(
+      MerchantClientProfileScreen(
+        client: client,
+        onOpenOrder: (pedido) {
+          _openOrderDetail(pedido);
+        },
+      ),
+    );
+  }
+
   Future<void> _openProfile() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
+    await _pushInShell(const MerchantEmbeddedProfile());
     if (!mounted) return;
     await _refreshDashboard();
   }
 
   Future<void> _openMagicOnboarding() async {
-    final result = await Navigator.of(context).push<MagicOnboardingResult>(
-      MaterialPageRoute(builder: (_) => const MagicOnboardingScreen()),
+    final result = await _pushInShell<MagicOnboardingResult>(
+      const MagicOnboardingScreen(),
     );
 
     if (result == null || !mounted) return;
@@ -527,6 +648,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     await _refreshDashboard();
   }
 
+  Future<void> _openPendingMerchantOrder() async {
+    final orderId = MerchantDeepLink.peekOrder();
+    if (orderId == null || orderId.isEmpty || !mounted) {
+      return;
+    }
+
+    for (var i = 0; i < 10 && mounted && _contentNavKey.currentState == null; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (!mounted) return;
+
+    MerchantDeepLink.consumeOrder();
+    await _pushInShell(OrderDetailScreen(orderId: orderId));
+    if (!mounted) return;
+    await _refreshDashboard();
+  }
+
   Future<void> _openOrderDetail(PedidoModel pedido) async {
     final orderId = pedido.orderId;
     if (orderId == null || orderId.trim().isEmpty) {
@@ -539,9 +677,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)),
-    );
+    await _pushInShell(OrderDetailScreen(orderId: orderId));
 
     if (!mounted) return;
     await _refreshDashboard();
@@ -662,23 +798,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final comercio = await _resolveCurrentComercio();
     if (!mounted) return;
 
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => QrGeneratorScreen(comercio: comercio)),
-    );
+    await _pushInShell(QrGeneratorScreen(comercio: comercio));
   }
 
   Future<void> _openCurrentMenuManager() async {
-    if (!_hasComercioId) {
-      _showInfo('No hay comercio configurado para gestionar el menú.');
-      return;
-    }
-
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const CategoryListScreen()));
-
-    if (!mounted) return;
-    await _refreshDashboard();
+    _selectNav(MerchantNavDestination.products);
   }
 
   Future<void> _openNotificationsSheet() async {
@@ -748,8 +872,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           contentPadding: EdgeInsets.zero,
                           dense: true,
                           leading: Icon(bucket.icon, color: bucket.color),
-                          title: Text(title),
-                          subtitle: Text(bucket.label),
+                          title: Text(
+                            'Nuevo pedido ${title.isEmpty ? pedido.id : title}',
+                          ),
+                          subtitle: Text(
+                            '${_relativeTime(pedido.createdAt)}\n${bucket.label}',
+                          ),
+                          isThreeLine: true,
+                          trailing: Text(
+                            'Ver pedido →',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: _purple,
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            _openOrderDetail(pedido);
+                          },
                         );
                       },
                     ),
@@ -763,167 +904,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _editBusinessInfo(ComercioModel comercio) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => BusinessSetupScreen(initialComercio: comercio),
-      ),
-    );
+    await _pushInShell(MerchantEmbeddedBusinessSetup(comercio: comercio));
     if (!mounted) return;
     await _refreshDashboard();
   }
 
-  Future<void> _openBuyAiCreditsSheet() async {
-    if (!mounted) return;
-
-    final packages = <({String credits, String price, String description})>[
-      (
-        credits: '30 créditos',
-        price: '\$3',
-        description: 'Para completar imágenes iniciales',
-      ),
-      (
-        credits: '100 créditos',
-        price: '\$8',
-        description: 'Ideal para mantener tu menú actualizado',
-      ),
-      (
-        credits: '300 créditos',
-        price: '\$20',
-        description: 'Para catálogos grandes y promociones',
-      ),
-    ];
-
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Recargar créditos IA',
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: _darkText,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Elige un paquete para seguir generando imágenes con IA.',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w500,
-                    color: _mutedText,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Flexible(
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: packages.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final item = packages[index];
-                      return Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xFFE7E2F6)),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 42,
-                              height: 42,
-                              decoration: BoxDecoration(
-                                color: _purple.withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Icon(
-                                Icons.auto_awesome_rounded,
-                                color: _purple,
-                                size: 22,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '${item.credits} — ${item.price}',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                      color: _darkText,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    item.description,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12.3,
-                                      fontWeight: FontWeight.w500,
-                                      color: _mutedText,
-                                      height: 1.3,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  FilledButton.tonal(
-                                    onPressed: () {
-                                      Navigator.of(sheetContext).pop();
-                                      _showInfo(
-                                        'Pronto podrás comprar créditos desde la app.',
-                                      );
-                                    },
-                                    style: FilledButton.styleFrom(
-                                      foregroundColor: _purple,
-                                      backgroundColor: _purple.withValues(
-                                        alpha: 0.10,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 10,
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      'Elegir paquete',
-                                      style: GoogleFonts.poppins(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12.4,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Future<void> _updateBusinessOnline(bool value) async {
+    if (!MerchantSession.canManageSettings) {
+      _showInfo(MerchantSession.deniedMessage('cambiar el estado del negocio'));
+      return;
+    }
     if (_isUpdatingBusinessOnline) return;
 
     final comercioId = SupabaseConfig.currentComercioId.trim();
@@ -1054,6 +1044,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       setState(() {
         _requiresPaymentToPublish = snap.requiresPaymentToPublish;
         _didLoadBillingGate = true;
+        _billingPlanName = (snap.plan?.name ?? '').trim().isEmpty
+            ? 'Profesional'
+            : snap.plan!.name.trim();
         if (snap.businessOnline != _businessOnline && !_isUpdatingBusinessOnline) {
           _businessOnline = snap.businessOnline;
         }
@@ -1064,10 +1057,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _openBilling() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const BillingPlanScreen()),
-    );
-    if (mounted) await _refreshBillingGate();
+    _selectNav(MerchantNavDestination.plan);
   }
 
   DateTime _startOfDay(DateTime date) =>
@@ -1137,6 +1127,46 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final range = _customSalesRange;
     if (range == null) return _selectedSalesRange.label;
     return '${_shortDate(range.start)} - ${_shortDate(range.end)}';
+  }
+
+  Future<void> _onSalesRangeSelected(
+    _SalesRange range,
+    List<PedidoModel> validOrders,
+  ) async {
+    if (range == _SalesRange.custom) {
+      final earliest = validOrders
+          .map((o) => o.createdAt?.toLocal())
+          .whereType<DateTime>()
+          .fold<DateTime?>(null, (acc, date) {
+            if (acc == null || date.isBefore(acc)) {
+              return date;
+            }
+            return acc;
+          });
+
+      final firstDate = earliest != null
+          ? _startOfDay(earliest)
+          : _startOfDay(DateTime.now().subtract(const Duration(days: 365 * 5)));
+
+      final picked = await showDateRangePicker(
+        context: context,
+        firstDate: firstDate,
+        lastDate: DateTime.now(),
+        initialDateRange: _customSalesRange,
+        helpText: 'Selecciona un rango',
+        locale: const Locale('es'),
+      );
+
+      if (!mounted || picked == null) return;
+      setState(() {
+        _customSalesRange = picked;
+        _selectedSalesRange = _SalesRange.custom;
+      });
+      return;
+    }
+
+    if (_selectedSalesRange == range) return;
+    setState(() => _selectedSalesRange = range);
   }
 
   _SalesRangeWindow _resolveSalesRangeWindow(Iterable<PedidoModel> orders) {
@@ -1398,14 +1428,236 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   double _deltaPercentVsYesterday({
-    required int todayValue,
-    required int yesterdayValue,
+    required num todayValue,
+    required num yesterdayValue,
   }) {
     if (yesterdayValue == 0) {
       return todayValue > 0 ? 100 : 0;
     }
 
     return ((todayValue - yesterdayValue) / yesterdayValue.abs()) * 100;
+  }
+
+  int _uniqueCustomerCount(Iterable<PedidoModel> orders) {
+    final keys = <String>{};
+    for (final pedido in orders) {
+      final phone = (pedido.clientePhone ?? '').trim();
+      if (phone.isNotEmpty) {
+        keys.add('p:$phone');
+        continue;
+      }
+      final name = (pedido.nombreCliente ?? '').trim().toLowerCase();
+      if (name.isNotEmpty) {
+        keys.add('n:$name');
+      }
+    }
+    return keys.length;
+  }
+
+  bool _isOnLocalDay(DateTime? date, DateTime dayStart) {
+    if (date == null) return false;
+    final local = date.toLocal();
+    return !local.isBefore(dayStart) &&
+        local.isBefore(dayStart.add(const Duration(days: 1)));
+  }
+
+  List<MerchantTopProduct> _topProducts(Iterable<PedidoModel> orders) {
+    final counts = <String, ({int quantity, String? imageUrl})>{};
+    for (final pedido in orders) {
+      if (pedido.statusBucket == OrderStatusBucket.canceled) continue;
+      for (final item in pedido.items) {
+        final name = item.nombre.trim().isEmpty ? 'Producto' : item.nombre.trim();
+        final current = counts[name];
+        counts[name] = (
+          quantity: (current?.quantity ?? 0) + item.cantidad,
+          imageUrl: (item.imageUrl ?? '').trim().isEmpty
+              ? current?.imageUrl
+              : item.imageUrl,
+        );
+      }
+    }
+    final ranked = counts.entries.toList()
+      ..sort((a, b) => b.value.quantity.compareTo(a.value.quantity));
+    return ranked
+        .take(4)
+        .map(
+          (entry) => MerchantTopProduct(
+            name: entry.key,
+            quantity: entry.value.quantity,
+            imageUrl: entry.value.imageUrl,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  String _displayPublicUrl(ComercioModel comercio) {
+    final url = getPublicMenuUrl(comercio);
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url.replaceFirst(RegExp(r'^https?://'), '');
+    return '${uri.host}${uri.path}';
+  }
+
+  Future<void> _openAddProduct() async {
+    if (!MerchantSession.canManageCatalog) {
+      _showInfo(MerchantSession.deniedMessage('modificar productos'));
+      return;
+    }
+    if (!_hasComercioId) {
+      _showInfo('No hay comercio configurado para agregar productos.');
+      return;
+    }
+
+    try {
+      final rows = await Supabase.instance.client
+          .from('categorias')
+          .select()
+          .eq('comercio_id', SupabaseConfig.currentComercioId)
+          .order('orden', ascending: true);
+      if (!mounted) return;
+      final categories = (rows as List<dynamic>)
+          .map(
+            (row) =>
+                CategoryModel.fromMap(Map<String, dynamic>.from(row as Map)),
+          )
+          .toList(growable: false);
+      if (categories.isEmpty) {
+        _showInfo('Crea una categoría antes de agregar productos.');
+        await _openCurrentMenuManager();
+        return;
+      }
+
+      await _pushInShell(
+        ProductFormScreen(
+          categories: categories,
+          initialCategoryId: categories.first.id,
+        ),
+      );
+      if (!mounted) return;
+      await _refreshDashboard();
+    } catch (error) {
+      _showInfo('No se pudieron cargar las categorías. $error');
+    }
+  }
+
+  // ignore: unused_element
+  Future<void> _openClientsSheet(List<PedidoModel> orders) async {
+    if (!mounted) return;
+    final unique = <String, PedidoModel>{};
+    for (final pedido in orders) {
+      final phone = (pedido.clientePhone ?? '').trim();
+      final name = (pedido.nombreCliente ?? '').trim();
+      final key = phone.isNotEmpty
+          ? 'p:$phone'
+          : (name.isNotEmpty ? 'n:${name.toLowerCase()}' : '');
+      if (key.isEmpty) continue;
+      unique.putIfAbsent(key, () => pedido);
+    }
+    final clients = unique.values.toList(growable: false);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        if (clients.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.fromLTRB(20, 12, 20, 28),
+            child: Text(
+              'Aún no hay clientes registrados. Aparecerán cuando recibas pedidos.',
+            ),
+          );
+        }
+
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.72,
+          maxChildSize: 0.95,
+          minChildSize: 0.45,
+          builder: (context, controller) {
+            return ListView.separated(
+              controller: controller,
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+              itemCount: clients.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final client = clients[index];
+                final name = (client.nombreCliente ?? '').trim().isEmpty
+                    ? 'Cliente'
+                    : client.nombreCliente!.trim();
+                final phone = (client.clientePhone ?? '').trim();
+                return ListTile(
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.person_outline_rounded),
+                  ),
+                  title: Text(name),
+                  subtitle: Text(phone.isEmpty ? 'Sin teléfono' : phone),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ignore: unused_element
+  void _scrollToSales() {
+    final target = _salesSectionKey.currentContext;
+    if (target == null) return;
+    Scrollable.ensureVisible(
+      target,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      alignment: 0.08,
+    );
+  }
+
+  void _bumpShell() {
+    _shellRevision.value++;
+  }
+
+  void _syncShellStack() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final pushed = _contentNavKey.currentState?.canPop() ?? false;
+      if (pushed == _shellHasPushedRoute) return;
+      setState(() => _shellHasPushedRoute = pushed);
+    });
+  }
+
+  void _selectNav(MerchantNavDestination destination) {
+    if (!MerchantSession.canOpen(destination)) {
+      _showInfo(MerchantSession.deniedMessage('abrir esta sección'));
+      return;
+    }
+    if (_scaffoldKey.currentState?.isDrawerOpen == true) {
+      Navigator.of(context).pop();
+    }
+    _contentNavKey.currentState?.popUntil((route) => route.isFirst);
+    if (_selectedNav == destination) {
+      _bumpShell();
+      return;
+    }
+    setState(() => _selectedNav = destination);
+    _bumpShell();
+  }
+
+  void _resetContentNavigator() {
+    if (!mounted) return;
+    setState(() {
+      _contentNavKey = GlobalKey<NavigatorState>();
+      _shellHasPushedRoute = false;
+    });
+    _bumpShell();
+  }
+
+  Future<T?> _pushInShell<T>(Widget page) {
+    final nav = _contentNavKey.currentState;
+    if (nav != null) {
+      return nav.push<T>(merchantShellRoute(page));
+    }
+    return Navigator.of(context).push<T>(merchantShellRoute(page));
   }
 
   PedidoModel _pedidoWithOptimisticStatus(PedidoModel pedido) {
@@ -1444,8 +1696,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  String _relativeTime(DateTime? value) {
+    if (value == null) return 'hace un momento';
+    final diff = DateTime.now().difference(value.toLocal());
+    if (diff.inMinutes < 1) return 'hace un momento';
+    if (diff.inMinutes < 60) {
+      return 'hace ${diff.inMinutes} minuto${diff.inMinutes == 1 ? '' : 's'}';
+    }
+    if (diff.inHours < 24) {
+      return 'hace ${diff.inHours} hora${diff.inHours == 1 ? '' : 's'}';
+    }
+    return 'hace ${diff.inDays} día${diff.inDays == 1 ? '' : 's'}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final parentShell = MerchantShellScope.maybeOf(context);
+    if (parentShell != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        parentShell.goHome(resetContent: true);
+      });
+      return const SizedBox.shrink();
+    }
+
     final theme = Theme.of(context);
     final media = MediaQuery.of(context);
     final bottomInset = media.viewPadding.bottom;
@@ -1460,46 +1734,89 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         }
 
         final dashboardData = snapshot.data;
+        final isWideShell = screenWidth >= 1024;
+        final sidebar = MerchantDashboardSidebar(
+          selected: _selectedNav,
+          planName: _billingPlanName,
+          collapsed: isWideShell && _sidebarCollapsed,
+          onToggleCollapsed: isWideShell
+              ? () => setState(() => _sidebarCollapsed = !_sidebarCollapsed)
+              : null,
+          onSelect: (destination) {
+            if (dashboardData == null) return;
+            _selectNav(destination);
+          },
+        );
 
-        return Scaffold(
+        return MerchantShellScope(
+          selected: _selectedNav,
+          onSelect: _selectNav,
+          onResetContent: _resetContentNavigator,
+          child: Scaffold(
+          key: _scaffoldKey,
           backgroundColor: _dashboardBg,
-          floatingActionButton: dashboardData == null
+          drawer: isWideShell ? null : Drawer(child: sidebar),
+          floatingActionButton: !_canShowAssistedOrderFab(dashboardData, screenWidth)
               ? null
-              : Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    screenWidth < 720 ? 16 : 0,
-                    0,
-                    screenWidth < 720 ? 16 : 0,
-                    bottomInset > 0 ? 4 : 0,
-                  ),
-                  child: screenWidth < 720
-                      ? SizedBox(
-                          width: double.infinity,
-                          child: FloatingActionButton.extended(
-                            heroTag: 'assisted-order-fab',
-                            backgroundColor: _purple,
-                            foregroundColor: Colors.white,
-                            onPressed: () =>
-                                _openAssistedPublicMenu(dashboardData.comercio),
-                            icon: const Icon(Icons.receipt_long_rounded),
-                            label: const Text('Nuevo pedido'),
-                          ),
-                        )
-                      : FloatingActionButton.extended(
-                          heroTag: 'assisted-order-fab',
-                          backgroundColor: _purple,
-                          foregroundColor: Colors.white,
-                          onPressed: () =>
-                              _openAssistedPublicMenu(dashboardData.comercio),
-                          icon: const Icon(Icons.receipt_long_rounded),
-                          label: const Text('Nuevo pedido'),
-                        ),
+              : FloatingActionButton.extended(
+                  heroTag: 'assisted-order-fab',
+                  tooltip: 'Pedido asistido',
+                  backgroundColor: _purple,
+                  foregroundColor: Colors.white,
+                  elevation: 3,
+                  onPressed: () =>
+                      _openAssistedPublicMenu(dashboardData!.comercio),
+                  icon: const Icon(Icons.point_of_sale_rounded, size: 20),
+                  label: const Text('Nuevo pedido'),
                 ),
-          floatingActionButtonLocation: screenWidth < 720
-              ? FloatingActionButtonLocation.centerFloat
-              : FloatingActionButtonLocation.endFloat,
-          body: SafeArea(
-            child: Builder(
+          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+          body: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (isWideShell)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  width: _sidebarCollapsed
+                      ? MerchantDashboardSidebar.collapsedWidth
+                      : MerchantDashboardSidebar.expandedWidth,
+                  child: sidebar,
+                ),
+              if (isWideShell)
+                const VerticalDivider(
+                  width: 1,
+                  thickness: 1,
+                  color: Color(0xFFEEEFF5),
+                ),
+              Expanded(
+                child: Column(
+                  children: [
+                    if (dashboardData != null)
+                      MerchantShellHeader(
+                        title: _selectedNav.title,
+                        commerceName: dashboardData.comercio.nombre,
+                        businessOnline: _businessOnline,
+                        isUpdatingOnline: _isUpdatingBusinessOnline,
+                        onToggleOnline: _updateBusinessOnline,
+                        onOpenNotifications: _openNotificationsSheet,
+                        onOpenProfile: _openProfile,
+                        onScanWithAi: _openMagicOnboarding,
+                        showMenuButton: !isWideShell,
+                        onOpenMenu: () =>
+                            _scaffoldKey.currentState?.openDrawer(),
+                      ),
+                    Expanded(
+                      child: Navigator(
+                        key: _contentNavKey,
+                        observers: [_contentNavObserver],
+                        onGenerateRoute: (_) {
+                          return merchantShellRoute(
+                            ListenableBuilder(
+                              listenable: _shellRevision,
+                              builder: (context, _) {
+                                return SafeArea(
+                                  top: false,
+                                  child: Builder(
               builder: (context) {
                 if (snapshot.hasError) {
                   return Center(
@@ -1560,25 +1877,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         .take(3)
                         .toList(growable: false);
 
-                    final pendingCount = validOrders
+                    final todayStart = _startOfDay(DateTime.now());
+                    final todayOrders = validOrders
+                        .where((pedido) => _isOnLocalDay(pedido.createdAt, todayStart))
+                        .toList(growable: false);
+                    final todayActiveOrders = todayOrders
                         .where(
                           (pedido) =>
-                              pedido.statusBucket == OrderStatusBucket.pending,
+                              pedido.statusBucket != OrderStatusBucket.canceled,
                         )
-                        .length;
-                    final completedCount = validOrders
-                        .where(
-                          (pedido) =>
-                              pedido.statusBucket ==
-                              OrderStatusBucket.completed,
-                        )
-                        .length;
-                    final canceledCount = validOrders
-                        .where(
-                          (pedido) =>
-                              pedido.statusBucket == OrderStatusBucket.canceled,
-                        )
-                        .length;
+                        .toList(growable: false);
+                    final todayRevenue = todayActiveOrders.fold<double>(
+                      0,
+                      (sum, o) => sum + _resolvePedidoTotal(o),
+                    );
+                    final todayCustomers = _uniqueCustomerCount(todayActiveOrders);
+                    final topProducts = _topProducts(validOrders);
+                    final publicUrl = getPublicMenuUrl(data.comercio);
+                    final displayUrl = _displayPublicUrl(data.comercio);
                     final selectedOrders = validOrders
                         .where(
                           (o) => _isWithinSelectedSalesRange(
@@ -1603,65 +1919,102 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     );
                     final ordersLabel = _selectedSalesRange.ordersLabel;
                     final incomeLabel = _selectedSalesRange.incomeLabel;
-                    final kpiCards = [
+                    final kpiCards = <_CompactKpiCardData>[
                       _CompactKpiCardData(
-                        title: 'Pedidos',
-                        value: '${validOrders.length}',
+                        title: 'Pedidos hoy',
+                        value: todayOrders.isEmpty ? '—' : '${todayOrders.length}',
+                        hasData: todayOrders.isNotEmpty,
                         icon: Icons.shopping_bag_outlined,
                         color: _purple,
                         deltaPercent: _deltaPercentVsYesterday(
-                          todayValue: validOrders.length,
+                          todayValue: todayOrders.length,
                           yesterdayValue: data.yesterdayTotalOrders,
                         ),
                       ),
-                      _CompactKpiCardData(
-                        title: 'Completados',
-                        value: '$completedCount',
-                        icon: Icons.check_circle_outline_rounded,
-                        color: _green,
-                        deltaPercent: _deltaPercentVsYesterday(
-                          todayValue: completedCount,
-                          yesterdayValue: data.yesterdayCompletedOrders,
+                      if (MerchantSession.canSeeSalesKpis) ...[
+                        _CompactKpiCardData(
+                          title: 'Ventas hoy',
+                          value: todayOrders.isEmpty
+                              ? '—'
+                              : '\$${todayRevenue.toStringAsFixed(2)}',
+                          hasData: todayOrders.isNotEmpty,
+                          icon: Icons.attach_money_rounded,
+                          color: _green,
+                          deltaPercent: _deltaPercentVsYesterday(
+                            todayValue: todayRevenue,
+                            yesterdayValue: data.lastDayRevenue,
+                          ),
                         ),
-                      ),
-                      _CompactKpiCardData(
-                        title: 'Pendientes',
-                        value: '$pendingCount',
-                        icon: Icons.access_time_rounded,
-                        color: _orange,
-                        deltaPercent: _deltaPercentVsYesterday(
-                          todayValue: pendingCount,
-                          yesterdayValue: data.yesterdayPendingOrders,
+                        _CompactKpiCardData(
+                          title: 'Clientes hoy',
+                          value: todayCustomers == 0 ? '—' : '$todayCustomers',
+                          hasData: todayCustomers > 0,
+                          icon: Icons.groups_outlined,
+                          color: _orange,
+                          deltaPercent: _deltaPercentVsYesterday(
+                            todayValue: todayCustomers,
+                            yesterdayValue: data.yesterdayUniqueCustomers,
+                          ),
                         ),
-                        trendSemantics: _KpiTrendSemantics.growthIsNegativeWarning,
-                      ),
-                      _CompactKpiCardData(
-                        title: 'Cancelados',
-                        value: '$canceledCount',
-                        icon: Icons.cancel_outlined,
-                        color: _red,
-                        deltaPercent: _deltaPercentVsYesterday(
-                          todayValue: canceledCount,
-                          yesterdayValue: data.yesterdayCanceledOrders,
+                        _CompactKpiCardData(
+                          title: 'Ticket promedio',
+                          value: selectedCount == 0
+                              ? '—'
+                              : '\$${ticketPromedio.toStringAsFixed(2)}',
+                          hasData: selectedCount > 0,
+                          icon: Icons.receipt_long_outlined,
+                          color: _purple,
+                          deltaPercent: _deltaPercentVsYesterday(
+                            todayValue: ticketPromedio,
+                            yesterdayValue: data.yesterdayTotalOrders == 0
+                                ? 0
+                                : data.lastDayRevenue /
+                                    data.yesterdayTotalOrders,
+                          ),
                         ),
-                        trendSemantics: _KpiTrendSemantics.growthIsNegativeBad,
-                      ),
+                      ],
                     ];
 
-                    return RefreshIndicator(
+                    if (_selectedNav != MerchantNavDestination.home) {
+                      return MerchantShellSwitcher(
+                        child: KeyedSubtree(
+                          key: ValueKey(_selectedNav),
+                          child: _buildWorkspace(
+                            data: data,
+                            validOrders: validOrders,
+                            ordersSnapshot: ordersSnapshot,
+                            selectedRevenue: selectedRevenue,
+                            selectedCount: selectedCount,
+                            ticketPromedio: ticketPromedio,
+                            salesSeries: salesSeries,
+                            ordersLabel: ordersLabel,
+                            incomeLabel: incomeLabel,
+                            topProducts: topProducts,
+                            publicUrl: publicUrl,
+                            displayUrl: displayUrl,
+                            todayOrders: todayActiveOrders,
+                          ),
+                        ),
+                      );
+                    }
+
+                    return MerchantShellSwitcher(
+                      child: KeyedSubtree(
+                        key: const ValueKey(MerchantNavDestination.home),
+                        child: RefreshIndicator(
                       onRefresh: _refreshDashboard,
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           final viewportWidth = constraints.maxWidth;
-                          final isDesktop = viewportWidth >= 1024;
+                          final isDesktop = screenWidth >= 1024;
                           final contentMaxWidth = viewportWidth >= 1200 ? 1320.0 : double.infinity;
                           final horizontalPadding = viewportWidth >= 1200
                               ? 28.0
                               : (viewportWidth >= 720 ? 22.0 : 16.0);
                           final isMobile = viewportWidth < 720;
                           final bottomPadding = (isMobile
-                                  ? 168
-                                  : (isSmallScreen ? 136 : 148)) +
+                                  ? 96
+                                  : (isSmallScreen ? 88 : 96)) +
                               bottomInset;
 
                           final list = ListView(
@@ -1672,40 +2025,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               bottomPadding,
                             ),
                             children: [
-                          _DashboardHeader(
+                          MerchantHomeHeader(
                             commerceName: data.comercio.nombre,
-                            darkText: _darkText,
-                            mutedText: _mutedText,
+                            businessOnline: _businessOnline,
+                            isUpdatingOnline: _isUpdatingBusinessOnline,
+                            onToggleOnline: _updateBusinessOnline,
                             onOpenNotifications: _openNotificationsSheet,
                             onOpenProfile: _openProfile,
-                            onActionSelected: (value) async {
-                              switch (value) {
-                                case _DashboardAction.refresh:
-                                  await _refreshDashboard();
-                                  break;
-                                case _DashboardAction.magicMenu:
-                                  await _openMagicOnboarding();
-                                  break;
-                                case _DashboardAction.shareMenu:
-                                  await _sharePublicMenu();
-                                  break;
-                                case _DashboardAction.copyLink:
-                                  await _copyPublicMenuUrl();
-                                  break;
-                                case _DashboardAction.openWeb:
-                                  await _openPublicMenu();
-                                  break;
-                                case _DashboardAction.showQr:
-                                  await _openQrGenerator();
-                                  break;
-                                case _DashboardAction.manageMenu:
-                                  await _openCurrentMenuManager();
-                                  break;
-                                case _DashboardAction.billing:
-                                  await _openBilling();
-                                  break;
-                              }
-                            },
+                            hoursCaption: data.schedule.statusAt().caption,
+                            showActions: false,
                           ),
                           const SizedBox(height: 16),
                           if (_recentCatalogResult != null)
@@ -1719,237 +2047,333 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             columns: isDesktop ? 4 : 2,
                             useVerticalLayout: isMobile,
                           ),
-                          SizedBox(height: isDesktop ? 16 : 14),
+                          SizedBox(height: isDesktop ? 18 : 14),
+                          MerchantQuickActions(
+                            onAddProduct: _openAddProduct,
+                            onEditMenu: () =>
+                                _selectNav(MerchantNavDestination.products),
+                            onShareQr: () =>
+                                _selectNav(MerchantNavDestination.digitalMenu),
+                            onImprovePhotos: () =>
+                                _selectNav(MerchantNavDestination.products),
+                            onConfigureHours: () => _openHours(data.schedule),
+                          ),
+                          SizedBox(height: isDesktop ? 18 : 14),
                           if (isDesktop)
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Expanded(
+                                  flex: 7,
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
-                                      _CompactBusinessConfigBanner(
-                                        title: 'Configuración del negocio',
-                                        subtitle:
-                                            'Administra tu perfil público y abre el menú en segundos.',
-                                        onEdit: () => _editBusinessInfo(data.comercio),
-                                        onManageMenu: _openCurrentMenuManager,
-                                        businessOnline: _businessOnline,
-                                        businessLogoUrl: data.comercio.logoUrl,
-                                        purple: _purple,
+                                      Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(
+                                            child: MerchantSmartMenuCard(
+                                              publicUrl: publicUrl,
+                                              displayUrl: displayUrl,
+                                              visits: data.analytics.visits,
+                                              scans: data.analytics.scans,
+                                              menuOrders: validOrders.length,
+                                              onCopy: _copyPublicMenuUrl,
+                                              onDownloadQr: _openQrGenerator,
+                                              onOpenUrl: _openPublicMenu,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 16),
+                                          Expanded(
+                                            child: KeyedSubtree(
+                                              key: _salesSectionKey,
+                                              child: _CompactSalesSummaryCard(
+                                                title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+                                                salesToday: selectedRevenue,
+                                                ordersToday: selectedCount,
+                                                averageTicket: ticketPromedio,
+                                                darkText: _darkText,
+                                                mutedText: _mutedText,
+                                                purple: _purple,
+                                                salesHistory: salesSeries.values,
+                                                salesLabels: salesSeries.labels,
+                                                salesTooltipLabels: salesSeries.tooltipLabels,
+                                                rangeLabel: _activeRangeLabel(),
+                                                ordersLabel: ordersLabel,
+                                                incomeLabel: incomeLabel,
+                                                deltaPercent: _deltaPercentVsYesterday(
+                                                  todayValue: selectedRevenue,
+                                                  yesterdayValue: data.lastDayRevenue,
+                                                ),
+                                                showMiniMetrics: false,
+                                                emptyMessage:
+                                                    'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                                                onRangeSelected: (range) =>
+                                                    _onSalesRangeSelected(range, validOrders),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                       const SizedBox(height: 16),
-                                      _CompactBusinessInfoCard(
-                                        comercio: data.comercio,
-                                        aiCreditsBalance: data.aiCreditsBalance,
-                                        aiCreditsUsed: data.aiCreditsUsed,
-                                        isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
-                                        businessOnline: _businessOnline,
-                                        onToggleOnline: _updateBusinessOnline,
-                                        onBuyAiCredits: _openBuyAiCreditsSheet,
-                                        darkText: _darkText,
-                                        mutedText: _mutedText,
-                                        purple: _purple,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                                    children: [
-                                      _CompactSalesSummaryCard(
-                                        salesToday: selectedRevenue,
-                                        ordersToday: selectedCount,
-                                        averageTicket: ticketPromedio,
-                                        darkText: _darkText,
-                                        mutedText: _mutedText,
-                                        purple: _purple,
-                                        salesHistory: salesSeries.values,
-                                        salesLabels: salesSeries.labels,
-                                        salesTooltipLabels: salesSeries.tooltipLabels,
-                                        rangeLabel: _activeRangeLabel(),
-                                        ordersLabel: ordersLabel,
-                                        incomeLabel: incomeLabel,
-                                        onRangeSelected: (range) async {
-                                          if (range == _SalesRange.custom) {
-                                            final earliest = validOrders
-                                                .map((o) => o.createdAt?.toLocal())
-                                                .whereType<DateTime>()
-                                                .fold<DateTime?>(null, (acc, date) {
-                                              if (acc == null || date.isBefore(acc)) {
-                                                return date;
-                                              }
-                                              return acc;
-                                            });
-
-                                            final firstDate = earliest != null
-                                                ? _startOfDay(earliest)
-                                                : _startOfDay(
-                                                    DateTime.now().subtract(
-                                                      const Duration(days: 365 * 5),
+                                      Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                                              children: [
+                                                _SectionTitle(
+                                                  title: 'Pedidos recientes',
+                                                  actionLabel: 'Ver todos',
+                                                  onActionTap: () =>
+                                                      _selectNav(MerchantNavDestination.orders),
+                                                ),
+                                                const SizedBox(height: 10),
+                                                if (ordersSnapshot.hasError)
+                                                  _EmptyStateCard(
+                                                    title: 'No se pudieron cargar los pedidos',
+                                                    subtitle: _ordersErrorSubtitle(
+                                                      ordersSnapshot.error,
                                                     ),
-                                                  );
-
-                                            final picked = await showDateRangePicker(
-                                              context: context,
-                                              firstDate: firstDate,
-                                              lastDate: DateTime.now(),
-                                              initialDateRange: _customSalesRange,
-                                              helpText: 'Selecciona un rango',
-                                              locale: const Locale('es'),
-                                            );
-
-                                            if (!mounted || picked == null) return;
-                                            setState(() {
-                                              _customSalesRange = picked;
-                                              _selectedSalesRange = _SalesRange.custom;
-                                            });
-                                            return;
-                                          }
-
-                                          if (_selectedSalesRange == range) return;
-                                          setState(() => _selectedSalesRange = range);
-                                        },
-                                      ),
-                                      const SizedBox(height: 16),
-                                      _SectionTitle(
-                                        title: 'Pedidos recientes',
-                                        actionLabel: validOrders.length > 3
-                                            ? 'Ver todos'
-                                            : null,
-                                        onActionTap: validOrders.length > 3
-                                            ? () => _openAllOrdersSheet(validOrders)
-                                            : null,
-                                      ),
-                                      const SizedBox(height: 10),
-                                      if (ordersSnapshot.hasError)
-                                        _EmptyStateCard(
-                                          title: 'No se pudieron cargar los pedidos',
-                                          subtitle: _ordersErrorSubtitle(
-                                            ordersSnapshot.error,
+                                                    icon: Icons.error_outline_rounded,
+                                                    actionLabel: 'Reintentar',
+                                                    onAction: _refreshDashboard,
+                                                  )
+                                                else if (recentOrders.isEmpty &&
+                                                    malformedOrders.isEmpty)
+                                                  MerchantEmptyPanel(
+                                                    title: 'Sin pedidos recientes',
+                                                    subtitle:
+                                                        'Aquí aparecerán tus últimos pedidos cuando empiecen a llegar.',
+                                                    icon: Icons.description_outlined,
+                                                    actionLabel: 'Compartir tu menú',
+                                                    onAction: _sharePublicMenu,
+                                                  )
+                                                else ...[
+                                                  ...malformedOrders.map(
+                                                    (pedido) => _MalformedOrderTile(pedido: pedido),
+                                                  ),
+                                                  ...recentOrders.map(
+                                                    (pedido) => _CompactRecentOrderTile(
+                                                      pedido: pedido,
+                                                      onTap: () => _openOrderDetail(pedido),
+                                                      darkText: _darkText,
+                                                      mutedText: _mutedText,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
                                           ),
-                                          icon: Icons.error_outline_rounded,
-                                          actionLabel: 'Reintentar',
-                                          onAction: _refreshDashboard,
-                                        )
-                                      else if (recentOrders.isEmpty &&
-                                          malformedOrders.isEmpty)
-                                        _EmptyStateCard(
-                                          title: 'Sin pedidos recientes',
-                                          subtitle:
-                                              'Aún no recibes pedidos. Aquí aparecerán los últimos cuando entren.',
-                                          icon: Icons.inbox_outlined,
-                                        )
-                                      else ...[
-                                        ...malformedOrders.map(
-                                          (pedido) => _MalformedOrderTile(pedido: pedido),
+                                          const SizedBox(width: 16),
+                                          Expanded(
+                                            child: MerchantTopProductsCard(
+                                              products: topProducts,
+                                              onSeeAll: _openCurrentMenuManager,
+                                              onAddProduct: _openAddProduct,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (!_hideGrowBanner) ...[
+                                        const SizedBox(height: 16),
+                                        MerchantGrowBanner(
+                                          onSeePlans: _openBilling,
+                                          onDismiss: () =>
+                                              setState(() => _hideGrowBanner = true),
                                         ),
-                                        ...recentOrders.map(
-                                          (pedido) => _CompactRecentOrderTile(
-                                            pedido: pedido,
-                                            onTap: () => _openOrderDetail(pedido),
-                                            darkText: _darkText,
-                                            mutedText: _mutedText,
-                                          ),
+                                      ],
+                                      if (viewportWidth < 1180) ...[
+                                        const SizedBox(height: 16),
+                                        MerchantTipCard(
+                                          onImprovePhotos: _openCurrentMenuManager,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        MerchantAiCreditsCard(
+                                          balance: data.aiCreditsBalance,
+                                          onHistory: () => _openAiCredits(balance: data.aiCreditsBalance),
+                                          onReload: () => _openAiCredits(balance: data.aiCreditsBalance),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        MerchantProfileProgressCard(
+                                          steps: [
+                                            MerchantProfileStep(
+                                              label: 'Nombre del negocio',
+                                              done: data.comercio.nombre.trim().isNotEmpty &&
+                                                  data.comercio.nombre.trim().toLowerCase() !=
+                                                      'comercio',
+                                              onTap: () => _editBusinessInfo(data.comercio),
+                                            ),
+                                            MerchantProfileStep(
+                                              label: 'WhatsApp configurado',
+                                              done: (data.comercio.whatsapp ?? '')
+                                                  .trim()
+                                                  .isNotEmpty,
+                                              onTap: () => _editBusinessInfo(data.comercio),
+                                            ),
+                                            MerchantProfileStep(
+                                              label: 'Menú con productos',
+                                              done: data.productCount > 0,
+                                              onTap: _openCurrentMenuManager,
+                                            ),
+                                            MerchantProfileStep(
+                                              label: 'Horarios de atención',
+                                              done: data.schedule.isConfigured,
+                                              onTap: () => _openHours(data.schedule),
+                                            ),
+                                            MerchantProfileStep(
+                                              label: 'Fotos profesionales',
+                                              done: data.productsWithImages > 0,
+                                              onTap: _openCurrentMenuManager,
+                                            ),
+                                          ],
                                         ),
                                       ],
                                     ],
                                   ),
                                 ),
+                                if (viewportWidth >= 1180) ...[
+                                const SizedBox(width: 16),
+                                SizedBox(
+                                  width: 300,
+                                  child: Column(
+                                    children: [
+                                      MerchantTipCard(
+                                        onImprovePhotos: _openCurrentMenuManager,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      MerchantAiCreditsCard(
+                                        balance: data.aiCreditsBalance,
+                                        onHistory: () => _openAiCredits(balance: data.aiCreditsBalance),
+                                        onReload: () => _openAiCredits(balance: data.aiCreditsBalance),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      MerchantProfileProgressCard(
+                                        steps: [
+                                          MerchantProfileStep(
+                                            label: 'Nombre del negocio',
+                                            done: data.comercio.nombre.trim().isNotEmpty &&
+                                                data.comercio.nombre.trim().toLowerCase() !=
+                                                    'comercio',
+                                            onTap: () => _editBusinessInfo(data.comercio),
+                                          ),
+                                          MerchantProfileStep(
+                                            label: 'WhatsApp configurado',
+                                            done: (data.comercio.whatsapp ?? '')
+                                                .trim()
+                                                .isNotEmpty,
+                                            onTap: () => _editBusinessInfo(data.comercio),
+                                          ),
+                                          MerchantProfileStep(
+                                            label: 'Menú con productos',
+                                            done: data.productCount > 0,
+                                            onTap: _openCurrentMenuManager,
+                                          ),
+                                          MerchantProfileStep(
+                                            label: 'Horarios de atención',
+                                            done: data.schedule.isConfigured,
+                                            onTap: () => _openHours(data.schedule),
+                                          ),
+                                          MerchantProfileStep(
+                                            label: 'Fotos profesionales',
+                                            done: data.productsWithImages > 0,
+                                            onTap: _openCurrentMenuManager,
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                ],
                               ],
                             )
                           else ...[
-                            _CompactBusinessConfigBanner(
-                              title: 'Configuración del negocio',
-                              subtitle:
-                                  'Administra tu perfil público y abre el menú en segundos.',
-                              onEdit: () => _editBusinessInfo(data.comercio),
-                              onManageMenu: _openCurrentMenuManager,
-                              businessOnline: _businessOnline,
-                              businessLogoUrl: data.comercio.logoUrl,
-                              purple: _purple,
+                            MerchantSmartMenuCard(
+                              publicUrl: publicUrl,
+                              displayUrl: displayUrl,
+                              visits: data.analytics.visits,
+                              scans: data.analytics.scans,
+                              menuOrders: validOrders.length,
+                              onCopy: _copyPublicMenuUrl,
+                              onDownloadQr: _openQrGenerator,
+                              onOpenUrl: _openPublicMenu,
                             ),
                             const SizedBox(height: 12),
-                            _CompactSalesSummaryCard(
-                              salesToday: selectedRevenue,
-                              ordersToday: selectedCount,
-                              averageTicket: ticketPromedio,
-                              darkText: _darkText,
-                              mutedText: _mutedText,
-                              purple: _purple,
-                              salesHistory: salesSeries.values,
-                              salesLabels: salesSeries.labels,
-                              salesTooltipLabels: salesSeries.tooltipLabels,
-                              rangeLabel: _activeRangeLabel(),
-                              ordersLabel: ordersLabel,
-                              incomeLabel: incomeLabel,
-                              onRangeSelected: (range) async {
-                                if (range == _SalesRange.custom) {
-                                  final earliest = validOrders
-                                      .map((o) => o.createdAt?.toLocal())
-                                      .whereType<DateTime>()
-                                      .fold<DateTime?>(null, (acc, date) {
-                                    if (acc == null || date.isBefore(acc)) {
-                                      return date;
-                                    }
-                                    return acc;
-                                  });
-
-                                  final firstDate = earliest != null
-                                      ? _startOfDay(earliest)
-                                      : _startOfDay(
-                                          DateTime.now().subtract(
-                                            const Duration(days: 365 * 5),
-                                          ),
-                                        );
-
-                                  final picked = await showDateRangePicker(
-                                    context: context,
-                                    firstDate: firstDate,
-                                    lastDate: DateTime.now(),
-                                    initialDateRange: _customSalesRange,
-                                    helpText: 'Selecciona un rango',
-                                    locale: const Locale('es'),
-                                  );
-
-                                  if (!mounted || picked == null) return;
-                                  setState(() {
-                                    _customSalesRange = picked;
-                                    _selectedSalesRange = _SalesRange.custom;
-                                  });
-                                  return;
-                                }
-
-                                if (_selectedSalesRange == range) return;
-                                setState(() => _selectedSalesRange = range);
-                              },
+                            KeyedSubtree(
+                              key: _salesSectionKey,
+                              child: _CompactSalesSummaryCard(
+                                title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+                                salesToday: selectedRevenue,
+                                ordersToday: selectedCount,
+                                averageTicket: ticketPromedio,
+                                darkText: _darkText,
+                                mutedText: _mutedText,
+                                purple: _purple,
+                                salesHistory: salesSeries.values,
+                                salesLabels: salesSeries.labels,
+                                salesTooltipLabels: salesSeries.tooltipLabels,
+                                rangeLabel: _activeRangeLabel(),
+                                ordersLabel: ordersLabel,
+                                incomeLabel: incomeLabel,
+                                deltaPercent: _deltaPercentVsYesterday(
+                                  todayValue: selectedRevenue,
+                                  yesterdayValue: data.lastDayRevenue,
+                                ),
+                                showMiniMetrics: false,
+                                emptyMessage:
+                                    'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                                onRangeSelected: (range) =>
+                                    _onSalesRangeSelected(range, validOrders),
+                              ),
                             ),
-                            const SizedBox(height: 14),
-                            _CompactBusinessInfoCard(
-                              comercio: data.comercio,
-                              aiCreditsBalance: data.aiCreditsBalance,
-                              aiCreditsUsed: data.aiCreditsUsed,
-                              isUpdatingBusinessOnline: _isUpdatingBusinessOnline,
-                              businessOnline: _businessOnline,
-                              onToggleOnline: _updateBusinessOnline,
-                              onBuyAiCredits: _openBuyAiCreditsSheet,
-                              darkText: _darkText,
-                              mutedText: _mutedText,
-                              purple: _purple,
+                            const SizedBox(height: 12),
+                            MerchantAiCreditsCard(
+                              balance: data.aiCreditsBalance,
+                              onHistory: () => _openAiCredits(balance: data.aiCreditsBalance),
+                              onReload: () => _openAiCredits(balance: data.aiCreditsBalance),
                             ),
-                          ],
-                          const SizedBox(height: 16),
-                          if (!isDesktop) ...[
+                            const SizedBox(height: 12),
+                            MerchantTipCard(
+                              onImprovePhotos: _openCurrentMenuManager,
+                            ),
+                            const SizedBox(height: 12),
+                            MerchantProfileProgressCard(
+                              steps: [
+                                MerchantProfileStep(
+                                  label: 'Nombre del negocio',
+                                  done: data.comercio.nombre.trim().isNotEmpty &&
+                                      data.comercio.nombre.trim().toLowerCase() !=
+                                          'comercio',
+                                  onTap: () => _editBusinessInfo(data.comercio),
+                                ),
+                                MerchantProfileStep(
+                                  label: 'WhatsApp configurado',
+                                  done: (data.comercio.whatsapp ?? '').trim().isNotEmpty,
+                                  onTap: () => _editBusinessInfo(data.comercio),
+                                ),
+                                MerchantProfileStep(
+                                  label: 'Menú con productos',
+                                  done: data.productCount > 0,
+                                  onTap: _openCurrentMenuManager,
+                                ),
+                                MerchantProfileStep(
+                                  label: 'Horarios de atención',
+                                  done: data.schedule.isConfigured,
+                                  onTap: () => _openHours(data.schedule),
+                                ),
+                                MerchantProfileStep(
+                                  label: 'Fotos profesionales',
+                                  done: data.productsWithImages > 0,
+                                  onTap: _openCurrentMenuManager,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
                             _SectionTitle(
                               title: 'Pedidos recientes',
-                              actionLabel: validOrders.length > 3
-                                  ? 'Ver todos'
-                                  : null,
-                              onActionTap: validOrders.length > 3
-                                  ? () => _openAllOrdersSheet(validOrders)
-                                  : null,
+                              actionLabel: 'Ver todos',
+                              onActionTap: () => _selectNav(MerchantNavDestination.orders),
                             ),
                             const SizedBox(height: 10),
                             if (ordersSnapshot.hasError)
@@ -1964,11 +2388,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               )
                             else if (recentOrders.isEmpty &&
                                 malformedOrders.isEmpty)
-                              _EmptyStateCard(
+                              MerchantEmptyPanel(
                                 title: 'Sin pedidos recientes',
                                 subtitle:
-                                    'Aún no recibes pedidos. Aquí aparecerán los últimos cuando entren.',
-                                icon: Icons.inbox_outlined,
+                                    'Aquí aparecerán tus últimos pedidos cuando empiecen a llegar.',
+                                icon: Icons.description_outlined,
+                                actionLabel: 'Compartir tu menú',
+                                onAction: _sharePublicMenu,
                               )
                             else ...[
                               ...malformedOrders.map(
@@ -1981,6 +2407,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   darkText: _darkText,
                                   mutedText: _mutedText,
                                 ),
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            MerchantTopProductsCard(
+                              products: topProducts,
+                              onSeeAll: _openCurrentMenuManager,
+                              onAddProduct: _openAddProduct,
+                            ),
+                            if (!_hideGrowBanner) ...[
+                              const SizedBox(height: 12),
+                              MerchantGrowBanner(
+                                onSeePlans: _openBilling,
+                                onDismiss: () =>
+                                    setState(() => _hideGrowBanner = true),
                               ),
                             ],
                           ],
@@ -1996,17 +2436,164 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           );
                         },
                       ),
-                    );
+                    ),
+                  ),
+                );
                   },
                 );
               },
             ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
+        ),
         );
       },
     );
   }
 
+  Widget _salesSummaryCard({
+    required double selectedRevenue,
+    required int selectedCount,
+    required double ticketPromedio,
+    required _SalesHistorySeries salesSeries,
+    required String ordersLabel,
+    required String incomeLabel,
+    required List<PedidoModel> validOrders,
+    required _DashboardSnapshot data,
+  }) {
+    return _CompactSalesSummaryCard(
+      title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+      salesToday: selectedRevenue,
+      ordersToday: selectedCount,
+      averageTicket: ticketPromedio,
+      darkText: _darkText,
+      mutedText: _mutedText,
+      purple: _purple,
+      salesHistory: salesSeries.values,
+      salesLabels: salesSeries.labels,
+      salesTooltipLabels: salesSeries.tooltipLabels,
+      rangeLabel: _activeRangeLabel(),
+      ordersLabel: ordersLabel,
+      incomeLabel: incomeLabel,
+      deltaPercent: _deltaPercentVsYesterday(
+        todayValue: selectedRevenue,
+        yesterdayValue: data.lastDayRevenue,
+      ),
+      showMiniMetrics: false,
+      emptyMessage: 'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+      onRangeSelected: (range) => _onSalesRangeSelected(range, validOrders),
+    );
+  }
+
+  Widget _buildWorkspace({
+    required _DashboardSnapshot data,
+    required List<PedidoModel> validOrders,
+    required AsyncSnapshot<List<PedidoModel>> ordersSnapshot,
+    required double selectedRevenue,
+    required int selectedCount,
+    required double ticketPromedio,
+    required _SalesHistorySeries salesSeries,
+    required String ordersLabel,
+    required String incomeLabel,
+    required List<MerchantTopProduct> topProducts,
+    required String publicUrl,
+    required String displayUrl,
+    required List<PedidoModel> todayOrders,
+  }) {
+    final hourCounts = List<int>.filled(24, 0);
+    for (final pedido in todayOrders) {
+      final hour = pedido.createdAt?.toLocal().hour;
+      if (hour == null) continue;
+      hourCounts[hour] += 1;
+    }
+
+    switch (_selectedNav) {
+      case MerchantNavDestination.home:
+        return const SizedBox.shrink();
+      case MerchantNavDestination.orders:
+        return MerchantOrdersWorkspace(
+          orders: validOrders,
+          errorSubtitle: ordersSnapshot.hasError
+              ? _ordersErrorSubtitle(ordersSnapshot.error)
+              : null,
+          onRetry: _refreshDashboard,
+          itemBuilder: (pedido) => _CompactRecentOrderTile(
+            pedido: pedido,
+            onTap: () => _openOrderDetail(pedido),
+            darkText: _darkText,
+            mutedText: _mutedText,
+          ),
+        );
+      case MerchantNavDestination.digitalMenu:
+        return MerchantDigitalMenuWorkspace(
+          publicUrl: publicUrl,
+          displayUrl: displayUrl,
+          previewUrl: _ownerPreviewUri(data.comercio),
+          menuOrders: data.analytics.orders,
+          visits: data.analytics.visits,
+          scans: data.analytics.scans,
+          onCopy: _copyPublicMenuUrl,
+          onDownloadQr: _openQrGenerator,
+          onOpenUrl: _openPublicMenu,
+        );
+      case MerchantNavDestination.products:
+        return const MerchantEmbeddedProducts();
+      case MerchantNavDestination.clients:
+        return MerchantClientsWorkspace(
+          orders: validOrders,
+          onOpenClient: _openClient,
+        );
+      case MerchantNavDestination.stats:
+        return MerchantStatsWorkspace(
+          salesCard: KeyedSubtree(
+            key: _salesSectionKey,
+            child: _salesSummaryCard(
+              selectedRevenue: selectedRevenue,
+              selectedCount: selectedCount,
+              ticketPromedio: ticketPromedio,
+              salesSeries: salesSeries,
+              ordersLabel: ordersLabel,
+              incomeLabel: incomeLabel,
+              validOrders: validOrders,
+              data: data,
+            ),
+          ),
+          topProducts: topProducts,
+          hourCounts: hourCounts,
+          analytics: data.analytics,
+          onSeeProducts: () => _selectNav(MerchantNavDestination.products),
+          onAddProduct: _openAddProduct,
+        );
+      case MerchantNavDestination.marketing:
+        return const MerchantMarketingWorkspace();
+      case MerchantNavDestination.settings:
+        return MerchantSettingsHub(
+          comercio: data.comercio,
+          planName: _billingPlanName,
+          hoursSubtitle: data.schedule.isConfigured
+              ? (data.schedule.statusAt().caption ?? 'Horario configurado')
+              : 'Define cuándo recibes pedidos',
+          onOpenBusiness: () => _editBusinessInfo(data.comercio),
+          onOpenHours: () => _openHours(data.schedule),
+          onOpenPlan: () => _selectNav(MerchantNavDestination.plan),
+          onOpenUsers: _openStaff,
+        );
+      case MerchantNavDestination.plan:
+        return const MerchantEmbeddedBilling();
+    }
+  }
+
+  // ignore: unused_element
   Future<void> _openAllOrdersSheet(List<PedidoModel> orders) async {
     if (!mounted) return;
 
@@ -2047,6 +2634,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 }
 
+// ignore: unused_element
 class _DashboardHeader extends StatelessWidget {
   const _DashboardHeader({
     required this.commerceName,
@@ -2267,7 +2855,7 @@ class _CompactKpiCardData {
     required this.icon,
     required this.color,
     required this.deltaPercent,
-    this.trendSemantics = _KpiTrendSemantics.growthIsPositive,
+    this.hasData = true,
   });
 
   final String title;
@@ -2275,7 +2863,8 @@ class _CompactKpiCardData {
   final IconData icon;
   final Color color;
   final double deltaPercent;
-  final _KpiTrendSemantics trendSemantics;
+  final _KpiTrendSemantics trendSemantics = _KpiTrendSemantics.growthIsPositive;
+  final bool hasData;
 }
 
 enum _KpiTrendSemantics {
@@ -2354,11 +2943,53 @@ class _CompactKpiCard extends StatelessWidget {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _kpiTrend({
+    required double iconSize,
+    required double fontSize,
+    bool compact = false,
+  }) {
+    if (!data.hasData) {
+      return Text(
+        'Todavía no hay datos',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: GoogleFonts.poppins(
+          fontSize: fontSize,
+          color: const Color(0xFF6B6F92),
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
     final isUp = data.deltaPercent >= 0;
     final trendColor = _trendColor(isUp);
     final trendValue = data.deltaPercent.abs().round();
+    final label = Text(
+      '$trendValue% vs ayer',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: GoogleFonts.poppins(
+        fontSize: fontSize,
+        color: trendColor,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+    return Row(
+      mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+      children: [
+        Icon(
+          isUp
+              ? Icons.arrow_drop_up_rounded
+              : Icons.arrow_drop_down_rounded,
+          size: iconSize,
+          color: trendColor,
+        ),
+        if (compact) label else Flexible(child: label),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final useGridLayout = fixedWidth == null;
 
     if (useGridLayout) {
@@ -2416,29 +3047,7 @@ class _CompactKpiCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 2),
-              Row(
-                children: [
-                  Icon(
-                    isUp
-                        ? Icons.arrow_drop_up_rounded
-                        : Icons.arrow_drop_down_rounded,
-                    size: 14,
-                    color: trendColor,
-                  ),
-                  Flexible(
-                    child: Text(
-                      '$trendValue% vs ayer',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 10,
-                        color: trendColor,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              _kpiTrend(iconSize: 14, fontSize: 10),
             ],
           ),
         );
@@ -2508,29 +3117,7 @@ class _CompactKpiCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Icon(
-                      isUp
-                          ? Icons.arrow_drop_up_rounded
-                          : Icons.arrow_drop_down_rounded,
-                      size: 18,
-                      color: trendColor,
-                    ),
-                    Text(
-                      '$trendValue% vs ayer',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: trendColor,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
+                _kpiTrend(iconSize: 18, fontSize: 11, compact: true),
               ],
             ),
           ],
@@ -2589,35 +3176,14 @@ class _CompactKpiCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(
-                isUp
-                    ? Icons.arrow_drop_up_rounded
-                    : Icons.arrow_drop_down_rounded,
-                size: 14,
-                color: trendColor,
-              ),
-              Flexible(
-                child: Text(
-                  '$trendValue% vs ayer',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(
-                    fontSize: 10.5,
-                    color: trendColor,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
+          _kpiTrend(iconSize: 14, fontSize: 10.5),
         ],
       ),
     );
   }
 }
 
+// ignore: unused_element
 class _CompactBusinessConfigBanner extends StatelessWidget {
   const _CompactBusinessConfigBanner({
     required this.title,
@@ -3032,6 +3598,10 @@ class _CompactSalesSummaryCard extends StatelessWidget {
     required this.ordersLabel,
     required this.incomeLabel,
     required this.onRangeSelected,
+    this.title = 'Resumen de ventas',
+    this.deltaPercent = 0,
+    this.showMiniMetrics = true,
+    this.emptyMessage,
   });
 
   final double salesToday;
@@ -3047,13 +3617,20 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   final String ordersLabel;
   final String incomeLabel;
   final ValueChanged<_SalesRange> onRangeSelected;
+  final String title;
+  final double deltaPercent;
+  final bool showMiniMetrics;
+  final String? emptyMessage;
 
   @override
   Widget build(BuildContext context) {
+    final hasSalesData = salesToday > 0 || ordersToday > 0;
     final chartData =
-        salesHistory ?? const <double>[120, 180, 140, 200, 248, 220, 210];
+        salesHistory == null || salesHistory!.isEmpty
+            ? const <double>[0, 0, 0, 0, 0, 0, 0]
+            : salesHistory!;
     final labels =
-        salesLabels ?? const <String>['00', '04', '08', '12', '16', '20', '24'];
+        salesLabels ?? const <String>['L', 'M', 'X', 'J', 'V', 'S', 'D'];
     final tooltipLabels = salesTooltipLabels ?? labels;
 
     var highlightIndex = 0;
@@ -3157,7 +3734,9 @@ class _CompactSalesSummaryCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '\$${salesToday.toStringAsFixed(2)}',
+              hasSalesData
+                  ? '\$${salesToday.toStringAsFixed(2)}'
+                  : '—',
               style: GoogleFonts.poppins(
                 fontSize: isMobile ? 32 : 38,
                 height: 0.98,
@@ -3166,24 +3745,40 @@ class _CompactSalesSummaryCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(
-                  Icons.arrow_upward_rounded,
-                  color: Color(0xFF16A34A),
-                  size: 16,
-                ),
-                const SizedBox(width: 3),
-                Text(
-                  '15% vs ayer',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12.3,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF16A34A),
+            if (hasSalesData)
+              Row(
+                children: [
+                  Icon(
+                    deltaPercent >= 0
+                        ? Icons.arrow_upward_rounded
+                        : Icons.arrow_downward_rounded,
+                    color: deltaPercent >= 0
+                        ? const Color(0xFF16A34A)
+                        : const Color(0xFFEF4444),
+                    size: 16,
                   ),
+                  const SizedBox(width: 3),
+                  Text(
+                    '${deltaPercent.abs().round()}% vs ayer',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12.3,
+                      fontWeight: FontWeight.w600,
+                      color: deltaPercent >= 0
+                          ? const Color(0xFF16A34A)
+                          : const Color(0xFFEF4444),
+                    ),
+                  ),
+                ],
+              )
+            else
+              Text(
+                emptyMessage ?? 'Todavía no tienes ventas',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: mutedText,
                 ),
-              ],
-            ),
+              ),
           ],
         );
 
@@ -3202,7 +3797,9 @@ class _CompactSalesSummaryCard extends StatelessWidget {
         final ticketCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: 'Ticket promedio',
-            value: '\$${averageTicket.toStringAsFixed(2)}',
+            value: hasSalesData
+                ? '\$${averageTicket.toStringAsFixed(2)}'
+                : '—',
             color: const Color(0xFF8B5CF6),
             icon: Icons.receipt_rounded,
           ),
@@ -3210,7 +3807,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
         final ordersCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: ordersLabel,
-            value: '$ordersToday',
+            value: hasSalesData ? '$ordersToday' : '—',
             color: const Color(0xFF3B82F6),
             icon: Icons.bar_chart_rounded,
           ),
@@ -3218,7 +3815,9 @@ class _CompactSalesSummaryCard extends StatelessWidget {
         final incomeCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: incomeLabel,
-            value: '\$${salesToday.toStringAsFixed(2)}',
+            value: hasSalesData
+                ? '\$${salesToday.toStringAsFixed(2)}'
+                : '—',
             color: const Color(0xFF22C55E),
             icon: Icons.attach_money_rounded,
           ),
@@ -3270,7 +3869,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    'Resumen de ventas',
+                    title,
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
@@ -3292,11 +3891,34 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                   children: [
                     SizedBox(width: 122, child: salesTotalBlock),
                     const SizedBox(width: 10),
-                    Expanded(child: chartWidget),
+                    Expanded(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          chartWidget,
+                          if (emptyMessage != null &&
+                              salesToday <= 0 &&
+                              ordersToday <= 0)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              child: Text(
+                                emptyMessage!,
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: mutedText,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-              const SizedBox(height: 12),
-              miniMetrics,
+              if (showMiniMetrics) ...[
+                const SizedBox(height: 12),
+                miniMetrics,
+              ],
             ],
           ),
         );
@@ -3628,6 +4250,7 @@ class _SalesMiniCard extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _CompactBusinessInfoCard extends StatelessWidget {
   const _CompactBusinessInfoCard({
     required this.comercio,
@@ -4374,6 +4997,10 @@ class _DashboardSnapshot {
     required this.comercio,
     required this.categoryCount,
     required this.productCount,
+    this.productsWithImages = 0,
+    this.hasLocation = false,
+    this.schedule = const BusinessSchedule(days: {}),
+    this.analytics = const MenuAnalyticsSummary(),
     this.aiCreditsBalance = 0,
     this.aiCreditsUsed = 0,
     double? lastDayRevenue,
@@ -4381,11 +5008,16 @@ class _DashboardSnapshot {
     this.yesterdayCompletedOrders = 0,
     this.yesterdayPendingOrders = 0,
     this.yesterdayCanceledOrders = 0,
+    this.yesterdayUniqueCustomers = 0,
   }) : _lastDayRevenue = lastDayRevenue;
 
   final ComercioModel comercio;
   final int categoryCount;
   final int productCount;
+  final int productsWithImages;
+  final bool hasLocation;
+  final BusinessSchedule schedule;
+  final MenuAnalyticsSummary analytics;
   final double aiCreditsBalance;
   final double aiCreditsUsed;
   final double? _lastDayRevenue;
@@ -4393,6 +5025,7 @@ class _DashboardSnapshot {
   final int yesterdayCompletedOrders;
   final int yesterdayPendingOrders;
   final int yesterdayCanceledOrders;
+  final int yesterdayUniqueCustomers;
 
   double get lastDayRevenue => _lastDayRevenue ?? 0;
 }
@@ -4654,6 +5287,32 @@ class _CatalogUpdateBanner extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _DashboardContentNavObserver extends NavigatorObserver {
+  _DashboardContentNavObserver(this.onStackChanged);
+
+  final VoidCallback onStackChanged;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    onStackChanged();
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    onStackChanged();
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    onStackChanged();
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    onStackChanged();
   }
 }
 

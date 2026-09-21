@@ -13,6 +13,7 @@ import 'package:kosmenu_app/screens/mobile_camera_capture_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
 import 'package:kosmenu_app/screens/public_menu_view.dart';
+import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/order_gate_handler.dart';
 import 'package:kosmenu_app/services/push_notification_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -211,7 +212,15 @@ class _KosmenuAppState extends State<KosmenuApp> {
 
   String _resolveInitialRoute() {
     if (kIsWeb) {
-      return Uri.base.path.isEmpty ? '/' : Uri.base.path;
+      final uri = Uri.base;
+      final orderId = OrderGateHandler.extractOrderId(uri);
+      if (orderId != null && orderId.isNotEmpty) {
+        MerchantDeepLink.rememberOrder(orderId);
+        // Enter through AuthGate/dashboard. Flutter would otherwise split
+        // `/orders/view/{id}` into `/orders/view` and treat "view" as an order.
+        return '/';
+      }
+      return uri.path.isEmpty ? '/' : uri.path;
     }
 
     return '/';
@@ -302,10 +311,12 @@ class _KosmenuAppState extends State<KosmenuApp> {
         (uri.pathSegments.first == 'orders' ||
             uri.pathSegments.first == 'order')) {
       final orderId = uri.pathSegments[1];
-      return MaterialPageRoute(
-        settings: settings,
-        builder: (_) => OrderGateScreen(orderId: orderId),
-      );
+      if (orderId != 'view' && orderId != 'public') {
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => OrderGateScreen(orderId: orderId),
+        );
+      }
     }
 
     if (uri.pathSegments.length == 3 &&
@@ -357,6 +368,11 @@ class _KosmenuAppState extends State<KosmenuApp> {
       debugShowCheckedModeBanner: false,
       navigatorKey: _navigatorKey,
       initialRoute: _resolveInitialRoute(),
+      onGenerateInitialRoutes: (initialRoute) {
+        return <Route<dynamic>>[
+          _onGenerateRoute(RouteSettings(name: initialRoute)),
+        ];
+      },
       onGenerateRoute: _onGenerateRoute,
       theme: AppTheme.lightTheme(),
       localizationsDelegates: const [
@@ -383,6 +399,11 @@ class _BrandedEntryScreenState extends State<_BrandedEntryScreen> {
   @override
   void initState() {
     super.initState();
+    if (MerchantDeepLink.peekOrder() != null) {
+      _showAuth = true;
+      return;
+    }
+
     Future<void>.delayed(const Duration(milliseconds: 880), () {
       if (!mounted) return;
       setState(() => _startExit = true);

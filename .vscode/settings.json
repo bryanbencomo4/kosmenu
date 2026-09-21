@@ -1,5 +1,5 @@
 {
-  "dart.flutterSdkPath": ".fvm/versions/stable",
+  "dart.flutterSdkPath": ".fvm/versions/3.41.6",
   "deno.enable": true,
   "deno.enablePaths": [
     "supabase/functions"

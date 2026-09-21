@@ -108,19 +108,19 @@ export function ProductOptionsSheet({
         role="dialog"
         aria-modal="true"
         aria-label={`Opciones de ${product.nombre}`}
-        className="flex max-h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-[22px] bg-white shadow-[0_16px_40px_rgba(15,23,42,0.12)]"
+        className="flex max-h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
       >
         <div className="flex items-start justify-between gap-3 px-4 py-4 sm:px-5">
           <div className="min-w-0">
-            <h3 className="truncate text-lg font-extrabold text-[#111827]">{product.nombre}</h3>
+            <h3 className="truncate text-lg font-extrabold text-[var(--menu-text)]">{product.nombre}</h3>
             {product.descripcion?.trim() ? (
-              <p className="mt-1 text-sm leading-5 text-slate-500">{product.descripcion.trim()}</p>
+              <p className="mt-1 text-sm leading-5 text-[var(--menu-text-muted)]">{product.descripcion.trim()}</p>
             ) : null}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-slate-50 text-slate-500"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]"
             aria-label="Cerrar"
           >
             <X className="h-4 w-4" />
@@ -130,7 +130,7 @@ export function ProductOptionsSheet({
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-5">
           {options?.tamanos?.length ? (
             <section>
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Tamaño</p>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Tamaño</p>
               <div className="mt-3 grid gap-2">
                 {options.tamanos.map((size) => {
                   const active = tamanoId === size.id;
@@ -139,14 +139,21 @@ export function ProductOptionsSheet({
                       key={size.id}
                       type="button"
                       onClick={() => setTamanoId(size.id)}
-                      className={`flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
+                      className="flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition"
+                      style={
                         active
-                          ? 'border-[var(--primary-color)] bg-[color-mix(in_srgb,var(--primary-color)_10%,white)]'
-                          : 'border-slate-200 bg-slate-50'
-                      }`}
+                          ? {
+                              borderColor: 'var(--menu-primary)',
+                              backgroundColor: 'color-mix(in srgb, var(--menu-primary) 12%, var(--menu-surface))',
+                            }
+                          : {
+                              borderColor: 'var(--menu-border)',
+                              backgroundColor: 'var(--menu-surface-alt)',
+                            }
+                      }
                     >
-                      <span className="text-sm font-bold text-slate-900">{size.label}</span>
-                      <span className="text-sm font-black text-slate-900">{formatPrice(size.precio)}</span>
+                      <span className="text-sm font-bold text-[var(--menu-text)]">{size.label}</span>
+                      <span className="text-sm font-black text-[var(--menu-text)]">{formatPrice(size.precio)}</span>
                     </button>
                   );
                 })}
@@ -156,16 +163,16 @@ export function ProductOptionsSheet({
 
           {categoryOptions?.servicio_adicional?.precios_por_tamano ? (
             <section>
-              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3">
                 <input
                   type="checkbox"
                   checked={servicioAdicional}
                   onChange={(event) => setServicioAdicional(event.target.checked)}
-                  className="mt-1 h-4 w-4 accent-[var(--primary-color)]"
+                  className="mt-1 h-4 w-4 accent-[var(--menu-primary)]"
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-bold text-slate-900">{servicioLabel}</span>
-                  <span className="mt-1 block text-xs text-slate-500">
+                  <span className="block text-sm font-bold text-[var(--menu-text)]">{servicioLabel}</span>
+                  <span className="mt-1 block text-xs text-[var(--menu-text-muted)]">
                     {tamanoId && servicioPrice > 0
                       ? `+ ${formatPrice(servicioPrice)}`
                       : 'Precio según el tamaño seleccionado'}
@@ -177,14 +184,14 @@ export function ProductOptionsSheet({
 
           {options?.ajustes?.length ? (
             <section>
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Ajustes</p>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Ajustes</p>
               <div className="mt-3 space-y-2">
                 {options.ajustes.map((ajuste) => {
                   const checked = ajusteIds.includes(ajuste.id);
                   return (
                     <label
                       key={ajuste.id}
-                      className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                      className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3"
                     >
                       <input
                         type="checkbox"
@@ -196,12 +203,12 @@ export function ProductOptionsSheet({
                               : prev.filter((entry) => entry !== ajuste.id),
                           );
                         }}
-                        className="mt-1 h-4 w-4 accent-[var(--primary-color)]"
+                        className="mt-1 h-4 w-4 accent-[var(--menu-primary)]"
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-bold text-slate-900">{ajuste.label}</span>
+                        <span className="block text-sm font-bold text-[var(--menu-text)]">{ajuste.label}</span>
                         {ajuste.precio > 0 ? (
-                          <span className="mt-1 block text-xs text-slate-500">
+                          <span className="mt-1 block text-xs text-[var(--menu-text-muted)]">
                             + {formatPrice(ajuste.precio)}
                           </span>
                         ) : null}
@@ -214,20 +221,20 @@ export function ProductOptionsSheet({
           ) : null}
 
           <section>
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Cantidad</p>
-            <div className="mt-3 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-1">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Cantidad</p>
+            <div className="mt-3 inline-flex items-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] p-1">
               <button
                 type="button"
                 onClick={() => setQuantity((prev) => Math.max(1, prev - 1))}
-                className="grid h-9 w-9 place-items-center rounded-full bg-white text-base font-black text-slate-700"
+                className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
               >
                 −
               </button>
-              <span className="min-w-10 px-2 text-center text-sm font-black text-slate-900">{quantity}</span>
+              <span className="min-w-10 px-2 text-center text-sm font-black text-[var(--menu-text)]">{quantity}</span>
               <button
                 type="button"
                 onClick={() => setQuantity((prev) => prev + 1)}
-                className="grid h-9 w-9 place-items-center rounded-full bg-white text-base font-black text-slate-700"
+                className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
               >
                 +
               </button>
@@ -240,8 +247,8 @@ export function ProductOptionsSheet({
             type="button"
             disabled={!canConfirm}
             onClick={() => onConfirm(selection, quantity)}
-            className="inline-flex min-h-12 w-full items-center justify-center rounded-[16px] text-sm font-bold text-white disabled:opacity-50"
-            style={{ backgroundColor: 'var(--primary-color)' }}
+            className="inline-flex min-h-12 w-full items-center justify-center rounded-[16px] text-sm font-bold disabled:opacity-50"
+            style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
           >
             Agregar · {formatPrice(unitPrice * quantity)}
           </button>

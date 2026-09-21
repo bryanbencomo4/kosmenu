@@ -15,6 +15,7 @@ import 'package:kosmenu_app/screens/product_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/category_icon_ai_service.dart';
+import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -977,6 +978,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }
 
   Future<void> _createCategory() async {
+    if (!MerchantSession.canManageCatalog) {
+      _showMessage(MerchantSession.deniedMessage('modificar el menú'));
+      return;
+    }
     if (_isMutating) return;
     final draft = await _showCategoryEditorSheet(title: 'Nueva categoría');
     if (!mounted || draft == null || draft.name.isEmpty) return;
@@ -1286,6 +1291,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     ProductModel? product,
     String? initialCategoryId,
   }) async {
+    if (!MerchantSession.canManageCatalog) {
+      _showMessage(MerchantSession.deniedMessage('modificar productos'));
+      return;
+    }
     if (_categories.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1669,6 +1678,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }
 
   Future<void> _deleteCategory(CategoryModel category) async {
+    if (!MerchantSession.canManageCatalog) {
+      _showMessage(MerchantSession.deniedMessage('eliminar información del menú'));
+      return;
+    }
     if (_isMutating) return;
 
     final confirm = await showDialog<bool>(

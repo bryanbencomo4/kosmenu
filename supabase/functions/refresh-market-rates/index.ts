@@ -84,7 +84,7 @@ Deno.serve(async (req: Request) => {
         ok: true,
         function: 'refresh-market-rates',
         providers: ['bcv', 'p2p_binance', 'google'],
-        expectedUnit: 'VES por 1 USD',
+        expectedUnit: 'VES por 1 USD (bcv_rate) y VES por 1 EUR (payload.bcv_rates.EUR)',
       },
       200,
     );
@@ -181,6 +181,8 @@ Deno.serve(async (req: Request) => {
 
     const previousBcv = parseRate(previous?.bcv_rate);
     const previousP2p = parseRate(previous?.p2p_binance_rate);
+    const previousBcvRates = extractBcvOfficialRates(previous?.payload);
+    const nextBcvEur = parseRate(bcv.payload['parsed_eur_rate']) ?? previousBcvRates.EUR;
     const previousGoogleChanged =
       previousGoogleRates['USD/COP'] !== google.rates['USD/COP'] ||
       previousGoogleRates['USD/EUR'] !== google.rates['USD/EUR'] ||
@@ -190,6 +192,7 @@ Deno.serve(async (req: Request) => {
       (previous == null ||
         previousBcv !== bcv.appliedRate ||
         previousP2p !== p2p.appliedRate ||
+        previousBcvRates.EUR !== nextBcvEur ||
         previousGoogleChanged);
 
     if (shouldInsert) {
@@ -200,6 +203,10 @@ Deno.serve(async (req: Request) => {
         is_fallback: google.isFallback,
         warnings: [...warnings, ...google.warnings],
         google_rates: google.rates,
+        bcv_rates: {
+          USD: bcv.appliedRate,
+          EUR: nextBcvEur,
+        },
         providers: providerResults.map((item) => ({
           provider: item.provider,
           ok: item.ok,
@@ -242,6 +249,7 @@ Deno.serve(async (req: Request) => {
         },
         next_rates: {
           bcv: bcv.appliedRate,
+          bcv_eur: nextBcvEur,
           p2p_binance: p2p.appliedRate,
           google: google.rates,
         },
@@ -362,6 +370,11 @@ async function fetchBcvRate(): Promise<ProviderFetchResult> {
       sourceUrl: selectedAttempt.sourceUrl,
       payload: {
         parsed_rate: selectedAttempt.rate,
+        parsed_eur_rate: selectedAttempt.eurRate > 0 ? selectedAttempt.eurRate : null,
+        parsed_rates: {
+          USD: selectedAttempt.rate,
+          EUR: selectedAttempt.eurRate > 0 ? selectedAttempt.eurRate : null,
+        },
         parser: selectedAttempt.parser,
         fallback_used: selectedAttempt.sourceUrl !== BCV_URL,
       },
@@ -382,6 +395,7 @@ async function fetchBcvRate(): Promise<ProviderFetchResult> {
 type BcvDocumentAttempt = {
   ok: boolean;
   rate: number;
+  eurRate: number;
   responseStatus: number | null;
   sourceUrl: string;
   parser: string;
@@ -403,6 +417,7 @@ async function fetchBcvDocument(url: string): Promise<BcvDocumentAttempt> {
       return {
         ok: false,
         rate: 0,
+        eurRate: 0,
         responseStatus: response.status,
         sourceUrl: url,
         parser: 'none',
@@ -411,20 +426,22 @@ async function fetchBcvDocument(url: string): Promise<BcvDocumentAttempt> {
       };
     }
 
-    const rate = parseBcvUsdRate(text);
+    const rates = parseBcvOfficialRates(text);
     return {
-      ok: rate > 0,
-      rate,
+      ok: rates.USD > 0,
+      rate: rates.USD,
+      eurRate: rates.EUR,
       responseStatus: response.status,
       sourceUrl: url,
-      parser: 'regex_usd_fecha_valor',
+      parser: 'regex_currency_fecha_valor',
       textSnippet: text.slice(0, 1500),
-      errorMessage: rate > 0 ? '' : 'Could not parse BCV USD rate.',
+      errorMessage: rates.USD > 0 ? '' : 'Could not parse BCV USD rate.',
     };
   } catch (error) {
     return {
       ok: false,
       rate: 0,
+      eurRate: 0,
       responseStatus: null,
       sourceUrl: url,
       parser: 'none',
@@ -434,29 +451,47 @@ async function fetchBcvDocument(url: string): Promise<BcvDocumentAttempt> {
   }
 }
 
-function parseBcvUsdRate(html: string): number {
+function parseBcvOfficialRates(html: string): { USD: number; EUR: number } {
   const normalized = html
     .replace(/[*_`#]/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
+  return {
+    USD: parseBcvCurrencyRate(normalized, 'USD'),
+    EUR: parseBcvCurrencyRate(normalized, 'EUR'),
+  };
+}
+
+function parseBcvCurrencyRate(normalizedHtml: string, currency: 'USD' | 'EUR'): number {
   const patterns = [
-    /USD\s*([0-9.,]+)\s*Fecha\s*Valor/i,
-    /USD\s*[^0-9]{0,20}([0-9.,]+)\s*Fecha\s*Valor/i,
-    /dollar-04_2\.png\s*USD\s*([0-9.,]+)/i,
-    /USD\s*<[^>]*>\s*([0-9.,]+)/i,
+    new RegExp(`${currency}\\s*([0-9.,]+)\\s*Fecha\\s*Valor`, 'i'),
+    new RegExp(`${currency}\\s*[^0-9]{0,40}([0-9.,]+)\\s*Fecha\\s*Valor`, 'i'),
+    new RegExp(`${currency}\\s*<[^>]*>\\s*([0-9.,]+)`, 'i'),
   ];
 
   for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    const rate = parseLocaleNumber(match?.[1]);
+    const rate = parseLocaleNumber(normalizedHtml.match(pattern)?.[1]);
     if (rate > 0) {
       return rate;
     }
   }
 
   return 0;
+}
+
+function extractBcvOfficialRates(payload: unknown): { USD: number | null; EUR: number | null } {
+  const empty = { USD: null as number | null, EUR: null as number | null };
+  if (!isRecord(payload)) {
+    return empty;
+  }
+
+  const nested = isRecord(payload.bcv_rates) ? payload.bcv_rates : payload;
+  return {
+    USD: parseRate(nested.USD),
+    EUR: parseRate(nested.EUR),
+  };
 }
 
 async function fetchBinanceP2PRate(): Promise<ProviderFetchResult> {

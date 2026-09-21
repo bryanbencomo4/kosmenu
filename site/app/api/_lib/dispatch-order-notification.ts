@@ -56,6 +56,7 @@ export async function dispatchOrderNotification(
         record: payload.record,
         old_record: payload.old_record ?? null,
       }),
+      signal: AbortSignal.timeout(6_000),
     });
 
     const rawBody = await response.text();
@@ -88,8 +89,22 @@ export async function dispatchOrderNotification(
       orderId: extractOrderCode(payload.record),
       message: error instanceof Error ? error.message : 'unknown',
     });
-    return { ok: false, reason: 'notify-order-network-error' };
+    const timeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+    return {
+      ok: false,
+      reason: timeout ? 'notify-order-timeout' : 'notify-order-network-error',
+    };
   }
+}
+
+export function merchantWhatsappDelivered(result: DispatchOrderNotificationResult): boolean {
+  if (!result.ok) return false;
+  const body = result.body;
+  if (!body || typeof body !== 'object') return false;
+  const merchant = (body as { merchantWhatsapp?: { ok?: boolean; skipped?: boolean; reason?: string } }).merchantWhatsapp;
+  if (!merchant) return false;
+  if (merchant.ok === true && merchant.skipped !== true) return true;
+  return merchant.reason === 'merchant-whatsapp-already-sent';
 }
 
 export function extractOrderCode(record: Record<string, unknown>): string {

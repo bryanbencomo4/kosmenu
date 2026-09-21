@@ -2,12 +2,13 @@
 
 import { Caveat, Manrope } from 'next/font/google';
 import { useEffect, useState, type ReactNode } from 'react';
-import { ChevronRight, MapPin, ShoppingBag, Truck, Utensils } from 'lucide-react';
+import { BookOpen, ChevronRight, MapPin, Moon, ShoppingBag, Sun, Truck, Utensils } from 'lucide-react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskImage } from './KioskImage';
 import { pickKioskGreeting } from './kiosk-greetings';
 import type { KioskFulfillment } from './kiosk-types';
+import type { MenuThemeMode } from '../../_lib/menu-theme';
 
 const greetingFont = Caveat({
   subsets: ['latin'],
@@ -29,7 +30,10 @@ type KioskHomeProps = {
   locationLabel: string | null;
   tagline?: string | null;
   supportsDelivery: boolean;
+  themeMode: MenuThemeMode;
+  onToggleTheme: () => void;
   onSelect: (fulfillment: KioskFulfillment) => void;
+  onBrowseMenu: () => void;
 };
 
 export function KioskHome({
@@ -41,7 +45,10 @@ export function KioskHome({
   openCaption,
   locationLabel,
   supportsDelivery,
+  themeMode,
+  onToggleTheme,
   onSelect,
+  onBrowseMenu,
 }: KioskHomeProps) {
   const [greeting, setGreeting] = useState<string | null>(null);
 
@@ -50,16 +57,28 @@ export function KioskHome({
   }, []);
 
   return (
-    <section className="relative flex min-h-[100dvh] flex-col overflow-x-hidden overflow-y-auto bg-[var(--menu-background)] text-[var(--menu-text)]">
+    <section className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-[var(--menu-background)] text-[var(--menu-text)]">
       <KioskDecor />
       <KioskMotionStyles />
 
-      <div className="relative z-10 mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-center px-5 pb-3 pt-7 sm:pt-8">
+      <div className="absolute right-4 top-3 z-20 sm:right-5">
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--menu-surface)] px-3 py-1.5 text-xs font-bold text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
+          aria-label={themeMode === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
+        >
+          {themeMode === 'dark' ? <Sun className="h-3.5 w-3.5" strokeWidth={2.2} /> : <Moon className="h-3.5 w-3.5" strokeWidth={2.2} />}
+          {themeMode === 'dark' ? 'Tema claro' : 'Tema oscuro'}
+        </button>
+      </div>
+
+      <div className="relative z-10 mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-center px-5 pb-3 pt-14 sm:pt-10">
         <div className="flex flex-col items-center text-center">
           <p
             aria-live="polite"
             className={`${greetingFont.className} min-h-[2.4rem] max-w-[20rem] px-2 text-[24px] font-semibold leading-7 sm:min-h-[2.8rem] sm:max-w-[26rem] sm:text-[32px] sm:leading-8`}
-            style={{ color: 'color-mix(in srgb, var(--menu-primary) 78%, #3f2f22)' }}
+            style={{ color: 'color-mix(in srgb, var(--menu-primary) 72%, var(--menu-text))' }}
           >
             {greeting ? (
               <span className="kiosk-enter inline-block" style={{ animationDelay: '40ms' }}>
@@ -72,32 +91,32 @@ export function KioskHome({
             <KioskImage
               src={logoUrl}
               alt={`Logo de ${businessName}`}
-              className="kiosk-enter mt-3 h-[96px] w-[96px] rounded-[22px] bg-white shadow-[0_10px_28px_rgba(15,23,42,0.08)] sm:h-[118px] sm:w-[118px]"
+              className="kiosk-enter mt-3 h-[96px] w-[96px] rounded-[22px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)] sm:h-[118px] sm:w-[118px]"
             />
           ) : (
             <div
-              className="kiosk-enter mt-3 grid h-[96px] w-[96px] place-items-center rounded-[22px] text-3xl font-black text-white shadow-[0_10px_28px_rgba(15,23,42,0.08)] sm:h-[118px] sm:w-[118px] sm:text-4xl"
-              style={{ backgroundColor: 'var(--menu-primary)' }}
+            className="kiosk-enter mt-3 grid h-[96px] w-[96px] place-items-center rounded-[22px] text-3xl font-black shadow-[var(--menu-shadow)] sm:h-[118px] sm:w-[118px] sm:text-4xl"
+              style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
             >
               {initialLetter}
             </div>
           )}
 
-          <p className="kiosk-enter mt-3.5 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">
-            <span className="hidden h-px w-8 bg-slate-300 sm:block" />
+          <p className="kiosk-enter mt-3.5 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.25em] text-[var(--menu-text-muted)]">
+            <span className="hidden h-px w-8 bg-[var(--menu-border)] sm:block" />
             Menú inteligente
-            <span className="hidden h-px w-8 bg-slate-300 sm:block" />
+            <span className="hidden h-px w-8 bg-[var(--menu-border)] sm:block" />
           </p>
 
           <h1
-            className={`${nameFont.className} kiosk-enter mt-1.5 line-clamp-2 max-w-[16ch] text-[32px] font-extrabold leading-[1.05] tracking-[-0.04em] text-[#111827] sm:text-[46px]`}
+            className={`${nameFont.className} kiosk-enter mt-1.5 line-clamp-2 max-w-[16ch] text-[32px] font-extrabold leading-[1.05] tracking-[-0.04em] text-[var(--menu-text)] sm:text-[46px]`}
             style={{ animationDelay: '80ms' }}
           >
             {businessName}
           </h1>
 
           {locationLabel ? (
-            <p className="mt-2 flex max-w-sm items-start justify-center gap-1.5 text-[13px] font-medium leading-5 text-slate-500">
+            <p className="mt-2 flex max-w-sm items-start justify-center gap-1.5 text-[13px] font-medium leading-5 text-[var(--menu-text-muted)]">
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'var(--menu-primary)' }} />
               <span className="line-clamp-2">{locationLabel}</span>
             </p>
@@ -107,8 +126,14 @@ export function KioskHome({
             className="mt-3 inline-flex max-w-[20rem] items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-semibold leading-5"
             style={
               isOpen
-                ? { backgroundColor: '#ECFDF5', color: '#047857' }
-                : { backgroundColor: '#FEF2F2', color: '#B91C1C' }
+                ? {
+                    backgroundColor: 'color-mix(in srgb, #10B981 16%, var(--menu-surface))',
+                    color: 'color-mix(in srgb, #059669 70%, var(--menu-text))',
+                  }
+                : {
+                    backgroundColor: 'color-mix(in srgb, #F43F5E 16%, var(--menu-surface))',
+                    color: 'color-mix(in srgb, #E11D48 72%, var(--menu-text))',
+                  }
             }
           >
             <span className={`h-2 w-2 shrink-0 rounded-full ${isOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
@@ -117,11 +142,20 @@ export function KioskHome({
         </div>
 
         <div className="mt-6 grid w-full gap-3">
+          {!isOpen ? (
+            <HomeAction
+              delayMs={80}
+              icon={<BookOpen className="h-5 w-5" strokeWidth={2.1} />}
+              title="Ver menú"
+              subtitle="Consulta los productos. Los pedidos se habilitan al abrir"
+              onClick={onBrowseMenu}
+            />
+          ) : null}
           <HomeAction
             delayMs={100}
             icon={<Utensils className="h-5 w-5" strokeWidth={2.1} />}
             title="Comer aquí"
-            subtitle="Te preparamos el pedido para mesa"
+            subtitle={isOpen ? 'Te preparamos el pedido para mesa' : 'Disponible cuando el negocio abra'}
             onClick={() => onSelect('dine_in')}
             disabled={!isOpen}
           />
@@ -129,7 +163,7 @@ export function KioskHome({
             delayMs={160}
             icon={<ShoppingBag className="h-5 w-5" strokeWidth={2.1} />}
             title="Para llevar"
-            subtitle="Retiras en el local cuando esté listo"
+            subtitle={isOpen ? 'Retiras en el local cuando esté listo' : 'Disponible cuando el negocio abra'}
             onClick={() => onSelect('takeaway')}
             disabled={!isOpen}
           />
@@ -137,7 +171,13 @@ export function KioskHome({
             delayMs={220}
             icon={<Truck className="h-5 w-5" strokeWidth={2.1} />}
             title="Delivery"
-            subtitle={supportsDelivery ? 'Lo enviamos a tu dirección' : 'Este negocio no tiene delivery'}
+            subtitle={
+              !supportsDelivery
+                ? 'Este negocio no tiene delivery'
+                : isOpen
+                  ? 'Lo enviamos a tu dirección'
+                  : 'Disponible cuando el negocio abra'
+            }
             onClick={() => onSelect('delivery')}
             disabled={!isOpen || !supportsDelivery}
           />
@@ -188,20 +228,35 @@ function HomeAction({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="kiosk-card group flex min-h-[4.5rem] w-full items-center gap-3.5 rounded-[22px] bg-white px-3.5 py-3 text-left shadow-[0_8px_30px_rgba(15,23,42,0.06)] transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_12px_34px_rgba(15,23,42,0.09)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-[0_8px_30px_rgba(15,23,42,0.06)]"
+      aria-disabled={disabled}
+      className={`kiosk-card group flex min-h-[4.5rem] w-full items-center gap-3.5 rounded-[22px] bg-[var(--menu-surface)] px-3.5 py-3 text-left shadow-[var(--menu-shadow)] ${
+        disabled ? 'cursor-not-allowed' : 'transition duration-200 ease-out hover:-translate-y-0.5'
+      }`}
       style={{ animationDelay: `${delayMs}ms` }}
     >
       <span
-        className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] text-white sm:h-12 sm:w-12"
-        style={{ backgroundColor: 'var(--menu-primary)' }}
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] sm:h-12 sm:w-12"
+        style={
+          disabled
+            ? { backgroundColor: 'var(--menu-surface-alt)', color: 'var(--menu-text-muted)' }
+            : { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }
+        }
       >
         {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[1.02rem] font-bold tracking-[-0.02em] text-[#111827]">{title}</span>
-        <span className="mt-0.5 block text-sm font-medium text-slate-500">{subtitle}</span>
+        <span
+          className={`block text-[1.02rem] font-bold tracking-[-0.02em] ${
+            disabled ? 'text-[var(--menu-text-muted)]' : 'text-[var(--menu-text)]'
+          }`}
+        >
+          {title}
+        </span>
+        <span className="mt-0.5 block text-sm font-medium text-[var(--menu-text-muted)]">{subtitle}</span>
       </span>
-      <ChevronRight className="kiosk-chevron h-5 w-5 shrink-0" style={{ color: 'var(--menu-primary)' }} />
+      {disabled ? null : (
+        <ChevronRight className="kiosk-chevron h-5 w-5 shrink-0" style={{ color: 'var(--menu-primary)' }} />
+      )}
     </button>
   );
 }

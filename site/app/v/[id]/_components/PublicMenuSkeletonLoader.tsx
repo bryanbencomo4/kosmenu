@@ -7,7 +7,13 @@ type PublicMenuSkeletonLoaderProps = {
 };
 
 function Pulse({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-neutral-200 ${className}`} aria-hidden />;
+  return (
+    <div
+      className={`animate-pulse rounded-full ${className}`}
+      style={{ backgroundColor: 'var(--menu-surface-alt, #E5E7EB)' }}
+      aria-hidden
+    />
+  );
 }
 
 export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoaderProps) {
@@ -15,7 +21,8 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
 
   return (
     <main
-      className="relative flex min-h-[100dvh] flex-col overflow-x-hidden bg-[#F6F7F9] text-[#111827]"
+      className="relative flex min-h-[100dvh] flex-col overflow-x-hidden bg-[var(--menu-background)] text-[var(--menu-text)]"
+      style={{ backgroundColor: 'var(--menu-background, #F6F7F9)', color: 'var(--menu-text, #111827)' }}
       aria-busy="true"
       aria-label={knownName ? `Cargando menú de ${businessName}` : 'Cargando menú'}
     >
@@ -27,14 +34,14 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
 
           <Pulse className="mt-3 h-[96px] w-[96px] rounded-[22px] sm:h-[118px] sm:w-[118px]" />
 
-          <p className="mt-3.5 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-400">
-            <span className="hidden h-px w-8 bg-slate-300 sm:block" />
+          <p className="mt-3.5 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.25em] text-[var(--menu-text-muted)]">
+            <span className="hidden h-px w-8 bg-[var(--menu-border)] sm:block" />
             Menú inteligente
-            <span className="hidden h-px w-8 bg-slate-300 sm:block" />
+            <span className="hidden h-px w-8 bg-[var(--menu-border)] sm:block" />
           </p>
 
           {knownName ? (
-            <h1 className="mt-1.5 line-clamp-2 max-w-[16ch] text-[32px] font-extrabold leading-[1.05] tracking-[-0.04em] text-[#111827] sm:text-[46px]">
+            <h1 className="mt-1.5 line-clamp-2 max-w-[16ch] text-[32px] font-extrabold leading-[1.05] tracking-[-0.04em] text-[var(--menu-text)] sm:text-[46px]">
               {businessName}
             </h1>
           ) : (
@@ -49,7 +56,7 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
           {Array.from({ length: 3 }).map((_, index) => (
             <div
               key={index}
-              className="flex min-h-[4.5rem] items-center gap-3.5 rounded-[22px] bg-white px-3.5 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.06)]"
+              className="flex min-h-[4.5rem] items-center gap-3.5 rounded-[22px] bg-[var(--menu-surface)] px-3.5 py-3 shadow-[var(--menu-shadow)]"
             >
               <Pulse className="h-11 w-11 shrink-0 rounded-[14px] sm:h-12 sm:w-12" />
               <div className="min-w-0 flex-1">

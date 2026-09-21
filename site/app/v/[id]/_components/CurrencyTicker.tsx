@@ -9,7 +9,7 @@ type CurrencyTickerProps = {
 
 const SCROLL_SPEED_PX_PER_SEC = 52;
 
-export function CurrencyTicker({ entries, accentColor = 'var(--primary-color)' }: CurrencyTickerProps) {
+export function CurrencyTicker({ entries, accentColor = 'currentColor' }: CurrencyTickerProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const segmentRef = useRef<HTMLDivElement>(null);
   const [durationSec, setDurationSec] = useState(18);
@@ -51,8 +51,8 @@ export function CurrencyTicker({ entries, accentColor = 'var(--primary-color)' }
   const renderSegment = (prefix: string) =>
     segmentEntries.map((entry, index) => (
       <div key={`${prefix}-${index}`} className="flex shrink-0 items-center gap-3 pr-3">
-        <span className="text-xs font-bold tracking-[0.04em] text-white/95">{entry}</span>
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: accentColor }} />
+        <span className="text-xs font-bold tracking-[0.04em] text-current opacity-95">{entry}</span>
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full opacity-80" style={{ backgroundColor: accentColor }} />
       </div>
     ));
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 /// One destination account field shown to the merchant (bank, phone, key…).
@@ -14,7 +16,7 @@ class PaymentAccountField {
 
   factory PaymentAccountField.fromMap(Map<String, dynamic> row) {
     return PaymentAccountField(
-      label: '${row['label'] ?? ''}'.trim(),
+      label: '${row['label'] ?? row['name'] ?? ''}'.trim(),
       value: '${row['value'] ?? ''}'.trim(),
       copyable: row['copyable'] != false,
     );
@@ -76,12 +78,16 @@ class PaymentMethodCatalog {
   bool get isCrypto => kind == 'crypto_checkout';
   bool get isGiftCard => kind == 'gift_card';
   bool get isCash => kind == 'cash';
+  bool get isPagoMovil => code == 'pago_movil';
+
+  /// Binance Pay, gift cards and Pago Móvil (BDV) are the live checkout.
+  bool get isAutomatedCheckout => isAutomatic || isPagoMovil;
 
   /// Manual methods with no destination yet must not be offered: the merchant
   /// would send money nowhere and the review queue would have nothing to match.
   bool get isReadyForCheckout {
     if (!isActive) return false;
-    if (isAutomatic) return true;
+    if (isAutomatedCheckout) return true;
     if (requiresAdvisorCode) return true;
     return accountFields.any((field) => field.value.isNotEmpty);
   }
@@ -97,20 +103,6 @@ class PaymentMethodCatalog {
   }
 
   factory PaymentMethodCatalog.fromRow(Map<String, dynamic> row) {
-    final fieldsRaw = row['account_fields'];
-    final fields = <PaymentAccountField>[];
-    if (fieldsRaw is List) {
-      for (final item in fieldsRaw) {
-        if (item is Map) {
-          final field = PaymentAccountField.fromMap(
-            Map<String, dynamic>.from(item),
-          );
-          if (field.label.isEmpty && field.value.isEmpty) continue;
-          fields.add(field);
-        }
-      }
-    }
-
     return PaymentMethodCatalog(
       id: '${row['id'] ?? row['code'] ?? ''}',
       code: '${row['code'] ?? ''}',
@@ -127,7 +119,7 @@ class PaymentMethodCatalog {
       logoUrl: _nullableText(row['logo_url']),
       brandColor: parseBrandColor(row['brand_color']?.toString()),
       instructions: _nullableText(row['instructions']),
-      accountFields: fields,
+      accountFields: parseAccountFields(row['account_fields']),
       requiresReference: row['requires_reference'] == true,
       requiresReceipt: row['requires_receipt'] == true,
       requiresAdvisorCode: row['requires_advisor_code'] == true,
@@ -250,17 +242,19 @@ List<PaymentMethodCatalog> fallbackPaymentMethods() {
     PaymentMethodCatalog(
       id: 'pago_movil',
       code: 'pago_movil',
-      name: 'Pago movil',
-      tagline: 'Transferencia interbancaria en Venezuela',
+      name: 'Pago Móvil',
+      tagline: 'Paga desde tu banco de Venezuela. Confirmación automática.',
       verification: 'manual',
       kind: 'bank_transfer',
       isActive: true,
       sortOrder: 30,
       countryCode: 'VE',
       localCurrency: 'VES',
-      brandColor: Color(0xFF1E4E9C),
+      brandColor: Color(0xFF2563EB),
+      instructions:
+          'Transfiere el monto exacto en bolívares (tasa BCV) y escribe los últimos 4 dígitos de la referencia. El sistema lo confirma solo.',
       requiresReference: true,
-      requiresReceipt: true,
+      requiresReceipt: false,
     ),
     PaymentMethodCatalog(
       id: 'bancolombia',
@@ -346,8 +340,11 @@ List<PaymentMethodCatalog> mergePaymentCatalog(
         .toList(growable: false);
   }
 
-  final ordered = [...remote]..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-  return ordered.where((method) => method.isReadyForCheckout).toList(growable: false);
+  final ordered = [...remote]
+    ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  return ordered
+      .where((method) => method.isReadyForCheckout)
+      .toList(growable: false);
 }
 
 List<PaymentMethodCatalog> automaticPaymentMethods(
@@ -362,6 +359,43 @@ List<PaymentMethodCatalog> manualPaymentMethods(
   return methods.where((method) => method.isManual).toList(growable: false);
 }
 
+/// Methods shown on Plan y facturación. Cash and other manual review stay hidden.
+List<PaymentMethodCatalog> checkoutPaymentMethods(
+  List<PaymentMethodCatalog> methods,
+) {
+  return methods
+      .where((method) => method.isAutomatedCheckout)
+      .toList(growable: false);
+}
+
+String normalizePagoMovilReferenceTail(String raw) {
+  return raw.replaceAll(RegExp(r'\D'), '');
+}
+
+bool isPagoMovilReferenceTail(String raw) {
+  return RegExp(r'^\d{4}$').hasMatch(normalizePagoMovilReferenceTail(raw));
+}
+
+double? vesAmountFromUsd({required double usd, required double? bcvRate}) {
+  if (bcvRate == null || bcvRate <= 0 || usd < 0) return null;
+  return (usd * bcvRate * 100).round() / 100;
+}
+
+String formatBolivares(double amount) {
+  final parts = amount.toStringAsFixed(2).split('.');
+  final whole = parts.first;
+  final cents = parts.length > 1 ? parts[1] : '00';
+  final buffer = StringBuffer();
+  for (var i = 0; i < whole.length; i++) {
+    final remaining = whole.length - i;
+    if (i > 0 && remaining % 3 == 0) {
+      buffer.write('.');
+    }
+    buffer.write(whole[i]);
+  }
+  return 'Bs. ${buffer.toString()},$cents';
+}
+
 Color? parseBrandColor(String? raw) {
   final value = (raw ?? '').trim();
   if (!RegExp(r'^#?[0-9A-Fa-f]{6}$').hasMatch(value)) {
@@ -369,6 +403,31 @@ Color? parseBrandColor(String? raw) {
   }
   final hex = value.startsWith('#') ? value.substring(1) : value;
   return Color(int.parse('FF$hex', radix: 16));
+}
+
+List<PaymentAccountField> parseAccountFields(Object? raw) {
+  Object? value = raw;
+  if (value is String && value.trim().isNotEmpty) {
+    try {
+      value = jsonDecode(value);
+    } catch (_) {
+      return const <PaymentAccountField>[];
+    }
+  }
+  if (value is! List) {
+    return const <PaymentAccountField>[];
+  }
+  final fields = <PaymentAccountField>[];
+  for (final item in value) {
+    if (item is Map) {
+      final field = PaymentAccountField.fromMap(
+        Map<String, dynamic>.from(item),
+      );
+      if (field.label.isEmpty && field.value.isEmpty) continue;
+      fields.add(field);
+    }
+  }
+  return fields;
 }
 
 /// Strips separators so `EMX-ABCD-EFGH-IJKL` and `emxabcdefghijkl` match.
@@ -388,10 +447,15 @@ String? validateManualPaymentDraft({
   if (draft.months < 1 || draft.months > 24) {
     return 'Elige entre 1 y 24 meses.';
   }
-  if (method.requiresReference && draft.reference.trim().length < 4) {
+  if (method.isPagoMovil) {
+    if (!isPagoMovilReferenceTail(draft.reference)) {
+      return 'Escribe los últimos 4 dígitos de la referencia.';
+    }
+  } else if (method.requiresReference && draft.reference.trim().length < 4) {
     return 'Escribe el numero de referencia de la transferencia.';
   }
-  if (method.requiresReceipt && (draft.receiptPath == null || draft.receiptPath!.isEmpty)) {
+  if (method.requiresReceipt &&
+      (draft.receiptPath == null || draft.receiptPath!.isEmpty)) {
     return 'Sube el comprobante de pago para que podamos verificarlo.';
   }
   if (method.requiresAdvisorCode && draft.advisorCode.trim().length < 4) {
@@ -410,12 +474,14 @@ String mapBillingRpcError(Object error) {
     'NOT_BUSINESS_OWNER' => 'Esta cuenta no es la dueña de este negocio.',
     'TOO_MANY_ATTEMPTS' =>
       'Demasiados intentos. Espera 10 minutos antes de volver a canjear.',
-    'GIFT_CARD_NOT_FOUND' => 'Ese codigo no existe. Revisa que lo hayas escrito bien.',
+    'GIFT_CARD_NOT_FOUND' =>
+      'Ese codigo no existe. Revisa que lo hayas escrito bien.',
     'GIFT_CARD_ALREADY_REDEEMED' => 'Esa tarjeta de regalo ya fue canjeada.',
     'GIFT_CARD_VOID' => 'Esa tarjeta de regalo fue anulada.',
     'GIFT_CARD_EXPIRED' => 'Esa tarjeta de regalo ya vencio.',
     'METHOD_NOT_AVAILABLE' => 'Este metodo de pago no esta disponible ahora.',
-    'METHOD_NOT_MANUAL' => 'Este metodo se confirma solo. No envies comprobante.',
+    'METHOD_NOT_MANUAL' =>
+      'Este metodo se confirma solo. No envies comprobante.',
     'REFERENCE_REQUIRED' => 'Falta el numero de referencia.',
     'RECEIPT_REQUIRED' => 'Falta el comprobante de pago.',
     'RECEIPT_NOT_FOUND' =>
@@ -434,9 +500,7 @@ String mapBillingRpcError(Object error) {
 }
 
 String? _extractRpcCode(String text) {
-  final match = RegExp(
-    r'\b([A-Z]{3,}(?:_[A-Z0-9]+)*)\b',
-  ).firstMatch(text);
+  final match = RegExp(r'\b([A-Z]{3,}(?:_[A-Z0-9]+)*)\b').firstMatch(text);
   return match?.group(1);
 }
 

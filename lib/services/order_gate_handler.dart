@@ -25,25 +25,58 @@ class OrderGateHandler {
   static const Duration _lookupTimeout = Duration(seconds: 5);
 
   static String? extractOrderId(Uri uri) {
+    final fromUri = _extractOrderIdFromUri(uri);
+    if (fromUri != null && fromUri.isNotEmpty) {
+      return fromUri;
+    }
+
+    final fragment = uri.fragment.trim();
+    if (fragment.isEmpty) {
+      return null;
+    }
+
+    final hashUri = Uri.parse(fragment.startsWith('/') ? fragment : '/$fragment');
+    return _extractOrderIdFromUri(hashUri);
+  }
+
+  static String? _extractOrderIdFromUri(Uri uri) {
     final segments = uri.pathSegments.where((segment) => segment.isNotEmpty).toList();
     final host = uri.host.trim().toLowerCase();
     final scheme = uri.scheme.trim().toLowerCase();
 
     if (scheme == 'kosmenu' && (host == 'order' || host == 'orders') && segments.isNotEmpty) {
-      return Uri.decodeComponent(segments.first).trim();
+      return _usableOrderId(Uri.decodeComponent(segments.first).trim());
+    }
+
+    if (segments.length >= 3 &&
+        segments.first == 'orders' &&
+        (segments[1] == 'view' || segments[1] == 'public')) {
+      return _usableOrderId(Uri.decodeComponent(segments[2]).trim());
     }
 
     if (segments.length >= 2 && (segments.first == 'orders' || segments.first == 'order')) {
-      return Uri.decodeComponent(segments[1]).trim();
+      return _usableOrderId(Uri.decodeComponent(segments[1]).trim());
     }
 
     if (segments.length >= 4 &&
         segments.first == 'v' &&
         (segments[2] == 'orders' || segments[2] == 'order')) {
-      return Uri.decodeComponent(segments[3]).trim();
+      return _usableOrderId(Uri.decodeComponent(segments[3]).trim());
     }
 
-    return null;
+    return _usableOrderId((uri.queryParameters['order'] ?? '').trim());
+  }
+
+  static String? _usableOrderId(String orderId) {
+    final id = orderId.trim();
+    if (id.isEmpty) {
+      return null;
+    }
+    final reserved = {'view', 'public', 'order', 'orders'};
+    if (reserved.contains(id.toLowerCase())) {
+      return null;
+    }
+    return id;
   }
 
   Future<OrderGateDecision> resolve(String orderId) async {

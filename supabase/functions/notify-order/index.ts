@@ -36,6 +36,7 @@ type CommerceInfo = {
   ownerId: string;
   name: string;
   slug: string;
+  whatsapp: string;
 };
 
 const corsHeaders = {
@@ -47,9 +48,14 @@ const FIREBASE_AUTH_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging'
 const FIREBASE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DEFAULT_WASENDER_ENDPOINT = 'https://www.wasenderapi.com/api/send-message';
 const DEFAULT_PUBLIC_SITE_URL = 'https://elmenuxfa.com';
+const DEFAULT_APP_SITE_URL = 'https://app.elmenuxfa.com';
 
 function getPublicSiteUrl(): string {
   return (Deno.env.get('PUBLIC_SITE_URL') ?? DEFAULT_PUBLIC_SITE_URL).trim().replace(/\/$/, '');
+}
+
+function getAppSiteUrl(): string {
+  return (Deno.env.get('APP_SITE_URL') ?? DEFAULT_APP_SITE_URL).trim().replace(/\/$/, '');
 }
 
 Deno.serve(async (req: Request) => {
@@ -101,20 +107,21 @@ Deno.serve(async (req: Request) => {
     const pedidoId = (record.id ?? '').toString().trim();
     const shouldSendPush = eventType === 'INSERT';
     const shouldSendWhatsapp = eventType === 'INSERT' || statusChanged;
+    const shouldSendMerchantWhatsapp = eventType === 'INSERT';
 
-    const pushResult = shouldSendPush
-      ? await maybeSendPushNotifications({
+    const merchantWhatsappResult = shouldSendMerchantWhatsapp
+      ? await maybeSendMerchantWhatsappNotification({
           supabase,
-          commerce,
-          firebaseProjectId,
-          firebaseClientEmail,
-          firebasePrivateKey,
+          apiKey: waSenderApiKey,
+          endpoint: waSenderEndpoint,
+          record,
+          customerName,
           orderId,
+          commerce,
           pedidoId,
           eventType,
-          statusKey: currentStatus,
         })
-      : { ok: true, skipped: true, reason: 'push-not-applicable' };
+      : { ok: true, skipped: true, reason: 'not-new-order' };
 
     const whatsappResult = shouldSendWhatsapp
       ? await maybeSendWhatsappNotification({
@@ -132,6 +139,20 @@ Deno.serve(async (req: Request) => {
         })
       : { ok: true, skipped: true, reason: 'status-unchanged' };
 
+    const pushResult = shouldSendPush
+      ? await maybeSendPushNotifications({
+          supabase,
+          commerce,
+          firebaseProjectId,
+          firebaseClientEmail,
+          firebasePrivateKey,
+          orderId,
+          pedidoId,
+          eventType,
+          statusKey: currentStatus,
+        })
+      : { ok: true, skipped: true, reason: 'push-not-applicable' };
+
     return jsonResponse(
       {
         ok: true,
@@ -143,6 +164,7 @@ Deno.serve(async (req: Request) => {
         statusChanged,
         push: pushResult,
         whatsapp: whatsappResult,
+        merchantWhatsapp: merchantWhatsappResult,
       },
       200,
     );
@@ -291,63 +313,21 @@ function normalizeOrderStatus(value: unknown): string {
   return raw.replace(/\s+/g, '_');
 }
 
-function statusLabel(status: string): string {
+function statusNotificationTitle(status: string) {
   switch (status) {
     case 'confirmado':
-      return 'Confirmado';
+      return { emoji: '✅', label: 'Confirmado' };
     case 'preparando':
-      return 'Preparando';
+      return { emoji: '👨‍🍳', label: 'Preparando' };
     case 'en_camino':
-      return 'En camino';
+      return { emoji: '🛵', label: 'En camino' };
     case 'entregado':
-      return 'Entregado';
+      return { emoji: '🎉', label: 'Entregado' };
     case 'cancelado':
-      return 'Cancelado';
+      return { emoji: '⚠️', label: 'Cancelado' };
     case 'pendiente':
     default:
-      return 'Pendiente';
-  }
-}
-
-function messageLinesByStatus(status: string) {
-  switch (status) {
-    case 'confirmado':
-      return {
-        emoji: '✅',
-        headline: 'Tu pedido fue confirmado y ya entro en preparacion.',
-        detail: 'Muy pronto tendras una nueva actualizacion con el siguiente avance.',
-      };
-    case 'preparando':
-      return {
-        emoji: '👨‍🍳',
-        headline: 'Tu pedido ya se esta preparando.',
-        detail: 'Estamos afinando los ultimos detalles para que todo salga perfecto.',
-      };
-    case 'en_camino':
-      return {
-        emoji: '🛵',
-        headline: 'Tu pedido ya va en camino.',
-        detail: 'Te recomendamos estar atento al telefono o al punto de entrega.',
-      };
-    case 'entregado':
-      return {
-        emoji: '🎉',
-        headline: 'Tu pedido fue entregado con exito.',
-        detail: 'Gracias por confiar en elmenuxfa.com. Esperamos verte de nuevo pronto.',
-      };
-    case 'cancelado':
-      return {
-        emoji: '⚠️',
-        headline: 'Tu pedido fue actualizado como cancelado.',
-        detail: 'Si necesitas ayuda adicional, puedes comunicarte directamente con el negocio.',
-      };
-    case 'pendiente':
-    default:
-      return {
-        emoji: '🧾',
-        headline: 'Recibimos tu pedido y ya quedo registrado correctamente.',
-        detail: 'Te avisaremos por aqui apenas cambie de estado.',
-      };
+      return { emoji: '🧾', label: 'Recibido' };
   }
 }
 
@@ -463,15 +443,6 @@ async function ensureTrackingUrl(params: {
   return trackingUrl;
 }
 
-function buildBusinessUrl(slug: string): string {
-  const publicSiteUrl = getPublicSiteUrl();
-  if (slug) {
-    return `${publicSiteUrl}/v/${encodeURIComponent(slug)}`;
-  }
-
-  return publicSiteUrl;
-}
-
 function buildWhatsappMessage(params: {
   customerName: string;
   orderId: string;
@@ -480,25 +451,14 @@ function buildWhatsappMessage(params: {
   status: string;
   trackingUrl: string;
 }) {
-  const businessUrl = buildBusinessUrl(params.businessSlug);
   const trackingUrl = params.trackingUrl.trim() || buildTrackingUrl(params.orderId, params.businessSlug);
-  const messageVariant = messageLinesByStatus(params.status);
+  const title = statusNotificationTitle(params.status);
+  const orderId = params.orderId.trim();
 
-  return [
-    `Hola ${params.customerName} 👋`,
-    '',
-    `${messageVariant.emoji} *${params.businessName}*`,
-    `Pedido #${params.orderId}`,
-    '',
-    `${messageVariant.headline}`,
-    `Estado actual: *${statusLabel(params.status)}*.`,
-    `${messageVariant.detail}`,
-    '',
-    `🛍️ Negocio: ${businessUrl}`,
-    `🔎 Sigue tu pedido aqui: ${trackingUrl}`,
-    '',
-    'Gracias por ordenar con elmenuxfa.com ✨',
-  ].join('\n');
+  return [`${title.emoji} *${title.label}*`, orderId ? `#${orderId}` : '', '', trackingUrl]
+    .filter((line, index, lines) => line !== '' || Boolean(lines[index + 1]))
+    .join('\n')
+    .trim();
 }
 
 function normalizePhoneToE164(phone: string): string {
@@ -563,6 +523,32 @@ async function claimNotificationSlot(
   return true;
 }
 
+async function releaseNotificationSlot(
+  supabase: ReturnType<typeof createClient>,
+  params: {
+    pedidoId: string;
+    channel: 'whatsapp' | 'push';
+    eventType: string;
+    statusKey: string;
+  },
+) {
+  if (!params.pedidoId) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from('order_notification_dedup')
+    .delete()
+    .eq('pedido_id', params.pedidoId)
+    .eq('channel', params.channel)
+    .eq('event_type', params.eventType)
+    .eq('status_key', params.statusKey);
+
+  if (error) {
+    console.warn('order_notification_dedup release skipped', error.message);
+  }
+}
+
 async function maybeSendWhatsappNotification(params: {
   supabase: ReturnType<typeof createClient>;
   apiKey: string;
@@ -615,6 +601,139 @@ async function maybeSendWhatsappNotification(params: {
       trackingUrl,
     });
 
+    return await sendWasenderText({
+      apiKey: params.apiKey,
+      endpoint: params.endpoint,
+      recipient,
+      text,
+      orderId: params.orderId,
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unknown WhatsApp notification error.',
+    };
+  }
+}
+
+function resolveMerchantTotalLabel(record: PedidoRecord): string {
+  const detalles = record.detalles ?? {};
+  const currency = (detalles['moneda_checkout'] ?? '').toString().trim().toUpperCase();
+  const totalRaw = detalles['total_moneda_checkout'] ?? detalles['total'];
+  const total = typeof totalRaw === 'number' ? totalRaw : Number(totalRaw);
+  if (!Number.isFinite(total)) {
+    return '—';
+  }
+  const symbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency || '';
+  return `${symbol} ${total.toFixed(2)}`.trim();
+}
+
+function buildMerchantWhatsappMessage(params: {
+  businessName: string;
+  orderId: string;
+  customerName: string;
+  totalLabel: string;
+  appOrderUrl: string;
+}) {
+  const orderId = params.orderId.trim();
+  const totalLabel = params.totalLabel.trim();
+  const detail = [orderId ? `#${orderId}` : '', totalLabel && totalLabel !== '—' ? totalLabel : '']
+    .filter(Boolean)
+    .join(' · ');
+
+  return [`💰 *Nuevo pedido*`, detail, '', params.appOrderUrl]
+    .filter((line, index, lines) => line !== '' || Boolean(lines[index + 1]))
+    .join('\n')
+    .trim();
+}
+
+async function maybeSendMerchantWhatsappNotification(params: {
+  supabase: ReturnType<typeof createClient>;
+  apiKey: string;
+  endpoint: string;
+  record: PedidoRecord;
+  customerName: string;
+  orderId: string;
+  commerce: CommerceInfo;
+  pedidoId: string;
+  eventType: string;
+}) {
+  if (!params.apiKey) {
+    return { ok: true, skipped: true, reason: 'wasender-key-missing' };
+  }
+
+  const merchantPhone = (params.commerce.whatsapp ?? '').trim();
+  if (!merchantPhone) {
+    return { ok: true, skipped: true, reason: 'merchant-whatsapp-missing' };
+  }
+
+  const claimed = await claimNotificationSlot(params.supabase, {
+    pedidoId: params.pedidoId,
+    channel: 'whatsapp',
+    eventType: params.eventType,
+    statusKey: 'merchant-new',
+  });
+  if (!claimed) {
+    return { ok: true, skipped: true, reason: 'merchant-whatsapp-already-sent' };
+  }
+
+  try {
+    const recipient = normalizePhoneToE164(merchantPhone);
+    const appOrderUrl = `${getAppSiteUrl()}/orders/view/${encodeURIComponent(params.orderId)}`;
+    const text = buildMerchantWhatsappMessage({
+      businessName: params.commerce.name || 'Tu comercio',
+      orderId: params.orderId,
+      customerName: params.customerName,
+      totalLabel: resolveMerchantTotalLabel(params.record),
+      appOrderUrl,
+    });
+
+    const delivered = await sendWasenderText({
+      apiKey: params.apiKey,
+      endpoint: params.endpoint,
+      recipient,
+      text,
+      orderId: params.orderId,
+    });
+
+    if (!delivered.ok) {
+      await releaseNotificationSlot(params.supabase, {
+        pedidoId: params.pedidoId,
+        channel: 'whatsapp',
+        eventType: params.eventType,
+        statusKey: 'merchant-new',
+      });
+      console.error('merchant WhatsApp delivery failed', {
+        orderId: params.orderId,
+        error: 'error' in delivered ? delivered.error : 'unknown',
+      });
+    }
+
+    return delivered;
+  } catch (error) {
+    await releaseNotificationSlot(params.supabase, {
+      pedidoId: params.pedidoId,
+      channel: 'whatsapp',
+      eventType: params.eventType,
+      statusKey: 'merchant-new',
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unknown merchant WhatsApp notification error.',
+    };
+  }
+}
+
+async function sendWasenderText(params: {
+  apiKey: string;
+  endpoint: string;
+  recipient: string;
+  text: string;
+  orderId: string;
+}) {
+  let lastError = 'WASender request failed.';
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
     const response = await fetch(params.endpoint, {
       method: 'POST',
       headers: {
@@ -623,8 +742,8 @@ async function maybeSendWhatsappNotification(params: {
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        to: recipient,
-        text,
+        to: params.recipient,
+        text: params.text,
       }),
     });
 
@@ -637,33 +756,35 @@ async function maybeSendWhatsappNotification(params: {
       payload = rawBody;
     }
 
-    if (!response.ok) {
-      console.error('WASender delivery failed', {
-        orderId: params.orderId,
-        status: response.status,
-        recipientSuffix: recipient.slice(-4),
-      });
+    if (response.ok) {
       return {
-        ok: false,
-        status: response.status,
-        recipient,
-        error: typeof payload === 'object' && payload !== null
-          ? ((payload as Record<string, unknown>)['message'] ?? (payload as Record<string, unknown>)['error'] ?? 'WASender request failed.')
-          : String(payload ?? 'WASender request failed.'),
+        ok: true,
+        recipient: params.recipient,
+        response: payload,
       };
     }
 
-    return {
-      ok: true,
-      recipient,
-      response: payload,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : 'Unknown WhatsApp notification error.',
-    };
+    lastError = typeof payload === 'object' && payload !== null
+      ? String((payload as Record<string, unknown>)['message'] ?? (payload as Record<string, unknown>)['error'] ?? `WASender request failed with status ${response.status}.`)
+      : String(payload ?? `WASender request failed with status ${response.status}.`);
+
+    console.error('WASender delivery failed', {
+      orderId: params.orderId,
+      status: response.status,
+      attempt,
+      recipientSuffix: params.recipient.slice(-4),
+    });
+
+    if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 422) {
+      break;
+    }
   }
+
+  return {
+    ok: false,
+    recipient: params.recipient,
+    error: lastError,
+  };
 }
 
 async function maybeSendPushNotifications(params: {
@@ -762,7 +883,7 @@ async function loadCommerceInfo(
 ): Promise<CommerceInfo> {
   const { data, error } = await supabase
     .from('comercios')
-    .select('owner_id,nombre,slug')
+    .select('owner_id,nombre,slug,whatsapp')
     .eq('id', comercioId)
     .limit(1)
     .maybeSingle();
@@ -775,6 +896,7 @@ async function loadCommerceInfo(
     ownerId: data?.owner_id?.toString().trim() ?? '',
     name: data?.nombre?.toString().trim() ?? 'elmenuxfa.com',
     slug: data?.slug?.toString().trim() ?? '',
+    whatsapp: data?.whatsapp?.toString().trim() ?? '',
   };
 }
 

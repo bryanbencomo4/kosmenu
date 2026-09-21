@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -66,18 +67,20 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
       }
 
       final fallbackMessage = decision.reason == 'no-session'
-          ? 'No hay sesión activa. Abriremos el pedido en el navegador.'
+          ? 'Inicia sesión para gestionar este pedido.'
           : 'Este pedido se abrirá en la vista web por seguridad.';
 
       setState(() {
         _loading = false;
-        _title = 'Abrir pedido en navegador';
+        _title = kIsWeb ? 'Abre el pedido en el panel' : 'Abrir pedido en navegador';
         _fallbackUri = decision.fallbackUri;
         _showAccountMismatchNotice = false;
         _message = fallbackMessage;
       });
 
-      _launchFallbackInBackground(decision.fallbackUri);
+      if (!kIsWeb) {
+        _launchFallbackInBackground(decision.fallbackUri);
+      }
     } catch (_) {
       if (!mounted) {
         return;

@@ -6,7 +6,7 @@ type KioskDecorProps = {
 };
 
 export function KioskDecor({ density = 'full', tone = 'brand' }: KioskDecorProps) {
-  const stroke = tone === 'muted' ? '#CBD5E1' : 'var(--menu-primary)';
+  const stroke = tone === 'muted' ? 'var(--menu-border)' : 'var(--menu-primary)';
   const showSecondary = density === 'full';
 
   return (

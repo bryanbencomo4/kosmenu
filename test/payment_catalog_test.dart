@@ -8,14 +8,23 @@ void main() {
       final methods = mergePaymentCatalog(fallbackPaymentMethods());
       final automatic = automaticPaymentMethods(methods);
       final manual = manualPaymentMethods(methods);
+      final checkout = checkoutPaymentMethods(methods);
 
       expect(automatic.map((item) => item.code), ['crypto_usdt', 'gift_card']);
-      expect(manual.map((item) => item.code), ['efectivo']);
+      expect(manual.map((item) => item.code), ['pago_movil', 'efectivo']);
+      expect(checkout.map((item) => item.code), [
+        'crypto_usdt',
+        'gift_card',
+        'pago_movil',
+      ]);
+      expect(checkout.any((item) => item.code == 'efectivo'), isFalse);
       expect(methods.any((item) => item.code == 'bancolombia'), isFalse);
     });
 
     test('un metodo manual con cuenta lista si aparece', () {
-      final bancolombia = fallbackPaymentMethods().firstWhere((item) => item.code == 'bancolombia');
+      final bancolombia = fallbackPaymentMethods().firstWhere(
+        (item) => item.code == 'bancolombia',
+      );
       final ready = PaymentMethodCatalog(
         id: bancolombia.id,
         code: bancolombia.code,
@@ -34,6 +43,7 @@ void main() {
 
       final methods = mergePaymentCatalog([ready]);
       expect(methods.map((item) => item.code), ['bancolombia']);
+      expect(checkoutPaymentMethods(methods), isEmpty);
     });
   });
 
@@ -45,50 +55,80 @@ void main() {
     });
   });
 
-  group('manual draft', () {
-    final pagoMovil = PaymentMethodCatalog.fromRow({
-      'code': 'pago_movil',
-      'name': 'Pago movil',
-      'verification': 'manual',
-      'kind': 'bank_transfer',
-      'requires_reference': true,
-      'requires_receipt': true,
-      'account_fields': [
-        {'label': 'Telefono', 'value': '0414'},
-      ],
+  group('pago movil', () {
+    final pagoMovil = fallbackPaymentMethods().firstWhere(
+      (item) => item.code == 'pago_movil',
+    );
+
+    test('parsea account_fields desde lista o json', () {
+      expect(
+        parseAccountFields([
+          {'label': 'Teléfono', 'value': '0412'},
+        ]).first.value,
+        '0412',
+      );
+      expect(
+        parseAccountFields('[{"label":"Banco","value":"BDV"}]').first.label,
+        'Banco',
+      );
     });
 
-    test('exige referencia y comprobante', () {
+    test('es checkout automatico y no pide comprobante', () {
+      expect(pagoMovil.isPagoMovil, isTrue);
+      expect(pagoMovil.isAutomatedCheckout, isTrue);
+      expect(pagoMovil.requiresReceipt, isFalse);
+      expect(pagoMovil.isReadyForCheckout, isTrue);
+    });
+
+    test('exige exactamente 4 digitos de referencia', () {
       expect(
         validateManualPaymentDraft(
           method: pagoMovil,
           draft: const ManualPaymentDraft(),
         ),
-        contains('referencia'),
+        contains('4 dígitos'),
+      );
+      expect(
+        validateManualPaymentDraft(
+          method: pagoMovil,
+          draft: const ManualPaymentDraft(reference: '875'),
+        ),
+        contains('4 dígitos'),
       );
       expect(
         validateManualPaymentDraft(
           method: pagoMovil,
           draft: const ManualPaymentDraft(reference: '001122'),
         ),
-        contains('comprobante'),
+        contains('4 dígitos'),
       );
       expect(
         validateManualPaymentDraft(
           method: pagoMovil,
-          draft: const ManualPaymentDraft(
-            reference: '001122',
-            receiptPath: 'biz/file.jpg',
-          ),
+          draft: const ManualPaymentDraft(reference: '8754'),
         ),
         isNull,
       );
     });
 
+    test('convierte USD a bolivares con tasa BCV', () {
+      expect(vesAmountFromUsd(usd: 10, bcvRate: 36.5), 365);
+      expect(formatBolivares(365), 'Bs. 365,00');
+      expect(formatBolivares(1234.5), 'Bs. 1.234,50');
+      expect(vesAmountFromUsd(usd: 10, bcvRate: null), isNull);
+    });
+  });
+
+  group('manual draft', () {
     test('efectivo exige codigo de asesor y no pide comprobante', () {
-      final cash = fallbackPaymentMethods().firstWhere((item) => item.code == 'efectivo');
+      final cash = fallbackPaymentMethods().firstWhere(
+        (item) => item.code == 'efectivo',
+      );
       expect(
-        validateManualPaymentDraft(method: cash, draft: const ManualPaymentDraft()),
+        validateManualPaymentDraft(
+          method: cash,
+          draft: const ManualPaymentDraft(),
+        ),
         contains('asesor'),
       );
       expect(
@@ -103,10 +143,19 @@ void main() {
 
   group('rpc errors', () {
     test('traduce los codigos que el comerciante puede provocar', () {
-      expect(mapBillingRpcError('GIFT_CARD_ALREADY_REDEEMED'), contains('ya fue canjeada'));
+      expect(
+        mapBillingRpcError('GIFT_CARD_ALREADY_REDEEMED'),
+        contains('ya fue canjeada'),
+      );
       expect(mapBillingRpcError('ADVISOR_CODE_INVALID'), contains('asesor'));
-      expect(mapBillingRpcError('SUBMISSION_ALREADY_PENDING'), contains('en revision'));
-      expect(mapBillingRpcError('REFERENCE_ALREADY_USED'), contains('referencia'));
+      expect(
+        mapBillingRpcError('SUBMISSION_ALREADY_PENDING'),
+        contains('en revision'),
+      );
+      expect(
+        mapBillingRpcError('REFERENCE_ALREADY_USED'),
+        contains('referencia'),
+      );
     });
   });
 

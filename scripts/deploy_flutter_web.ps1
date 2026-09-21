@@ -127,15 +127,17 @@ $vercelConfig = @'
 
 Push-Location $repoRoot
 try {
-  $flutter = Join-Path $env:USERPROFILE 'fvm\default\bin\flutter.bat'
-  if (-not (Test-Path $flutter)) {
-    $flutter = Join-Path $repoRoot '.fvm\versions\stable\bin\flutter.bat'
-  }
-  if (-not (Test-Path $flutter)) {
-    $flutter = 'flutter'
+  $flutterCandidates = @(
+    (Join-Path $repoRoot '.fvm\versions\3.41.6\bin\flutter.bat'),
+    (Join-Path $env:USERPROFILE 'fvm\versions\3.41.6\bin\flutter.bat'),
+    (Join-Path $repoRoot '.fvm\flutter_sdk\bin\flutter.bat')
+  )
+  $flutter = $flutterCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $flutter) {
+    throw 'Flutter 3.41.6 not found via FVM. Run `fvm use 3.41.6` in the repo. Do not use a global PATH flutter.'
   }
 
-  Write-Host "Building Flutter web with dart-defines (API_BASE_URL=$apiBaseUrl, SUPABASE_URL=$supabaseUrl)"
+  Write-Host "Building Flutter web with dart-defines (API_BASE_URL=$apiBaseUrl, SUPABASE_URL=$supabaseUrl) using $flutter"
 
   & $flutter build web --release --no-wasm-dry-run `
     "--dart-define=API_BASE_URL=$apiBaseUrl" `

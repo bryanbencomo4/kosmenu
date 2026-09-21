@@ -75,10 +75,11 @@ npx vercel deploy --prod --prebuilt   # only if build matches freeze SHA
 Flutter production build (explicit defines — no defaults):
 
 ```text
-flutter build web --release \
+fvm flutter build web --release --no-wasm-dry-run \
   --dart-define=API_BASE_URL=https://elmenuxfa.com \
   --dart-define=SUPABASE_URL=https://qqhberaayhohxlbbhdyi.supabase.co \
   --dart-define=SUPABASE_ANON_KEY=<PROD_ANON>
+# SDK pin: Flutter 3.41.6 / Dart 3.11.4 (.fvmrc). Never use PATH `flutter`.
 ```
 
 Scan artifact: must contain prod ref; must NOT contain Preview ref or `service_role`.

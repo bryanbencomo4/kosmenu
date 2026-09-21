@@ -3,6 +3,10 @@ export type MarketRatesInput = {
   p2p_binance_rate?: number | string | null;
   payload?: {
     google_rates?: Record<string, number | string | null> | null;
+    bcv_rates?: {
+      USD?: number | string | null;
+      EUR?: number | string | null;
+    } | null;
   } | null;
 };
 
@@ -89,6 +93,31 @@ function isTrackedVesPair(baseCurrency: string, quoteCurrency: string) {
   return direct || reverse;
 }
 
+function isBcvExchangeSource(source: string) {
+  const normalized = (source ?? '').trim().toLowerCase();
+  return normalized === 'bcv' || normalized === 'bcv_usd' || normalized === 'bcv_eur';
+}
+
+function canonicalizeBcvSource(source: string) {
+  const normalized = (source ?? '').trim().toLowerCase();
+  if (normalized === 'bcv_eur') return 'bcv_eur';
+  if (normalized === 'bcv' || normalized === 'bcv_usd') return 'bcv_usd';
+  return normalized;
+}
+
+function bcvVesRateForSource(
+  source: string,
+  marketRates: MarketRatesInput | null | undefined,
+) {
+  const rates = marketRates?.payload?.bcv_rates;
+  const usdRate = parseExchangeRate(rates?.USD) ?? parseExchangeRate(marketRates?.bcv_rate) ?? 0;
+  const eurRate = parseExchangeRate(rates?.EUR) ?? 0;
+  if (canonicalizeBcvSource(source) === 'bcv_eur') {
+    return eurRate > 0 ? eurRate : usdRate;
+  }
+  return usdRate;
+}
+
 function adjustedP2pRateForBuyer(rate: number) {
   return rate > 0 ? rate * 1.006 : 0;
 }
@@ -140,7 +169,15 @@ export function derivedExchangeRateForCurrency(
     if (rate > 0) return rate;
   }
 
-  if ((source === 'bcv' || source === 'p2p_binance' || source === 'google') && isTrackedVesPair(base, quote)) {
+  if (isBcvExchangeSource(source) && (quote === 'VES' || base === 'VES')) {
+    const vesRate = bcvVesRateForSource(source, marketRates);
+    if (vesRate > 0) {
+      if (quote === 'VES') return vesRate;
+      return 1 / vesRate;
+    }
+  }
+
+  if ((source === 'p2p_binance' || source === 'google') && isTrackedVesPair(base, quote)) {
     const usdToBase = usdToCurrencyRateForSource(source, base, marketRates);
     const usdToQuote = usdToCurrencyRateForSource(source, quote, marketRates);
     if (usdToBase > 0 && usdToQuote > 0) {
@@ -161,8 +198,11 @@ export function derivedExchangeRateForCurrency(
 
 export function exchangeSourceLabel(source: string | null | undefined) {
   switch ((source ?? '').trim().toLowerCase()) {
+    case 'bcv_eur':
+      return 'BCV EUR';
     case 'bcv':
-      return 'BCV';
+    case 'bcv_usd':
+      return 'BCV USD';
     case 'p2p_binance':
       return 'Binance P2P';
     case 'google':

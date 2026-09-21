@@ -11,7 +11,7 @@ Required values:
 - `record.id` and/or `record.detalles.order_id`
 
 Supported events:
-- `INSERT`: owner push notification + customer WhatsApp notification
+- `INSERT`: owner push notification + customer WhatsApp + merchant WhatsApp to `comercios.whatsapp`
 - `UPDATE`: customer WhatsApp notification only when `estado` actually changes
 
 ## Required env vars

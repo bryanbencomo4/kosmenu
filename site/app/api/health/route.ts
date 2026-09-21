@@ -1,81 +1,123 @@
 import { NextResponse } from 'next/server';
 
-import { loadPublicMenuByIdentifier } from '../menu/_lib/load-public-menu';
-import { getAnonServerSupabaseClient } from '../_lib/supabase-server';
-
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 8;
 
-const MENU_CANARY_SLUG = 'napoles-pizza';
+const PING_TIMEOUT_MS = 4_000;
 
-type CheckStatus = 'ok' | 'fail';
+type CheckName = 'site' | 'supabaseRest' | 'supabaseAuth' | 'egress';
 
-async function timed<T>(fn: () => Promise<T>, ms: number): Promise<{ ok: true; value: T } | { ok: false }> {
+async function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const value = await Promise.race([
-      fn(),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('timeout')), ms);
+    return await Promise.race([
+      work,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
       }),
     ]);
-    return { ok: true, value };
-  } catch {
-    return { ok: false };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function pingRest() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '');
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error('missing supabase env');
+  const response = await fetch(`${url}/rest/v1/comercios?select=id&limit=1`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`rest ${response.status}`);
+}
+
+async function pingAuth() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, '');
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error('missing supabase env');
+  const response = await fetch(`${url}/auth/v1/health`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+  });
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`auth health ${response.status}`);
+  }
+}
+
+async function pingEgress() {
+  const response = await fetch('https://example.com/', {
+    method: 'HEAD',
+    cache: 'no-store',
+    signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+  });
+  if (!response.ok && response.status >= 500) {
+    throw new Error(`egress ${response.status}`);
+  }
+}
+
+function publicErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/sb_secret_[a-zA-Z0-9]+|eyJ[a-zA-Z0-9._-]+/g, '[redacted]').slice(0, 160);
+}
+
+async function runCheck(name: Exclude<CheckName, 'site'>, work: () => Promise<void>) {
+  const started = Date.now();
+  try {
+    await withTimeout(work(), PING_TIMEOUT_MS);
+    return { name, ok: true as const, ms: Date.now() - started, error: null as string | null };
+  } catch (error) {
+    return {
+      name,
+      ok: false as const,
+      ms: Date.now() - started,
+      error: publicErrorMessage(error),
+    };
   }
 }
 
 export async function GET() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? '';
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? '';
+  const [supabaseRest, supabaseAuth, egress] = await Promise.all([
+    runCheck('supabaseRest', pingRest),
+    runCheck('supabaseAuth', pingAuth),
+    runCheck('egress', pingEgress),
+  ]);
 
-  const checks: Record<string, CheckStatus> = {
+  const checks: Record<CheckName, 'ok' | 'fail'> = {
     site: 'ok',
-    supabaseRest: 'fail',
-    supabaseAuth: 'fail',
-    publicMenu: 'fail',
+    supabaseRest: supabaseRest.ok ? 'ok' : 'fail',
+    supabaseAuth: supabaseAuth.ok ? 'ok' : 'fail',
+    egress: egress.ok ? 'ok' : 'fail',
   };
 
-  if (supabaseUrl && anonKey) {
-    const rest = await timed(async () => {
-      const client = getAnonServerSupabaseClient();
-      const { error } = await client
-        .from('global_market_rates')
-        .select('updated_at')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-    }, 8000);
-    checks.supabaseRest = rest.ok ? 'ok' : 'fail';
-
-    const auth = await timed(async () => {
-      const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/settings`, {
-        headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
-        cache: 'no-store',
-      });
-      if (!response.ok) throw new Error(String(response.status));
-    }, 8000);
-    checks.supabaseAuth = auth.ok ? 'ok' : 'fail';
-  }
-
-  const menu = await timed(async () => {
-    const loaded = await loadPublicMenuByIdentifier(MENU_CANARY_SLUG);
-    if (!loaded) {
-      throw new Error('canary menu missing');
-    }
-    // Offline/draft is a billing outcome, not an outage. Online menus must still have products.
-    if (loaded.isOnline && (!Array.isArray(loaded.productos) || loaded.productos.length < 1)) {
-      throw new Error('canary menu empty');
-    }
-  }, 8000);
-  checks.publicMenu = menu.ok ? 'ok' : 'fail';
-
-  const ok = Object.values(checks).every((status) => status === 'ok');
+  const ok = supabaseRest.ok;
+  const supabase =
+    supabaseRest.ok && supabaseAuth.ok ? 'healthy' : supabaseRest.ok ? 'degraded' : 'down';
   return NextResponse.json(
     {
       ok,
-      service: 'elmenuxfa-site',
+      supabase,
+      latencyMs: supabaseRest.ms,
+      timestamp: new Date().toISOString(),
+      version:
+        process.env.VERCEL_GIT_COMMIT_SHA ||
+        process.env.VERCEL_DEPLOYMENT_ID ||
+        'dev',
+      service: 'kosmenu-site',
       checks,
-      ts: new Date().toISOString(),
+      timingsMs: {
+        supabaseRest: supabaseRest.ms,
+        supabaseAuth: supabaseAuth.ms,
+        egress: egress.ms,
+      },
+      errors: {
+        supabaseRest: supabaseRest.error,
+        supabaseAuth: supabaseAuth.error,
+        egress: egress.error,
+      },
     },
     {
       status: ok ? 200 : 503,

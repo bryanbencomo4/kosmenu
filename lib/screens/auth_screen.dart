@@ -9,6 +9,8 @@ import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
+import 'package:kosmenu_app/services/merchant_session.dart';
+import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -43,12 +45,40 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<PostAuthDestination> _resolveTargetForUser(String userId) async {
     Future<PostAuthDestination> resolveOnce() async {
-      final row = await Supabase.instance.client
+      final owned = await Supabase.instance.client
           .from('comercios')
           .select('id, slug, nombre, logo_url')
           .eq('owner_id', userId)
           .limit(1)
           .maybeSingle();
+
+      Map<String, dynamic>? row = owned;
+      var isOwner = owned != null;
+      var role = MerchantStaffRole.administrador;
+
+      if (row == null) {
+        try {
+          await Supabase.instance.client.rpc('accept_pending_comercio_invites');
+        } catch (_) {}
+        final member = await Supabase.instance.client
+            .from('comercio_members')
+            .select('comercio_id, role, comercios(id, slug, nombre, logo_url)')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .limit(1)
+            .maybeSingle();
+        if (member != null) {
+          role = MerchantStaffRoleUi.fromRaw(member['role']?.toString());
+          final nested = member['comercios'];
+          if (nested is Map) {
+            row = Map<String, dynamic>.from(nested);
+          } else if (member['comercio_id'] != null) {
+            row = {'id': member['comercio_id']};
+          }
+        }
+      }
+
+      MerchantSession.set(role: role, isOwner: isOwner);
 
       if (row == null) {
         SupabaseConfig.clearCurrentComercioId();
