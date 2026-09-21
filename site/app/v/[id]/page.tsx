@@ -1764,7 +1764,7 @@ export default function PublicMenuPage() {
           : `/api/menu/${encodedIdentifier}`;
         const requestInit: RequestInit = {
           method: 'GET',
-          cache: isOwnerPreview ? 'no-store' : 'default',
+          cache: 'no-store',
           headers: isOwnerPreview
             ? { Authorization: `Bearer ${ownerPreviewToken}` }
             : undefined,
@@ -4324,13 +4324,70 @@ export default function PublicMenuPage() {
 
   if (isDraftMode) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-950 px-6 text-slate-50">
-        <div className="w-full max-w-2xl rounded-3xl border border-amber-300/35 bg-amber-100/10 p-7 text-center backdrop-blur-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200">Sitio en mantenimiento</p>
-          <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">Estamos terminando de activar este menu</h1>
-          <p className="mt-3 text-sm text-slate-200 sm:text-base">
-            El menu publico estara disponible cuando la cuenta propietaria confirme su correo y complete la activacion.
-          </p>
+      <main className="relative flex min-h-screen overflow-hidden bg-[#0c0d12] px-5 py-8 text-white sm:px-8 sm:py-10">
+        <div className="pointer-events-none absolute inset-0 opacity-40">
+          <div className="absolute -left-24 top-20 h-72 w-72 rounded-full border border-amber-300/20" />
+          <div className="absolute -right-28 bottom-12 h-96 w-96 rounded-full border border-amber-300/15" />
+          <div className="absolute left-1/2 top-0 h-full w-px bg-amber-200/10" />
+        </div>
+
+        <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col">
+          <header className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <img
+                src="/branding/isotipo.png"
+                alt="Logo de elmenuxfa"
+                className="h-11 w-11 rounded-2xl border border-white/10 bg-amber-300 object-contain p-1.5"
+              />
+              <div className="min-w-0">
+                <p className="truncate text-[10px] font-black uppercase tracking-[0.28em] text-amber-200/80">Menú inteligente</p>
+                <p className="truncate text-base font-black text-white sm:text-lg">{comercioNombre}</p>
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full border border-amber-300/25 bg-amber-300/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-amber-200">
+              No disponible
+            </span>
+          </header>
+
+          <section className="flex flex-1 flex-col items-center justify-center py-14 text-center sm:py-20">
+            <div className="relative grid h-44 w-56 place-items-center sm:h-56 sm:w-72">
+              <div className="absolute bottom-7 h-8 w-44 rounded-[50%] bg-black/60 blur-xl sm:w-56" />
+              <div className="relative z-10 flex h-32 w-44 flex-col items-center justify-center rounded-[42%] border-2 border-white/15 bg-[#20232b] shadow-[0_24px_70px_rgba(0,0,0,0.45)] sm:h-40 sm:w-56">
+                <Store className="h-12 w-12 text-white/80 sm:h-16 sm:w-16" strokeWidth={1.5} />
+                <span className="mt-2 rounded-md bg-amber-300 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-950 sm:text-xs">
+                  Menú pausado
+                </span>
+              </div>
+              <span className="absolute right-3 top-1 z-20 grid h-12 w-12 place-items-center rounded-full bg-amber-300 text-2xl font-black text-slate-950 shadow-[0_12px_30px_rgba(251,191,36,0.25)] sm:right-8">
+                !
+              </span>
+            </div>
+
+            <p className="mt-4 text-[10px] font-black uppercase tracking-[0.32em] text-amber-200/75">Estamos haciendo unos ajustes</p>
+            <h1 className="mt-4 max-w-2xl text-3xl font-black leading-tight tracking-[-0.04em] text-white sm:text-5xl">
+              Este menú no está disponible por ahora
+            </h1>
+            <p className="mt-5 max-w-xl text-sm leading-7 text-slate-300 sm:text-base">
+              El negocio está terminando de configurar su menú digital. Vuelve a intentarlo en unos minutos.
+            </p>
+
+            <div className="mt-7 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300">
+              <span className="h-2 w-2 rounded-full bg-amber-300" />
+              Gracias por tu paciencia
+            </div>
+
+            <a
+              href="https://elmenuxfa.com"
+              className="mt-8 inline-flex items-center gap-2 rounded-2xl bg-amber-300 px-5 py-3 text-sm font-black text-slate-950 shadow-[0_14px_32px_rgba(251,191,36,0.18)] transition hover:bg-amber-200"
+            >
+              Volver al inicio
+              <ArrowRight className="h-4 w-4" strokeWidth={2.6} />
+            </a>
+          </section>
+
+          <footer className="border-t border-white/10 pt-5 text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+            Pide a tu manera · Powered by elmenuxfa.com
+          </footer>
         </div>
       </main>
     );

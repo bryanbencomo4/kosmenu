@@ -16,8 +16,9 @@ import {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const MENU_FRESH_MS = 30_000;
-const MENU_STALE_MS = 15 * 60_000;
+// Keep a short hot cache while making business-hours/config changes visible quickly.
+const MENU_FRESH_MS = 5_000;
+const MENU_STALE_MS = 60_000;
 const MARKET_RATES_TTL_MS = 60_000;
 const OWNER_VERIFY_TTL_MS = 5 * 60_000;
 
