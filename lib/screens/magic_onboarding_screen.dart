@@ -424,7 +424,8 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       final unsupported = reviewedAssets
           .where(
             (asset) =>
-                asset.mimeType == 'image/heic' || asset.mimeType == 'image/heif',
+                asset.mimeType == 'image/heic' ||
+                asset.mimeType == 'image/heif',
           )
           .toList(growable: false);
       if (unsupported.isNotEmpty) {
@@ -779,6 +780,69 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
   }
 
   Future<List<_MenuImportAsset>> _captureMenuPages() async {
+    final source = await showModalBottomSheet<_ScanPageSource>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.canvas,
+      builder: (context) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Escanear con IA',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textStrong,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Elige de donde quieres traer la foto del menu.',
+                  style: GoogleFonts.poppins(
+                    color: AppColors.textSoft,
+                    fontSize: 12.5,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _ImportSourceTile(
+                  icon: Icons.photo_library_rounded,
+                  title: 'Galeria de imagenes',
+                  subtitle:
+                      'Sube una o varias fotos del menu que ya tengas en tu dispositivo.',
+                  onTap: () =>
+                      Navigator.of(context).pop(_ScanPageSource.gallery),
+                ),
+                const SizedBox(height: 10),
+                _ImportSourceTile(
+                  icon: Icons.photo_camera_rounded,
+                  title: 'Tomar foto ahora',
+                  subtitle:
+                      'Usa la camara para capturar el menu en el momento.',
+                  onTap: () =>
+                      Navigator.of(context).pop(_ScanPageSource.camera),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted || source == null) {
+      return <_MenuImportAsset>[];
+    }
+
+    if (source == _ScanPageSource.gallery) {
+      return _pickGalleryImages();
+    }
+
     final image = await _webCameraHandoffService.pickCameraImage(
       context,
       feature: 'menu_scan',
@@ -2020,6 +2084,8 @@ class _TipItem {
 }
 
 enum _ImportSource { galleryImages, deviceFiles }
+
+enum _ScanPageSource { camera, gallery }
 
 class _ImportSourceTile extends StatelessWidget {
   const _ImportSourceTile({

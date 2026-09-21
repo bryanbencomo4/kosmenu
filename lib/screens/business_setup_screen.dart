@@ -9238,6 +9238,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                             ),
                           ),
                         ),
+                        // Removing requires a second method already active,
+                        // otherwise the merchant would be left with none.
+                        if (currentPayments.length > 1) ...[
+                          const SizedBox(width: 6),
+                          IconButton(
+                            onPressed: () {
+                              setState(() {
+                                currentPayments.remove(method);
+                              });
+                              unawaited(_saveDraft());
+                            },
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            color: _setupTextMedium,
+                            tooltip: 'Quitar ${_paymentMethodLabel(method)}',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 10),
