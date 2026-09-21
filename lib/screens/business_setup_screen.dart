@@ -8419,7 +8419,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Elige primero la moneda base de tu negocio.',
+          'Selecciona la moneda en la que están expresados los precios de tu menú físico.',
           style: const TextStyle(color: _setupTextMedium, fontSize: 12),
         ),
         const SizedBox(height: 14),
