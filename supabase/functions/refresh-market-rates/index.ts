@@ -465,6 +465,21 @@ function parseBcvOfficialRates(html: string): { USD: number; EUR: number } {
 }
 
 function parseBcvCurrencyRate(normalizedHtml: string, currency: 'USD' | 'EUR'): number {
+  const plainText = normalizedHtml
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const directPattern = new RegExp(
+    `\\b${currency}\\b\\s*(?:[:=-]\\s*)?([0-9]+(?:[.,][0-9]+)+)`,
+    'i',
+  );
+  const directRate = parseLocaleNumber(plainText.match(directPattern)?.[1]);
+  if (directRate > 0) {
+    return directRate;
+  }
+
   const patterns = [
     new RegExp(`${currency}\\s*([0-9.,]+)\\s*Fecha\\s*Valor`, 'i'),
     new RegExp(`${currency}\\s*[^0-9]{0,40}([0-9.,]+)\\s*Fecha\\s*Valor`, 'i'),

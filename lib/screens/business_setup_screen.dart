@@ -253,7 +253,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final Map<String, double> _marketRates = <String, double>{
     _exchangeSourceBcv: 300.2144,
     _exchangeSourceBcvUsd: 300.2144,
-    _exchangeSourceBcvEur: 351.2262,
+    _exchangeSourceBcvEur: 0,
     _exchangeSourceP2pBinance: 630.6,
   };
   final Map<String, double> _googleAnchorRates = Map<String, double>.from(
@@ -881,10 +881,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   double _bcvVesRate(String source) {
     final canonical = _canonicalExchangeSource(source);
     if (canonical == _exchangeSourceBcvEur) {
-      final eur = _marketRates[_exchangeSourceBcvEur] ?? 0;
-      if (eur > 0) {
-        return eur;
-      }
+      return _marketRates[_exchangeSourceBcvEur] ?? 0;
     }
     return _marketRates[_exchangeSourceBcvUsd] ??
         _marketRates[_exchangeSourceBcv] ??
@@ -1628,7 +1625,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'exchangeRateSource': _exchangeRateSource,
       'exchangeRateModes': _exchangeRateModeByCurrency,
       'exchangeRateSources': _exchangeRateSourceByCurrency,
-      'marketRateBcv': _marketRates[_exchangeSourceBcvUsd] ??
+      'marketRateBcv':
+          _marketRates[_exchangeSourceBcvUsd] ??
           _marketRates[_exchangeSourceBcv],
       'marketRateBcvEur': _marketRates[_exchangeSourceBcvEur],
       'marketRateP2p': _marketRates[_exchangeSourceP2pBinance],
@@ -2740,7 +2738,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       // `generate-branding-gemini` charges AI credits, so an exhausted balance
       // looks identical to a network failure from here. Log it: the palette
       // silently degrades to the local one and there would be no other trace.
-      debugPrint('Gemini palette analysis failed: ${error.runtimeType}: $error');
+      debugPrint(
+        'Gemini palette analysis failed: ${error.runtimeType}: $error',
+      );
       return null;
     }
   }
@@ -5058,7 +5058,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   String _exchangeSourceLabel(String source) {
     return switch (source) {
-      _exchangeSourceBcv => 'Tasa Oficial (BCV)',
+      _exchangeSourceBcvEur => 'Tasa Oficial (BCV EUR)',
+      _exchangeSourceBcv => 'Tasa Oficial (BCV USD)',
+      _exchangeSourceBcvUsd => 'Tasa Oficial (BCV USD)',
       _exchangeSourceGoogle => 'Google',
       _exchangeSourceP2pBinance => 'Tasa Mercado (Paralelo/P2P)',
       _ => source.toUpperCase(),
@@ -5101,7 +5103,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (source == _exchangeSourceGoogle) {
       return _googleRateForPair(base, currency);
     }
-    if (source == _exchangeSourceBcv &&
+    if (_isBcvSource(source) &&
         !_canUseBcvSourceForPair(quoteCurrency: currency, baseCurrency: base)) {
       return 0;
     }
@@ -5160,10 +5162,21 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final bcvRate = _parseExchangeRate(row['bcv_rate']);
       final p2pRate = _parseExchangeRate(row['p2p_binance_rate']);
       final payload = row['payload'];
+      final bcvRates = payload is Map ? payload['bcv_rates'] : null;
+      final bcvUsdRate = bcvRates is Map
+          ? _parseExchangeRate(bcvRates['USD'])
+          : bcvRate;
+      final bcvEurRate = bcvRates is Map
+          ? _parseExchangeRate(bcvRates['EUR'])
+          : 0.0;
       final updatedAt = _parseUtcTimestampToLocal(row['updated_at']);
       setState(() {
-        if (bcvRate > 0) {
-          _marketRates[_exchangeSourceBcv] = bcvRate;
+        if (bcvUsdRate > 0) {
+          _marketRates[_exchangeSourceBcv] = bcvUsdRate;
+          _marketRates[_exchangeSourceBcvUsd] = bcvUsdRate;
+        }
+        if (bcvEurRate > 0) {
+          _marketRates[_exchangeSourceBcvEur] = bcvEurRate;
         }
         if (p2pRate > 0) {
           _marketRates[_exchangeSourceP2pBinance] = p2pRate;
@@ -8779,6 +8792,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               _exchangeRateMode = enabled
                                   ? _exchangeModeAuto
                                   : _exchangeModeManual;
+                              // Persist per-currency, otherwise the stale
+                              // saved mode for this currency wins on save.
+                              _syncExchangeConfigForCurrency(currentCurrency);
                               if (enabled) {
                                 final synced = _rateForSource(
                                   _exchangeRateSource,
@@ -8831,6 +8847,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       }
                       setState(() {
                         _exchangeRateSource = value;
+                        // Persist per-currency, otherwise the stale saved
+                        // source for this currency wins over this selection.
+                        _syncExchangeConfigForCurrency(currentCurrency);
                         final synced = _rateForSource(value);
                         final masked = _formatExchangeRateMasked(synced);
                         _exchangeRateByCurrency[currentCurrency] = masked;
@@ -8838,17 +8857,20 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       });
                       await _saveDraft();
                     },
-                    child: Row(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
                       children: [
                         if (allowBcv)
-                          Expanded(
+                          SizedBox(
+                            width: 220,
                             child: RadioListTile<String>(
                               contentPadding: EdgeInsets.zero,
                               dense: true,
-                              value: _exchangeSourceBcv,
+                              value: _exchangeSourceBcvEur,
                               activeColor: _palette.primary,
                               title: const Text(
-                                'Tasa Oficial (BCV)',
+                                'BCV EUR',
                                 style: TextStyle(
                                   color: _setupTextHigh,
                                   fontSize: 13,
@@ -8856,7 +8878,32 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                 ),
                               ),
                               subtitle: Text(
-                                'BCV: ${_rateBadgeText(_exchangeSourceBcv, quoteCurrency: currentCurrency)}',
+                                'BCV: ${_rateBadgeText(_exchangeSourceBcvEur, quoteCurrency: currentCurrency)}',
+                                style: const TextStyle(
+                                  color: _setupTextMedium,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (allowBcv)
+                          SizedBox(
+                            width: 220,
+                            child: RadioListTile<String>(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              value: _exchangeSourceBcvUsd,
+                              activeColor: _palette.primary,
+                              title: const Text(
+                                'BCV USD',
+                                style: TextStyle(
+                                  color: _setupTextHigh,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              subtitle: Text(
+                                'BCV: ${_rateBadgeText(_exchangeSourceBcvUsd, quoteCurrency: currentCurrency)}',
                                 style: const TextStyle(
                                   color: _setupTextMedium,
                                   fontSize: 12,
@@ -8865,7 +8912,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                             ),
                           ),
                         if (allowP2p)
-                          Expanded(
+                          SizedBox(
+                            width: 220,
                             child: RadioListTile<String>(
                               contentPadding: EdgeInsets.zero,
                               dense: true,
@@ -8889,7 +8937,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                             ),
                           ),
                         if (allowGoogle)
-                          Expanded(
+                          SizedBox(
+                            width: 220,
                             child: RadioListTile<String>(
                               contentPadding: EdgeInsets.zero,
                               dense: true,
