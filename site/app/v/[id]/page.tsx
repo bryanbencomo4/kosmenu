@@ -1106,17 +1106,9 @@ function derivedExchangeRateForCurrency(
 }
 
 function formatTickerRate(rate: number) {
-  if (!Number.isFinite(rate) || rate <= 0) return '0';
+  if (!Number.isFinite(rate) || rate <= 0) return '0,00';
 
-  if (rate >= 1000) {
-    return rate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
-  if (rate >= 1) {
-    return rate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-  }
-
-  return rate.toLocaleString('es-VE', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+  return rate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 type BrandingCheckoutConfig = {
@@ -3129,7 +3121,7 @@ export default function PublicMenuPage() {
               </div>
               {selectedCurrencyCode !== businessBaseCurrency ? (
                 <p className="mt-2 text-[11px] font-semibold text-slate-500">
-                  Tasa usada ({exchangeSourceLabel(selectedExchangeSource)}): 1 {businessBaseCurrency} = {selectedExchangeRate} {selectedCurrencyCode}
+                  Tasa usada ({exchangeSourceLabel(selectedExchangeSource)}): 1 {businessBaseCurrency} = {formatTickerRate(selectedExchangeRate)} {selectedCurrencyCode}
                 </p>
               ) : null}
             </div>
@@ -4116,7 +4108,7 @@ export default function PublicMenuPage() {
       (email ? `Correo del cliente: ${email}.\n` : '') +
       `Moneda seleccionada: ${normalizeCurrencyCode(paymentMeta.currency)}.\n` +
       (paymentMeta.exchangeRate > 1
-        ? `Tasa aplicada (${exchangeSourceLabel(paymentMeta.exchangeRateSource)}): ${paymentMeta.exchangeRate}.\n`
+        ? `Tasa aplicada (${exchangeSourceLabel(paymentMeta.exchangeRateSource)}): ${formatTickerRate(paymentMeta.exchangeRate)}.\n`
         : '') +
       (paymentMeta.referenceLast4 ? `Referencia digital: ****${paymentMeta.referenceLast4}.\n` : '') +
       (paymentProofUrl ? `Comprobante: ${paymentProofUrl}.\n` : '') +
@@ -4952,7 +4944,7 @@ export default function PublicMenuPage() {
                                   Tasa aplicada ({exchangeSourceLabel(resolveCheckoutCurrencySource(group.currency, {
                                     checkoutExchange: checkoutExchangeConfig,
                                     businessExchangeSource,
-                                  }))}): 1 {businessBaseCurrency} = {group.exchangeRate} {group.currency}
+                                  }))}): 1 {businessBaseCurrency} = {formatTickerRate(group.exchangeRate)} {group.currency}
                                 </p>
                               ) : null}
                               <div className="mt-1 space-y-1.5">
@@ -5763,7 +5755,7 @@ export default function PublicMenuPage() {
                         </p>
                         {selectedCurrencyCode !== businessBaseCurrency ? (
                           <p className="mt-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
-                            Tasa snapshot ({exchangeSourceLabel(selectedExchangeSource)}): {selectedExchangeRate} {selectedCurrencyCode} por 1 {businessBaseCurrency}
+                            Tasa snapshot ({exchangeSourceLabel(selectedExchangeSource)}): {formatTickerRate(selectedExchangeRate)} {selectedCurrencyCode} por 1 {businessBaseCurrency}
                           </p>
                         ) : null}
                       </div>

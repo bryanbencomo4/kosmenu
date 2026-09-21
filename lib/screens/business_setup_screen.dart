@@ -4276,51 +4276,27 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     return double.tryParse(cleaned.replaceAll(RegExp(r'[,.]'), '')) ?? 0;
   }
 
-  int _exchangeRateFractionDigits(double value) {
-    if (value <= 0) {
-      return 2;
-    }
-    if (value >= 1) {
-      return value.truncateToDouble() == value ? 0 : 2;
-    }
-    if (value >= 0.01) {
-      return 4;
-    }
-    return 6;
-  }
-
-  String _trimTrailingFractionZeros(String value) {
-    if (!value.contains('.')) {
-      return value;
-    }
-    return value
-        .replaceFirst(RegExp(r'0+$'), '')
-        .replaceFirst(RegExp(r'\.$'), '');
-  }
+  // Rates are always shown rounded to 2 decimals, for every currency.
+  int _exchangeRateFractionDigits(double value) => 2;
 
   String _formatExchangeRate(double value) {
     if (value <= 0) {
       return '';
     }
-    final digits = _exchangeRateFractionDigits(value);
-    return _trimTrailingFractionZeros(value.toStringAsFixed(digits));
+    return value.toStringAsFixed(2);
   }
 
   String _formatExchangeRateMasked(double value) {
     if (value <= 0) {
       return '';
     }
-    final fixed = value.toStringAsFixed(_exchangeRateFractionDigits(value));
+    final fixed = value.toStringAsFixed(2);
     final parts = fixed.split('.');
     final integerPart = parts[0].replaceAllMapped(
       RegExp(r'\B(?=(\d{3})+(?!\d))'),
       (_) => ',',
     );
-    if (parts.length == 1) {
-      return integerPart;
-    }
-    final fractionPart = _trimTrailingFractionZeros(parts[1]);
-    return fractionPart.isEmpty ? integerPart : '$integerPart.$fractionPart';
+    return '$integerPart.${parts[1]}';
   }
 
   int _exchangeRateInputDecimalDigits(String quoteCurrency) {
