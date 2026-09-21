@@ -2,7 +2,7 @@
 
 import { Caveat, Manrope } from 'next/font/google';
 import { useEffect, useState, type ReactNode } from 'react';
-import { BookOpen, ChevronRight, MapPin, Moon, ShoppingBag, Sun, Truck, Utensils } from 'lucide-react';
+import { BookOpen, ChevronRight, Facebook, Instagram, MapPin, Moon, Music2, ShoppingBag, Sun, Truck, Utensils, Youtube } from 'lucide-react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskImage } from './KioskImage';
@@ -28,6 +28,7 @@ type KioskHomeProps = {
   closedCaption: string;
   openCaption: string;
   locationLabel: string | null;
+  socialLinks?: Array<{ network: string; href: string }>;
   tagline?: string | null;
   supportsDelivery: boolean;
   themeMode: MenuThemeMode;
@@ -44,6 +45,7 @@ export function KioskHome({
   closedCaption,
   openCaption,
   locationLabel,
+  socialLinks = [],
   supportsDelivery,
   themeMode,
   onToggleTheme,
@@ -120,6 +122,39 @@ export function KioskHome({
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'var(--menu-primary)' }} />
               <span className="line-clamp-2">{locationLabel}</span>
             </p>
+          ) : null}
+
+          {socialLinks.length > 0 ? (
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
+              {socialLinks.map(({ network, href }) => {
+                const Icon = network === 'instagram'
+                  ? Instagram
+                  : network === 'facebook'
+                    ? Facebook
+                    : network === 'youtube'
+                      ? Youtube
+                      : Music2;
+                const label = network === 'instagram'
+                  ? 'Instagram'
+                  : network === 'facebook'
+                    ? 'Facebook'
+                    : network === 'youtube'
+                      ? 'YouTube'
+                      : 'TikTok';
+                return (
+                  <a
+                    key={`${network}-${href}`}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={label}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface)] text-[var(--menu-text-muted)] shadow-[var(--menu-shadow)] transition hover:-translate-y-0.5 hover:text-[var(--menu-primary)]"
+                  >
+                    <Icon className="h-4 w-4" strokeWidth={2.2} />
+                  </a>
+                );
+              })}
+            </div>
           ) : null}
 
           <div

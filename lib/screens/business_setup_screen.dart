@@ -209,6 +209,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   final TextEditingController _whatsappController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _locationNoteController = TextEditingController();
+  final TextEditingController _instagramController = TextEditingController();
+  final TextEditingController _facebookController = TextEditingController();
+  final TextEditingController _youtubeController = TextEditingController();
+  final TextEditingController _tiktokController = TextEditingController();
   final BrandingAiService _brandingAiService = const BrandingAiService();
   final AiImageService _aiImageService = const AiImageService();
   final BusinessSectorsService _businessSectorsService =
@@ -436,6 +440,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _whatsappController.dispose();
     _addressController.dispose();
     _locationNoteController.dispose();
+    _instagramController.dispose();
+    _facebookController.dispose();
+    _youtubeController.dispose();
+    _tiktokController.dispose();
     _slugDebounce?.cancel();
     super.dispose();
   }
@@ -486,7 +494,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final row = await Supabase.instance.client
           .from('comercios')
           .select(
-            'id, slug, nombre, logo_url, whatsapp, en_linea, categoria, moneda, tasa_cambio_pesos, exchange_rate_mode, exchange_rate_source, exchange_rate_value, last_rate_update',
+            'id, slug, nombre, logo_url, whatsapp, en_linea, categoria, moneda, tasa_cambio_pesos, exchange_rate_mode, exchange_rate_source, exchange_rate_value, last_rate_update, branding_ia',
           )
           .eq('owner_id', user.id)
           .limit(1)
@@ -620,6 +628,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
     _selectedPhoneCountryIso = parsedPhone.countryIso;
     _whatsappController.text = parsedPhone.nationalNumber;
+    final seedBranding = _toStringDynamicMap(raw?['branding_ia']);
+    final seedBusinessConfig = _toStringDynamicMap(seedBranding['config_negocio']);
+    final seedSocialLinks = _toStringDynamicMap(seedBusinessConfig['social_links']);
+    _instagramController.text = seedSocialLinks['instagram']?.toString().trim() ?? '';
+    _facebookController.text = seedSocialLinks['facebook']?.toString().trim() ?? '';
+    _youtubeController.text = seedSocialLinks['youtube']?.toString().trim() ?? '';
+    _tiktokController.text = seedSocialLinks['tiktok']?.toString().trim() ?? '';
     final seedAddress = (raw?['direccion']?.toString() ?? '').trim();
     _isVirtualBusiness = raw?['negocio_virtual'] == true;
     if (_isVirtualBusiness) {
@@ -1453,6 +1468,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       );
       _selectedPhoneCountryIso = parsedPhone.countryIso;
       _whatsappController.text = parsedPhone.nationalNumber;
+      _instagramController.text = (map['instagram'] as String? ?? '').trim();
+      _facebookController.text = (map['facebook'] as String? ?? '').trim();
+      _youtubeController.text = (map['youtube'] as String? ?? '').trim();
+      _tiktokController.text = (map['tiktok'] as String? ?? '').trim();
       _addressController.text = (map['address'] as String? ?? '').trim();
       _locationNoteController.text = (map['locationNote'] as String? ?? '')
           .trim();
@@ -1638,6 +1657,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'editingComercioId': _editingComercioId ?? '',
       'whatsapp': _whatsappE164,
       'whatsappCountryIso': _selectedPhoneCountryIso,
+      'instagram': _instagramController.text.trim(),
+      'facebook': _facebookController.text.trim(),
+      'youtube': _youtubeController.text.trim(),
+      'tiktok': _tiktokController.text.trim(),
       'address': _addressController.text.trim(),
       'locationNote': _locationNoteController.text.trim(),
       'businessLatitude': _businessLatitude,
@@ -7359,12 +7382,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final text = _colorToHex(_paletteSuggestion.text);
 
     if (_seedBrandingIa.isEmpty) {
-      return _defaultBrandingIaPayload(
+      final payload = _defaultBrandingIaPayload(
         primary: primary,
         accent: accent,
         surface: surface,
         text: text,
       );
+      final config = Map<String, dynamic>.from(
+        _toStringDynamicMap(payload['config_negocio']),
+      );
+      config['social_links'] = _socialLinksPayload();
+      payload['config_negocio'] = config;
+      return payload;
     }
 
     final merged = Map<String, dynamic>.from(_seedBrandingIa);
@@ -7410,6 +7439,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final configNegocio = Map<String, dynamic>.from(
       _toStringDynamicMap(merged['config_negocio']),
     );
+    configNegocio['social_links'] = _socialLinksPayload();
     configNegocio['moneda_default'] = _baseCurrency;
     configNegocio['checkout_currencies'] = _selectedCurrencies.toList();
 
@@ -7435,6 +7465,20 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     merged['config_negocio'] = configNegocio;
 
     return merged;
+  }
+
+  Map<String, dynamic> _socialLinksPayload() {
+    final links = <String, dynamic>{};
+    final values = <String, String>{
+      'instagram': _instagramController.text.trim(),
+      'facebook': _facebookController.text.trim(),
+      'youtube': _youtubeController.text.trim(),
+      'tiktok': _tiktokController.text.trim(),
+    };
+    for (final entry in values.entries) {
+      if (entry.value.isNotEmpty) links[entry.key] = entry.value;
+    }
+    return links;
   }
 
   Map<String, dynamic> _paletteFieldsPayload() {
@@ -8091,7 +8135,64 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           'Selecciona el sector de tu negocio. Incluye gastronomia y otros rubros.',
           style: TextStyle(color: _setupTextLow, fontSize: 12),
         ),
+        const SizedBox(height: 18),
+        Text(
+          'Redes sociales (opcional)',
+          style: GoogleFonts.poppins(
+            color: _setupTextHigh,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Agrega solo las redes que quieras mostrar en tu menú público.',
+          style: TextStyle(color: _setupTextLow, fontSize: 12),
+        ),
+        const SizedBox(height: 10),
+        _socialField(
+          controller: _instagramController,
+          label: 'Instagram',
+          hint: 'instagram.com/tu-negocio',
+          icon: Icons.camera_alt_outlined,
+        ),
+        const SizedBox(height: 8),
+        _socialField(
+          controller: _facebookController,
+          label: 'Facebook',
+          hint: 'facebook.com/tu-negocio',
+          icon: Icons.facebook_rounded,
+        ),
+        const SizedBox(height: 8),
+        _socialField(
+          controller: _youtubeController,
+          label: 'YouTube',
+          hint: 'youtube.com/@tu-negocio',
+          icon: Icons.play_circle_outline_rounded,
+        ),
+        const SizedBox(height: 8),
+        _socialField(
+          controller: _tiktokController,
+          label: 'TikTok',
+          hint: 'tiktok.com/@tu-negocio',
+          icon: Icons.music_note_rounded,
+        ),
       ],
+    );
+  }
+
+  Widget _socialField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.url,
+      textInputAction: TextInputAction.next,
+      decoration: _fieldDecoration(label, icon).copyWith(hintText: hint),
+      onChanged: (_) => unawaited(_saveDraft()),
     );
   }
 

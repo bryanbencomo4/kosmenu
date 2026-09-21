@@ -103,6 +103,21 @@ function omitKeys(source: Record<string, unknown>, keys: readonly string[]) {
 export function toPublicComercioDto(row: Record<string, unknown> | null | undefined) {
   if (!row) return null;
   const picked = pickKeys(row, PUBLIC_COMERCIO_KEYS);
+  const branding = row.branding_ia;
+  const brandingConfig = branding && typeof branding === 'object'
+    ? (branding as Record<string, unknown>).config_negocio
+    : null;
+  const config = row.config_negocio ?? brandingConfig;
+  if (config && typeof config === 'object') {
+    const socialLinks = (config as Record<string, unknown>).social_links;
+    if (socialLinks && typeof socialLinks === 'object' && !Array.isArray(socialLinks)) {
+      picked.social_links = Object.fromEntries(
+        Object.entries(socialLinks)
+          .filter(([key, value]) => ['instagram', 'facebook', 'youtube', 'tiktok'].includes(key) && typeof value === 'string' && value.trim())
+          .map(([key, value]) => [key, String(value).trim()]),
+      );
+    }
+  }
   // Defense in depth: strip known sensitive keys even if allow-list drifts.
   return omitKeys(picked, SENSITIVE_COMERCIO_KEYS);
 }

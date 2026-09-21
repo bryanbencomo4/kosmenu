@@ -1,7 +1,7 @@
 'use client';
 
 import Head from 'next/head';
-import { ArrowRight, ArrowUp, ChevronDown, Flame, Info, Mail, MapPin, Menu, MessageCircle, Phone, Share2, ShoppingCart, Store, Truck, User, X } from 'lucide-react';
+import { ArrowRight, ArrowUp, ChevronDown, Facebook, Flame, Info, Instagram, Mail, MapPin, Menu, MessageCircle, Music2, Phone, Share2, ShoppingCart, Store, Truck, User, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
@@ -194,6 +194,7 @@ type ComercioRow = {
   telefono?: string | null;
   telefonos?: string | null;
   celular?: string | null;
+  social_links?: Record<string, string | null> | null;
   direccion?: string | null;
   ciudad?: string | null;
   descripcion?: string | null;
@@ -548,6 +549,12 @@ async function reverseGeocodeWithNominatim(point: DeliveryPoint) {
 
 function normalizePhone(value: string | null | undefined) {
   return (value ?? '').replace(/\D/g, '');
+}
+
+function normalizeSocialUrl(value: string | null | undefined) {
+  const raw = (value ?? '').trim();
+  if (!raw) return '';
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
 }
 
 function preloadImageAsset(src: string, timeoutMs = 1200) {
@@ -2362,6 +2369,9 @@ export default function PublicMenuPage() {
       menuData?.comercio.whatsapp,
   );
   const receivesOrdersOnWhatsapp = menuData?.comercio.recibe_pedidos_whatsapp !== false;
+  const socialLinks = Object.entries(menuData?.comercio.social_links ?? {})
+    .map(([network, value]) => ({ network, href: normalizeSocialUrl(value) }))
+    .filter((item) => item.href);
   const supportsDelivery = menuData?.comercio.permite_delivery === true;
   const normalizedDeliveryAddress = deliveryAddress.trim();
   const normalizedDeliveryReference = deliveryReference.trim();
@@ -4755,6 +4765,7 @@ export default function PublicMenuPage() {
           logoUrl={comercioLogoUrl || null}
           initialLetter={comercioInitialLetter}
           locationLabel={heroLocation || null}
+          socialLinks={socialLinks}
           tagline={menuData?.comercio.descripcion?.trim() || null}
           isOpen={!scheduleClosed}
           openCaption={kioskOpenCaption}
@@ -4977,6 +4988,42 @@ export default function PublicMenuPage() {
                         ) : (
                           <p className="font-semibold text-slate-800">No registrado</p>
                         )}
+                        {socialLinks.length > 0 ? (
+                          <div className="pt-2">
+                            <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Redes sociales</p>
+                            <div className="flex flex-wrap gap-2">
+                              {socialLinks.map(({ network, href }) => {
+                                const Icon = network === 'instagram'
+                                  ? Instagram
+                                  : network === 'facebook'
+                                    ? Facebook
+                                    : network === 'youtube'
+                                      ? Youtube
+                                      : Music2;
+                                const label = network === 'instagram'
+                                  ? 'Instagram'
+                                  : network === 'facebook'
+                                    ? 'Facebook'
+                                    : network === 'youtube'
+                                      ? 'YouTube'
+                                      : 'TikTok';
+                                return (
+                                  <a
+                                    key={`${network}-${href}`}
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    aria-label={label}
+                                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-[var(--primary-color)] hover:text-[var(--primary-color)]"
+                                  >
+                                    <Icon className="h-4 w-4" strokeWidth={2.2} />
+                                    {label}
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </section>

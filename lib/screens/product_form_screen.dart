@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -293,21 +294,25 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   }
 
   Future<void> _pickImage(ImageSource source) async {
-    final file = source == ImageSource.camera
-        ? await _webCameraHandoffService.pickCameraImage(
-            context,
-            feature: 'product',
-            waitingTitle: 'Toma la foto del producto desde tu celular',
-            waitingSubtitle:
-                'Escanea el codigo con tu telefono y la cargaremos aqui automaticamente.',
-            imageQuality: 82,
-            maxWidth: 1600,
-          )
-        : await _picker.pickImage(
-            source: source,
-            imageQuality: 82,
-            maxWidth: 1600,
-          );
+    XFile? file;
+    if (source == ImageSource.camera) {
+      if (!mounted) return;
+      file = await _webCameraHandoffService.pickCameraImage(
+        context,
+        feature: 'product',
+        waitingTitle: 'Toma la foto del producto desde tu celular',
+        waitingSubtitle:
+            'Escanea el codigo con tu telefono y la cargaremos aqui automaticamente.',
+        imageQuality: 82,
+        maxWidth: 1600,
+      );
+    } else {
+      file = await _picker.pickImage(
+        source: source,
+        imageQuality: 82,
+        maxWidth: 1600,
+      );
+    }
     if (file == null) return;
 
     if (!mounted) return;
@@ -438,55 +443,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       default:
         break;
     }
-  }
-
-  Future<bool?> _confirmAiImageGeneration() {
-    final product = widget.product;
-    if (product == null) {
-      return Future.value(false);
-    }
-
-    return showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final colorScheme = Theme.of(dialogContext).colorScheme;
-        return AlertDialog(
-          backgroundColor: colorScheme.surfaceContainerHigh,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          title: Text(
-            'Generar imagen con IA',
-            style: GoogleFonts.manrope(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          content: Text(
-            'Se descontará 1 crédito para generar la imagen de "${product.nombre}" y el proceso continuará en segundo plano. ¿Deseas continuar?',
-            style: TextStyle(color: colorScheme.onSurfaceVariant),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(
-                'Cancelar',
-                style: TextStyle(color: colorScheme.onSurfaceVariant),
-              ),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-              style: FilledButton.styleFrom(
-                backgroundColor: colorScheme.primary,
-                foregroundColor: colorScheme.onPrimary,
-              ),
-              label: const Text('Generar'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   void _showMessage(String message) {
@@ -813,8 +769,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       return;
     }
 
-    final confirmed = await _confirmAiImageGeneration();
-    if (confirmed != true) {
+    if (_isLoadingAiCredits) {
+      _showMessage('Consultando tus créditos IA...');
+      return;
+    }
+    if (_aiCreditsBalance < 1) {
+      await _showBuyCreditsSheet();
       return;
     }
     final categoryName = widget.categories
@@ -832,6 +792,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           ? product.descripcion
           : _descriptionController.text.trim(),
       categoryName: categoryName,
+      currentImageUrl: _remoteImageUrl,
+      availableCredits: _aiCreditsBalance,
+      onRecharge: () => unawaited(_showBuyCreditsSheet()),
     );
     if (!mounted || customPrompt == null) {
       return;
@@ -858,6 +821,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ? message!
             : 'Imagen IA en cola para ${product.nombre}.',
       );
+      if (mounted) {
+        setState(() {
+          _aiCreditsBalance = (_aiCreditsBalance - 1).clamp(0, double.infinity);
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       _showMessage('No se pudo generar la imagen IA: $error');

@@ -34,6 +34,7 @@ type KioskMenuExperienceProps = {
   logoUrl: string | null;
   initialLetter: string;
   locationLabel: string | null;
+  socialLinks?: Array<{ network: string; href: string }>;
   tagline?: string | null;
   isOpen: boolean;
   openCaption: string;
@@ -70,6 +71,7 @@ export function KioskMenuExperience({
   logoUrl,
   initialLetter,
   locationLabel,
+  socialLinks,
   tagline,
   isOpen,
   openCaption,
@@ -166,6 +168,7 @@ export function KioskMenuExperience({
           closedCaption={closedCaption}
           openCaption={openCaption}
           locationLabel={locationLabel}
+          socialLinks={socialLinks}
           tagline={tagline}
           supportsDelivery={supportsDelivery}
           themeMode={themeMode}
