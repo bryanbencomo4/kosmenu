@@ -91,12 +91,12 @@ class MerchantDashboardSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = <({
-      MerchantNavDestination id,
-      IconData icon,
-      String label,
-    })>[
-      (id: MerchantNavDestination.home, icon: Icons.home_rounded, label: 'Inicio'),
+    final items = <({MerchantNavDestination id, IconData icon, String label})>[
+      (
+        id: MerchantNavDestination.home,
+        icon: Icons.home_rounded,
+        label: 'Inicio',
+      ),
       (
         id: MerchantNavDestination.orders,
         icon: Icons.shopping_bag_outlined,
@@ -202,7 +202,9 @@ class MerchantDashboardSidebar extends StatelessWidget {
                           collapsed: collapsed,
                           onTap: () => onSelect(item.id),
                         ),
-                    if (MerchantSession.canOpen(MerchantNavDestination.plan)) ...[
+                    if (MerchantSession.canOpen(
+                      MerchantNavDestination.plan,
+                    )) ...[
                       const SizedBox(height: 16),
                       _PlanTile(
                         planName: planName,
@@ -215,7 +217,9 @@ class MerchantDashboardSidebar extends StatelessWidget {
               ),
               if (onToggleCollapsed != null)
                 Align(
-                  alignment: collapsed ? Alignment.center : Alignment.centerRight,
+                  alignment: collapsed
+                      ? Alignment.center
+                      : Alignment.centerRight,
                   child: IconButton(
                     tooltip: collapsed ? 'Expandir menú' : 'Plegar menú',
                     onPressed: onToggleCollapsed,
@@ -292,7 +296,9 @@ class _SidebarItem extends StatelessWidget {
                       Icon(
                         icon,
                         size: 20,
-                        color: selected ? Colors.white : const Color(0xFF6B6F92),
+                        color: selected
+                            ? Colors.white
+                            : const Color(0xFF6B6F92),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -300,10 +306,12 @@ class _SidebarItem extends StatelessWidget {
                           label,
                           style: GoogleFonts.poppins(
                             fontSize: 13,
-                            fontWeight:
-                                selected ? FontWeight.w700 : FontWeight.w500,
-                            color:
-                                selected ? Colors.white : const Color(0xFF374151),
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: selected
+                                ? Colors.white
+                                : const Color(0xFF374151),
                           ),
                         ),
                       ),
@@ -481,7 +489,9 @@ class MerchantHomeHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final name = commerceName.trim().isEmpty ? 'tu negocio' : commerceName.trim();
+    final name = commerceName.trim().isEmpty
+        ? 'tu negocio'
+        : commerceName.trim();
     final isMobile = MediaQuery.sizeOf(context).width < 720;
     final initials = _initials(name);
 
@@ -504,8 +514,8 @@ class MerchantHomeHeader extends StatelessWidget {
           hoursCaption?.trim().isNotEmpty == true
               ? hoursCaption!
               : businessOnline
-                  ? 'Tu negocio está abierto y listo para recibir más pedidos.'
-                  : 'Tu negocio está pausado. Actívalo para recibir pedidos.',
+              ? 'Tu negocio está abierto y listo para recibir más pedidos.'
+              : 'Tu negocio está pausado. Actívalo para recibir pedidos.',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: GoogleFonts.poppins(
@@ -619,10 +629,7 @@ class MerchantHomeHeader extends StatelessWidget {
                       ),
                       Text(
                         'Administrador',
-                        style: GoogleFonts.poppins(
-                          fontSize: 10,
-                          color: _muted,
-                        ),
+                        style: GoogleFonts.poppins(fontSize: 10, color: _muted),
                       ),
                     ],
                   ),
@@ -824,7 +831,10 @@ class MerchantQuickActions extends StatelessWidget {
               itemCount: actions.length,
               separatorBuilder: (_, _) => const SizedBox(width: 10),
               itemBuilder: (context, index) {
-                return SizedBox(width: 148, child: _QuickActionCard(data: actions[index]));
+                return SizedBox(
+                  width: 148,
+                  child: _QuickActionCard(data: actions[index]),
+                );
               },
             ),
           )
@@ -926,6 +936,9 @@ class MerchantSmartMenuCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.sizeOf(context).width < 720;
     final hasTraffic = visits > 0 || scans > 0;
+    final safeDisplayUrl = displayUrl.trim().isEmpty
+        ? publicUrl.trim()
+        : displayUrl.trim();
 
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
@@ -966,62 +979,132 @@ class MerchantSmartMenuCard extends StatelessWidget {
                         color: const Color(0xFF6B6F92),
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE9F8EF),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        child: Text(
+                          'Enlace listo para compartir',
+                          style: GoogleFonts.poppins(
+                            color: const Color(0xFF15803D),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-              if (!isMobile) _QrBox(data: publicUrl),
+              if (!isMobile) ...[
+                const SizedBox(width: 16),
+                Column(
+                  children: [
+                    Text(
+                      'Escanea para ver tu menú',
+                      style: GoogleFonts.poppins(
+                        color: const Color(0xFF5E6282),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    _QrBox(data: publicUrl),
+                  ],
+                ),
+              ],
             ],
           ),
           if (isMobile) ...[
             const SizedBox(height: 12),
-            Align(alignment: Alignment.center, child: _QrBox(data: publicUrl)),
+            Align(
+              alignment: Alignment.center,
+              child: _QrBox(data: publicUrl),
+            ),
           ],
           const SizedBox(height: 14),
           Container(
-            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 11, 8, 11),
             decoration: BoxDecoration(
               color: const Color(0xFFF8F7FC),
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE9EAF4)),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: onOpenUrl,
-                    child: Text(
-                      displayUrl,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF11183C),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.link_rounded,
+                      size: 17,
+                      color: Color(0xFF4B5680),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SelectableText(
+                        safeDisplayUrl.isEmpty
+                            ? 'Publica tu menú para obtener un enlace'
+                            : safeDisplayUrl,
+                        maxLines: 2,
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF11183C),
+                          height: 1.3,
+                        ),
                       ),
                     ),
-                  ),
-                ),
-                FilledButton(
-                  onPressed: onCopy,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF6D28D9),
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                  ),
-                  child: const Text('Copiar'),
+                    IconButton(
+                      onPressed: safeDisplayUrl.isEmpty ? null : onCopy,
+                      tooltip: 'Copiar enlace',
+                      icon: const Icon(Icons.copy_rounded, size: 19),
+                      color: const Color(0xFF4B5680),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: onDownloadQr,
-              icon: const Icon(Icons.download_rounded, size: 16),
-              label: const Text('Descargar QR'),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onOpenUrl,
+                  icon: const Icon(Icons.visibility_rounded, size: 18),
+                  label: const Text('Ver menú'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF6D28D9),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onDownloadQr,
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: const Text('Descargar QR'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF4B5680),
+                    side: const BorderSide(color: Color(0xFFD9DCEF)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 14),
           if (!hasTraffic)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -1035,30 +1118,30 @@ class MerchantSmartMenuCard extends StatelessWidget {
             )
           else
             Row(
-            children: [
-              Expanded(
-                child: _MenuStat(
-                  icon: Icons.visibility_outlined,
-                  value: '$visits',
-                  label: 'Visitas al menú',
+              children: [
+                Expanded(
+                  child: _MenuStat(
+                    icon: Icons.visibility_outlined,
+                    value: '$visits',
+                    label: 'Visitas al menú',
+                  ),
                 ),
-              ),
-              Expanded(
-                child: _MenuStat(
-                  icon: Icons.qr_code_scanner_rounded,
-                  value: '$scans',
-                  label: 'Escaneos QR',
+                Expanded(
+                  child: _MenuStat(
+                    icon: Icons.qr_code_scanner_rounded,
+                    value: '$scans',
+                    label: 'Escaneos QR',
+                  ),
                 ),
-              ),
-              Expanded(
-                child: _MenuStat(
-                  icon: Icons.shopping_cart_outlined,
-                  value: '$menuOrders',
-                  label: 'Pedidos desde el menú',
+                Expanded(
+                  child: _MenuStat(
+                    icon: Icons.shopping_cart_outlined,
+                    value: '$menuOrders',
+                    label: 'Pedidos desde el menú',
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );
@@ -1274,14 +1357,14 @@ class MerchantAiCreditsCard extends StatelessWidget {
         children: [
           Row(
             children: [
-                    Text(
-                      'Fotos profesionales IA',
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFF11183C),
-                      ),
-                    ),
+              Text(
+                'Fotos profesionales IA',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF11183C),
+                ),
+              ),
               const Spacer(),
               TextButton(
                 onPressed: onHistory,
@@ -1342,7 +1425,7 @@ class MerchantAiCreditsCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-                child: const Text('Ver créditos'),
+              child: const Text('Ver créditos'),
             ),
           ),
         ],
@@ -1542,7 +1625,9 @@ class MerchantTopProductsCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: MerchantSession.canManageCatalog ? onAddProduct : null,
+                    onPressed: MerchantSession.canManageCatalog
+                        ? onAddProduct
+                        : null,
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF6D28D9),
                     ),
