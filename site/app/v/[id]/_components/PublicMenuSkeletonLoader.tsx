@@ -41,7 +41,7 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
           </p>
 
           {knownName ? (
-            <h1 className="mt-1.5 line-clamp-2 max-w-[16ch] text-[32px] font-extrabold leading-[1.05] tracking-[-0.04em] text-[var(--menu-text)] sm:text-[46px]">
+            <h1 className="mt-1.5 max-w-[min(92vw,28ch)] break-words text-[clamp(28px,8vw,46px)] font-extrabold leading-[1.08] tracking-[-0.04em] text-[var(--menu-text)]">
               {businessName}
             </h1>
           ) : (

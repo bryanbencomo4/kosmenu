@@ -3985,6 +3985,109 @@ class _BusinessActionTile extends StatelessWidget {
   }
 }
 
+String _formatSalesFullCurrency(double value) {
+  final fixed = value.toStringAsFixed(2);
+  final parts = fixed.split('.');
+  final integer = parts.first.replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+(?!\d))'),
+    (_) => ',',
+  );
+  return '\$$integer.${parts.last}';
+}
+
+String _formatSalesDisplayCurrency(double value) {
+  final absolute = value.abs();
+  if (absolute >= 1000000) {
+    return '\$${(value / 1000000).toStringAsFixed(1)}M';
+  }
+  if (absolute >= 1000) {
+    return _formatSalesFullCurrency(value);
+  }
+  return _formatSalesFullCurrency(value);
+}
+
+class _ResponsiveSalesTotal extends StatelessWidget {
+  const _ResponsiveSalesTotal({
+    required this.value,
+    required this.color,
+    required this.compact,
+  });
+
+  final double? value;
+  final Color color;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final amount = value;
+    if (amount == null) {
+      return Text(
+        '—',
+        style: GoogleFonts.poppins(
+          fontSize: compact ? 32 : 38,
+          height: 0.98,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      );
+    }
+
+    final fullValue = _formatSalesFullCurrency(amount);
+    final displayValue = _formatSalesDisplayCurrency(amount);
+    final amountOnly = displayValue.substring(1);
+    final baseSize = compact ? 32.0 : 38.0;
+    final scale = amountOnly.length >= 10
+        ? 0.72
+        : amountOnly.length >= 8
+        ? 0.84
+        : amountOnly.length >= 6
+        ? 0.94
+        : 1.0;
+
+    return Tooltip(
+      message: fullValue,
+      waitDuration: const Duration(milliseconds: 350),
+      child: SizedBox(
+        height: compact ? 42 : 48,
+        width: double.infinity,
+        child: FittedBox(
+          alignment: Alignment.centerLeft,
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                '\$',
+                style: GoogleFonts.poppins(
+                  fontSize: baseSize * 0.68 * scale,
+                  height: 1,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+              const SizedBox(width: 2),
+              Text(
+                amountOnly,
+                maxLines: 1,
+                softWrap: false,
+                style: GoogleFonts.poppins(
+                  fontSize: baseSize * scale,
+                  height: 0.98,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CompactSalesSummaryCard extends StatelessWidget {
   const _CompactSalesSummaryCard({
     required this.salesToday,
@@ -4117,40 +4220,74 @@ class _CompactSalesSummaryCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Text(
-              hasSalesData ? '\$${salesToday.toStringAsFixed(2)}' : '—',
-              style: GoogleFonts.poppins(
-                fontSize: isMobile ? 32 : 38,
-                height: 0.98,
-                fontWeight: FontWeight.w700,
-                color: darkText,
-              ),
+            _ResponsiveSalesTotal(
+              value: hasSalesData ? salesToday : null,
+              color: darkText,
+              compact: isMobile,
             ),
-            const SizedBox(height: 8),
-            if (hasSalesData)
-              Row(
-                children: [
-                  Icon(
-                    deltaPercent >= 0
-                        ? Icons.arrow_upward_rounded
-                        : Icons.arrow_downward_rounded,
-                    color: deltaPercent >= 0
-                        ? const Color(0xFF16A34A)
-                        : const Color(0xFFEF4444),
-                    size: 16,
+            if (hasSalesData) ...[
+              const SizedBox(height: 6),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF4F3FB),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
                   ),
-                  const SizedBox(width: 3),
-                  Text(
-                    '${deltaPercent.abs().round()}% vs ayer',
+                  child: Text(
+                    'Valor exacto: ${_formatSalesFullCurrency(salesToday)}',
                     style: GoogleFonts.poppins(
-                      fontSize: 12.3,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w600,
-                      color: deltaPercent >= 0
-                          ? const Color(0xFF16A34A)
-                          : const Color(0xFFEF4444),
+                      color: mutedText,
                     ),
                   ),
-                ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            if (hasSalesData)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: deltaPercent >= 0
+                      ? const Color(0xFFE9F8EF)
+                      : const Color(0xFFFDECEC),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        deltaPercent >= 0
+                            ? Icons.arrow_upward_rounded
+                            : Icons.arrow_downward_rounded,
+                        color: deltaPercent >= 0
+                            ? const Color(0xFF16A34A)
+                            : const Color(0xFFEF4444),
+                        size: 14,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${deltaPercent.abs().round()}% vs período anterior',
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: deltaPercent >= 0
+                              ? const Color(0xFF16A34A)
+                              : const Color(0xFFEF4444),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               )
             else
               Text(
@@ -4246,15 +4383,47 @@ class _CompactSalesSummaryCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: darkText,
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: purple.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(
+                      Icons.bar_chart_rounded,
+                      color: purple,
+                      size: 19,
                     ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: darkText,
+                          ),
+                        ),
+                        const Text(
+                          'Resumen del período seleccionado',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF6B6F92),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   rangeSelector,
                 ],
               ),
@@ -4267,7 +4436,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 122, child: salesTotalBlock),
+                    SizedBox(width: 166, child: salesTotalBlock),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Stack(
@@ -4295,6 +4464,44 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                     ),
                   ],
                 ),
+              if (!showMiniMetrics) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8F7FC),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        hasSalesData
+                            ? Icons.shopping_bag_outlined
+                            : Icons.insights_outlined,
+                        color: purple,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          hasSalesData
+                              ? 'Buen trabajo. Tus ventas están creciendo en este período.'
+                              : 'Sin datos todavía. Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: darkText,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               if (showMiniMetrics) ...[const SizedBox(height: 12), miniMetrics],
             ],
           ),
