@@ -66,7 +66,11 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
   String _scanProgressMessage = '';
   double _scanProgressValue = 0;
   int _selectedAssetCount = 0;
-  bool _generateAiImages = true;
+  bool _generateAiImages = false;
+  bool _isLoadingAiCredits = true;
+  double _aiCreditsBalance = 0;
+  int _aiImagesGeneratedCount = 0;
+  bool _isFirstMenuSetup = false;
 
   bool get _isFileImportMode =>
       widget.inputMode == MagicOnboardingInputMode.fileImport;
@@ -113,6 +117,59 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..forward();
+    _loadAiImageAvailability();
+  }
+
+  Future<void> _loadAiImageAvailability() async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) {
+      if (mounted) setState(() => _isLoadingAiCredits = false);
+      return;
+    }
+
+    try {
+      final responses = await Future.wait<dynamic>([
+        Supabase.instance.client.functions.invoke(
+          'get-ai-credits',
+          method: HttpMethod.get,
+          queryParameters: <String, String>{'commerce_id': comercioId},
+        ),
+        Supabase.instance.client
+            .from('comercios')
+            .select(
+              'onboarding_completed, ai_image_generation_used, ai_images_generated_count',
+            )
+            .eq('id', comercioId)
+            .limit(1)
+            .maybeSingle(),
+      ]);
+      final payload = _responseMap(responses[0].data);
+      final balance =
+          (payload['credits_balance'] as num?)?.toDouble() ??
+          double.tryParse('${payload['credits_balance'] ?? 0}') ??
+          0;
+      final commerce = _responseMap(responses[1]);
+      final onboardingCompleted = commerce['onboarding_completed'] == true;
+      final imageGenerationUsed = commerce['ai_image_generation_used'] == true;
+      final generatedCount = _asInt(commerce['ai_images_generated_count']);
+      final remainingQuota = (25 - generatedCount).clamp(0, 25);
+      if (!mounted) return;
+      setState(() {
+        _aiCreditsBalance = balance;
+        _aiImagesGeneratedCount = generatedCount;
+        _isFirstMenuSetup = !onboardingCompleted && !imageGenerationUsed;
+        _generateAiImages =
+            _isFirstMenuSetup && balance > 0 && remainingQuota > 0;
+        _isLoadingAiCredits = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingAiCredits = false;
+          _generateAiImages = false;
+        });
+      }
+    }
   }
 
   @override
@@ -173,6 +230,10 @@ class _MagicOnboardingScreenState extends State<MagicOnboardingScreen>
                         ),
                         child: _AiImagesOptInCard(
                           value: _generateAiImages,
+                          creditsBalance: _aiCreditsBalance,
+                          imagesGeneratedCount: _aiImagesGeneratedCount,
+                          isLoadingCredits: _isLoadingAiCredits,
+                          isFirstMenuSetup: _isFirstMenuSetup,
                           onChanged: (value) {
                             if (!mounted) {
                               return;
@@ -1883,10 +1944,31 @@ class _AiNoteCard extends StatelessWidget {
 }
 
 class _AiImagesOptInCard extends StatelessWidget {
-  const _AiImagesOptInCard({required this.value, required this.onChanged});
+  const _AiImagesOptInCard({
+    required this.value,
+    required this.creditsBalance,
+    required this.imagesGeneratedCount,
+    required this.isLoadingCredits,
+    required this.isFirstMenuSetup,
+    required this.onChanged,
+  });
 
   final bool value;
+  final double creditsBalance;
+  final int imagesGeneratedCount;
+  final bool isLoadingCredits;
+  final bool isFirstMenuSetup;
   final ValueChanged<bool> onChanged;
+
+  String _creditsLabel() {
+    if (isLoadingCredits) return 'Consultando créditos disponibles...';
+    final credits = creditsBalance.toStringAsFixed(
+      creditsBalance % 1 == 0 ? 0 : 2,
+    );
+    final remainingQuota = (25 - imagesGeneratedCount).clamp(0, 25);
+    final images = creditsBalance.floor().clamp(0, remainingQuota);
+    return '$credits créditos disponibles · puedes crear hasta $images imágenes en este proceso.';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1937,7 +2019,18 @@ class _AiImagesOptInCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Incluye hasta 30 creditos iniciales. En onboarding se usa una sola vez y mantiene el tope de 25 imagenes.',
+                  _creditsLabel(),
+                  style: GoogleFonts.poppins(
+                    color: AppColors.textSoft,
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isFirstMenuSetup
+                      ? 'Se activa automáticamente en tu primera creación de menú.'
+                      : 'Está desactivada por defecto porque este comercio ya tiene un menú creado.',
                   style: GoogleFonts.poppins(
                     color: AppColors.textSoft,
                     fontSize: 11.5,
@@ -1951,7 +2044,9 @@ class _AiImagesOptInCard extends StatelessWidget {
           Switch.adaptive(
             value: value,
             activeTrackColor: AppColors.accent,
-            onChanged: onChanged,
+            onChanged: isLoadingCredits || creditsBalance <= 0
+                ? null
+                : onChanged,
           ),
         ],
       ),
