@@ -109,6 +109,8 @@ function UpsellProductTile({
             <img
               src={imageUrl}
               alt={product.nombre}
+              loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover"
               onError={() => setFailed(true)}
             />

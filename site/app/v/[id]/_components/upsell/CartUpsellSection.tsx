@@ -29,7 +29,7 @@ export function CartUpsellSection({ suggestions, formatPrice, onAdd, onDismiss }
           <div key={suggestion.productId} className="flex items-center gap-3 rounded-[18px] border border-[var(--menu-border)] p-2.5">
             <div className="h-11 w-11 shrink-0 overflow-hidden rounded-[12px] bg-[var(--menu-surface-alt)]">
               {suggestion.imageUrl ? (
-                <img src={suggestion.imageUrl} alt={suggestion.name} className="h-full w-full object-cover" />
+                <img src={suggestion.imageUrl} alt={suggestion.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
               ) : null}
             </div>
             <div className="min-w-0 flex-1">

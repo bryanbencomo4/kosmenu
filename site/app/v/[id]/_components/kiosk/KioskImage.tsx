@@ -29,6 +29,8 @@ export function KioskImage({ src, alt = '', className = '', imgClassName = '' }:
           ref={imageRef}
           src={src}
           alt={alt}
+          loading="lazy"
+          decoding="async"
           className={`relative h-full w-full object-cover ${shown ? 'opacity-100' : 'opacity-0'} ${imgClassName}`}
           onLoad={() => setLoadedSrc(src)}
           onError={() => setLoadedSrc(src)}

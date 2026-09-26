@@ -151,7 +151,7 @@ export function BundleRail({ items, formatPrice, onAdd, titleStyle }: BundleRail
             >
               <div className="relative h-[128px] bg-[var(--menu-surface-alt)]">
                 {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.name} draggable={false} className="pointer-events-none h-full w-full object-cover" />
+                  <img src={item.imageUrl} alt={item.name} loading="lazy" decoding="async" draggable={false} className="pointer-events-none h-full w-full object-cover" />
                 ) : (
                   <div className="grid h-full place-items-center text-3xl opacity-40">🍽️</div>
                 )}

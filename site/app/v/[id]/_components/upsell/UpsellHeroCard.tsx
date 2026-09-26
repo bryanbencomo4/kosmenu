@@ -29,7 +29,7 @@ export function UpsellHeroCard({
         }}
       >
         {coverUrl ? (
-          <img src={coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          <img src={coverUrl} alt="" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover" />
         ) : (
           <div
             className="absolute inset-0"
@@ -47,6 +47,8 @@ export function UpsellHeroCard({
               <img
                 src={logoUrl}
                 alt=""
+                loading="lazy"
+                decoding="async"
                 className="h-11 w-11 rounded-full border-2 border-white/80 object-cover"
               />
             ) : null}

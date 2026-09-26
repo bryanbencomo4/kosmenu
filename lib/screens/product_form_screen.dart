@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -13,10 +11,10 @@ import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/models/upsell_config.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
+import 'package:kosmenu_app/services/product_image_optimizer.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProductFormScreen extends StatefulWidget {
@@ -857,27 +855,6 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return null;
   }
 
-  String _imageExtensionForUpload(XFile file) {
-    final sourceName = file.name.trim().isNotEmpty ? file.name : file.path;
-    final match = RegExp(r'\.([a-zA-Z0-9]+)$').firstMatch(sourceName);
-    final ext = (match?.group(1) ?? 'jpg').toLowerCase();
-    return switch (ext) {
-      'png' => 'png',
-      'webp' => 'webp',
-      'gif' => 'gif',
-      _ => 'jpg',
-    };
-  }
-
-  String _contentTypeForExtension(String extension) {
-    return switch (extension) {
-      'png' => 'image/png',
-      'webp' => 'image/webp',
-      'gif' => 'image/gif',
-      _ => 'image/jpeg',
-    };
-  }
-
   double _parsePrice() {
     return double.parse(_priceController.text.trim().replaceAll(',', '.'));
   }
@@ -886,31 +863,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() => _isUploadingImage = true);
 
     try {
-      final extension = _imageExtensionForUpload(sourceImage);
-      final contentType =
-          sourceImage.mimeType ?? _contentTypeForExtension(extension);
-      late final Uint8List uploadBytes;
-
-      if (kIsWeb) {
-        uploadBytes = await sourceImage.readAsBytes();
-      } else {
-        final tempDir = await getTemporaryDirectory();
-        final compressedPath =
-            '${tempDir.path}/product_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-        final compressedFile = await FlutterImageCompress.compressAndGetFile(
-          sourceImage.path,
-          compressedPath,
-          quality: 72,
-          minWidth: 1280,
-        );
-
-        final fileToUploadPath = compressedFile?.path ?? sourceImage.path;
-        uploadBytes = await File(fileToUploadPath).readAsBytes();
-      }
+      final uploadBytes = ProductImageOptimizer.compressToJpeg(
+        await sourceImage.readAsBytes(),
+      );
 
       final fileName =
-          '${SupabaseConfig.currentComercioId}/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.$extension';
+          '${SupabaseConfig.currentComercioId}/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
 
       await Supabase.instance.client.storage
           .from(_bucketName)
@@ -919,7 +877,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             uploadBytes,
             fileOptions: FileOptions(
               upsert: true,
-              contentType: contentType,
+              contentType: 'image/jpeg',
             ),
           );
 

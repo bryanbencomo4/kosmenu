@@ -15,6 +15,7 @@ import {
 } from './_lib/menu-theme';
 import {
   displayProductImage,
+  optimizeMenuImageUrl,
   resolveHeroCover,
 } from './_lib/product-image';
 import {
@@ -841,12 +842,16 @@ function getGoogleFontsUrl(branding: BrandingConfig | null | undefined) {
   return `https://fonts.googleapis.com/css2?family=${safeTitle}:wght@500;700;800&family=${safeBody}:wght@400;500;600&display=swap`;
 }
 
-function safeImageSrc(imageUrl: string | null | undefined, fallbackImageUrl?: string | null) {
+function safeImageSrc(
+  imageUrl: string | null | undefined,
+  fallbackImageUrl?: string | null,
+  width = 480,
+) {
   const src = (imageUrl ?? '').trim();
-  if (src.length > 0) return src;
+  if (src.length > 0) return optimizeMenuImageUrl(src, width);
 
   const fallback = (fallbackImageUrl ?? '').trim();
-  if (fallback.length > 0) return fallback;
+  if (fallback.length > 0) return optimizeMenuImageUrl(fallback, width);
 
   return defaultProductImage;
 }
@@ -2605,7 +2610,7 @@ export default function PublicMenuPage() {
     statsMotionEnabled,
     prefersReducedMotion ? MOTION_TOKENS.duration.instant : 1250,
   );
-  const heroImageSrc = safeImageSrc(heroProduct?.imagen_url, comercioLogoUrl);
+  const heroImageSrc = safeImageSrc(heroProduct?.imagen_url, comercioLogoUrl, 1200);
   const heroLocation = [menuData?.comercio.ciudad, menuData?.comercio.direccion]
     .map((item) => (item ?? '').trim())
     .filter(Boolean)
@@ -3048,6 +3053,8 @@ export default function PublicMenuPage() {
                     <img
                       src={item.imageUrl}
                       alt={item.name}
+                      loading="lazy"
+                      decoding="async"
                       className="h-14 w-14 shrink-0 rounded-[18px] border border-slate-200 bg-slate-50 object-cover"
                     />
                     <div className="min-w-0 flex-1">
@@ -4856,6 +4863,8 @@ export default function PublicMenuPage() {
                 <img
                   src={expandedProductImage.src}
                   alt={expandedProductImage.alt}
+                  loading="lazy"
+                  decoding="async"
                   className="max-h-[72vh] w-full rounded-2xl object-contain"
                 />
                 <div className="mt-3 rounded-2xl bg-black/55 px-4 py-3 text-white">

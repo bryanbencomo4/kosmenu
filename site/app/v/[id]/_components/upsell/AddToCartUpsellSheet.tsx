@@ -56,7 +56,7 @@ export function AddToCartUpsellSheet({ open, suggestions, formatPrice, onAdd, on
             >
               <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[14px] bg-[var(--menu-surface-alt)]">
                 {suggestion.imageUrl ? (
-                  <img src={suggestion.imageUrl} alt={suggestion.name} className="h-full w-full object-cover" />
+                  <img src={suggestion.imageUrl} alt={suggestion.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
                 ) : null}
               </div>
               <div className="min-w-0 flex-1">

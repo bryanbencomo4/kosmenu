@@ -10,6 +10,7 @@ import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
+import 'package:kosmenu_app/services/product_image_optimizer.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -345,7 +346,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
             imageQuality: 82,
             maxWidth: 1600,
           );
-    if (photo == null) return;
+    if (!mounted || photo == null) return;
 
     final comercioId = SupabaseConfig.currentComercioId.trim();
     if (comercioId.isEmpty) {
@@ -359,24 +360,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
     setState(() => _updatingImageProductIds.add(product.id));
 
     try {
-      final sourceName = photo.name.trim().isNotEmpty ? photo.name : photo.path;
-      final extensionMatch = RegExp(r'\.([a-zA-Z0-9]+)$').firstMatch(sourceName);
-      final extension = (extensionMatch?.group(1) ?? 'jpg').toLowerCase();
-      final normalizedExtension = switch (extension) {
-        'png' => 'png',
-        'webp' => 'webp',
-        'gif' => 'gif',
-        _ => 'jpg',
-      };
-      final contentType = switch (normalizedExtension) {
-        'png' => 'image/png',
-        'webp' => 'image/webp',
-        'gif' => 'image/gif',
-        _ => 'image/jpeg',
-      };
+      final bytes = ProductImageOptimizer.compressToJpeg(
+        await photo.readAsBytes(),
+      );
       final fileName =
-          '$comercioId/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.$normalizedExtension';
-      final bytes = await photo.readAsBytes();
+          '$comercioId/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
 
       await Supabase.instance.client.storage
           .from(_bucketName)
@@ -385,7 +373,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
             bytes,
             fileOptions: FileOptions(
               upsert: true,
-              contentType: contentType,
+              contentType: 'image/jpeg',
             ),
           );
 
