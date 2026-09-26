@@ -1,12 +1,54 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/business_schedule.dart';
+import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
+import 'package:kosmenu_app/widgets/merchant_dashboard_pages.dart';
 
 void main() {
+  testWidgets('stepper settings sections open independently', (
+    WidgetTester tester,
+  ) async {
+    var profileOpens = 0;
+    var appearanceOpens = 0;
+    var paymentsOpen = 0;
+    var operationsOpens = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MerchantSettingsHub(
+            comercio: const ComercioModel(id: 'shop-1', nombre: 'Mi negocio'),
+            planName: 'Menú Digital',
+            hoursSubtitle: 'Horario configurado',
+            onOpenBusiness: () => profileOpens++,
+            onOpenAppearance: () => appearanceOpens++,
+            onOpenPayments: () => paymentsOpen++,
+            onOpenOperations: () => operationsOpens++,
+            onOpenHours: () {},
+            onOpenPlan: () {},
+            onOpenUsers: () {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Información del negocio'));
+    expect(profileOpens, 1);
+    expect(appearanceOpens, 0);
+    await tester.tap(find.text('Logo y apariencia'));
+    expect(appearanceOpens, 1);
+
+    await tester.tap(find.text('Cobros y tasa'));
+    expect(paymentsOpen, 1);
+
+    await tester.tap(find.text('Operación y WhatsApp'));
+    expect(operationsOpens, 1);
+  });
+
   test('nav title for sales tools is honest', () {
     expect(MerchantNavDestination.marketing.title, 'Herramientas de venta');
   });

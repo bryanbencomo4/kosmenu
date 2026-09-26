@@ -18,6 +18,7 @@ import 'package:kosmenu_app/services/order_notification_service.dart';
 import 'package:kosmenu_app/screens/ai_credits_screen.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
+import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/screens/business_hours_screen.dart';
 import 'package:kosmenu_app/screens/comercio_staff_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
@@ -606,6 +607,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     await _refreshDashboard();
   }
 
+  Future<void> _openBusinessSettings(
+    ComercioModel comercio,
+    MerchantBusinessSettingsSection section,
+  ) async {
+    await _pushInShell(
+      BusinessSetupScreen(
+        initialComercio: comercio,
+        businessConfigOnly: true,
+        settingsSection: section,
+      ),
+    );
+    if (!mounted) return;
+    await _refreshDashboard();
+  }
+
   Future<void> _openStaff() async {
     await _pushInShell(const ComercioStaffScreen());
   }
@@ -915,9 +931,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _editBusinessInfo(ComercioModel comercio) async {
-    await _pushInShell(MerchantEmbeddedBusinessSetup(comercio: comercio));
-    if (!mounted) return;
-    await _refreshDashboard();
+    await _openBusinessSettings(
+      comercio,
+      MerchantBusinessSettingsSection.profile,
+    );
   }
 
   Future<void> _updateBusinessOnline(bool value) async {
@@ -2996,7 +3013,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           hoursSubtitle: data.schedule.isConfigured
               ? (data.schedule.statusAt().caption ?? 'Horario configurado')
               : 'Define cuándo recibes pedidos',
-          onOpenBusiness: () => _editBusinessInfo(data.comercio),
+          onOpenBusiness: () => _openBusinessSettings(
+            data.comercio,
+            MerchantBusinessSettingsSection.profile,
+          ),
+          onOpenAppearance: () => _openBusinessSettings(
+            data.comercio,
+            MerchantBusinessSettingsSection.appearance,
+          ),
+          onOpenPayments: () => _openBusinessSettings(
+            data.comercio,
+            MerchantBusinessSettingsSection.payments,
+          ),
+          onOpenOperations: () => _openBusinessSettings(
+            data.comercio,
+            MerchantBusinessSettingsSection.operations,
+          ),
           onOpenHours: () => _openHours(data.schedule),
           onOpenPlan: () => _selectNav(MerchantNavDestination.plan),
           onOpenUsers: _openStaff,

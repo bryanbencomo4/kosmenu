@@ -26,6 +26,7 @@ import 'package:kosmenu_app/services/business_sectors_service.dart';
 import 'package:kosmenu_app/services/google_places_lookup.dart';
 import 'package:kosmenu_app/services/logo_image_guard.dart';
 import 'package:kosmenu_app/services/logo_palette.dart';
+import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/logo_crop_editor.dart';
@@ -37,15 +38,24 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 
+enum MerchantBusinessSettingsSection {
+  profile,
+  appearance,
+  payments,
+  operations,
+}
+
 class BusinessSetupScreen extends StatefulWidget {
   const BusinessSetupScreen({
     super.key,
     this.initialComercio,
     this.businessConfigOnly = false,
+    this.settingsSection,
   });
 
   final ComercioModel? initialComercio;
   final bool businessConfigOnly;
+  final MerchantBusinessSettingsSection? settingsSection;
 
   @override
   State<BusinessSetupScreen> createState() => _BusinessSetupScreenState();
@@ -329,14 +339,58 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   bool get _isEditing => _editingComercioId != null;
 
-  List<_SetupStep> get _activeSteps => widget.businessConfigOnly
-      ? const <_SetupStep>[
-          _SetupStep.identity,
-          _SetupStep.style,
-          _SetupStep.checkout,
-          _SetupStep.operation,
-        ]
-      : _SetupStep.values;
+  bool get _isStandaloneSettings => widget.settingsSection != null;
+  bool get _isSettingsEditor =>
+      _isStandaloneSettings || widget.businessConfigOnly;
+    bool get _needsCheckoutServices =>
+      !_isStandaloneSettings ||
+      widget.settingsSection == MerchantBusinessSettingsSection.payments;
+    bool get _needsSectorOptions =>
+      !_isStandaloneSettings ||
+      widget.settingsSection == MerchantBusinessSettingsSection.profile;
+
+  String get _settingsSectionTitle => switch (widget.settingsSection) {
+    MerchantBusinessSettingsSection.profile => 'Perfil, logo y redes',
+    MerchantBusinessSettingsSection.appearance => 'Apariencia del menú',
+    MerchantBusinessSettingsSection.payments => 'Cobros y tasa de cambio',
+    MerchantBusinessSettingsSection.operations => 'Operación y WhatsApp',
+    null => 'Mi Negocio',
+  };
+
+  String get _settingsSectionSubtitle => switch (widget.settingsSection) {
+    MerchantBusinessSettingsSection.profile =>
+      'Edita la información que ven tus clientes.',
+    MerchantBusinessSettingsSection.appearance =>
+      'Ajusta colores, tema, tipografía y diseño del menú.',
+    MerchantBusinessSettingsSection.payments =>
+      'Configura monedas, tasas y los datos de cobro.',
+    MerchantBusinessSettingsSection.operations =>
+      'Define cómo contactarte y cómo recibes pedidos.',
+    null => '',
+  };
+
+  _SetupStep _stepForSettingsSection(MerchantBusinessSettingsSection section) {
+    return switch (section) {
+      MerchantBusinessSettingsSection.profile => _SetupStep.identity,
+      MerchantBusinessSettingsSection.appearance => _SetupStep.style,
+      MerchantBusinessSettingsSection.payments => _SetupStep.checkout,
+      MerchantBusinessSettingsSection.operations => _SetupStep.operation,
+    };
+  }
+
+  List<_SetupStep> get _activeSteps {
+    final section = widget.settingsSection;
+    if (section != null) return <_SetupStep>[_stepForSettingsSection(section)];
+    if (widget.businessConfigOnly) {
+      return const <_SetupStep>[
+        _SetupStep.identity,
+        _SetupStep.style,
+        _SetupStep.checkout,
+        _SetupStep.operation,
+      ];
+    }
+    return _SetupStep.values;
+  }
 
   int get _currentStepFlowIndex {
     final index = _activeSteps.indexOf(_step);
@@ -364,7 +418,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       )] ??
       _fontSuggestionsByCategory['Otro']!;
 
-  bool get _showBackControls => widget.businessConfigOnly || _isEditing;
+  bool get _showBackControls =>
+      _isStandaloneSettings || widget.businessConfigOnly || _isEditing;
 
   bool get _showStepBackButton => _currentStepFlowIndex > 0;
 
@@ -397,22 +452,31 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   @override
   void initState() {
     super.initState();
+    final settingsSection = widget.settingsSection;
+    if (settingsSection != null) {
+      _step = _stepForSettingsSection(settingsSection);
+      _draftPersistenceEnabled = false;
+    }
     _exchangeRateController.addListener(_forceExchangeRateCursorAtEnd);
     _ensureCurrencyConfig('USD');
     _loadActiveCurrencyIntoController();
-    _subscribeToMarketRatesRealtime();
-    _subscribeToProviderStatusRealtime();
-    _marketRatesRefreshTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _refreshLiveRateState(),
-    );
-    unawaited(_loadBusinessSectors());
+    if (_needsCheckoutServices) {
+      _subscribeToMarketRatesRealtime();
+      _subscribeToProviderStatusRealtime();
+      _marketRatesRefreshTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) => _refreshLiveRateState(),
+      );
+    }
+    if (_needsSectorOptions) unawaited(_loadBusinessSectors());
     _loadInitialData();
-    _autosaveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!_loadingExisting && _draftPersistenceEnabled) {
-        unawaited(_saveDraft());
-      }
-    });
+    if (_draftPersistenceEnabled) {
+      _autosaveTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!_loadingExisting && _draftPersistenceEnabled) {
+          unawaited(_saveDraft());
+        }
+      });
+    }
   }
 
   @override
@@ -480,7 +544,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         return;
       }
 
-      final restored = await _restoreDraft(user.id);
+      final restored = !_isStandaloneSettings && await _restoreDraft(user.id);
       if (restored) {
         if ((_editingComercioId ?? '').trim().isEmpty) {
           await _hydrateEditingComercioId(user.id);
@@ -512,22 +576,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         setState(() => _loadingExisting = false);
       }
       final comercioId = (_editingComercioId ?? '').trim();
-      if (comercioId.isNotEmpty) {
+      if (comercioId.isNotEmpty && !_isStandaloneSettings) {
         unawaited(_refreshMenuCatalogCount(comercioId));
       }
-      unawaited(_checkSlugAvailability(_slugController.text));
+      if (_needsSectorOptions) {
+        unawaited(_checkSlugAvailability(_slugController.text));
+      }
       final logoPath = _selectedLogo?.path ?? '';
-      if (_shouldGeneratePaletteForLogo(logoPath) && !_paletteManuallyEdited) {
+      if (_step == _SetupStep.style &&
+          _shouldGeneratePaletteForLogo(logoPath) &&
+          !_paletteManuallyEdited) {
         unawaited(_refreshSmartStyleSuggestions());
       }
-      if (_step.index >= _SetupStep.checkout.index &&
+      if (_needsCheckoutServices &&
+          _step.index >= _SetupStep.checkout.index &&
           !_isExchangeRateConfigured()) {
         unawaited(_suggestExchangeRate());
       }
-      if (_step.index >= _SetupStep.checkout.index) {
+      if (_needsCheckoutServices &&
+          _step.index >= _SetupStep.checkout.index) {
         unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
       }
-      unawaited(_loadProviderStatuses());
+      if (_needsCheckoutServices) unawaited(_loadProviderStatuses());
     }
   }
 
@@ -4099,6 +4169,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   Future<void> _nextStep() async {
     _ensureCurrentStepInFlow();
 
+    if (_isStandaloneSettings) {
+      await _saveSettingsSection();
+      return;
+    }
+
     if (_step == _SetupStep.checkout) {
       _syncActiveCurrencyDataFromController();
     }
@@ -4187,6 +4262,166 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (nextStep == _SetupStep.checkout) {
       unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
       unawaited(_suggestExchangeRate());
+    }
+  }
+
+  Future<void> _saveSettingsSection() async {
+    if (_saving) return;
+    if (!MerchantSession.canManageSettings) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(MerchantSession.deniedMessage('editar la configuración'))),
+      );
+      return;
+    }
+
+    final comercioId = (_editingComercioId ?? '').trim();
+    if (comercioId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se encontró el negocio que quieres editar.')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      switch (widget.settingsSection!) {
+        case MerchantBusinessSettingsSection.profile:
+          final name = _nameController.text.trim();
+          final slug = _normalizeSlug(_slugController.text);
+          if (name.length < 3 || slug.length < 3 || !_isSlugFormatValid(slug)) {
+            throw const FormatException('Revisa el nombre y el enlace público.');
+          }
+          await _checkSlugAvailability(slug);
+          if (!mounted) return;
+          if (!_isSlugAvailable) {
+            throw const FormatException('Ese enlace ya está en uso. Prueba otro.');
+          }
+          final user = Supabase.instance.client.auth.currentUser;
+          if (user == null) {
+            throw const FormatException('Tu sesión expiró. Inicia sesión de nuevo.');
+          }
+          final logoUrl = await _uploadLogoIfNeeded(user);
+          await _writeComercioFields(
+            <String, dynamic>{
+              'nombre': name,
+              'slug': slug,
+              'categoria': _selectedCategory,
+              'logo_url': logoUrl,
+              'branding_ia': _buildBrandingIaPayload(),
+            },
+            removable: <String>{'categoria', 'logo_url', 'branding_ia'},
+          );
+          break;
+        case MerchantBusinessSettingsSection.appearance:
+          await _writeComercioFields(
+            <String, dynamic>{
+              ..._paletteFieldsPayload(),
+              'menu_layout': _selectedLayoutId,
+              'menu_footer': _selectedFooter,
+            },
+            removable: <String>{
+              'menu_palette',
+              'menu_palette_primary',
+              'menu_palette_accent',
+              'menu_palette_surface',
+              'menu_palette_text',
+              'menu_theme_mode',
+              'color_principal',
+              'branding_ia',
+              'menu_font',
+              'menu_layout',
+              'menu_footer',
+            },
+          );
+          break;
+        case MerchantBusinessSettingsSection.payments:
+          _syncActiveCurrencyDataFromController();
+          if (_selectedCurrencies.isEmpty || !_hasPrimaryCurrencySelected) {
+            throw const FormatException('Selecciona una moneda de cobro principal.');
+          }
+          if (!_isExchangeRateConfigured()) {
+            throw const FormatException('Configura una tasa de cambio antes de guardar.');
+          }
+          if (!_hasPaymentDetailsForSelectedMethods()) {
+            throw const FormatException('Completa los datos de cada método de pago.');
+          }
+          final methods = _selectedCurrencies
+              .expand(_selectedPaymentsForCurrency)
+              .toSet();
+          final defaultMethod = methods.isNotEmpty ? methods.first : 'Efectivo';
+          var quotedRate = 1.0;
+          for (final currency in _selectedCurrencies) {
+            if (currency == _baseCurrency) continue;
+            final rate = _effectiveExchangeRateForCurrency(currency);
+            if (rate > quotedRate) quotedRate = rate;
+          }
+          await _writeComercioFields(
+            <String, dynamic>{
+              'moneda': _baseCurrency,
+              'tasa_cambio_pesos':
+                  _baseCurrency == 'COP' && quotedRate > 0 ? quotedRate : null,
+              'metodo_pago_predeterminado': defaultMethod,
+              'metodos_pago': methods.toList(),
+            },
+            removable: <String>{
+              'moneda',
+              'tasa_cambio_pesos',
+              'metodo_pago_predeterminado',
+              'metodos_pago',
+            },
+          );
+          await _syncPaymentMethods(comercioId);
+          await _persistCheckoutBranding(comercioId);
+          break;
+        case MerchantBusinessSettingsSection.operations:
+          final message = _operationValidationMessage();
+          if (message != null) throw FormatException(message);
+          await _writeComercioFields(
+            <String, dynamic>{
+              'whatsapp': _whatsappE164.isEmpty ? null : _whatsappE164,
+              'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
+              'direccion': _composeAddressWithNote().isEmpty
+                  ? null
+                  : _composeAddressWithNote(),
+              'latitud': _isVirtualBusiness ? null : _businessLatitude,
+              'longitud': _isVirtualBusiness ? null : _businessLongitude,
+              'negocio_virtual': _isVirtualBusiness,
+              'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
+            },
+            removable: <String>{
+              'whatsapp',
+              'recibe_pedidos_whatsapp',
+              'direccion',
+              'latitud',
+              'longitud',
+              'negocio_virtual',
+              'permite_delivery',
+            },
+          );
+          break;
+      }
+
+      if (mounted) await _openCompletionActions();
+    } on FormatException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message)),
+        );
+      }
+    } on PostgrestException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo guardar: ${error.message}')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo guardar esta sección. Inténtalo de nuevo.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -7543,7 +7778,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
-  Future<void> _persistPaletteChanges() async {
+  Future<void> _persistPaletteChanges({bool force = false}) async {
+    if (_isStandaloneSettings && !force) {
+      return;
+    }
     if ((_editingComercioId ?? '').trim().isEmpty) {
       return;
     }
@@ -7895,7 +8133,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       const SnackBar(content: Text('Configuracion guardada correctamente.')),
     );
 
-    if (widget.businessConfigOnly) {
+    if (_isSettingsEditor) {
       Navigator.of(context).pop(true);
       return;
     }
@@ -7942,7 +8180,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             fontSize: 28,
             fontWeight: FontWeight.w700,
           ),
-          title: const Text('Mi Negocio'),
+          title: Text(_settingsSectionTitle),
         ),
         body: SafeArea(
           child: LayoutBuilder(
@@ -7954,10 +8192,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   .toDouble();
               final content = Column(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-                    child: _StepPills(step: _step, steps: _activeSteps),
-                  ),
+                  if (_isStandaloneSettings)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 12, 18, 4),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _settingsSectionSubtitle,
+                          style: const TextStyle(
+                            color: _setupTextMedium,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                      child: _StepPills(step: _step, steps: _activeSteps),
+                    ),
                   if (_showDraftRecoveredHint)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
@@ -8036,7 +8289,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                               _saving
                                   ? 'Guardando...'
                                   : _isLastStepInFlow
-                                  ? (widget.businessConfigOnly
+                                  ? (_isSettingsEditor
                                         ? 'Guardar cambios'
                                         : (_isEditing
                                               ? 'Guardar y continuar al pago'
@@ -8053,12 +8306,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
               return Column(
                 children: [
-                  LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 4,
-                    backgroundColor: const Color(0xFF281D49),
-                    valueColor: AlwaysStoppedAnimation<Color>(_palette.primary),
-                  ),
+                  if (!_isStandaloneSettings)
+                    LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 4,
+                      backgroundColor: const Color(0xFF281D49),
+                      valueColor: AlwaysStoppedAnimation<Color>(_palette.primary),
+                    ),
                   Expanded(
                     child: useDesktopContentWidth
                         ? Center(

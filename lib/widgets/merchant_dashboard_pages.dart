@@ -8,7 +8,6 @@ import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_screen.dart';
-import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/profile_screen.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
@@ -625,6 +624,9 @@ class MerchantSettingsHub extends StatelessWidget {
     required this.planName,
     required this.hoursSubtitle,
     required this.onOpenBusiness,
+    required this.onOpenAppearance,
+    required this.onOpenPayments,
+    required this.onOpenOperations,
     required this.onOpenHours,
     required this.onOpenPlan,
     required this.onOpenUsers,
@@ -634,6 +636,9 @@ class MerchantSettingsHub extends StatelessWidget {
   final String planName;
   final String hoursSubtitle;
   final VoidCallback onOpenBusiness;
+  final VoidCallback onOpenAppearance;
+  final VoidCallback onOpenPayments;
+  final VoidCallback onOpenOperations;
   final VoidCallback onOpenHours;
   final VoidCallback onOpenPlan;
   final VoidCallback onOpenUsers;
@@ -659,12 +664,24 @@ class MerchantSettingsHub extends StatelessWidget {
         onTap: onOpenHours,
       ),
       (
-        icon: Icons.chat_outlined,
-        title: 'WhatsApp',
+        icon: Icons.palette_outlined,
+        title: 'Logo y apariencia',
+        subtitle: 'Colores, tipografía y diseño del menú',
+        onTap: onOpenAppearance,
+      ),
+      (
+        icon: Icons.payments_outlined,
+        title: 'Cobros y tasa',
+        subtitle: 'Monedas y métodos de pago',
+        onTap: onOpenPayments,
+      ),
+      (
+        icon: Icons.tune_rounded,
+        title: 'Operación y WhatsApp',
         subtitle: (comercio.whatsapp ?? '').trim().isEmpty
-            ? 'Sin configurar'
+            ? 'Dirección, entrega y contacto'
             : comercio.whatsapp!.trim(),
-        onTap: onOpenBusiness,
+        onTap: onOpenOperations,
       ),
       (
         icon: Icons.group_outlined,
@@ -729,7 +746,7 @@ class MerchantSettingsHub extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const Icon(Icons.chevron_right_rounded, color: Color(0xFF9CA3AF)),
+                          const Icon(Icons.chevron_right_rounded, color: Color(0xFF9CA3AF)),
                 ],
               ),
             ),
@@ -841,17 +858,6 @@ class MerchantEmbeddedBilling extends StatelessWidget {
       );
     }
     return const BillingPlanScreen(embedded: true);
-  }
-}
-
-class MerchantEmbeddedBusinessSetup extends StatelessWidget {
-  const MerchantEmbeddedBusinessSetup({super.key, required this.comercio});
-
-  final ComercioModel comercio;
-
-  @override
-  Widget build(BuildContext context) {
-    return BusinessSetupScreen(initialComercio: comercio);
   }
 }
 
