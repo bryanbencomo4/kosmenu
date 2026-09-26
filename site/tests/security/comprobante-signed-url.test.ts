@@ -169,4 +169,58 @@ describe('GET /api/business/orders/[orderId]/comprobante', () => {
     expect(body.data.url).toContain('https://');
     expect(JSON.stringify(body)).not.toContain(SERVICE_ROLE);
   });
+
+  it('allows the merchant app to preflight the signed-url request', async () => {
+    const { OPTIONS } = await loadRoute({ userId: 'user-owner' });
+    const response = await OPTIONS(
+      new Request('http://localhost/api/business/orders/x/comprobante', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://app.elmenuxfa.com',
+          'Access-Control-Request-Method': 'GET',
+          'Access-Control-Request-Headers': 'authorization',
+        },
+      }),
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://app.elmenuxfa.com',
+    );
+    expect(response.headers.get('Access-Control-Allow-Methods')).toContain('GET');
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain(
+      'authorization',
+    );
+  });
+
+  it('does not reflect an untrusted origin', async () => {
+    const { OPTIONS } = await loadRoute({ userId: 'user-owner' });
+    const response = await OPTIONS(
+      new Request('http://localhost/api/business/orders/x/comprobante', {
+        method: 'OPTIONS',
+        headers: { Origin: 'https://untrusted.example' },
+      }),
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+
+  it('includes CORS headers on the authorized signed-url response', async () => {
+    const { GET } = await loadRoute({ userId: 'user-owner' });
+    const response = await GET(
+      new Request('http://localhost/api/business/orders/comercio-a-1710000000000/comprobante', {
+        headers: {
+          Authorization: 'Bearer test-token-abcdefghijklmnopqrstuvwxyz',
+          Origin: 'https://app.elmenuxfa.com',
+        },
+      }),
+      { params: Promise.resolve({ orderId: 'comercio-a-1710000000000' }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://app.elmenuxfa.com',
+    );
+  });
 });
