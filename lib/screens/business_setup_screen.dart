@@ -889,10 +889,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         canonical == _exchangeSourceGoogle;
   }
 
-  String _providerStatusKey(String source) {
-    return _isBcvSource(source) ? _exchangeSourceBcv : source;
-  }
-
   double _bcvVesRate(String source) {
     final canonical = _canonicalExchangeSource(source);
     if (canonical == _exchangeSourceBcvEur) {

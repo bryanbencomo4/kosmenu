@@ -5065,7 +5065,7 @@ export default function PublicMenuPage() {
                                       {method.tasa_cambio || method.exchange_rate ? (
                                         <p>Tasa de cambio: {method.tasa_cambio ?? method.exchange_rate}</p>
                                       ) : null}
-                                      {paymentMethodDetails(method).slice(0, 2).map((detail, index) => (
+                                      {paymentMethodDetails(method).map((detail, index) => (
                                         <p key={`${method.id}-detail-${index}`}>{detail}</p>
                                       ))}
                                     </div>
@@ -5660,6 +5660,45 @@ export default function PublicMenuPage() {
                         Como vas a pagar
                       </p>
 
+                      {kioskCurrencyOptions.length > 1 ? (
+                        <div
+                          className="checkout-item-enter rounded-[18px] bg-[var(--menu-surface)] p-3 shadow-[var(--menu-shadow)]"
+                          role="group"
+                          aria-label="Moneda de pago"
+                        >
+                          <p className="mb-2 text-xs font-semibold text-[var(--menu-text-muted)]">
+                            Moneda de pago
+                          </p>
+                          <div className="flex gap-2">
+                            {kioskCurrencyOptions.map((currency) => {
+                              const isSelected = selectedCurrencyCode === currency;
+                              return (
+                                <button
+                                  key={`checkout-currency-${currency}`}
+                                  type="button"
+                                  aria-pressed={isSelected}
+                                  onClick={() => selectMenuCurrency(currency)}
+                                  className="min-h-10 flex-1 rounded-xl px-3 text-sm font-bold transition-colors"
+                                  style={
+                                    isSelected
+                                      ? {
+                                          backgroundColor: 'var(--menu-primary)',
+                                          color: 'var(--menu-on-primary, #fff)',
+                                        }
+                                      : {
+                                          backgroundColor: 'var(--menu-surface-alt)',
+                                          color: 'var(--menu-text-muted)',
+                                        }
+                                  }
+                                >
+                                  {currency === 'VES' ? 'Bs (VES)' : currency}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+
                       {selectedCurrencyGroup?.methods.length ? (
                         <div className="space-y-2">
                           {selectedCurrencyGroup.methods.map((method, index) => {
@@ -5685,7 +5724,7 @@ export default function PublicMenuPage() {
                                   <div>
                                     <p className="text-sm font-bold text-[var(--menu-text)]">{paymentMethodLabel(method)}</p>
                                     {details.length > 0 ? (
-                                      <p className="mt-1 text-xs text-[var(--menu-text-muted)]">{details.slice(0, 2).join(' · ')}</p>
+                                      <p className="mt-1 text-xs text-[var(--menu-text-muted)]">{details.join(' · ')}</p>
                                     ) : null}
                                   </div>
                                   <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${isSelected ? 'bg-emerald-500 text-white' : 'bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]'}`}>
