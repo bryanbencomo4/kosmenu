@@ -73,6 +73,21 @@ class AppLinks {
   static const String merchantAppUrl = 'https://app.elmenuxfa.com';
   static const String brandIsotipoUrl = '$productionUrl/branding/isotipo.png';
 
+  static Uri passwordRecoveryRedirectUri({
+    required bool isWeb,
+    required Uri currentUri,
+  }) {
+    if (!isWeb) {
+      return Uri(scheme: 'com.kosmenu.app', host: 'reset-password');
+    }
+
+    return currentUri.replace(
+      path: '/auth/recovery',
+      queryParameters: const {'flow': 'password-recovery'},
+      fragment: '',
+    );
+  }
+
   /// Next.js API origin. Required via `--dart-define=API_BASE_URL=...`.
   /// No silent fallback to production — missing define fails at first use.
   static String get apiBaseUrl {

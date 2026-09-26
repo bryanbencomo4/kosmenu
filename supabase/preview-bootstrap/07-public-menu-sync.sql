@@ -4,6 +4,10 @@
 -- Adds public-menu fields missing from the synthetic Preview bootstrap and a
 -- service-role-only manifest for scheduled public-menu synchronization.
 
+alter type public.exchange_rate_source add value if not exists 'google';
+alter type public.exchange_rate_source add value if not exists 'bcv_eur';
+alter type public.exchange_rate_source add value if not exists 'bcv_usd';
+
 alter table public.comercios
   add column if not exists horarios jsonb not null default '{}'::jsonb,
   add column if not exists is_platform_demo boolean not null default false,

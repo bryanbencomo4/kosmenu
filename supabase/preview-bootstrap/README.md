@@ -27,6 +27,16 @@ npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-boo
 npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/05-private-storage.sql
 # Seed only after Auth test user exists (see 06-preview-seed.sql header).
 npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/06-preview-seed.sql
+# Add public-menu mirror fields + service-role-only sync manifest.
+npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/07-public-menu-sync.sql
+# Add anon column grants and online-only commerce policy (menu tables only).
+npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/08-public-menu-api.sql
+# Schedule the daily Production-public -> Preview menu sync after Vault secrets exist.
+npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/09-public-menu-sync-cron.sql
+# Add Preview-only owner login reads and free, non-billing test plan.
+npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/10-preview-login-access.sql
+# Add the minimal free Preview AI wallet used by the merchant dashboard.
+npx supabase db query --project-ref gsfxqzvmyzjjgpigrste -f supabase/preview-bootstrap/11-preview-dashboard-ai-credits.sql
 ```
 
 If `db query -f` is unavailable in your CLI version, pipe file contents with an explicit Preview connection (still never target production).

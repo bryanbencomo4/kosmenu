@@ -17,4 +17,24 @@ void main() {
     expect(uri.fragment, contains('access_token='));
     expect(uri.queryParameters.containsKey('access_token'), isFalse);
   });
+
+  test('password recovery web redirect stays on the current app origin', () {
+    final uri = AppLinks.passwordRecoveryRedirectUri(
+      isWeb: true,
+      currentUri: Uri.parse('https://preview-kosmenu.vercel.app/?tab=login'),
+    );
+
+    expect(uri.origin, 'https://preview-kosmenu.vercel.app');
+    expect(uri.path, '/auth/recovery');
+    expect(uri.queryParameters, {'flow': 'password-recovery'});
+  });
+
+  test('password recovery native redirect opens the app callback', () {
+    final uri = AppLinks.passwordRecoveryRedirectUri(
+      isWeb: false,
+      currentUri: Uri.parse('https://app.elmenuxfa.com'),
+    );
+
+    expect(uri.toString(), 'com.kosmenu.app://reset-password');
+  });
 }

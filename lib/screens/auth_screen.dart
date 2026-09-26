@@ -31,6 +31,8 @@ void returnToAuthGate(BuildContext context) {
   );
 }
 
+final ValueNotifier<bool> passwordRecoveryPending = ValueNotifier(false);
+
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
@@ -187,56 +189,319 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) {
     final supabase = Supabase.instance.client;
 
-    return StreamBuilder<AuthState>(
-      stream: supabase.auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        final session = snapshot.data?.session ?? supabase.auth.currentSession;
-
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const BrandedLoadingScreen(withScaffold: true);
+    return ValueListenableBuilder<bool>(
+      valueListenable: passwordRecoveryPending,
+      builder: (context, isPasswordRecovery, _) {
+        if (isPasswordRecovery) {
+          return const PasswordRecoveryScreen();
         }
 
-        if (session == null) {
-          SupabaseConfig.clearCurrentComercioId();
-          clearMerchantPresence();
-          _resetTargetCache();
-          return const AuthScreen();
-        }
+        return StreamBuilder<AuthState>(
+          stream: supabase.auth.onAuthStateChange,
+          builder: (context, snapshot) {
+            final session =
+                snapshot.data?.session ?? supabase.auth.currentSession;
 
-        final userId = session.user.id;
-        return FutureBuilder<PostAuthDestination>(
-          future: _targetFutureFor(userId),
-          builder: (context, targetSnapshot) {
-            if (targetSnapshot.connectionState == ConnectionState.waiting) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
               return const BrandedLoadingScreen(withScaffold: true);
             }
 
-            if (targetSnapshot.hasError) {
-              return Scaffold(
-                body: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      'No se pudo validar el acceso: ${targetSnapshot.error}',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              );
+            if (session == null) {
+              SupabaseConfig.clearCurrentComercioId();
+              clearMerchantPresence();
+              _resetTargetCache();
+              return const AuthScreen();
             }
 
-            switch (targetSnapshot.data) {
-              case PostAuthDestination.dashboard:
-                return const AdminDashboardScreen();
-              case PostAuthDestination.billing:
-                return const BillingPlanScreen();
-              case PostAuthDestination.setup:
-              case null:
-                return const BusinessSetupScreen();
-            }
+            final userId = session.user.id;
+            return FutureBuilder<PostAuthDestination>(
+              future: _targetFutureFor(userId),
+              builder: (context, targetSnapshot) {
+                if (targetSnapshot.connectionState == ConnectionState.waiting) {
+                  return const BrandedLoadingScreen(withScaffold: true);
+                }
+
+                if (targetSnapshot.hasError) {
+                  return Scaffold(
+                    body: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          'No se pudo validar el acceso: ${targetSnapshot.error}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  );
+                }
+
+                switch (targetSnapshot.data) {
+                  case PostAuthDestination.dashboard:
+                    return const AdminDashboardScreen();
+                  case PostAuthDestination.billing:
+                    return const BillingPlanScreen();
+                  case PostAuthDestination.setup:
+                  case null:
+                    return const BusinessSetupScreen();
+                }
+              },
+            );
           },
         );
       },
+    );
+  }
+}
+
+class PasswordRecoveryScreen extends StatefulWidget {
+  const PasswordRecoveryScreen({super.key});
+
+  @override
+  State<PasswordRecoveryScreen> createState() => _PasswordRecoveryScreenState();
+}
+
+class _PasswordRecoveryScreenState extends State<PasswordRecoveryScreen> {
+  final _passwordController = TextEditingController();
+  final _confirmationController = TextEditingController();
+  bool _isSubmitting = false;
+  bool _isComplete = false;
+  bool _obscurePassword = true;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _confirmationController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _savePassword() async {
+    final password = _passwordController.text;
+    if (password.length < 8) {
+      setState(() => _errorMessage = 'Usa al menos 8 caracteres.');
+      return;
+    }
+    if (password != _confirmationController.text) {
+      setState(() => _errorMessage = 'Las contraseñas no coinciden.');
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+    try {
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(password: password),
+      );
+      if (mounted) setState(() => _isComplete = true);
+    } on AuthException catch (error) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = error.message.toLowerCase().contains('weak password')
+              ? 'Elige una contraseña más segura.'
+              : 'No se pudo guardar la contraseña. Solicita un enlace nuevo e inténtalo otra vez.';
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _errorMessage =
+              'No se pudo guardar la contraseña. Inténtalo de nuevo.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _returnToLogin() async {
+    try {
+      await Supabase.instance.client.auth.signOut();
+    } catch (_) {}
+    passwordRecoveryPending.value = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isWeb = kIsWeb;
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4F1F8),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Container(
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFE4DDED)),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x160E0718),
+                      blurRadius: 36,
+                      offset: Offset(0, 16),
+                    ),
+                  ],
+                ),
+                child: _isComplete
+                    ? _buildSuccessContent()
+                    : _buildPasswordForm(isWeb),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPasswordForm(bool isWeb) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.lock_reset_rounded,
+          color: Color(0xFF6532A8),
+          size: 32,
+        ),
+        const SizedBox(height: 20),
+        const Text(
+          'Crea una contraseña nueva',
+          style: TextStyle(
+            color: Color(0xFF21172D),
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Elige una clave de al menos 8 caracteres para recuperar el acceso a tu panel.',
+          style: TextStyle(color: Color(0xFF716779), height: 1.5),
+        ),
+        const SizedBox(height: 24),
+        TextField(
+          controller: _passwordController,
+          obscureText: _obscurePassword,
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.newPassword],
+          decoration: InputDecoration(
+            labelText: 'Nueva contraseña',
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              tooltip: _obscurePassword
+                  ? 'Mostrar contraseña'
+                  : 'Ocultar contraseña',
+              onPressed: () =>
+                  setState(() => _obscurePassword = !_obscurePassword),
+              icon: Icon(
+                _obscurePassword
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _confirmationController,
+          obscureText: _obscurePassword,
+          textInputAction: TextInputAction.done,
+          autofillHints: const [AutofillHints.newPassword],
+          onSubmitted: (_) => _isSubmitting ? null : _savePassword(),
+          decoration: const InputDecoration(
+            labelText: 'Confirmar contraseña',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (_errorMessage != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF0EF),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFF2C6C2)),
+            ),
+            child: Text(
+              _errorMessage!,
+              style: const TextStyle(color: Color(0xFF9B352C)),
+            ),
+          ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: _isSubmitting ? null : _savePassword,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF6532A8),
+              minimumSize: const Size.fromHeight(50),
+            ),
+            child: _isSubmitting
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text('Guardar contraseña'),
+          ),
+        ),
+        if (isWeb) ...[
+          const SizedBox(height: 12),
+          const Text(
+            'Cuando termines, vuelve al panel e inicia sesión con tu nueva clave.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFF716779), fontSize: 12),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSuccessContent() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.check_circle_outline_rounded,
+          color: Color(0xFF27835A),
+          size: 48,
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'Contraseña actualizada',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Color(0xFF21172D),
+            fontSize: 23,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Tu clave nueva ya está lista. Inicia sesión para volver al panel.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Color(0xFF716779), height: 1.5),
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: _returnToLogin,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF6532A8),
+              minimumSize: const Size.fromHeight(50),
+            ),
+            child: const Text('Volver a iniciar sesión'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -462,7 +727,13 @@ class _AuthScreenState extends State<AuthScreen> {
     }
 
     try {
-      await Supabase.instance.client.auth.resetPasswordForEmail(email);
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        email,
+        redirectTo: AppLinks.passwordRecoveryRedirectUri(
+          isWeb: kIsWeb,
+          currentUri: Uri.base,
+        ).toString(),
+      );
       _showSnack('Te enviamos un correo para restablecer la contraseña.');
     } on AuthException catch (error) {
       _showSnack(_translateAuthError(error.message), isError: true);

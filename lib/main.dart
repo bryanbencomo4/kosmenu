@@ -92,6 +92,8 @@ Widget _buildRecoverableErrorScreen(FlutterErrorDetails details) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  passwordRecoveryPending.value =
+      kIsWeb && Uri.base.queryParameters['flow'] == 'password-recovery';
   ErrorWidget.builder = _buildRecoverableErrorScreen;
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -134,10 +136,17 @@ class _KosmenuAppState extends State<KosmenuApp> {
 
   StreamSubscription<Uri>? _appLinkSubscription;
   StreamSubscription<String>? _pushTapSubscription;
+  StreamSubscription<AuthState>? _authRecoverySubscription;
 
   @override
   void initState() {
     super.initState();
+    _authRecoverySubscription = Supabase.instance.client.auth.onAuthStateChange
+        .listen((state) {
+          if (state.event == AuthChangeEvent.passwordRecovery) {
+            passwordRecoveryPending.value = true;
+          }
+        });
     if (!kIsWeb) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) {
@@ -153,6 +162,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
   void dispose() {
     _appLinkSubscription?.cancel();
     _pushTapSubscription?.cancel();
+    _authRecoverySubscription?.cancel();
     _pushNotifications.dispose();
     super.dispose();
   }
@@ -213,6 +223,9 @@ class _KosmenuAppState extends State<KosmenuApp> {
   String _resolveInitialRoute() {
     if (kIsWeb) {
       final uri = Uri.base;
+      if (uri.queryParameters['flow'] == 'password-recovery') {
+        return '/auth/recovery';
+      }
       final orderId = OrderGateHandler.extractOrderId(uri);
       if (orderId != null && orderId.isNotEmpty) {
         MerchantDeepLink.rememberOrder(orderId);
@@ -247,6 +260,11 @@ class _KosmenuAppState extends State<KosmenuApp> {
   }
 
   void _openOrderLink(Uri uri, {bool replaceStack = false}) {
+    if (uri.scheme == 'com.kosmenu.app' && uri.host == 'reset-password') {
+      passwordRecoveryPending.value = true;
+      return;
+    }
+
     final orderId = OrderGateHandler.extractOrderId(uri);
     if (orderId == null || orderId.isEmpty) {
       return;
@@ -289,9 +307,8 @@ class _KosmenuAppState extends State<KosmenuApp> {
       final encodedPayload = uri.pathSegments[1];
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => MobileCameraCaptureScreen(
-          encodedPayload: encodedPayload,
-        ),
+        builder: (_) =>
+            MobileCameraCaptureScreen(encodedPayload: encodedPayload),
       );
     }
 
@@ -399,6 +416,7 @@ class _BrandedEntryScreenState extends State<_BrandedEntryScreen> {
   @override
   void initState() {
     super.initState();
+    passwordRecoveryPending.addListener(_onPasswordRecoveryPending);
     if (MerchantDeepLink.peekOrder() != null) {
       _showAuth = true;
       return;
@@ -413,6 +431,17 @@ class _BrandedEntryScreenState extends State<_BrandedEntryScreen> {
       if (!mounted) return;
       setState(() => _showAuth = true);
     });
+  }
+
+  @override
+  void dispose() {
+    passwordRecoveryPending.removeListener(_onPasswordRecoveryPending);
+    super.dispose();
+  }
+
+  void _onPasswordRecoveryPending() {
+    if (!mounted || !passwordRecoveryPending.value || _showAuth) return;
+    setState(() => _showAuth = true);
   }
 
   @override
@@ -432,7 +461,7 @@ class _BrandedEntryScreenState extends State<_BrandedEntryScreen> {
           child: SlideTransition(position: slide, child: child),
         );
       },
-      child: _showAuth
+      child: _showAuth || passwordRecoveryPending.value
           ? const AuthGate(key: ValueKey<String>('auth'))
           : _BrandedSplash(
               key: const ValueKey<String>('splash'),

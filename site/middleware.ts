@@ -152,6 +152,12 @@ function isAdminAliasPath(pathname: string) {
   );
 }
 
+function isVercelPreviewHost(hostname: string) {
+  if (process.env.VERCEL_ENV !== 'preview') return false;
+  const deploymentHost = requestHostname(process.env.VERCEL_URL ?? '');
+  return deploymentHost.length > 0 && hostname === deploymentHost;
+}
+
 function isAssetRequest(pathname: string) {
   return pathname.startsWith('/_next/') || shouldPreserveHostForWellKnown(pathname) || hasFileExtension(pathname);
 }
@@ -226,6 +232,9 @@ export function middleware(request: NextRequest) {
   const isLocalDevelopmentAliasHost = LOCAL_DEVELOPMENT_ALIAS_HOSTS.has(hostname);
   const isDevelopmentHost = isLocalDevelopmentHost || isLocalDevelopmentAliasHost;
   const isAdminHost = ADMIN_HOSTS.has(hostname);
+  const isPreviewAdminPath =
+    isVercelPreviewHost(hostname) &&
+    (isInternalAdminPath(pathname) || isAdminAliasPath(pathname));
   const isLocalAdminPath = isLocalDevelopmentHost && isInternalAdminPath(pathname);
 
   const needsCanonicalHost =
@@ -257,18 +266,25 @@ export function middleware(request: NextRequest) {
     );
   }
 
-  if (!isAdminHost && !isLocalAdminPath && (isInternalAdminPath(pathname) || isAdminAliasPath(pathname))) {
+  if (
+    !isAdminHost &&
+    !isPreviewAdminPath &&
+    !isLocalAdminPath &&
+    (isInternalAdminPath(pathname) || isAdminAliasPath(pathname))
+  ) {
     const redirectUrl = cloneRedirectUrl(request);
     redirectUrl.pathname = '/';
     redirectUrl.search = '';
     return applySecurityHeaders(NextResponse.redirect(redirectUrl, 307), pathname);
   }
 
-  if (isAdminHost || isLocalAdminPath) {
+  if (isAdminHost || isPreviewAdminPath || isLocalAdminPath) {
     if (pathname.startsWith('/api/') || pathname.startsWith('/wp-json/')) {
       return applySecurityHeaders(NextResponse.next(), pathname);
     }
-    const internalAdminPath = isAdminHost ? resolveAdminInternalPath(pathname) : pathname;
+    const internalAdminPath = isAdminHost || isPreviewAdminPath
+      ? resolveAdminInternalPath(pathname)
+      : pathname;
     const requestHeaders = new Headers(request.headers);
     const hasAdminSession = Boolean(request.cookies.get(ADMIN_SESSION_COOKIE)?.value?.trim());
     const isAdminPublicApiPath = PUBLIC_ADMIN_API_PATHS.has(internalAdminPath);

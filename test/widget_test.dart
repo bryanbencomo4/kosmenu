@@ -1,6 +1,8 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/main.dart';
+import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -25,5 +27,25 @@ void main() {
 
     // Brand copy on AuthScreen (replaces legacy "Kosmenú" expectation).
     expect(find.textContaining('elmenuxfa.com'), findsWidgets);
+  });
+
+  testWidgets('password recovery validates length and confirmation', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: PasswordRecoveryScreen()),
+    );
+
+    await tester.enterText(find.byType(TextField).at(0), 'short');
+    await tester.enterText(find.byType(TextField).at(1), 'short');
+    await tester.tap(find.text('Guardar contraseña'));
+    await tester.pump();
+    expect(find.text('Usa al menos 8 caracteres.'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).at(0), 'password123');
+    await tester.enterText(find.byType(TextField).at(1), 'password321');
+    await tester.tap(find.text('Guardar contraseña'));
+    await tester.pump();
+    expect(find.text('Las contraseñas no coinciden.'), findsOneWidget);
   });
 }
