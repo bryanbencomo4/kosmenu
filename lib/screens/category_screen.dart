@@ -1346,11 +1346,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     ProductModel product,
     bool disponible,
   ) async {
-    if (_isMutating) return;
+    if (!MerchantSession.canManageCatalog || _isMutating) return;
 
     final previous = List<ProductModel>.from(_products);
 
     setState(() {
+      _isMutating = true;
       _products = _products
           .map(
             (item) => item.id == product.id
@@ -1388,6 +1389,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       _showMessage(
         'No se pudo actualizar la visibilidad del producto. Intenta nuevamente.',
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
     }
   }
 
@@ -1441,6 +1446,86 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
   Future<void> _showProduct(ProductModel product) async {
     await _setProductVisibility(product, true);
+  }
+
+  Future<void> _deleteProduct(ProductModel product) async {
+    if (!MerchantSession.canManageCatalog) {
+      _showMessage(MerchantSession.deniedMessage('eliminar productos'));
+      return;
+    }
+    if (_isMutating) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          backgroundColor: colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            'Eliminar producto',
+            style: GoogleFonts.manrope(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: Text(
+            '¿Eliminar "${product.nombre}"? Esta acción no se puede deshacer.',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.error,
+                foregroundColor: colorScheme.onError,
+              ),
+              label: const Text('Eliminar producto'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || confirmed != true) return;
+
+    setState(() => _isMutating = true);
+    try {
+      final deletedRows = await Supabase.instance.client
+          .from('productos')
+          .delete()
+          .eq('comercio_id', SupabaseConfig.currentComercioId)
+          .eq('id', product.id)
+          .select('id');
+
+      if ((deletedRows as List<dynamic>).isEmpty) {
+        throw StateError('No se pudo confirmar la eliminación del producto.');
+      }
+
+      if (!mounted) return;
+      await _loadCategories(showLoadingIndicator: false);
+      if (!mounted) return;
+      _showMessage('Producto eliminado.');
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage(
+        'No se pudo eliminar el producto. Intenta nuevamente o revisa si forma parte de una oferta activa.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isMutating = false);
+      }
+    }
   }
 
   Future<bool?> _confirmAiImageGeneration(ProductModel product) {
@@ -2491,6 +2576,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       priceLabel: _formatProductPrice(product.precio),
       priceSecondaryLabel: _formatProductPriceSecondary(product.precio),
       onEdit: () => _openProductFormDirect(product: product),
+      onDelete: () => _deleteProduct(product),
       onToggleVisible: () {
         if (product.disponible) {
           unawaited(_hideProduct(product));
@@ -3479,6 +3565,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                             priceSecondaryLabel:
                                 _formatProductPriceSecondary(product.precio),
                             onEdit: () => _openProductFormDirect(product: product),
+                            onDelete: () => _deleteProduct(product),
                             onToggleVisible: () {
                               if (product.disponible) {
                                 unawaited(_hideProduct(product));
@@ -3507,6 +3594,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                 _formatProductPriceSecondary(product.precio),
                             disabled: disabled,
                             onEdit: () => _openProductFormDirect(product: product),
+                            onDelete: () => _deleteProduct(product),
                             onToggleVisibility: () {
                               if (product.disponible) {
                                 unawaited(_hideProduct(product));
@@ -3985,6 +4073,7 @@ class _DesktopProductsTableRow extends StatelessWidget {
     this.priceSecondaryLabel,
     required this.disabled,
     required this.onEdit,
+    required this.onDelete,
     required this.onToggleVisibility,
     required this.onImproveImage,
   });
@@ -3994,6 +4083,7 @@ class _DesktopProductsTableRow extends StatelessWidget {
   final String? priceSecondaryLabel;
   final bool disabled;
   final VoidCallback onEdit;
+  final VoidCallback onDelete;
   final VoidCallback onToggleVisibility;
   final VoidCallback onImproveImage;
 
@@ -4129,6 +4219,9 @@ class _DesktopProductsTableRow extends StatelessWidget {
                       case 'toggle':
                         onToggleVisibility();
                         break;
+                      case 'delete':
+                        onDelete();
+                        break;
                     }
                   },
                   itemBuilder: (_) => [
@@ -4140,6 +4233,26 @@ class _DesktopProductsTableRow extends StatelessWidget {
                       value: 'toggle',
                       child: Text(
                         product.disponible ? 'Marcar como agotado' : 'Marcar disponible',
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Eliminar producto',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -5180,6 +5293,7 @@ class _DashboardProductCard extends StatelessWidget {
     required this.priceLabel,
     this.priceSecondaryLabel,
     required this.onEdit,
+    required this.onDelete,
     required this.onToggleVisible,
     required this.onImproveImage,
   });
@@ -5189,6 +5303,7 @@ class _DashboardProductCard extends StatelessWidget {
   final String priceLabel;
   final String? priceSecondaryLabel;
   final VoidCallback onEdit;
+  final VoidCallback onDelete;
   final VoidCallback onToggleVisible;
   final VoidCallback onImproveImage;
 
@@ -5358,6 +5473,15 @@ class _DashboardProductCard extends StatelessWidget {
                         onTap: onImproveImage,
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: _CategoryActionButton(
+                        icon: Icons.delete_outline_rounded,
+                        label: 'Eliminar producto',
+                        onTap: onDelete,
+                      ),
+                    ),
                   ],
                 );
               }
@@ -5387,6 +5511,14 @@ class _DashboardProductCard extends StatelessWidget {
                       icon: Icons.auto_awesome_rounded,
                       label: 'Mejorar IA',
                       onTap: onImproveImage,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _CategoryActionButton(
+                      icon: Icons.delete_outline_rounded,
+                      label: 'Eliminar',
+                      onTap: onDelete,
                     ),
                   ),
                 ],

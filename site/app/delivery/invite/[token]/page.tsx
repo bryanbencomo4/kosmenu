@@ -354,7 +354,8 @@ export default function DeliveryInvitePage() {
   }, [refresh, submitting, token]);
 
   const invitationStatus = normalizeStatus(payload?.invitation?.status);
-  const effectiveInvitationStatus = arrivedOptimistic ? 'arrived' : invitationStatus;
+  const effectiveInvitationStatus =
+    arrivedOptimistic && invitationStatus === 'accepted' ? 'arrived' : invitationStatus;
   const orderStatus = normalizeStatus(payload?.order?.status);
   const canAccept = Boolean(payload?.actions?.canAccept);
   const canMarkArrived = Boolean(payload?.actions?.canMarkArrived);
@@ -399,15 +400,19 @@ export default function DeliveryInvitePage() {
     const dst = payload?.delivery?.coordinates;
     const srcLat = safeNumber(payload?.comercio?.lat);
     const srcLng = safeNumber(payload?.comercio?.lng);
+    const dstLat = safeNumber(dst?.lat);
+    const dstLng = safeNumber(dst?.lng);
 
-    if (dst?.lat != null && dst?.lng != null && srcLat != null && srcLng != null) {
-      return `https://www.google.com/maps?saddr=${srcLat},${srcLng}&daddr=${dst.lat},${dst.lng}&output=embed`;
-    }
-    if (dst?.lat != null && dst?.lng != null) {
-      return `https://www.google.com/maps?q=${encodeURIComponent(`${dst.lat},${dst.lng}`)}&z=16&output=embed`;
-    }
-    if (payload?.delivery?.address) {
-      return `https://www.google.com/maps?q=${encodeURIComponent(payload.delivery.address)}&z=16&output=embed`;
+    if (dstLat != null && dstLng != null) {
+      const points = [{ lat: dstLat, lng: dstLng }];
+      if (srcLat != null && srcLng != null) points.push({ lat: srcLat, lng: srcLng });
+      const padding = 0.008;
+      const minLat = Math.min(...points.map((point) => point.lat)) - padding;
+      const maxLat = Math.max(...points.map((point) => point.lat)) + padding;
+      const minLng = Math.min(...points.map((point) => point.lng)) - padding;
+      const maxLng = Math.max(...points.map((point) => point.lng)) + padding;
+      const bounds = `${minLng},${minLat},${maxLng},${maxLat}`;
+      return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bounds)}&layer=mapnik&marker=${encodeURIComponent(`${dstLat},${dstLng}`)}`;
     }
     return '';
   }, [payload?.comercio?.lat, payload?.comercio?.lng, payload?.delivery?.address, payload?.delivery?.coordinates]);
@@ -672,6 +677,23 @@ export default function DeliveryInvitePage() {
                 loading="lazy"
                 referrerPolicy="no-referrer-when-downgrade"
               />
+            ) : payload.delivery?.address ? (
+              <div className="grid h-64 place-items-center px-6 text-center">
+                <div>
+                  <MapPinned className="mx-auto h-8 w-8 text-slate-500" />
+                  <p className="mt-2 text-sm font-semibold text-slate-700">
+                    No hay coordenadas para mostrar el mapa aquí.
+                  </p>
+                  <a
+                    href={navigationUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-bold text-white"
+                  >
+                    Abrir dirección en Maps
+                  </a>
+                </div>
+              </div>
             ) : (
               <div className="grid h-64 place-items-center">
                 <p className="text-sm font-semibold text-slate-500">No hay mapa disponible</p>
@@ -774,7 +796,7 @@ export default function DeliveryInvitePage() {
                   onClick={() => void submitAction('arrived')}
                   className="inline-flex w-full items-center justify-center rounded-2xl bg-orange-500 px-4 py-4 text-base font-black text-white shadow-[0_12px_26px_rgba(249,115,22,0.35)] disabled:cursor-not-allowed disabled:bg-orange-200 disabled:text-orange-100 disabled:shadow-none"
                 >
-                  {submitting ? 'Guardando...' : 'Ya llegue al punto'}
+                  {submitting ? 'Guardando...' : 'Ya llegué al punto'}
                 </button>
               ) : null}
 

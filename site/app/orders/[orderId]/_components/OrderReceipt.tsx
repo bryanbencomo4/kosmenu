@@ -2,7 +2,7 @@
 
 import { Manrope } from 'next/font/google';
 import Link from 'next/link';
-import { ArrowLeft, Check, MapPin, RotateCcw, Truck, Utensils } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, MapPin, RotateCcw, Truck, Utensils } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 
 const headingFont = Manrope({
@@ -504,10 +504,23 @@ export function OrderReceipt(props: OrderReceiptProps) {
             type="button"
             disabled={props.deliveryConfirmationLoading}
             onClick={props.onConfirmDelivery}
-            className="mt-3 inline-flex min-h-12 w-full items-center justify-center rounded-[16px] bg-emerald-50 text-sm font-bold text-emerald-800"
-            style={{ opacity: props.deliveryConfirmationLoading ? 0.7 : 1 }}
+            className="mt-4 inline-flex min-h-[68px] w-full items-center justify-start gap-3 rounded-2xl bg-emerald-700 px-5 py-3 text-left text-base font-extrabold text-white shadow-[0_12px_26px_rgba(4,120,87,0.25)] transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70"
           >
-            {props.deliveryConfirmationLoading ? 'Confirmando entrega...' : 'Confirmar que recibí mi pedido'}
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15">
+              {props.deliveryConfirmationLoading ? (
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              ) : (
+                <CheckCircle2 className="h-6 w-6" strokeWidth={2.5} />
+              )}
+            </span>
+            <span className="min-w-0">
+              <span className="block leading-tight">
+                {props.deliveryConfirmationLoading ? 'Confirmando recepción...' : 'Confirmar que recibí mi pedido'}
+              </span>
+              <span className="mt-1 block text-xs font-semibold text-emerald-50">
+                Pulsa cuando ya tengas el pedido
+              </span>
+            </span>
           </button>
         ) : null}
         {props.deliveryConfirmationMessage ? (

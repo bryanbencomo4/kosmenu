@@ -110,22 +110,20 @@ class DeliveryCourierService {
     required String normalizedPhone,
   }) async {
     final client = Supabase.instance.client;
-    try {
-      final response = await client.rpc(
-        'upsert_delivery_courier',
-        params: {
-          'p_comercio_id': comercioId,
-          'p_alias': alias,
-          'p_phone_e164': phoneE164,
-          'p_normalized_phone': normalizedPhone,
-        },
-      );
+    final response = await client.rpc(
+      'upsert_delivery_courier',
+      params: {
+        'p_comercio_id': comercioId,
+        'p_alias': alias,
+        'p_phone_e164': phoneE164,
+        'p_normalized_phone': normalizedPhone,
+      },
+    );
 
-      if (response is! List || response.isEmpty) return null;
-      return DeliveryCourier.fromMap(Map<String, dynamic>.from(response.first as Map));
-    } catch (_) {
-      return null;
+    if (response is! List || response.isEmpty) {
+      throw StateError('No se recibio confirmacion al guardar el repartidor.');
     }
+    return DeliveryCourier.fromMap(Map<String, dynamic>.from(response.first as Map));
   }
 
   static Future<void> touchLastUsed(String courierId) async {

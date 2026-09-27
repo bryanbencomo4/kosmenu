@@ -445,23 +445,31 @@ class _AssignCourierSheetState extends State<AssignCourierSheet> {
     }
 
     setState(() => _sending = true);
-    final saved = await DeliveryCourierService.upsertCourier(
-      comercioId: widget.comercioId,
-      alias: alias,
-      phoneE164: phoneE164,
-      normalizedPhone: normalized,
-    );
+    DeliveryCourier? saved;
+    try {
+      saved = await DeliveryCourierService.upsertCourier(
+        comercioId: widget.comercioId,
+        alias: alias,
+        phoneE164: phoneE164,
+        normalizedPhone: normalized,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      _setStatus(
+        'No se pudo guardar el repartidor. Revisa la conexion e intenta de nuevo.',
+        isError: true,
+      );
+      return;
+    }
 
     if (!mounted) return;
     setState(() => _sending = false);
 
     if (saved == null) {
-      Navigator.of(context).pop(
-        DeliveryCourierSelection(
-          alias: alias.isEmpty ? 'Repartidor' : alias,
-          phoneE164: phoneE164,
-          normalizedPhone: normalized,
-        ),
+      _setStatus(
+        'No se pudo guardar el repartidor. Intenta de nuevo.',
+        isError: true,
       );
       return;
     }

@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { NextResponse } from 'next/server';
 
+import { sendWhatsappText } from '../../../_lib/send-order-whatsapp';
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{24,160}$/;
@@ -559,10 +560,96 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
       p_payload: { arrived_at: arrivedInvitation.arrived_at },
     });
 
+    await enqueueCustomerArrivalNotification(supabase, context, arrivedInvitation);
+
     context.invitation = arrivedInvitation;
     return NextResponse.json(buildPayload(context), { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo procesar la accion del repartidor.';
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
+}
+
+async function enqueueCustomerArrivalNotification(
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
+  context: InvitationContext,
+  invitation: DeliveryInvitationRow,
+) {
+  const pedido = context.pedido;
+  const comercio = context.comercio;
+  if (!pedido) return;
+
+  const detalles = asRecord(pedido.detalles);
+  const recipient = (
+    pedido.telefono_cliente ?? detalles.telefono_cliente ?? ''
+  ).toString().trim();
+  if (!recipient) {
+    await logArrivalNotificationFailure(supabase, invitation, 'customer-phone-missing');
+    return;
+  }
+
+  const orderId = (
+    detalles.order_id ?? detalles.codigo_orden ?? invitation.order_id ?? ''
+  ).toString().trim();
+  const businessName = comercio?.nombre?.trim() || 'el comercio';
+  const trackingUrl = (detalles.tracking_url ?? '').toString().trim();
+  const message = [
+    `🛵 El repartidor llegó al punto de entrega de tu pedido${orderId ? ` #${orderId}` : ''}.`,
+    `Comercio: ${businessName}.`,
+    'Por favor, confirma la recepción cuando tengas el pedido.',
+    trackingUrl,
+  ].filter(Boolean).join('\n');
+
+  try {
+    const queued = await sendWhatsappText(recipient, message, {
+      source: 'delivery-arrival-customer',
+      dedupeKey: `delivery-arrival:${invitation.id}`,
+      comercioId: invitation.comercio_id ?? null,
+      pedidoId: invitation.pedido_id ?? null,
+      orderId,
+      deliveryInvitationId: invitation.id,
+      deliveryActor: invitation.accepted_by_name ?? 'guest_courier',
+    });
+
+    await supabase.from('delivery_invitation_events').insert({
+      invitation_id: invitation.id,
+      pedido_id: invitation.pedido_id,
+      order_id: invitation.order_id,
+      event_type: queued.queued ? 'customer_arrival_notification_queued' : 'customer_arrival_notification_sent',
+      actor: invitation.accepted_by_name ?? 'guest_courier',
+      payload: {
+        channel: 'whatsapp',
+        provider: 'wasender',
+        queue_id: (queued.response as Record<string, unknown>).queueId,
+        status: queued.queued ? 'queued' : 'sent',
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown';
+    console.error('[delivery-arrival] customer WhatsApp enqueue failed', {
+      invitationId: invitation.id,
+      orderId,
+      error: message.slice(0, 160),
+    });
+    await logArrivalNotificationFailure(
+      supabase,
+      invitation,
+      message.slice(0, 160) || 'queue-enqueue-failed',
+    );
+  }
+}
+
+async function logArrivalNotificationFailure(
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
+  invitation: DeliveryInvitationRow,
+  error: string,
+) {
+  await supabase.from('delivery_invitation_events').insert({
+    invitation_id: invitation.id,
+    pedido_id: invitation.pedido_id,
+    order_id: invitation.order_id,
+    event_type: 'customer_arrival_notification_failed',
+    actor: invitation.accepted_by_name ?? 'guest_courier',
+    payload: { channel: 'whatsapp', provider: 'wasender', error },
+  });
 }
