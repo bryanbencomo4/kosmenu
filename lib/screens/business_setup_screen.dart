@@ -925,10 +925,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }) {
     final direct =
         quoteCurrency == 'VES' &&
-        (baseCurrency == 'USD' || baseCurrency == 'EUR');
+        (baseCurrency == 'USD' ||
+            baseCurrency == 'EUR' ||
+            baseCurrency == 'COP');
     final reverse =
         baseCurrency == 'VES' &&
-        (quoteCurrency == 'USD' || quoteCurrency == 'EUR');
+        (quoteCurrency == 'USD' ||
+            quoteCurrency == 'EUR' ||
+            quoteCurrency == 'COP');
     return direct || reverse;
   }
 
@@ -4643,9 +4647,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'VES' => () {
         final liveRate = _marketRates[source] ?? 0;
         if (liveRate > 0) {
-          return source == _exchangeSourceP2pBinance
-              ? _adjustP2pRateForBuyer(liveRate)
-              : liveRate;
+          if (source == _exchangeSourceP2pBinance) {
+            return _adjustP2pRateForBuyer(liveRate);
+          }
+          if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+            return liveRate * (_googleAnchorRates['USD/EUR'] ?? 0);
+          }
+          return liveRate;
         }
         return _usdToCurrencyRate('VES');
       }(),
@@ -4805,7 +4813,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               .toDouble();
       return switch (currency) {
         'USD' => 1.0,
-        'VES' => liveRate.toDouble(),
+        'VES' => source == _exchangeSourceBcvEur
+            ? liveRate * usdEur
+            : liveRate.toDouble(),
         'COP' => usdCop,
         'EUR' => usdEur,
         _ => 0.0,

@@ -88,8 +88,8 @@ function googleRateForPair(
 function isTrackedVesPair(baseCurrency: string, quoteCurrency: string) {
   const base = normalizeCurrencyCode(baseCurrency);
   const quote = normalizeCurrencyCode(quoteCurrency);
-  const direct = quote === 'VES' && (base === 'USD' || base === 'EUR');
-  const reverse = base === 'VES' && (quote === 'USD' || quote === 'EUR');
+  const direct = quote === 'VES' && (base === 'USD' || base === 'EUR' || base === 'COP');
+  const reverse = base === 'VES' && (quote === 'USD' || quote === 'EUR' || quote === 'COP');
   return direct || reverse;
 }
 
@@ -132,10 +132,12 @@ function usdToCurrencyRateForSource(
 
   const googleRates = googleRatesFromPayload(marketRates?.payload ?? null);
   if (normalizedCurrency === 'VES') {
-    const liveRate =
-      source === 'p2p_binance'
-        ? adjustedP2pRateForBuyer(parseExchangeRate(marketRates?.p2p_binance_rate) ?? 0)
-        : parseExchangeRate(marketRates?.bcv_rate) ?? 0;
+    let liveRate = source === 'p2p_binance'
+      ? adjustedP2pRateForBuyer(parseExchangeRate(marketRates?.p2p_binance_rate) ?? 0)
+      : bcvVesRateForSource(source, marketRates);
+    if (canonicalizeBcvSource(source) === 'bcv_eur') {
+      liveRate *= googleRates.get('USD/EUR') ?? 0;
+    }
     if (liveRate > 0) return liveRate;
     return (googleRates.get('VES/USD') ?? 0) > 0 ? 1 / (googleRates.get('VES/USD') ?? 0) : 0;
   }
@@ -169,15 +171,10 @@ export function derivedExchangeRateForCurrency(
     if (rate > 0) return rate;
   }
 
-  if (isBcvExchangeSource(source) && (quote === 'VES' || base === 'VES')) {
-    const vesRate = bcvVesRateForSource(source, marketRates);
-    if (vesRate > 0) {
-      if (quote === 'VES') return vesRate;
-      return 1 / vesRate;
-    }
-  }
-
-  if ((source === 'p2p_binance' || source === 'google') && isTrackedVesPair(base, quote)) {
+  if (
+    (isBcvExchangeSource(source) || source === 'p2p_binance' || source === 'google') &&
+    isTrackedVesPair(base, quote)
+  ) {
     const usdToBase = usdToCurrencyRateForSource(source, base, marketRates);
     const usdToQuote = usdToCurrencyRateForSource(source, quote, marketRates);
     if (usdToBase > 0 && usdToQuote > 0) {

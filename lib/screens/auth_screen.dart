@@ -167,7 +167,19 @@ class _AuthGateState extends State<AuthGate> {
       return await resolveOnce();
     } catch (_) {
       await Future<void>.delayed(const Duration(milliseconds: 320));
-      return resolveOnce();
+      try {
+        return await resolveOnce();
+      } catch (error) {
+        debugPrint('Session validation failed; clearing local session: $error');
+        try {
+          await Supabase.instance.client.auth.signOut(
+            scope: SignOutScope.local,
+          );
+        } catch (signOutError) {
+          debugPrint('Could not clear local session: $signOutError');
+        }
+        rethrow;
+      }
     }
   }
 

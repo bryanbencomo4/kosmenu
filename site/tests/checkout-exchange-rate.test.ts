@@ -92,6 +92,27 @@ describe('derivedExchangeRateForCurrency', () => {
 
     expect(rate).toBeCloseTo(477, 2);
   });
+
+  it('derives COP to VES through USD with the BCV rate', () => {
+    const rate = derivedExchangeRateForCurrency('COP', 'VES', 'bcv_usd', {
+      bcv_rate: 976.9,
+      p2p_binance_rate: null,
+      payload: { google_rates: { 'USD/COP': 3257.79 } },
+    });
+
+    expect(rate).toBeCloseTo(976.9 / 3257.79, 5);
+    expect(23000 * rate).toBeCloseTo(6896.91, 1);
+  });
+
+  it('derives COP to VES through USD with the Binance P2P rate', () => {
+    const rate = derivedExchangeRateForCurrency('COP', 'VES', 'p2p_binance', {
+      bcv_rate: 976.9,
+      p2p_binance_rate: 1100,
+      payload: { google_rates: { 'USD/COP': 3257.79 } },
+    });
+
+    expect(rate).toBeCloseTo((1100 * 1.006) / 3257.79, 5);
+  });
 });
 
 describe('resolveCheckoutCurrencySource', () => {
