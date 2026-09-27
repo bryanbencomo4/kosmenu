@@ -1038,7 +1038,20 @@ function OrderTrackingPageInner() {
         amountLabel: formatAmountByCurrency(item.subtotal, checkoutCurrency),
       }))}
       subtotalLabel={formatAmountByCurrency(subtotalCheckout, checkoutCurrency)}
-      deliveryLabel={isDelivery || deliveryCheckout > 0 ? formatAmountByCurrency(deliveryCheckout, checkoutCurrency) : null}
+      deliveryLabel={
+        isDelivery
+          ? deliveryCheckout > 0
+            ? formatAmountByCurrency(deliveryCheckout, checkoutCurrency)
+            : 'Se paga aparte'
+          : deliveryCheckout > 0
+            ? formatAmountByCurrency(deliveryCheckout, checkoutCurrency)
+            : null
+      }
+      deliveryFeeNote={
+        isDelivery && deliveryCheckout <= 0
+          ? 'El costo del delivery no está incluido en el total del pedido. Debes pagarlo aparte al repartidor.'
+          : null
+      }
       cashChangeLabel={cashChangeAmount > 0 ? formatAmountByCurrency(cashChangeAmount, checkoutCurrency) : null}
       totalLabel={formatAmountByCurrency(totalCheckout, checkoutCurrency)}
       paymentLabel={paymentLabel || null}
