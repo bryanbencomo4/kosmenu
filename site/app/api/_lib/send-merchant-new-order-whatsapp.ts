@@ -48,5 +48,10 @@ export async function sendMerchantNewOrderWhatsapp(input: SendMerchantNewOrderWh
 
   const text = buildMerchantNewOrderWhatsappText(input);
   const result = await sendWhatsappText(input.merchantWhatsapp, text);
-  return { ok: true as const, skipped: false as const, recipient: result.recipient };
+  return {
+    ok: true as const,
+    skipped: false as const,
+    queued: result.queued,
+    recipient: result.recipient,
+  };
 }

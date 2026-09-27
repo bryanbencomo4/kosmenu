@@ -4,6 +4,9 @@ project_id = "qqhberaayhohxlbbhdyi"
 [functions.notify-order]
 verify_jwt = false
 
+[functions.process-wasender-queue]
+verify_jwt = false
+
 [functions.process-ai-image-jobs]
 verify_jwt = false
 

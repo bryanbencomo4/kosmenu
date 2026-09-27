@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 
-import { dispatchOrderNotification } from '../../../../_lib/dispatch-order-notification';
+import {
+  customerWhatsappFallbackUrl,
+  dispatchOrderNotification,
+} from '../../../../_lib/dispatch-order-notification';
 import { extractComercioId } from '../../../../_lib/order-utils';
 import { consumeRateLimit, getClientIp } from '../../../../_lib/rate-limit';
 import { getUserFromBearerRequest } from '../../../../_lib/supabase-user-auth';
@@ -126,6 +129,7 @@ export async function POST(request: Request, { params }: Params) {
         ok: true,
         dispatched: result.ok,
         reason: result.reason ?? null,
+        fallbackWhatsappUrl: customerWhatsappFallbackUrl(result),
       },
       {
         status: 200,

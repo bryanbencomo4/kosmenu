@@ -1,5 +1,7 @@
 import 'server-only';
 
+const ORDER_NOTIFICATION_TIMEOUT_MS = 20_000;
+
 export type OrderNotificationEventType = 'INSERT' | 'UPDATE';
 
 export type OrderNotificationPayload = {
@@ -56,7 +58,7 @@ export async function dispatchOrderNotification(
         record: payload.record,
         old_record: payload.old_record ?? null,
       }),
-      signal: AbortSignal.timeout(6_000),
+      signal: AbortSignal.timeout(ORDER_NOTIFICATION_TIMEOUT_MS),
     });
 
     const rawBody = await response.text();
@@ -105,6 +107,24 @@ export function merchantWhatsappDelivered(result: DispatchOrderNotificationResul
   if (!merchant) return false;
   if (merchant.ok === true && merchant.skipped !== true) return true;
   return merchant.reason === 'merchant-whatsapp-already-sent';
+}
+
+export function customerWhatsappFallbackUrl(result: DispatchOrderNotificationResult): string | null {
+  if (!result.ok || !result.body || typeof result.body !== 'object') return null;
+
+  const whatsapp = (result.body as { whatsapp?: Record<string, unknown> }).whatsapp;
+  if (!whatsapp || whatsapp.ok !== false || whatsapp.skipped === true) return null;
+
+  const rawUrl = (whatsapp.fallbackUrl ?? '').toString().trim();
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'https:' || url.hostname !== 'wa.me' || !/^\/\d{10,15}$/.test(url.pathname)) {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export function extractOrderCode(record: Record<string, unknown>): string {

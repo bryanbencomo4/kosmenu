@@ -1,11 +1,16 @@
+import 'server-only';
+
+import { createHash } from 'node:crypto';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
 import { publicSiteUrl } from './public-site-url';
+import { getServiceSupabaseClient } from './supabase-server';
 
 export type SendOrderNotificationResult = {
   ok: true;
   recipient: string;
   response: unknown;
+  queued: boolean;
 };
 
 type SendOrderNotificationOptions = {
@@ -14,12 +19,15 @@ type SendOrderNotificationOptions = {
   trackingUrl?: string;
 };
 
-type WasenderErrorPayload = {
-  message?: string;
-  error?: string;
+export type WhatsappQueueMetadata = {
+  source?: string;
+  dedupeKey?: string;
+  comercioId?: string | null;
+  pedidoId?: string | null;
+  orderId?: string | null;
+  deliveryInvitationId?: string | null;
+  deliveryActor?: string | null;
 };
-
-const DEFAULT_WASENDER_ENDPOINT = 'https://www.wasenderapi.com/api/send-message';
 
 export function statusNotificationTitle(status: string) {
   switch ((status ?? '').toString().trim().toLowerCase()) {
@@ -120,71 +128,43 @@ export async function sendOrderNotification(
 export async function sendWhatsappText(
   phone: string,
   text: string,
+  metadata: WhatsappQueueMetadata = {},
 ): Promise<SendOrderNotificationResult> {
-  const apiKey = process.env.WASENDER_API_KEY?.trim();
-  if (!apiKey) {
+  if (!process.env.WASENDER_API_KEY?.trim()) {
     throw new Error('WASENDER_API_KEY not configured.');
   }
 
-  const endpoint = process.env.WASENDER_API_ENDPOINT?.trim() || DEFAULT_WASENDER_ENDPOINT;
   const recipient = normalizePhoneToE164(phone);
-  let lastError = `WASenderAPI request failed.`;
+  const dedupeKey = metadata.dedupeKey?.trim() || createHash('sha256')
+    .update(`${recipient}\n${text}`)
+    .digest('hex');
+  const { data, error } = await getServiceSupabaseClient().rpc('enqueue_wasender_message', {
+    p_source: metadata.source?.trim() || 'next-api',
+    p_recipient: recipient,
+    p_message: text,
+    p_dedupe_key: dedupeKey,
+    p_comercio_id: metadata.comercioId ?? null,
+    p_pedido_id: metadata.pedidoId ?? null,
+    p_order_id: metadata.orderId ?? null,
+    p_delivery_invitation_id: metadata.deliveryInvitationId ?? null,
+    p_delivery_actor: metadata.deliveryActor ?? null,
+  });
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        to: recipient,
-        text,
-      }),
-    });
-
-    const rawBody = await response.text();
-    let payload: unknown = null;
-
-    try {
-      payload = rawBody ? JSON.parse(rawBody) : null;
-    } catch {
-      payload = rawBody;
-    }
-
-    if (response.ok) {
-      return {
-        ok: true,
-        recipient,
-        response: payload,
-      };
-    }
-
-    const message = typeof payload === 'object' && payload !== null
-      ? (((payload as WasenderErrorPayload).message ?? (payload as WasenderErrorPayload).error ?? '').toString())
-      : String(payload ?? '');
-    const normalizedMessage = message.toLowerCase();
-    lastError = message || `WASenderAPI request failed with status ${response.status}.`;
-
-    if (response.status === 401 || response.status === 403) {
-      throw new Error('WASenderAPI rejected the credentials. Check or renew the API key.');
-    }
-
-    if (
-      response.status === 400 ||
-      response.status === 422 ||
-      normalizedMessage.includes('invalid') ||
-      normalizedMessage.includes('phone') ||
-      normalizedMessage.includes('number')
-    ) {
-      throw new Error(`Invalid WhatsApp number: ${recipient}.`);
-    }
-
-    if (attempt === 2 || (response.status !== 429 && response.status < 500)) {
-      break;
-    }
+  if (error) {
+    throw new Error(`Unable to queue WASender message: ${error.message}`);
   }
 
-  throw new Error(lastError);
+  const row = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : undefined;
+  const queueId = (row?.queue_id ?? '').toString().trim();
+  if (!queueId) {
+    throw new Error('WASender queue did not return a message id.');
+  }
+  const queued = row?.queued === true;
+
+  return {
+    ok: true,
+    recipient,
+    queued,
+    response: { queueId, alreadyProcessed: !queued },
+  };
 }

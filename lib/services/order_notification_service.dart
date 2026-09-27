@@ -15,6 +15,7 @@ class OrderNotificationService {
   static Future<void> dispatchStatusChange({
     required String orderId,
     required String previousStatus,
+    Future<void> Function(String url)? onWhatsappFallback,
   }) async {
     final trimmedOrderId = orderId.trim();
     final trimmedPrevious = previousStatus.trim();
@@ -46,11 +47,27 @@ class OrderNotificationService {
           )
           .timeout(_timeout);
 
-      if (response.statusCode >= 400 && kDebugMode) {
-        debugPrint(
-          'OrderNotificationService dispatch failed '
-          '(${response.statusCode}): ${response.body}',
-        );
+      if (response.statusCode >= 400) {
+        if (kDebugMode) {
+          debugPrint(
+            'OrderNotificationService dispatch failed '
+            '(${response.statusCode}): ${response.body}',
+          );
+        }
+        return;
+      }
+
+      if (onWhatsappFallback != null) {
+        final payload = jsonDecode(response.body);
+        if (payload is Map && payload['fallbackWhatsappUrl'] is String) {
+          final url = Uri.tryParse(payload['fallbackWhatsappUrl'] as String);
+          if (url != null &&
+              url.scheme == 'https' &&
+              url.host == 'wa.me' &&
+              url.pathSegments.isNotEmpty) {
+            await onWhatsappFallback(url.toString());
+          }
+        }
       }
     } catch (error, stackTrace) {
       if (kDebugMode) {

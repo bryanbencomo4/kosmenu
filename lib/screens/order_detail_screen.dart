@@ -13,6 +13,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/delivery_courier_service.dart';
+import 'package:kosmenu_app/services/delivery_invite_notification_service.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/services/order_notification_service.dart';
 import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
@@ -64,6 +65,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   String? _overlayStatus;
   String? _verificationError;
   String? _deliveryInviteFeedback;
+  String? _deliveryInviteUrl;
   bool _loadingMarkerIcons = false;
   String? _markerIconsKey;
   BitmapDescriptor? _businessMarkerIcon;
@@ -709,6 +711,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         OrderNotificationService.dispatchStatusChange(
           orderId: widget.orderId,
           previousStatus: latestStatus,
+          onWhatsappFallback: _openOrderNotificationFallback,
         ),
       );
 
@@ -798,6 +801,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
       );
     }
+  }
+
+  Future<void> _openOrderNotificationFallback(String url) async {
+    final uri = Uri.tryParse(url);
+    final opened =
+        uri != null &&
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          opened
+              ? 'WASender no pudo enviar la notificacion. WhatsApp esta abierto; presiona Enviar.'
+              : 'WASender no pudo enviar la notificacion y no se pudo abrir WhatsApp.',
+        ),
+      ),
+    );
   }
 
   Future<void> _openCustomerCall(String phone) async {
@@ -939,7 +960,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     await _updateOrderStatus(action.status);
   }
 
-  Future<String?> _createDeliveryInviteLink({String? invitedPhone}) async {
+  Future<({String token, String url})?> _createDeliveryInviteLink({
+    String? invitedPhone,
+  }) async {
     final response = await Supabase.instance.client.rpc(
       'create_delivery_invitation',
       params: {
@@ -959,7 +982,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       return null;
     }
 
-    return AppLinks.deliveryInviteByToken(token);
+    return (token: token, url: AppLinks.deliveryInviteByToken(token));
   }
 
   Future<void> _generateAndSendDeliveryInviteWhatsapp({
@@ -997,29 +1020,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     setState(() {
       _isManagingDeliveryInvite = true;
       _deliveryInviteFeedback = null;
+      _deliveryInviteUrl = null;
     });
 
     try {
-      final inviteUrl = await _createDeliveryInviteLink(invitedPhone: waDigits);
-      if (inviteUrl == null || inviteUrl.trim().isEmpty) {
+      final invite = await _createDeliveryInviteLink(invitedPhone: waDigits);
+      if (invite == null || invite.url.trim().isEmpty) {
         throw Exception('No fue posible generar un enlace valido.');
       }
 
-      final message = Uri.encodeComponent(
-        'Hola ${selection.alias}. Te asignaron una entrega de $comercioNombre.\n'
-        'Pedido: ${widget.orderId}.\n'
-        'Abre este enlace para aceptar y gestionar la entrega:\n$inviteUrl',
-      );
+      if (!mounted) return;
+      setState(() => _deliveryInviteUrl = invite.url);
 
-      final waUri = Uri.parse('https://wa.me/$waDigits?text=$message');
-      final launched = await launchUrl(
-        waUri,
-        mode: LaunchMode.externalApplication,
+      final notificationStatus = await DeliveryInviteNotificationService.send(
+        orderId: widget.orderId,
+        token: invite.token,
+        courierAlias: selection.alias,
       );
-
-      if (!launched) {
-        throw Exception('No se pudo abrir WhatsApp en este dispositivo.');
-      }
 
       if (!mounted) return;
       final refreshed = await _fetchOrder();
@@ -1027,7 +1044,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       setState(() {
         _cachedOrderData = refreshed ?? _cachedOrderData;
-        _deliveryInviteFeedback = 'Enlace enviado por WhatsApp.';
+        _deliveryInviteFeedback = switch (notificationStatus) {
+          DeliveryInviteNotificationStatus.sent =>
+            'Invitacion enviada por WhatsApp.',
+          DeliveryInviteNotificationStatus.queued =>
+            'Invitacion en la cola de WhatsApp. Puedes copiar el enlace mientras se procesa.',
+          DeliveryInviteNotificationStatus.failed =>
+            'WASender no pudo enviar el mensaje. Copia el enlace para compartirlo manualmente.',
+        };
       });
 
       if (selection.courierId != null && selection.courierId!.isNotEmpty) {
@@ -1049,6 +1073,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         setState(() => _isManagingDeliveryInvite = false);
       }
     }
+  }
+
+  Future<void> _copyDeliveryInviteUrl() async {
+    final url = (_deliveryInviteUrl ?? '').trim();
+    if (url.isEmpty) return;
+
+    await Clipboard.setData(ClipboardData(text: url));
+    if (!mounted) return;
+
+    setState(() {
+      _deliveryInviteFeedback =
+          'Enlace copiado. Ya puedes compartirlo con el repartidor.';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text('Enlace de invitacion copiado.'),
+      ),
+    );
   }
 
   Future<void> _revokeDeliveryInvite() async {
@@ -1095,6 +1138,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       setState(() {
         _cachedOrderData = refreshed ?? _cachedOrderData;
         _deliveryInviteFeedback = 'Enlace revocado.';
+        _deliveryInviteUrl = null;
       });
     } catch (error) {
       if (!mounted) return;
@@ -2917,6 +2961,47 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         ),
                                       ),
                                     ),
+                                  if ((_deliveryInviteUrl ?? '')
+                                      .isNotEmpty) ...[
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        onPressed: _copyDeliveryInviteUrl,
+                                        icon: const Icon(
+                                          Icons.copy_rounded,
+                                          size: 18,
+                                        ),
+                                        label: const Text(
+                                          'Copiar enlace de invitacion',
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: const Color(
+                                            0xFF15803D,
+                                          ),
+                                          backgroundColor: const Color(
+                                            0xFFF0FDF4,
+                                          ),
+                                          side: const BorderSide(
+                                            color: Color(0xFF86EFAC),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                            horizontal: 14,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          textStyle: GoogleFonts.manrope(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
                                   Row(
                                     children: [
                                       Expanded(
@@ -3225,7 +3310,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   data.comercioNombre,
                                                 )
                                               : null,
-                                          icon: const Icon(Icons.chat_rounded, size: 17),
+                                          icon: const Icon(
+                                            Icons.chat_rounded,
+                                            size: 17,
+                                          ),
                                           label: Text(
                                             whatsappNotificationsEnabled
                                                 ? 'Enviar WhatsApp'
@@ -3557,9 +3645,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     child: OutlinedButton.icon(
                                       onPressed: _isLoadingComprobante
                                           ? null
-                                          : () => _openComprobanteViewer(
-                                              pedido,
-                                            ),
+                                          : () =>
+                                                _openComprobanteViewer(pedido),
                                       icon: _isLoadingComprobante
                                           ? const SizedBox(
                                               width: 16,

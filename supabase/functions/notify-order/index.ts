@@ -46,7 +46,6 @@ const corsHeaders = {
 
 const FIREBASE_AUTH_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const FIREBASE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const DEFAULT_WASENDER_ENDPOINT = 'https://www.wasenderapi.com/api/send-message';
 const DEFAULT_PUBLIC_SITE_URL = 'https://elmenuxfa.com';
 const DEFAULT_APP_SITE_URL = 'https://app.elmenuxfa.com';
 
@@ -90,7 +89,6 @@ Deno.serve(async (req: Request) => {
     const firebaseClientEmail = (Deno.env.get('FIREBASE_CLIENT_EMAIL') ?? '').trim();
     const firebasePrivateKey = normalizePrivateKey(Deno.env.get('FIREBASE_PRIVATE_KEY') ?? '');
     const waSenderApiKey = (Deno.env.get('WASENDER_API_KEY') ?? '').trim();
-    const waSenderEndpoint = (Deno.env.get('WASENDER_API_ENDPOINT') ?? '').trim() || DEFAULT_WASENDER_ENDPOINT;
 
     if (!supabaseUrl || !serviceRoleKey) {
       return jsonResponse(
@@ -113,7 +111,6 @@ Deno.serve(async (req: Request) => {
       ? await maybeSendMerchantWhatsappNotification({
           supabase,
           apiKey: waSenderApiKey,
-          endpoint: waSenderEndpoint,
           record,
           customerName,
           orderId,
@@ -127,7 +124,6 @@ Deno.serve(async (req: Request) => {
       ? await maybeSendWhatsappNotification({
           supabase,
           apiKey: waSenderApiKey,
-          endpoint: waSenderEndpoint,
           record,
           customerPhone,
           customerName,
@@ -461,6 +457,11 @@ function buildWhatsappMessage(params: {
     .trim();
 }
 
+function buildWhatsappFallbackUrl(recipient: string, text: string): string {
+  const digits = recipient.replace(/\D/g, '');
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+
 function normalizePhoneToE164(phone: string): string {
   const raw = (phone ?? '').toString().trim();
   if (!raw) {
@@ -552,7 +553,6 @@ async function releaseNotificationSlot(
 async function maybeSendWhatsappNotification(params: {
   supabase: ReturnType<typeof createClient>;
   apiKey: string;
-  endpoint: string;
   record: PedidoRecord;
   customerPhone: string;
   customerName: string;
@@ -584,6 +584,7 @@ async function maybeSendWhatsappNotification(params: {
     return { ok: true, skipped: true, reason: 'whatsapp-already-sent' };
   }
 
+  let fallbackUrl = '';
   try {
     const recipient = normalizePhoneToE164(params.customerPhone);
     const trackingUrl = await ensureTrackingUrl({
@@ -600,18 +601,32 @@ async function maybeSendWhatsappNotification(params: {
       status: params.currentStatus,
       trackingUrl,
     });
+    fallbackUrl = buildWhatsappFallbackUrl(recipient, text);
 
-    return await sendWasenderText({
-      apiKey: params.apiKey,
-      endpoint: params.endpoint,
+    const queued = await enqueueWasenderMessage({
+      supabase: params.supabase,
+      source: 'order-customer',
       recipient,
       text,
+      dedupeKey: `order:${params.pedidoId}:customer:${params.eventType}:${params.currentStatus}`,
+      comercioId: params.record.comercio_id ?? null,
+      pedidoId: params.pedidoId || null,
       orderId: params.orderId,
+      eventType: params.eventType,
+      statusKey: params.currentStatus,
     });
+    return { ok: true, queued: true, queueId: queued.id, recipient };
   } catch (error) {
+    await releaseNotificationSlot(params.supabase, {
+      pedidoId: params.pedidoId,
+      channel: 'whatsapp',
+      eventType: params.eventType,
+      statusKey: params.currentStatus,
+    });
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'Unknown WhatsApp notification error.',
+      ...(fallbackUrl ? { fallbackUrl } : {}),
     };
   }
 }
@@ -650,7 +665,6 @@ function buildMerchantWhatsappMessage(params: {
 async function maybeSendMerchantWhatsappNotification(params: {
   supabase: ReturnType<typeof createClient>;
   apiKey: string;
-  endpoint: string;
   record: PedidoRecord;
   customerName: string;
   orderId: string;
@@ -688,28 +702,19 @@ async function maybeSendMerchantWhatsappNotification(params: {
       appOrderUrl,
     });
 
-    const delivered = await sendWasenderText({
-      apiKey: params.apiKey,
-      endpoint: params.endpoint,
+    const queued = await enqueueWasenderMessage({
+      supabase: params.supabase,
+      source: 'order-merchant',
       recipient,
       text,
+      dedupeKey: `order:${params.pedidoId}:merchant:${params.eventType}:merchant-new`,
+      comercioId: params.commerce.ownerId ? params.record.comercio_id ?? null : null,
+      pedidoId: params.pedidoId || null,
       orderId: params.orderId,
+      eventType: params.eventType,
+      statusKey: 'merchant-new',
     });
-
-    if (!delivered.ok) {
-      await releaseNotificationSlot(params.supabase, {
-        pedidoId: params.pedidoId,
-        channel: 'whatsapp',
-        eventType: params.eventType,
-        statusKey: 'merchant-new',
-      });
-      console.error('merchant WhatsApp delivery failed', {
-        orderId: params.orderId,
-        error: 'error' in delivered ? delivered.error : 'unknown',
-      });
-    }
-
-    return delivered;
+    return { ok: true, queued: true, queueId: queued.id, recipient };
   } catch (error) {
     await releaseNotificationSlot(params.supabase, {
       pedidoId: params.pedidoId,
@@ -724,67 +729,41 @@ async function maybeSendMerchantWhatsappNotification(params: {
   }
 }
 
-async function sendWasenderText(params: {
-  apiKey: string;
-  endpoint: string;
+async function enqueueWasenderMessage(params: {
+  supabase: ReturnType<typeof createClient>;
+  source: string;
   recipient: string;
   text: string;
+  dedupeKey: string;
+  comercioId: string | null;
+  pedidoId: string | null;
   orderId: string;
+  eventType: string;
+  statusKey: string;
 }) {
-  let lastError = 'WASender request failed.';
-
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const response = await fetch(params.endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${params.apiKey}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        to: params.recipient,
-        text: params.text,
-      }),
-    });
-
-    const rawBody = await response.text();
-    let payload: unknown = rawBody;
-
-    try {
-      payload = rawBody ? JSON.parse(rawBody) : null;
-    } catch {
-      payload = rawBody;
-    }
-
-    if (response.ok) {
-      return {
-        ok: true,
-        recipient: params.recipient,
-        response: payload,
-      };
-    }
-
-    lastError = typeof payload === 'object' && payload !== null
-      ? String((payload as Record<string, unknown>)['message'] ?? (payload as Record<string, unknown>)['error'] ?? `WASender request failed with status ${response.status}.`)
-      : String(payload ?? `WASender request failed with status ${response.status}.`);
-
-    console.error('WASender delivery failed', {
-      orderId: params.orderId,
-      status: response.status,
-      attempt,
-      recipientSuffix: params.recipient.slice(-4),
-    });
-
-    if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 422) {
-      break;
-    }
+  const { data, error } = await params.supabase.rpc('enqueue_wasender_message', {
+    p_source: params.source,
+    p_recipient: params.recipient,
+    p_message: params.text,
+    p_dedupe_key: params.dedupeKey,
+    p_comercio_id: params.comercioId,
+    p_pedido_id: params.pedidoId,
+    p_order_id: params.orderId,
+    p_dedup_event_type: params.eventType,
+    p_dedup_status_key: params.statusKey,
+  });
+  if (error) {
+    throw new Error(`Unable to queue WASender message: ${error.message}`);
   }
 
-  return {
-    ok: false,
-    recipient: params.recipient,
-    error: lastError,
-  };
+  const row = Array.isArray(data)
+    ? data[0] as Record<string, unknown> | undefined
+    : undefined;
+  const id = (row?.queue_id ?? '').toString().trim();
+  if (!id) {
+    throw new Error('WASender queue did not return a message id.');
+  }
+  return { id };
 }
 
 async function maybeSendPushNotifications(params: {

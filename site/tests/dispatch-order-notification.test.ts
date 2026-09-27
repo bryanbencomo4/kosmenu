@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 import {
+  customerWhatsappFallbackUrl,
   dispatchOrderNotification,
   extractOrderCode,
   merchantWhatsappDelivered,
@@ -21,6 +22,7 @@ describe('extractOrderCode', () => {
 
 describe('dispatchOrderNotification', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -49,6 +51,7 @@ describe('dispatchOrderNotification', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     );
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
     vi.stubGlobal('fetch', fetchMock);
 
     const record = {
@@ -73,6 +76,7 @@ describe('dispatchOrderNotification', () => {
       Authorization: 'Bearer service-role-key',
       apikey: 'service-role-key',
     });
+    expect(timeoutSpy).toHaveBeenCalledWith(20_000);
 
     const body = JSON.parse(String(init.body));
     expect(body.type).toBe('INSERT');
@@ -113,5 +117,37 @@ describe('merchantWhatsappDelivered', () => {
         body: { merchantWhatsapp: { ok: true, skipped: true, reason: 'merchant-whatsapp-missing' } },
       }),
     ).toBe(false);
+  });
+});
+
+describe('customerWhatsappFallbackUrl', () => {
+  it('returns the customer fallback only after a failed WhatsApp send', () => {
+    expect(
+      customerWhatsappFallbackUrl({
+        ok: true,
+        body: {
+          whatsapp: {
+            ok: false,
+            skipped: false,
+            fallbackUrl: 'https://wa.me/584121234567?text=Pedido',
+          },
+        },
+      }),
+    ).toBe('https://wa.me/584121234567?text=Pedido');
+  });
+
+  it('rejects skipped sends and non-WhatsApp fallback URLs', () => {
+    expect(
+      customerWhatsappFallbackUrl({
+        ok: true,
+        body: { whatsapp: { ok: true, skipped: true, fallbackUrl: 'https://wa.me/584121234567' } },
+      }),
+    ).toBeNull();
+    expect(
+      customerWhatsappFallbackUrl({
+        ok: true,
+        body: { whatsapp: { ok: false, fallbackUrl: 'https://attacker.example/584121234567' } },
+      }),
+    ).toBeNull();
   });
 });
