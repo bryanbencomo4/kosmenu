@@ -146,10 +146,20 @@ export function MenuDirectorySearch() {
         openPanel();
       }
     };
+    const openFromSearchLink = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('a[href="#buscar"]')) {
+        openPanel();
+      }
+    };
 
     openFromHash();
     window.addEventListener('hashchange', openFromHash);
-    return () => window.removeEventListener('hashchange', openFromHash);
+    document.addEventListener('click', openFromSearchLink, true);
+    return () => {
+      window.removeEventListener('hashchange', openFromHash);
+      document.removeEventListener('click', openFromSearchLink, true);
+    };
   }, [openPanel]);
 
   useEffect(() => {

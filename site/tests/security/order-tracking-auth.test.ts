@@ -134,6 +134,17 @@ describe('public order response scrubbing', () => {
     expect(receipt.total).toBe(28_000);
   });
 
+  it('allows cancellation as soon as an order is pending', () => {
+    const { row } = buildPedido();
+    row.created_at = new Date().toISOString();
+    const receipt = toPublicOrderTrackingResponse(row, 'ORD-78', {
+      nombre: 'Demo',
+      moneda: 'COP',
+    });
+
+    expect(receipt.permissions.canCancelAsCustomer).toBe(true);
+  });
+
   it('does not expose email, phone, tokens, address, coords, or payment proof', () => {
     const { token, row } = buildPedido();
     const publicOrder = toPublicOrderTrackingResponse(row, 'comercio-demo-1710000000000', {
@@ -183,6 +194,18 @@ describe('customer PATCH schema / transitions', () => {
     expect(assertCustomerStatusTransition('entregado', 'pendiente').ok).toBe(false);
     expect(assertCustomerStatusTransition('pendiente', 'cancelado').ok).toBe(true);
   });
+
+  it('requires a reason for customer cancellation but not timeout cancellation', () => {
+    expect(customerOrderActionSchema.safeParse({ action: 'cancel', source: 'cliente' }).success).toBe(false);
+    expect(
+      customerOrderActionSchema.safeParse({
+        action: 'cancel',
+        source: 'cliente',
+        reason: 'Ya no lo necesito',
+      }).success,
+    ).toBe(true);
+    expect(customerOrderActionSchema.safeParse({ action: 'cancel', source: 'timeout' }).success).toBe(true);
+  });
 });
 
 describe('GET/PATCH /api/orders/[orderId] authorization', () => {
@@ -202,20 +225,20 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
   async function loadRouteWithMock(pedidoA: ReturnType<typeof buildPedido>, pedidoB?: ReturnType<typeof buildPedido>) {
     const rows = [pedidoA.row, ...(pedidoB ? [pedidoB.row] : [])];
 
+    let updateValues: Record<string, unknown> = {};
     const updateEq = vi.fn(async () => ({
-      data: { ...pedidoA.row, estado: 'cancelado' },
+      data: { ...pedidoA.row, ...updateValues },
       error: null,
     }));
-    const updateSelect = vi.fn(() => ({ maybeSingle: updateEq, eq: updateEq, neq: () => ({ select: updateSelect, maybeSingle: updateEq }) }));
+    const updateSelect = vi.fn(() => ({ maybeSingle: updateEq, eq: vi.fn(() => updateFilter), neq: vi.fn(() => updateFilter) }));
+    const updateFilter = {
+      eq: vi.fn(() => updateFilter),
+      neq: vi.fn(() => updateFilter),
+      select: updateSelect,
+      maybeSingle: updateEq,
+    };
     const updateChain = {
-      eq: vi.fn(() => ({
-        select: updateSelect,
-        neq: vi.fn(() => ({
-          select: updateSelect,
-          maybeSingle: updateEq,
-        })),
-        maybeSingle: updateEq,
-      })),
+      eq: vi.fn(() => updateFilter),
       select: updateSelect,
     };
 
@@ -242,7 +265,10 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
       if (table === 'pedidos') {
         return {
           select: vi.fn(() => listQuery),
-          update: vi.fn(() => updateChain),
+          update: vi.fn((values: Record<string, unknown>) => {
+            updateValues = values;
+            return updateChain;
+          }),
         };
       }
 
@@ -353,16 +379,39 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
     expect(response.status).toBe(400);
   });
 
-  it('rejects client cancel before timeout window', async () => {
+  it('allows client cancel before timeout with a reason and dispatches the seller notification', async () => {
     const pedido = buildPedido();
     pedido.row.created_at = new Date().toISOString();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ merchantWhatsapp: { ok: true, queued: true } }), { status: 200 }),
+    );
     const { PATCH } = await loadRouteWithMock(pedido);
     const orderId = pedido.row.detalles.order_id as string;
     const response = await PATCH(
       new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cancel', source: 'cliente' }),
+        body: JSON.stringify({ action: 'cancel', source: 'cliente', reason: 'Ya no necesito el pedido' }),
+      }),
+      { params: Promise.resolve({ orderId }) },
+    );
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.merchantNotified).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const dispatchBody = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(dispatchBody.record.detalles.cancellation.customerReason).toBe('Ya no necesito el pedido');
+  });
+
+  it('rejects client cancellation after the merchant accepts', async () => {
+    const pedido = buildPedido({ estado: 'confirmado' });
+    const { PATCH } = await loadRouteWithMock(pedido);
+    const orderId = pedido.row.detalles.order_id as string;
+    const response = await PATCH(
+      new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', source: 'cliente', reason: 'Ya no lo necesito' }),
       }),
       { params: Promise.resolve({ orderId }) },
     );

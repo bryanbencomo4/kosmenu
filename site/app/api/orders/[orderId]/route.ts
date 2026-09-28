@@ -14,7 +14,10 @@ import {
   normalizePublicStatus,
   toPublicOrderTrackingResponse,
 } from '../../_lib/public-order';
-import { dispatchOrderNotification } from '../../_lib/dispatch-order-notification';
+import {
+  dispatchOrderNotification,
+  merchantWhatsappDelivered,
+} from '../../_lib/dispatch-order-notification';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 
@@ -427,13 +430,6 @@ export async function PATCH(request: Request, { params }: Params) {
           { status: 409 },
         );
       }
-
-      if (!pendingExpired) {
-        return NextResponse.json(
-          { error: 'El cliente solo puede cancelar cuando se agota el tiempo de confirmacion (15 min).' },
-          { status: 409 },
-        );
-      }
     }
 
     if (source === 'timeout' && !pendingExpired) {
@@ -449,6 +445,7 @@ export async function PATCH(request: Request, { params }: Params) {
       cancellation: {
         source,
         reason,
+        ...(source === 'cliente' ? { customerReason: action.reason } : {}),
         at: new Date().toISOString(),
       },
     };
@@ -460,6 +457,7 @@ export async function PATCH(request: Request, { params }: Params) {
         detalles: nextDetalles,
       })
       .eq('id', order.id)
+      .eq('estado', 'pendiente')
       .select('id,comercio_id,estado,created_at,total,costo_delivery,public_tracking_token_hash,detalles')
       .maybeSingle();
 
@@ -477,20 +475,27 @@ export async function PATCH(request: Request, { params }: Params) {
       throw new Error(attempt.error.message);
     }
 
-    const updated = (attempt.data as PedidoRow | null) ?? {
-      ...order,
-      estado: 'cancelado',
-      detalles: nextDetalles,
-    };
-    void dispatchOrderNotification({
+    const updated = attempt.data as PedidoRow | null;
+    if (!updated) {
+      return NextResponse.json(
+        { error: 'El comercio ya aceptó o actualizó el pedido. No se pudo cancelar.' },
+        { status: 409 },
+      );
+    }
+    const notificationResult = await dispatchOrderNotification({
       type: 'UPDATE',
       record: updated as Record<string, unknown>,
       old_record: { ...order, estado: currentStatus },
-    }).catch(() => undefined);
+    });
+    const merchantNotified = merchantWhatsappDelivered(notificationResult);
 
     const comercio = await loadComercio(supabase, updated.comercio_id);
     return NextResponse.json(
-      { ok: true, data: toPublicOrderTrackingResponse(updated, orderId, comercio) },
+      {
+        ok: true,
+        data: toPublicOrderTrackingResponse(updated, orderId, comercio),
+        merchantNotified,
+      },
       { status: 200 },
     );
   } catch {

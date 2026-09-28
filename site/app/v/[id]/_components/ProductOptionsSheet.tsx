@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 
 import type { CartLineSelection } from '../../../_lib/menu-product-options';
+import { KioskImage } from './kiosk/KioskImage';
 import {
   parseCategoryMenuOptions,
   parseProductMenuOptions,
@@ -12,6 +13,7 @@ import {
 
 type ProductOptionsSheetProps = {
   open: boolean;
+  canAdd: boolean;
   product: {
     id: string;
     nombre: string;
@@ -19,6 +21,7 @@ type ProductOptionsSheetProps = {
     precio?: number | null;
     opciones_menu?: unknown;
   } | null;
+  imageUrl: string | null;
   category: {
     opciones_menu?: unknown;
   } | null;
@@ -29,7 +32,9 @@ type ProductOptionsSheetProps = {
 
 export function ProductOptionsSheet({
   open,
+  canAdd,
   product,
+  imageUrl,
   category,
   formatPrice,
   onClose,
@@ -93,41 +98,60 @@ export function ProductOptionsSheet({
       : 0;
 
   const requiresSize = (options?.tamanos?.length ?? 0) > 0;
-  const canConfirm = !requiresSize || Boolean(tamanoId);
+  const canConfirm = canAdd && (!requiresSize || Boolean(tamanoId));
 
   return (
     <div
-      className="fixed inset-0 z-[130] flex items-end justify-center bg-black/35 p-4 sm:items-center"
+      className="fixed inset-0 z-[130] flex items-end justify-center bg-black/45 p-2 sm:items-center sm:p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
         }
       }}
+      style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={`Opciones de ${product.nombre}`}
-        className="flex max-h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
+        className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)] sm:max-h-[min(88vh,760px)]"
       >
-        <div className="flex items-start justify-between gap-3 px-4 py-4 sm:px-5">
-          <div className="min-w-0">
-            <h3 className="truncate text-lg font-extrabold text-[var(--menu-text)]">{product.nombre}</h3>
-            {product.descripcion?.trim() ? (
-              <p className="mt-1 text-sm leading-5 text-[var(--menu-text-muted)]">{product.descripcion.trim()}</p>
-            ) : null}
-          </div>
+        <div className="relative h-40 shrink-0 bg-[var(--menu-surface-alt)] sm:h-52">
+          {imageUrl ? (
+            <KioskImage src={imageUrl} alt={product.nombre} className="h-full w-full" />
+          ) : (
+            <div className="grid h-full place-items-center text-sm font-semibold text-[var(--menu-text-muted)]">
+              Imagen no disponible
+            </div>
+          )}
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]"
+            className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur-sm"
             aria-label="Cerrar"
           >
-            <X className="h-4 w-4" />
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6">
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="min-w-0 text-xl font-extrabold leading-tight text-[var(--menu-text)] sm:text-2xl">
+              {product.nombre}
+            </h3>
+            <span className="shrink-0 rounded-full bg-[var(--menu-surface-alt)] px-3 py-1.5 text-sm font-extrabold text-[var(--menu-text)]">
+              {formatPrice(product.precio ?? 0)}
+            </span>
+          </div>
+          {product.descripcion?.trim() ? (
+            <p className="mt-3 whitespace-pre-line break-words text-sm leading-6 text-[var(--menu-text-muted)] sm:text-[15px]">
+              {product.descripcion.trim()}
+            </p>
+          ) : (
+            <p className="mt-3 text-sm text-[var(--menu-text-muted)]">Sin descripción adicional.</p>
+          )}
+
+          <div className="mt-6 space-y-5">
           {options?.tamanos?.length ? (
             <section>
               <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Tamaño</p>
@@ -240,9 +264,10 @@ export function ProductOptionsSheet({
               </button>
             </div>
           </section>
+          </div>
         </div>
 
-        <div className="px-4 py-4 sm:px-5">
+        <div className="shrink-0 border-t border-[var(--menu-border)] bg-[var(--menu-surface)] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pb-4">
           <button
             type="button"
             disabled={!canConfirm}

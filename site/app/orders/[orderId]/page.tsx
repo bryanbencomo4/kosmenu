@@ -458,7 +458,7 @@ function OrderTrackingPageInner() {
     setTokenRecoveryChecked(true);
   }, [orderId, pathname, router, trackingToken]);
 
-  async function cancelOrder(source: 'cliente' | 'timeout') {
+  async function cancelOrder(source: 'cliente' | 'timeout', reason?: string) {
     if (!orderId || !trackingToken || cancelLoading) return;
 
     setCancelLoading(true);
@@ -473,6 +473,7 @@ function OrderTrackingPageInner() {
         body: JSON.stringify({
           action: 'cancel',
           source,
+          ...(source === 'cliente' ? { reason } : {}),
         }),
       });
 
@@ -494,7 +495,9 @@ function OrderTrackingPageInner() {
       setCancelMessage(
         source === 'timeout'
           ? 'El pedido fue cancelado por falta de confirmacion en 15 minutos.'
-          : 'Tu pedido fue cancelado correctamente.',
+          : payload?.merchantNotified === false
+            ? 'El pedido quedó cancelado, pero no pudimos confirmar el aviso por WhatsApp. Comunícate directamente con el comercio.'
+            : 'Tu pedido fue cancelado y avisamos al comercio por WhatsApp.',
       );
     } catch (cancelError) {
       const message = cancelError instanceof Error ? cancelError.message : 'No se pudo cancelar el pedido.';
@@ -886,7 +889,7 @@ function OrderTrackingPageInner() {
     : 0;
   const confirmTimeLeftMs = Math.max(0, CONFIRMATION_TIMEOUT_MS - pendingElapsedMs);
   const pendingExpired = displayStatus === 'pendiente' && hasCreatedAt && pendingElapsedMs >= CONFIRMATION_TIMEOUT_MS;
-  const canCustomerCancel = displayStatus === 'pendiente' && pendingExpired;
+  const canCustomerCancel = displayStatus === 'pendiente';
   const canCustomerConfirmDelegatedDelivery =
     isDelivery &&
     deliveryDelegateStatus === 'arrived' &&
@@ -1089,13 +1092,7 @@ function OrderTrackingPageInner() {
       canCustomerCancel={canCustomerCancel}
       cancelLoading={cancelLoading}
       cancelMessage={displayStatus === 'cancelado' ? '' : cancelMessage}
-      onCancelOrder={() => {
-        if (typeof window !== 'undefined') {
-          const accepted = window.confirm('Vas a cancelar este pedido. Esta acción no se puede deshacer.');
-          if (!accepted) return;
-        }
-        void cancelOrder('cliente');
-      }}
+      onCancelOrder={(reason) => void cancelOrder('cliente', reason)}
       showPendingCancelHint={displayStatus === 'pendiente' && !pendingExpired}
       whatsappNotificationsEnabled={whatsappNotificationsEnabled}
       whatsappPreferenceSaving={whatsappPreferenceSaving}

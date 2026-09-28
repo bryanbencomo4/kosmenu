@@ -3,7 +3,7 @@
 import { Manrope } from 'next/font/google';
 import Link from 'next/link';
 import { ArrowLeft, Check, CheckCircle2, MapPin, RotateCcw, Truck, Utensils } from 'lucide-react';
-import type { CSSProperties, ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 
 const headingFont = Manrope({
   subsets: ['latin'],
@@ -66,7 +66,7 @@ type OrderReceiptProps = {
   canCustomerCancel: boolean;
   cancelLoading: boolean;
   cancelMessage: string;
-  onCancelOrder: () => void;
+  onCancelOrder: (reason: string) => void;
   showPendingCancelHint: boolean;
   whatsappNotificationsEnabled: boolean;
   whatsappPreferenceSaving: boolean;
@@ -191,6 +191,9 @@ function Section({
 }
 
 export function OrderReceipt(props: OrderReceiptProps) {
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+
   const copy = STATUS_COPY[props.status];
   const isCancelled = props.status === 'cancelado';
   const isDelivered = props.status === 'entregado';
@@ -537,16 +540,75 @@ export function OrderReceipt(props: OrderReceiptProps) {
           <button
             type="button"
             disabled={props.cancelLoading}
-            onClick={props.onCancelOrder}
+            onClick={() => {
+              setCancelReason('');
+              setCancelDialogOpen(true);
+            }}
             className="mt-3 inline-flex min-h-12 w-full items-center justify-center rounded-[16px] bg-rose-50 text-sm font-bold text-rose-800"
             style={{ opacity: props.cancelLoading ? 0.7 : 1 }}
           >
             {props.cancelLoading ? 'Cancelando pedido...' : 'Cancelar pedido'}
           </button>
         ) : null}
+        {cancelDialogOpen && props.canCustomerCancel ? (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4">
+            <form
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="cancel-order-title"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const reason = cancelReason.trim();
+                if (reason.length < 3 || props.cancelLoading) return;
+                props.onCancelOrder(reason);
+                setCancelDialogOpen(false);
+                setCancelReason('');
+              }}
+              className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
+            >
+              <h2 id="cancel-order-title" className="text-lg font-extrabold text-slate-900">
+                ¿Por qué cancelas el pedido?
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                El comercio recibirá el motivo por WhatsApp. Solo puedes cancelar antes de que acepte.
+              </p>
+              <label htmlFor="cancel-order-reason" className="mt-4 block text-sm font-bold text-slate-800">
+                Motivo de cancelación
+              </label>
+              <textarea
+                id="cancel-order-reason"
+                required
+                minLength={3}
+                maxLength={500}
+                rows={4}
+                value={cancelReason}
+                onChange={(event) => setCancelReason(event.target.value)}
+                placeholder="Escribe el motivo"
+                className="mt-2 w-full resize-y rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-600/20"
+              />
+              <div className="mt-4 flex gap-3">
+                <button
+                  type="button"
+                  disabled={props.cancelLoading}
+                  onClick={() => setCancelDialogOpen(false)}
+                  className="min-h-11 flex-1 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-700 disabled:opacity-60"
+                >
+                  Seguir con el pedido
+                </button>
+                <button
+                  type="submit"
+                  disabled={props.cancelLoading || cancelReason.trim().length < 3}
+                  className="min-h-11 flex-1 rounded-xl bg-rose-700 px-4 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  {props.cancelLoading ? 'Cancelando...' : 'Confirmar cancelación'}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
         {props.showPendingCancelHint ? (
           <p className="mt-3 text-center text-xs leading-5 text-slate-500">
-            Este pedido se cancela solo si el comercio no confirma en 15 minutos.
+            Puedes cancelarlo mientras el comercio no lo haya aceptado. Si no confirma en 15 minutos, se cancela automáticamente.
           </p>
         ) : null}
         {props.cancelMessage ? <p className="mt-2 text-center text-sm text-slate-600">{props.cancelMessage}</p> : null}

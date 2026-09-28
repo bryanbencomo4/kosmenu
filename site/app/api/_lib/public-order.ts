@@ -203,11 +203,6 @@ export function toPublicOrderTrackingResponse(
 
   const status = normalizePublicStatus(order.estado);
   const createdAt = (order.created_at ?? new Date().toISOString()).toString();
-  const createdAtMs = Date.parse(createdAt);
-  const pendingExpired =
-    status === 'pendiente' &&
-    Number.isFinite(createdAtMs) &&
-    Date.now() - createdAtMs >= CONFIRMATION_TIMEOUT_MS;
 
   const customerCanConfirm =
     CONFIRM_RECEIVED_ALLOWED_STATUSES.has(status) && delegateStatus === 'arrived';
@@ -235,7 +230,7 @@ export function toPublicOrderTrackingResponse(
     },
     notifications: { whatsappEnabled },
     permissions: {
-      canCancelAsCustomer: pendingExpired && status === 'pendiente',
+      canCancelAsCustomer: status === 'pendiente',
       canConfirmReceived: customerCanConfirm,
     },
     comercio: {

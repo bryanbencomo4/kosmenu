@@ -1,7 +1,7 @@
 'use client';
 
 import { Caveat, Manrope } from 'next/font/google';
-import { ArrowLeft, Search, ShoppingBag, X } from 'lucide-react';
+import { ArrowLeft, Plus, Search, ShoppingBag, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
@@ -315,14 +315,17 @@ export function KioskMenuExperience({
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {visibleProducts.map((product, index) => (
-              <article
+              <button
                 key={product.id}
-                className="kiosk-card flex overflow-hidden rounded-[22px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]"
+                type="button"
+                aria-label={`Ver detalles de ${product.name}`}
+                onClick={() => onAddProduct(product.id)}
+                className="kiosk-card flex w-full overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--menu-primary)]"
                 style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
               >
                 <div className="h-32 w-32 shrink-0 bg-[var(--menu-surface-alt)] sm:h-36 sm:w-36">
                   {product.imageUrl ? (
-                    <KioskImage src={product.imageUrl} alt="" className="h-full w-full" />
+                    <KioskImage src={product.imageUrl} alt={product.name} className="h-full w-full" />
                   ) : (
                     <div className="grid h-full place-items-center text-3xl">{activeCategory?.glyph || '🍽️'}</div>
                   )}
@@ -338,20 +341,22 @@ export function KioskMenuExperience({
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-2">
                     <p className="text-sm font-bold text-[var(--menu-text)]">{product.priceLabel}</p>
-                    {browseOnly ? null : (
-                    <button
-                      type="button"
-                      disabled={!product.available}
-                      onClick={() => onAddProduct(product.id)}
-                      className="rounded-[14px] px-3.5 py-2 text-xs font-bold transition duration-200 hover:-translate-y-0.5 disabled:opacity-40 disabled:hover:translate-y-0"
-                      style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
-                    >
-                      Agregar
-                    </button>
-                    )}
+                    {!browseOnly ? (
+                      <span
+                        className="inline-flex min-h-10 items-center gap-1.5 rounded-[14px] px-3.5 py-2 text-xs font-bold"
+                        style={{
+                          backgroundColor: 'var(--menu-primary)',
+                          color: 'var(--menu-on-primary)',
+                          opacity: product.available ? 1 : 0.55,
+                        }}
+                      >
+                        <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+                        {product.available ? 'Agregar' : 'No disponible'}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
-              </article>
+              </button>
             ))}
           </div>
         )}

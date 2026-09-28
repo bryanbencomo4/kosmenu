@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
+import { Search } from 'lucide-react';
 
 import { MerchantAuthControls, MerchantMobileSignupLink } from './merchant/MerchantAuthControls';
 
@@ -17,6 +18,8 @@ const navLinks = [
   { label: 'Demo', href: '#demo' },
   { label: 'Buscar menú', href: '#buscar' },
 ] as const;
+
+const mobileNavLinks = [navLinks[0], navLinks[5], ...navLinks.slice(1, 5)];
 
 export function Navbar({ supportHref, loginHref, signupHref }: NavbarProps) {
   return (
@@ -66,12 +69,17 @@ export function Navbar({ supportHref, loginHref, signupHref }: NavbarProps) {
         </div>
 
         <nav className="hide-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
-          {navLinks.map((item) => (
+          {mobileNavLinks.map((item) => (
             <Link
               key={item.label}
               href={item.href}
-              className="whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-3 py-2 text-[13px] font-medium text-slate-300 transition-all duration-300 hover:border-violet-400/40 hover:text-white"
+              className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-2 text-[13px] transition-all duration-300 ${
+                item.label === 'Buscar menú'
+                  ? 'border-[#FACC15]/70 bg-[#FACC15] font-bold text-[#111827] shadow-[0_6px_18px_rgba(250,204,21,0.2)]'
+                  : 'border-white/10 bg-white/5 font-medium text-slate-300 hover:border-white/20 hover:text-white'
+              }`}
             >
+              {item.label === 'Buscar menú' ? <Search className="h-3.5 w-3.5" /> : null}
               {item.label}
             </Link>
           ))}

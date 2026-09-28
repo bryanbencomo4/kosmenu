@@ -8,6 +8,7 @@ export const customerOrderActionSchema = z
       .object({
         action: z.literal('cancel'),
         source: z.enum(['cliente', 'timeout']),
+        reason: z.string().trim().max(500).optional(),
       })
       .strict(),
     z
@@ -21,7 +22,16 @@ export const customerOrderActionSchema = z
         action: z.literal('confirm_received'),
       })
       .strict(),
-  ]);
+  ])
+  .superRefine((value, context) => {
+    if (value.action === 'cancel' && value.source === 'cliente' && (value.reason ?? '').length < 3) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['reason'],
+        message: 'Especifica el motivo de la cancelación.',
+      });
+    }
+  });
 
 export type CustomerOrderAction = z.infer<typeof customerOrderActionSchema>;
 

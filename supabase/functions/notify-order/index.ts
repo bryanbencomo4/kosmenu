@@ -2,6 +2,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { importPKCS8, SignJWT } from 'https://esm.sh/jose@5.9.6';
+import { resolveMerchantOrderTotalLabel } from '../_shared/merchant-order-total.ts';
 
 type WebhookPayload = {
   type?: string;
@@ -37,6 +38,7 @@ type CommerceInfo = {
   name: string;
   slug: string;
   whatsapp: string;
+  currency: string;
 };
 
 const corsHeaders = {
@@ -76,6 +78,10 @@ Deno.serve(async (req: Request) => {
     const currentStatus = normalizeOrderStatus(record.estado);
     const previousStatus = normalizeOrderStatus(oldRecord.estado);
     const statusChanged = eventType === 'UPDATE' && currentStatus !== previousStatus;
+    const customerCancelled =
+      statusChanged &&
+      currentStatus === 'cancelado' &&
+      resolveCancellationSource(record) === 'cliente';
     const customerPhone = resolveCustomerPhone(record);
     const customerName = resolveCustomerName(record);
 
@@ -105,9 +111,9 @@ Deno.serve(async (req: Request) => {
     const pedidoId = (record.id ?? '').toString().trim();
     const shouldSendPush = eventType === 'INSERT';
     const shouldSendWhatsapp = eventType === 'INSERT' || statusChanged;
-    const shouldSendMerchantWhatsapp = eventType === 'INSERT';
+    const shouldSendMerchantWhatsapp = eventType === 'INSERT' || customerCancelled;
 
-    const merchantWhatsappResult = shouldSendMerchantWhatsapp
+    const merchantWhatsappResult = eventType === 'INSERT'
       ? await maybeSendMerchantWhatsappNotification({
           supabase,
           apiKey: waSenderApiKey,
@@ -118,7 +124,17 @@ Deno.serve(async (req: Request) => {
           pedidoId,
           eventType,
         })
-      : { ok: true, skipped: true, reason: 'not-new-order' };
+      : customerCancelled
+      ? await maybeSendMerchantCancellationNotification({
+          supabase,
+          apiKey: waSenderApiKey,
+          record,
+          orderId,
+          commerce,
+          pedidoId,
+          eventType,
+        })
+      : { ok: true, skipped: true, reason: 'not-new-order-or-customer-cancellation' };
 
     const whatsappResult = shouldSendWhatsapp
       ? await maybeSendWhatsappNotification({
@@ -189,6 +205,22 @@ function extractOldRecord(payload: WebhookPayload | PedidoRecord): PedidoRecord 
   }
 
   return {};
+}
+
+function resolveCancellationSource(record: PedidoRecord): string {
+  const cancellation = record.detalles?.['cancellation'];
+  if (!cancellation || typeof cancellation !== 'object') return '';
+  return ((cancellation as Record<string, unknown>)['source'] ?? '').toString().trim();
+}
+
+function resolveCustomerCancellationReason(record: PedidoRecord): string {
+  const cancellation = record.detalles?.['cancellation'];
+  if (!cancellation || typeof cancellation !== 'object') return '';
+  return ((cancellation as Record<string, unknown>)['customerReason'] ?? '')
+    .toString()
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 500);
 }
 
 function asPedidoRecord(value: unknown): PedidoRecord {
@@ -631,16 +663,15 @@ async function maybeSendWhatsappNotification(params: {
   }
 }
 
-function resolveMerchantTotalLabel(record: PedidoRecord): string {
+function resolveMerchantTotalLabel(record: PedidoRecord, commerceCurrency: string): string {
   const detalles = record.detalles ?? {};
-  const currency = (detalles['moneda_checkout'] ?? '').toString().trim().toUpperCase();
-  const totalRaw = detalles['total_moneda_checkout'] ?? detalles['total'];
-  const total = typeof totalRaw === 'number' ? totalRaw : Number(totalRaw);
-  if (!Number.isFinite(total)) {
-    return '—';
-  }
-  const symbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency || '';
-  return `${symbol} ${total.toFixed(2)}`.trim();
+  return resolveMerchantOrderTotalLabel({
+    baseTotal: detalles['total'],
+    checkoutTotal: detalles['total_moneda_checkout'],
+    baseCurrency: detalles['moneda_base'] ?? commerceCurrency,
+    checkoutCurrency: detalles['moneda_checkout'],
+    exchangeRate: detalles['tasa_cambio_snapshot'],
+  });
 }
 
 function buildMerchantWhatsappMessage(params: {
@@ -698,7 +729,7 @@ async function maybeSendMerchantWhatsappNotification(params: {
       businessName: params.commerce.name || 'Tu comercio',
       orderId: params.orderId,
       customerName: params.customerName,
-      totalLabel: resolveMerchantTotalLabel(params.record),
+      totalLabel: resolveMerchantTotalLabel(params.record, params.commerce.currency),
       appOrderUrl,
     });
 
@@ -725,6 +756,76 @@ async function maybeSendMerchantWhatsappNotification(params: {
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'Unknown merchant WhatsApp notification error.',
+    };
+  }
+}
+
+async function maybeSendMerchantCancellationNotification(params: {
+  supabase: ReturnType<typeof createClient>;
+  apiKey: string;
+  record: PedidoRecord;
+  orderId: string;
+  commerce: CommerceInfo;
+  pedidoId: string;
+  eventType: string;
+}) {
+  if (!params.apiKey) {
+    return { ok: true, skipped: true, reason: 'wasender-key-missing' };
+  }
+
+  const merchantPhone = (params.commerce.whatsapp ?? '').trim();
+  if (!merchantPhone) {
+    return { ok: true, skipped: true, reason: 'merchant-whatsapp-missing' };
+  }
+
+  const statusKey = 'customer-cancelled';
+  const claimed = await claimNotificationSlot(params.supabase, {
+    pedidoId: params.pedidoId,
+    channel: 'whatsapp',
+    eventType: params.eventType,
+    statusKey,
+  });
+  if (!claimed) {
+    return { ok: true, skipped: true, reason: 'merchant-cancellation-whatsapp-already-sent' };
+  }
+
+  try {
+    const recipient = normalizePhoneToE164(merchantPhone);
+    const appOrderUrl = `${getAppSiteUrl()}/orders/view/${encodeURIComponent(params.orderId)}`;
+    const reason = resolveCustomerCancellationReason(params.record) || 'No especificado';
+    const text = [
+      '⛔ *Pedido cancelado por el cliente*',
+      params.orderId ? `#${params.orderId}` : '',
+      `Motivo: ${reason}`,
+      '',
+      '*No continúes con la preparación. El pedido ya está cancelado en el sistema.*',
+      '',
+      appOrderUrl,
+    ].filter(Boolean).join('\n');
+
+    const queued = await enqueueWasenderMessage({
+      supabase: params.supabase,
+      source: 'order-merchant-cancel',
+      recipient,
+      text,
+      dedupeKey: `order:${params.pedidoId}:merchant:${params.eventType}:${statusKey}`,
+      comercioId: params.record.comercio_id ?? null,
+      pedidoId: params.pedidoId || null,
+      orderId: params.orderId,
+      eventType: params.eventType,
+      statusKey,
+    });
+    return { ok: true, queued: true, queueId: queued.id, recipient };
+  } catch (error) {
+    await releaseNotificationSlot(params.supabase, {
+      pedidoId: params.pedidoId,
+      channel: 'whatsapp',
+      eventType: params.eventType,
+      statusKey,
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unknown merchant cancellation WhatsApp error.',
     };
   }
 }
@@ -862,7 +963,7 @@ async function loadCommerceInfo(
 ): Promise<CommerceInfo> {
   const { data, error } = await supabase
     .from('comercios')
-    .select('owner_id,nombre,slug,whatsapp')
+    .select('owner_id,nombre,slug,whatsapp,moneda')
     .eq('id', comercioId)
     .limit(1)
     .maybeSingle();
@@ -876,6 +977,7 @@ async function loadCommerceInfo(
     name: data?.nombre?.toString().trim() ?? 'elmenuxfa.com',
     slug: data?.slug?.toString().trim() ?? '',
     whatsapp: data?.whatsapp?.toString().trim() ?? '',
+    currency: data?.moneda?.toString().trim().toUpperCase() || 'COP',
   };
 }
 

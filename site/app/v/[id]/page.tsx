@@ -2957,10 +2957,6 @@ export default function PublicMenuPage() {
   }, [scheduleClosed, commerceIdentifier]);
 
   function handleKioskAddProduct(productId: string) {
-    if (scheduleClosed) {
-      window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
-      return;
-    }
     setProductOptionsSheet({ open: true, productId });
   }
 
@@ -4810,9 +4806,21 @@ export default function PublicMenuPage() {
 
         <ProductOptionsSheet
           open={productOptionsSheet.open && !kioskVoucher}
+          canAdd={
+            !scheduleClosed &&
+            productById.get(productOptionsSheet.productId ?? '')?.disponible !== false
+          }
           product={
             productOptionsSheet.productId
               ? productById.get(productOptionsSheet.productId) ?? null
+              : null
+          }
+          imageUrl={
+            productOptionsSheet.productId
+              ? displayProductImage(
+                  productById.get(productOptionsSheet.productId)?.imagen_url,
+                  comercioLogoUrl,
+                )
               : null
           }
           category={

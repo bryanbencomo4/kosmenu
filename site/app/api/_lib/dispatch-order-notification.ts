@@ -106,7 +106,10 @@ export function merchantWhatsappDelivered(result: DispatchOrderNotificationResul
   const merchant = (body as { merchantWhatsapp?: { ok?: boolean; skipped?: boolean; reason?: string } }).merchantWhatsapp;
   if (!merchant) return false;
   if (merchant.ok === true && merchant.skipped !== true) return true;
-  return merchant.reason === 'merchant-whatsapp-already-sent';
+  return (
+    merchant.reason === 'merchant-whatsapp-already-sent' ||
+    merchant.reason === 'merchant-cancellation-whatsapp-already-sent'
+  );
 }
 
 export function customerWhatsappFallbackUrl(result: DispatchOrderNotificationResult): string | null {
