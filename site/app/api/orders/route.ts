@@ -24,6 +24,10 @@ import { evaluateBusinessOrdering } from '../_lib/business-hours';
 import { merchantPanelOrderHref } from '../../_lib/public-site-config';
 import { convertOrderAmount, normalizeOrderCurrency } from '../_lib/order-currency';
 import {
+  createCustomerRatingKey,
+  loadOrderServiceRatingSummary,
+} from '../_lib/order-service-rating';
+import {
   isTransientSupabaseFailure,
   supabaseWriteCircuit,
 } from '../_lib/supabase-circuit';
@@ -414,6 +418,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
 
+    const customerRatingSummary = await loadOrderServiceRatingSummary(
+      supabase,
+      resolvedComercioId,
+      await createCustomerRatingKey(clientWhatsapp),
+    );
+
     const ordering = evaluateBusinessOrdering({
       enLinea: comercioRow?.en_linea,
       horarios: comercioRow?.horarios,
@@ -474,6 +484,7 @@ export async function POST(request: Request) {
       items,
       total,
       total_moneda_checkout: totalCheckout,
+      customer_rating_summary: customerRatingSummary.customer,
     };
 
     const payload = {

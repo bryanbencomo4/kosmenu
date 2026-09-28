@@ -145,6 +145,39 @@ describe('public order response scrubbing', () => {
     expect(receipt.permissions.canCancelAsCustomer).toBe(true);
   });
 
+  it('allows rating only for terminal orders without a previous customer rating', () => {
+    const { row } = buildPedido({ estado: 'entregado' });
+    const commerce = { nombre: 'Demo', moneda: 'COP' };
+    expect(toPublicOrderTrackingResponse(row, 'ORD-78', commerce).permissions.canRateService).toBe(true);
+
+    const rated = {
+      ...row,
+      detalles: { ...row.detalles, customer_service_rating: 4 },
+    };
+    const ratedReceipt = toPublicOrderTrackingResponse(rated, 'ORD-78', commerce);
+    expect(ratedReceipt.permissions.canRateService).toBe(false);
+    expect(ratedReceipt.serviceRating.customer).toBe(4);
+
+    const pending = { ...row, estado: 'pendiente' };
+    expect(toPublicOrderTrackingResponse(pending, 'ORD-78', commerce).permissions.canRateService).toBe(false);
+  });
+
+  it('treats a completed courier delegation as delivered for customer tracking', () => {
+    const { row } = buildPedido({ estado: 'en_camino' });
+    row.detalles = {
+      ...row.detalles,
+      delivery_delegate: { status: 'completed' },
+      delivery: { mode: 'delivery' },
+    };
+    const receipt = toPublicOrderTrackingResponse(row, 'ORD-78', {
+      nombre: 'Demo',
+      moneda: 'COP',
+    });
+
+    expect(receipt.status).toBe('entregado');
+    expect(receipt.permissions.canRateService).toBe(true);
+  });
+
   it('does not expose email, phone, tokens, address, coords, or payment proof', () => {
     const { token, row } = buildPedido();
     const publicOrder = toPublicOrderTrackingResponse(row, 'comercio-demo-1710000000000', {
@@ -205,6 +238,12 @@ describe('customer PATCH schema / transitions', () => {
       }).success,
     ).toBe(true);
     expect(customerOrderActionSchema.safeParse({ action: 'cancel', source: 'timeout' }).success).toBe(true);
+  });
+
+  it('accepts only integer customer service ratings from one to five', () => {
+    expect(customerOrderActionSchema.safeParse({ action: 'submit_rating', rating: 5 }).success).toBe(true);
+    expect(customerOrderActionSchema.safeParse({ action: 'submit_rating', rating: 0 }).success).toBe(false);
+    expect(customerOrderActionSchema.safeParse({ action: 'submit_rating', rating: 5.5 }).success).toBe(false);
   });
 });
 
@@ -416,6 +455,63 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
       { params: Promise.resolve({ orderId }) },
     );
     expect(response.status).toBe(409);
+  });
+
+  it('rejects customer ratings before a terminal order state', async () => {
+    const pedido = buildPedido({ estado: 'preparando' });
+    const { PATCH } = await loadRouteWithMock(pedido);
+    const orderId = pedido.row.detalles.order_id as string;
+    const response = await PATCH(
+      new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submit_rating', rating: 5 }),
+      }),
+      { params: Promise.resolve({ orderId }) },
+    );
+    expect(response.status).toBe(409);
+  });
+
+  it('accepts a customer rating after delivery and returns the saved score', async () => {
+    const pedido = buildPedido({ estado: 'entregado' });
+    const { PATCH } = await loadRouteWithMock(pedido);
+    const orderId = pedido.row.detalles.order_id as string;
+    const response = await PATCH(
+      new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submit_rating', rating: 5 }),
+      }),
+      { params: Promise.resolve({ orderId }) },
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.rating).toBe(5);
+    expect(payload.data.serviceRating.customer).toBe(5);
+    expect(payload.data.permissions.canRateService).toBe(false);
+  });
+
+  it('accepts a customer rating when the delivery delegate has completed', async () => {
+    const pedido = buildPedido({ estado: 'en_camino' });
+    pedido.row.detalles = {
+      ...pedido.row.detalles,
+      delivery_delegate: { status: 'completed' },
+      delivery: { mode: 'delivery' },
+    };
+    const { PATCH } = await loadRouteWithMock(pedido);
+    const orderId = pedido.row.detalles.order_id as string;
+    const response = await PATCH(
+      new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submit_rating', rating: 4 }),
+      }),
+      { params: Promise.resolve({ orderId }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.serviceRating.customer).toBe(4);
   });
 });
 

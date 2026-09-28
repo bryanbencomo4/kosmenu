@@ -6,6 +6,7 @@ import {
   toPublicComercioDto,
   toPublicMetodosPagoDto,
 } from '../../_lib/public-menu-dto';
+import { loadOrderServiceRatingSummary } from '../../_lib/order-service-rating';
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
 import {
   CircuitOpenError,
@@ -287,6 +288,7 @@ async function loadPublicMenuByIdentifierUncached(
     upsellSettingsResult,
     upsellRulesResult,
     bundlesResult,
+    ratingSummary,
   ] = await Promise.all([
     supabase
       .from('categorias')
@@ -318,6 +320,7 @@ async function loadPublicMenuByIdentifierUncached(
       .select('*, bundle_items(*)')
       .eq('comercio_id', resolvedComercioId)
       .eq('enabled', true),
+    loadOrderServiceRatingSummary(supabase, resolvedComercioId),
   ]);
 
   if (categoriasResult.error) {
@@ -342,7 +345,11 @@ async function loadPublicMenuByIdentifierUncached(
     ownerId,
     isOnline,
     comercioRow,
-    comercio,
+    comercio: {
+      ...comercio,
+      rating_average: ratingSummary.comercio.average,
+      rating_count: ratingSummary.comercio.count,
+    },
     categorias: categoriasResult.data ?? [],
     productos,
     metodosPago: toPublicMetodosPagoDto(metodosPagoResult.data ?? []),

@@ -1,7 +1,7 @@
 'use client';
 
 import { Caveat, Manrope } from 'next/font/google';
-import { ArrowLeft, Plus, Search, ShoppingBag, X } from 'lucide-react';
+import { ArrowLeft, Plus, Search, ShoppingBag, Star, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
@@ -32,6 +32,8 @@ const titleFont = Manrope({
 type KioskMenuExperienceProps = {
   businessName: string;
   logoUrl: string | null;
+  ratingAverage: number;
+  ratingCount: number;
   initialLetter: string;
   locationLabel: string | null;
   socialLinks?: Array<{ network: string; href: string }>;
@@ -69,6 +71,8 @@ type KioskMenuExperienceProps = {
 export function KioskMenuExperience({
   businessName,
   logoUrl,
+  ratingAverage,
+  ratingCount,
   initialLetter,
   locationLabel,
   socialLinks,
@@ -222,6 +226,16 @@ export function KioskMenuExperience({
             <h2 className={`${titleFont.className} truncate text-lg font-extrabold tracking-[-0.03em] text-[var(--menu-text)]`}>
               {screen === 'products' ? activeCategory?.name || 'Productos' : 'Categorías'}
             </h2>
+            <p className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-[var(--menu-text-muted)]" aria-label={
+              ratingCount > 0
+                ? `Calificación ${ratingAverage.toFixed(1)} de 5, ${ratingCount} calificaciones`
+                : 'Este comercio aún no tiene calificaciones'
+            }>
+              <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+              {ratingCount > 0
+                ? <><span className="text-[var(--menu-text)]">{ratingAverage.toFixed(1)}</span><span aria-hidden="true">·</span>{ratingCount} {ratingCount === 1 ? 'calificación' : 'calificaciones'}</>
+                : 'Aún sin calificaciones'}
+            </p>
           </div>
           {logoUrl ? (
             <KioskImage

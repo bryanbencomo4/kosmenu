@@ -2,7 +2,7 @@
 
 import { Manrope } from 'next/font/google';
 import Link from 'next/link';
-import { ArrowLeft, Check, CheckCircle2, MapPin, RotateCcw, Truck, Utensils } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, MapPin, RotateCcw, Star, Truck, Utensils } from 'lucide-react';
 import { useState, type CSSProperties, type ReactNode } from 'react';
 
 const headingFont = Manrope({
@@ -68,6 +68,11 @@ type OrderReceiptProps = {
   cancelMessage: string;
   onCancelOrder: (reason: string) => void;
   showPendingCancelHint: boolean;
+  canCustomerRateService: boolean;
+  customerServiceRating: number | null;
+  serviceRatingLoading: boolean;
+  serviceRatingMessage: string;
+  onRateService: (rating: number) => void;
   whatsappNotificationsEnabled: boolean;
   whatsappPreferenceSaving: boolean;
   notificationMessage: string;
@@ -193,6 +198,7 @@ function Section({
 export function OrderReceipt(props: OrderReceiptProps) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [selectedServiceRating, setSelectedServiceRating] = useState(0);
 
   const copy = STATUS_COPY[props.status];
   const isCancelled = props.status === 'cancelado';
@@ -367,6 +373,79 @@ export function OrderReceipt(props: OrderReceiptProps) {
             <p className="mt-2 pl-6 text-sm font-medium text-slate-700">{props.pickupAddress}</p>
           ) : null}
         </section>
+
+        {props.canCustomerRateService || props.customerServiceRating !== null ? (
+          <section className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50 p-4 sm:p-5">
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-amber-600 shadow-sm">
+                <Star className="h-5 w-5 fill-amber-400" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className={`${headingFont.className} text-base font-extrabold text-slate-900`}>
+                  {props.customerServiceRating !== null ? 'Gracias por calificar' : '¿Cómo fue el servicio?'}
+                </h2>
+                <p className="mt-1 text-sm leading-5 text-slate-600">
+                  {props.customerServiceRating !== null
+                    ? 'Tu opinión ayuda a mejorar la experiencia.'
+                    : isCancelled
+                      ? 'Califica la atención recibida en este pedido.'
+                      : 'Califica tu experiencia con el comercio.'}
+                </p>
+              </div>
+            </div>
+            {props.customerServiceRating !== null ? (
+              <div className="mt-3 flex items-center gap-1" aria-label={`Tu calificación: ${props.customerServiceRating} de 5 estrellas`}>
+                {Array.from({ length: 5 }, (_, index) => (
+                  <Star
+                    key={index}
+                    className={`h-6 w-6 ${index < props.customerServiceRating! ? 'fill-amber-400 text-amber-500' : 'text-amber-200'}`}
+                  />
+                ))}
+                <span className="ml-2 text-sm font-bold text-slate-700">
+                  {props.customerServiceRating} de 5
+                </span>
+              </div>
+            ) : (
+              <>
+                <div className="mt-3 flex items-center gap-1" role="group" aria-label="Selecciona de 1 a 5 estrellas">
+                  {Array.from({ length: 5 }, (_, index) => {
+                    const value = index + 1;
+                    const active = value <= selectedServiceRating;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        disabled={props.serviceRatingLoading}
+                        aria-label={`${value} ${value === 1 ? 'estrella' : 'estrellas'}`}
+                        aria-pressed={selectedServiceRating === value}
+                        onClick={() => setSelectedServiceRating(value)}
+                        className="grid h-11 w-11 place-items-center rounded-full transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-500 disabled:opacity-50"
+                      >
+                        <Star className={`h-7 w-7 ${active ? 'fill-amber-400 text-amber-500' : 'text-amber-300'}`} />
+                      </button>
+                    );
+                  })}
+                  <span className="ml-2 text-sm font-semibold text-slate-600">
+                    {selectedServiceRating ? `${selectedServiceRating}/5` : 'Elige una calificación'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={selectedServiceRating === 0 || props.serviceRatingLoading}
+                  onClick={() => props.onRateService(selectedServiceRating)}
+                  className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {props.serviceRatingLoading ? 'Guardando…' : 'Enviar calificación'}
+                </button>
+              </>
+            )}
+            {props.serviceRatingMessage ? (
+              <p className="mt-2 text-sm font-semibold text-slate-700" role="status">
+                {props.serviceRatingMessage}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
 
         <Section title="Tu pedido" surface={props.colors.surface}>
           <ul className="space-y-2.5">

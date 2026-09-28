@@ -45,6 +45,10 @@ export type PublicOrderTrackingResponse = {
   permissions: {
     canCancelAsCustomer: boolean;
     canConfirmReceived: boolean;
+    canRateService: boolean;
+  };
+  serviceRating: {
+    customer: number | null;
   };
   comercio: {
     nombre: string;
@@ -201,8 +205,16 @@ export function toPublicOrderTrackingResponse(
       : {};
   const delegateStatus = (delegate.status ?? '').toString().trim().toLowerCase() || null;
 
-  const status = normalizePublicStatus(order.estado);
+  const persistedStatus = normalizePublicStatus(order.estado);
+  const status = persistedStatus === 'cancelado' || delegateStatus !== 'completed'
+    ? persistedStatus
+    : 'entregado';
   const createdAt = (order.created_at ?? new Date().toISOString()).toString();
+  const rawCustomerRating = Number(detalles.customer_service_rating);
+  const customerServiceRating = Number.isInteger(rawCustomerRating) && rawCustomerRating >= 1 && rawCustomerRating <= 5
+    ? rawCustomerRating
+    : null;
+  const isRateable = status === 'entregado' || status === 'cancelado';
 
   const customerCanConfirm =
     CONFIRM_RECEIVED_ALLOWED_STATUSES.has(status) && delegateStatus === 'arrived';
@@ -232,7 +244,9 @@ export function toPublicOrderTrackingResponse(
     permissions: {
       canCancelAsCustomer: status === 'pendiente',
       canConfirmReceived: customerCanConfirm,
+      canRateService: isRateable && customerServiceRating === null,
     },
+    serviceRating: { customer: customerServiceRating },
     comercio: {
       nombre: (comercio?.nombre ?? 'Comercio').toString(),
       slug: comercio?.slug ?? null,

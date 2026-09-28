@@ -16,6 +16,7 @@ import 'package:kosmenu_app/services/delivery_courier_service.dart';
 import 'package:kosmenu_app/services/delivery_invite_notification_service.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/services/order_notification_service.dart';
+import 'package:kosmenu_app/services/order_rating_service.dart';
 import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
@@ -80,6 +81,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   _OrderViewData? _cachedOrderData;
   final Map<String, String> _delegatedCourierAliasCache = <String, String>{};
   bool _isLoadingComprobante = false;
+  bool _isSubmittingCustomerRating = false;
   final ComprobanteSignedUrlSession _comprobanteSignedUrlSession =
       ComprobanteSignedUrlSession();
 
@@ -1159,6 +1161,93 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return OrderManagerService.normalizedRawStatus(estado);
   }
 
+  Future<void> _showCustomerRatingDialog(PedidoModel pedido) async {
+    var selectedRating = 5;
+    final rating = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(
+            'Califica al cliente',
+            style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '¿Cómo fue tu experiencia con ${pedido.nombreCliente?.trim().isNotEmpty == true ? pedido.nombreCliente!.trim() : 'este cliente'}?',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  final value = index + 1;
+                  return IconButton(
+                    tooltip: '$value ${value == 1 ? 'estrella' : 'estrellas'}',
+                    onPressed: () =>
+                        setDialogState(() => selectedRating = value),
+                    icon: Icon(
+                      value <= selectedRating
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
+                      color: const Color(0xFFF59E0B),
+                      size: 34,
+                    ),
+                  );
+                }),
+              ),
+              Text(
+                '$selectedRating de 5 estrellas',
+                style: GoogleFonts.manrope(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Ahora no'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(selectedRating),
+              icon: const Icon(Icons.star_rounded, size: 18),
+              label: const Text('Enviar calificación'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (rating == null || !mounted) return;
+    setState(() => _isSubmittingCustomerRating = true);
+    try {
+      await OrderRatingService.rateCustomer(
+        orderId: (pedido.orderId ?? widget.orderId).trim(),
+        rating: rating,
+      );
+      final refreshed = await _fetchOrder();
+      if (!mounted) return;
+      setState(() => _cachedOrderData = refreshed ?? _cachedOrderData);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Calificación guardada. Gracias.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('No se pudo guardar la calificación: $error'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmittingCustomerRating = false);
+    }
+  }
+
   List<_OrderStatusAction> _buildStatusActions({
     required bool isDelivery,
     required String currentStatus,
@@ -1784,10 +1873,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       icon: const Icon(Icons.arrow_back),
                       tooltip: 'Volver al panel',
                       onPressed: () {
-                        Navigator.of(context).pushNamedAndRemoveUntil(
-                          '/',
-                          (route) => false,
-                        );
+                        Navigator.of(
+                          context,
+                        ).pushNamedAndRemoveUntil('/', (route) => false);
                       },
                     ),
               actions: showPendingClock
@@ -1947,6 +2035,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 final visualStatusColor =
                     OrderManagerService.visualStatusColorForPedido(pedido);
                 final isOrderCanceled = visualStatusCode == 'cancelado';
+                final isOrderDelivered = visualStatusCode == 'entregado';
+                final customerRatingSummary = _asMap(
+                  pedido.detalles['customer_rating_summary'],
+                );
+                final customerRatingAverage =
+                    _toDoubleOrNull(customerRatingSummary['average']) ?? 0;
+                final customerRatingCount =
+                    int.tryParse('${customerRatingSummary['count'] ?? 0}') ?? 0;
+                final merchantServiceRating = int.tryParse(
+                  '${pedido.detalles['merchant_service_rating'] ?? ''}',
+                );
                 final nextStatusActions = _buildStatusActions(
                   isDelivery: isDeliveryOrder,
                   currentStatus: effectiveStatus,
@@ -3293,6 +3392,119 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                       ],
                                     ),
                                   ),
+                                  const SizedBox(height: 14),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(13),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFFBEB),
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: const Color(0xFFFDE68A),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.star_rounded,
+                                          color: Color(0xFFD97706),
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 9),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Reputación del cliente',
+                                                style: GoogleFonts.manrope(
+                                                  color: text,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                customerRatingCount > 0
+                                                    ? '${customerRatingAverage.toStringAsFixed(1)} de 5 · $customerRatingCount ${customerRatingCount == 1 ? 'calificación' : 'calificaciones'}'
+                                                    : 'Sin calificaciones anteriores',
+                                                style: GoogleFonts.manrope(
+                                                  color: muted,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (!isReadOnly &&
+                                      (isOrderDelivered ||
+                                          isOrderCanceled)) ...[
+                                    const SizedBox(height: 10),
+                                    if (merchantServiceRating != null)
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.check_circle_rounded,
+                                            size: 18,
+                                            color: success,
+                                          ),
+                                          const SizedBox(width: 7),
+                                          Text(
+                                            'Calificaste este pedido con $merchantServiceRating de 5 estrellas',
+                                            style: GoogleFonts.manrope(
+                                              color: muted,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    else
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: OutlinedButton.icon(
+                                          onPressed: _isSubmittingCustomerRating
+                                              ? null
+                                              : () => _showCustomerRatingDialog(
+                                                  pedido,
+                                                ),
+                                          icon: _isSubmittingCustomerRating
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                      ),
+                                                )
+                                              : const Icon(
+                                                  Icons.star_outline_rounded,
+                                                ),
+                                          label: Text(
+                                            _isSubmittingCustomerRating
+                                                ? 'Guardando calificación…'
+                                                : 'Calificar al cliente',
+                                          ),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: const Color(
+                                              0xFFB45309,
+                                            ),
+                                            side: const BorderSide(
+                                              color: Color(0xFFF59E0B),
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                   const SizedBox(height: 14),
                                   Column(
                                     children: [

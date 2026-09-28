@@ -179,6 +179,8 @@ type ComercioRow = {
   id: string;
   slug?: string | null;
   nombre?: string | null;
+  rating_average?: number | string | null;
+  rating_count?: number | string | null;
   moneda?: string | null;
   costo_envio?: number | string | null;
   tasa_cambio_pesos?: number | string | null;
@@ -4749,6 +4751,8 @@ export default function PublicMenuPage() {
         <KioskMenuExperience
           businessName={comercioNombre}
           logoUrl={comercioLogoUrl || null}
+          ratingAverage={toNumberOrNull(menuData.comercio.rating_average) ?? 0}
+          ratingCount={toNumberOrNull(menuData.comercio.rating_count) ?? 0}
           initialLetter={comercioInitialLetter}
           locationLabel={heroLocation || null}
           socialLinks={socialLinks}

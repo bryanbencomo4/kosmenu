@@ -97,6 +97,7 @@ type PedidoRow = {
       source?: string;
       cancelled_at?: string;
     } | null;
+    customer_service_rating?: number | null;
     items?: Array<{
       nombre?: string;
       cantidad?: number;
@@ -204,6 +205,10 @@ type PublicTrackingPayload = {
   permissions?: {
     canCancelAsCustomer: boolean;
     canConfirmReceived: boolean;
+    canRateService: boolean;
+  };
+  serviceRating?: {
+    customer: number | null;
   };
   comercio: {
     nombre: string;
@@ -248,6 +253,7 @@ function mapPublicTracking(pub: PublicTrackingPayload): {
         delivery_delegate: {
           status: pub.deliveryProgress?.delegateStatus ?? undefined,
         },
+        customer_service_rating: pub.serviceRating?.customer ?? null,
       },
     },
     comercio: {
@@ -384,6 +390,8 @@ function OrderTrackingPageInner() {
   const [whatsappPreferenceSaving, setWhatsappPreferenceSaving] = useState(false);
   const [cancelMessage, setCancelMessage] = useState('');
   const [cancelLoading, setCancelLoading] = useState(false);
+  const [serviceRatingLoading, setServiceRatingLoading] = useState(false);
+  const [serviceRatingMessage, setServiceRatingMessage] = useState('');
   const [deliveryConfirmationLoading, setDeliveryConfirmationLoading] = useState(false);
   const [deliveryConfirmationMessage, setDeliveryConfirmationMessage] = useState('');
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -547,6 +555,37 @@ function OrderTrackingPageInner() {
       setDeliveryConfirmationMessage(message);
     } finally {
       setDeliveryConfirmationLoading(false);
+    }
+  }
+
+  async function submitServiceRating(rating: number) {
+    if (!orderId || !trackingToken || serviceRatingLoading) return;
+
+    setServiceRatingLoading(true);
+    setServiceRatingMessage('');
+    try {
+      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submit_rating', rating }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error((payload?.error ?? '').toString() || 'No se pudo guardar tu calificación.');
+      }
+
+      const publicOrder = (payload?.data ?? null) as PublicTrackingPayload | null;
+      if (publicOrder?.orderId) {
+        const mapped = mapPublicTracking(publicOrder);
+        setOrder(mapped.order);
+      }
+      setServiceRatingMessage('Gracias. Tu calificación quedó registrada.');
+    } catch (ratingError) {
+      setServiceRatingMessage(
+        ratingError instanceof Error ? ratingError.message : 'No se pudo guardar tu calificación.',
+      );
+    } finally {
+      setServiceRatingLoading(false);
     }
   }
 
@@ -1094,6 +1133,14 @@ function OrderTrackingPageInner() {
       cancelMessage={displayStatus === 'cancelado' ? '' : cancelMessage}
       onCancelOrder={(reason) => void cancelOrder('cliente', reason)}
       showPendingCancelHint={displayStatus === 'pendiente' && !pendingExpired}
+      canCustomerRateService={
+        (displayStatus === 'entregado' || displayStatus === 'cancelado') &&
+        order?.detalles?.customer_service_rating == null
+      }
+      customerServiceRating={order?.detalles?.customer_service_rating ?? null}
+      serviceRatingLoading={serviceRatingLoading}
+      serviceRatingMessage={serviceRatingMessage}
+      onRateService={(rating) => void submitServiceRating(rating)}
       whatsappNotificationsEnabled={whatsappNotificationsEnabled}
       whatsappPreferenceSaving={whatsappPreferenceSaving}
       notificationMessage={notificationMessage}

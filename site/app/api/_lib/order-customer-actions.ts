@@ -22,6 +22,12 @@ export const customerOrderActionSchema = z
         action: z.literal('confirm_received'),
       })
       .strict(),
+    z
+      .object({
+        action: z.literal('submit_rating'),
+        rating: z.number().int().min(1).max(5),
+      })
+      .strict(),
   ])
   .superRefine((value, context) => {
     if (value.action === 'cancel' && value.source === 'cliente' && (value.reason ?? '').length < 3) {

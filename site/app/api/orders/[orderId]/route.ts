@@ -20,6 +20,10 @@ import {
 } from '../../_lib/dispatch-order-notification';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
 import { getServiceSupabaseClient } from '../../_lib/supabase-server';
+import {
+  createCustomerRatingKey,
+  isRateableOrderStatus,
+} from '../../_lib/order-service-rating';
 
 type Params = {
   params: Promise<{ orderId: string }>;
@@ -205,6 +209,58 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     const action = parsed.data;
+
+    if (action.action === 'submit_rating') {
+      const deliveryDelegate = order.detalles?.delivery_delegate;
+      const deliveryStatus =
+        deliveryDelegate && typeof deliveryDelegate === 'object'
+          ? deliveryDelegate.status
+          : null;
+      if (!isRateableOrderStatus(order.estado, deliveryStatus)) {
+        return NextResponse.json(
+          { error: 'Solo puedes calificar cuando el pedido termina o se cancela.' },
+          { status: 409 },
+        );
+      }
+
+      const customerKey = await createCustomerRatingKey(order.detalles?.telefono_cliente);
+      if (!customerKey) {
+        return NextResponse.json({ error: 'No se pudo validar el perfil del cliente.' }, { status: 503 });
+      }
+
+      const { error } = await supabase.rpc('submit_order_service_rating', {
+        p_pedido_id: order.id,
+        p_rater_side: 'customer',
+        p_rating: action.rating,
+        p_customer_key: customerKey,
+      });
+      if (error) {
+        if ((error as { code?: string }).code === '23505') {
+          return NextResponse.json({ error: 'Ya calificaste este pedido.' }, { status: 409 });
+        }
+        if (error.message?.includes('ORDER_NOT_RATEABLE')) {
+          return NextResponse.json({ error: 'El pedido ya no está disponible para calificar.' }, { status: 409 });
+        }
+        throw new Error(error.message);
+      }
+
+      const nextOrder = {
+        ...order,
+        detalles: {
+          ...(order.detalles ?? {}),
+          customer_service_rating: action.rating,
+        },
+      };
+      const comercio = await loadComercio(supabase, order.comercio_id);
+      return NextResponse.json(
+        {
+          ok: true,
+          rating: action.rating,
+          data: toPublicOrderTrackingResponse(nextOrder, orderId, comercio),
+        },
+        { status: 200 },
+      );
+    }
 
     if (action.action === 'set_whatsapp_notifications') {
       const currentDetalles =
