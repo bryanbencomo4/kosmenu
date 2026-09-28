@@ -1,3 +1,5 @@
+import { convertOrderAmount, normalizeOrderCurrency } from './order-currency';
+
 export type PublicOrderStatus =
   | 'pendiente'
   | 'confirmado'
@@ -70,6 +72,7 @@ type RawPedido = {
 type RawComercio = {
   nombre?: string | null;
   slug?: string | null;
+  moneda?: string | null;
   whatsapp?: string | null;
   telefono?: string | null;
   direccion?: string | null;
@@ -148,20 +151,31 @@ export function toPublicOrderTrackingResponse(
   comercio: RawComercio | null,
 ): PublicOrderTrackingResponse {
   const detalles = order.detalles && typeof order.detalles === 'object' ? order.detalles : {};
+  const baseCurrency = normalizeOrderCurrency(detalles.moneda_base ?? comercio?.moneda);
+  const requestedCurrency = normalizeOrderCurrency(detalles.moneda_checkout, baseCurrency);
+  const rawExchangeRate = Number(detalles.tasa_cambio_snapshot);
+  const hasUsableExchangeRate = Number.isFinite(rawExchangeRate) && rawExchangeRate > 0;
+  const currency = requestedCurrency === baseCurrency || hasUsableExchangeRate
+    ? requestedCurrency
+    : baseCurrency;
+  const convertToDisplayCurrency = (amount: number) =>
+    convertOrderAmount(amount, baseCurrency, currency, rawExchangeRate) ?? amount;
   const itemsRaw = Array.isArray(detalles.items) ? detalles.items : [];
   const items = itemsRaw
     .map((item) => {
       const row = (item ?? {}) as Record<string, unknown>;
       const name = (row.nombre ?? row.name ?? 'Producto').toString().trim() || 'Producto';
       const quantity = Number(row.cantidad ?? row.quantity ?? 0);
-      const unitPrice = Number(row.precio ?? row.price);
+      const unitPriceBase = Number(row.precio ?? row.price);
       if (!Number.isFinite(quantity) || quantity <= 0) return null;
       const productId = (row.product_id ?? row.productId ?? '').toString().trim();
       const selection = sanitizePublicSelection(row.opciones ?? row.selection);
       return {
         name,
         quantity,
-        unitPrice: Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : undefined,
+        unitPrice: Number.isFinite(unitPriceBase) && unitPriceBase >= 0
+          ? convertToDisplayCurrency(unitPriceBase)
+          : undefined,
         ...(productId ? { productId } : {}),
         ...(selection ? { selection } : {}),
       };
@@ -203,12 +217,16 @@ export function toPublicOrderTrackingResponse(
     status,
     createdAt,
     items,
-    subtotal: Number.isFinite(Number(detalles.subtotal)) ? Number(detalles.subtotal) : undefined,
-    deliveryCost: Number.isFinite(Number(order.costo_delivery))
-      ? Number(order.costo_delivery)
+    subtotal: Number.isFinite(Number(detalles.subtotal))
+      ? convertToDisplayCurrency(Number(detalles.subtotal))
       : undefined,
-    total: Number.isFinite(Number(order.total)) ? Number(order.total) : undefined,
-    currency: (detalles.moneda_checkout ?? 'USD').toString(),
+    deliveryCost: Number.isFinite(Number(order.costo_delivery))
+      ? convertToDisplayCurrency(Number(order.costo_delivery))
+      : undefined,
+    total: Number.isFinite(Number(detalles.total ?? order.total))
+      ? convertToDisplayCurrency(Number(detalles.total ?? order.total))
+      : undefined,
+    currency,
     deliveryType,
     locationHint: buildLocationHint(deliveryType, status, delegateStatus),
     deliveryProgress: {

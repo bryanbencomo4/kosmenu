@@ -43,6 +43,7 @@ type PedidoRow = {
 type ComercioSummary = {
   nombre?: string | null;
   slug?: string | null;
+  moneda?: string | null;
   direccion?: string | null;
   latitud?: number | string | null;
   longitud?: number | string | null;
@@ -119,7 +120,7 @@ async function loadComercio(
   if (!comercioId) return null;
   const result = await supabase
     .from('comercios')
-    .select('nombre,slug,direccion,whatsapp,telefono,logo_url,branding_ia')
+    .select('nombre,slug,moneda,direccion,whatsapp,telefono,logo_url,branding_ia')
     .eq('id', comercioId)
     .maybeSingle();
   if (result.error) return null;

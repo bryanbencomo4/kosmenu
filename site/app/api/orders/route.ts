@@ -22,6 +22,7 @@ import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
 import { getServiceSupabaseClient } from '../_lib/supabase-server';
 import { evaluateBusinessOrdering } from '../_lib/business-hours';
 import { merchantPanelOrderHref } from '../../_lib/public-site-config';
+import { convertOrderAmount, normalizeOrderCurrency } from '../_lib/order-currency';
 import {
   isTransientSupabaseFailure,
   supabaseWriteCircuit,
@@ -204,17 +205,6 @@ function normalizeDelivery(value: unknown) {
   };
 }
 
-function normalizeCurrencyCode(value: string | null | undefined) {
-  const code = (value ?? '').toString().trim().toUpperCase();
-  if (!code || code === 'SIN MONEDA') return 'COP';
-  return code;
-}
-
-function convertFromCop(amountInCop: number, currency: string, exchangeRate: number) {
-  if (currency === 'COP') return amountInCop;
-  return amountInCop / exchangeRate;
-}
-
 export async function POST(request: Request) {
   try {
     const ip = getClientIp(request);
@@ -247,7 +237,7 @@ export async function POST(request: Request) {
     const rawClientEmail = (body.clientEmail ?? '').trim().toLowerCase();
     const rawClientName = normalizeText(body.clientName ?? incomingDetalles.cliente_nombre);
     const rawClientWhatsapp = normalizeDigits(body.clientWhatsapp ?? incomingDetalles.telefono_cliente);
-    const rawCurrency = normalizeCurrencyCode(body.currency ?? incomingDetalles.moneda_checkout?.toString());
+    const rawCurrency = normalizeOrderCurrency(body.currency ?? incomingDetalles.moneda_checkout?.toString());
     const rawExchangeRate = Number(body.exchangeRate ?? incomingDetalles.tasa_cambio_snapshot);
     const rawCostDelivery = Number(body.costoDelivery ?? incomingDetalles.costo_delivery ?? 0);
     const rawDelivery = normalizeDelivery(body.delivery ?? incomingDetalles.delivery);
@@ -330,9 +320,20 @@ export async function POST(request: Request) {
           const supabase = getServiceSupabaseClient();
           const currency = validated.moneda_checkout;
           const currencySymbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency;
+          const { data: replayCommerce } = await supabase
+            .from('comercios')
+            .select('moneda')
+            .eq('id', cachedComercioId)
+            .maybeSingle();
+          const replayBaseCurrency = normalizeOrderCurrency(replayCommerce?.moneda);
           const replayTotal = validated.items.reduce((sum, item) => sum + item.cantidad * item.precio, 0)
             + (Number.isFinite(validated.costo_delivery) ? Math.max(validated.costo_delivery, 0) : 0);
-          const replayTotalCheckout = convertFromCop(replayTotal, currency, validated.tasa_cambio_snapshot);
+          const replayTotalCheckout = convertOrderAmount(
+            replayTotal,
+            replayBaseCurrency,
+            currency,
+            validated.tasa_cambio_snapshot,
+          ) ?? replayTotal;
           await ensureNewOrderMerchantNotify({
             supabase,
             comercioId: cachedComercioId,
@@ -379,17 +380,10 @@ export async function POST(request: Request) {
 
     const subtotal = items.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
     const total = subtotal + (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
-    const subtotalCheckout = convertFromCop(subtotal, currency, exchangeRate);
-    const costoDeliveryCheckout = convertFromCop(
-      Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
-      currency,
-      exchangeRate,
-    );
-    const totalCheckout = convertFromCop(total, currency, exchangeRate);
     const supabase = getServiceSupabaseClient();
 
     async function loadComercioRow() {
-      const full = supabase.from('comercios').select('id,slug,en_linea,horarios').limit(1);
+      const full = supabase.from('comercios').select('id,slug,moneda,en_linea,horarios').limit(1);
       const fullResult = isUuid(comercioId)
         ? await full.eq('id', comercioId)
         : await full.eq('slug', comercioId);
@@ -398,7 +392,7 @@ export async function POST(request: Request) {
         (fullResult.error.message ?? '').toLowerCase().includes('horarios') ||
         (fullResult.error.message ?? '').toLowerCase().includes('en_linea');
       if (!missingSchedule) return fullResult;
-      const legacy = supabase.from('comercios').select('id,slug').limit(1);
+      const legacy = supabase.from('comercios').select('id,slug,moneda').limit(1);
       return isUuid(comercioId)
         ? await legacy.eq('id', comercioId)
         : await legacy.eq('slug', comercioId);
@@ -411,10 +405,11 @@ export async function POST(request: Request) {
     }
 
     const comercioRow = (comercios ?? [])[0] as
-      | { id?: string; slug?: string; en_linea?: boolean | null; horarios?: unknown }
+      | { id?: string; slug?: string; moneda?: string | null; en_linea?: boolean | null; horarios?: unknown }
       | undefined;
     const resolvedComercioId = comercioRow?.id?.toString().trim() ?? '';
     const resolvedComercioSlug = comercioRow?.slug?.toString().trim() ?? '';
+    const baseCurrency = normalizeOrderCurrency(comercioRow?.moneda);
     if (!resolvedComercioId) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
@@ -428,6 +423,18 @@ export async function POST(request: Request) {
         { error: ordering.error, message: ordering.message },
         { status: 403 },
       );
+    }
+
+    const subtotalCheckout = convertOrderAmount(subtotal, baseCurrency, currency, exchangeRate);
+    const costoDeliveryCheckout = convertOrderAmount(
+      Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
+      baseCurrency,
+      currency,
+      exchangeRate,
+    );
+    const totalCheckout = convertOrderAmount(total, baseCurrency, currency, exchangeRate);
+    if (subtotalCheckout === null || costoDeliveryCheckout === null || totalCheckout === null) {
+      throw new Error('Invalid exchange rate for the selected checkout currency.');
     }
 
     const orderId = await allocateOrderDisplayId(supabase);
@@ -445,6 +452,7 @@ export async function POST(request: Request) {
       cliente_nombre: clientName,
       cliente_email: clientEmail || null,
       telefono_cliente: clientWhatsapp,
+      moneda_base: baseCurrency,
       moneda_checkout: currency,
       tasa_cambio_snapshot: exchangeRate,
       exchange_rate_source: normalizeText(incomingDetalles.exchange_rate_source) || null,

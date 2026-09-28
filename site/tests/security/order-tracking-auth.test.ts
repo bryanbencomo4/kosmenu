@@ -77,6 +77,63 @@ describe('public tracking token crypto', () => {
 });
 
 describe('public order response scrubbing', () => {
+  it('returns item prices and all receipt totals in the checkout currency', () => {
+    const { row } = buildPedido();
+    const exchangeRate = 0.00030701705909587157;
+    const order = {
+      ...row,
+      total: 28_000,
+      costo_delivery: 0,
+      detalles: {
+        ...row.detalles,
+        moneda_base: 'COP',
+        moneda_checkout: 'USD',
+        tasa_cambio_snapshot: exchangeRate,
+        subtotal: 28_000,
+        total: 28_000,
+        costo_delivery: 0,
+        items: [{ nombre: 'Dos carnes', cantidad: 1, precio: 28_000 }],
+      },
+    };
+
+    const receipt = toPublicOrderTrackingResponse(order, 'ORD-78', {
+      nombre: 'Demo',
+      moneda: 'COP',
+    });
+    const expectedUsd = 28_000 * exchangeRate;
+
+    expect(receipt.currency).toBe('USD');
+    expect(receipt.items[0]?.unitPrice).toBeCloseTo(expectedUsd);
+    expect(receipt.subtotal).toBeCloseTo(expectedUsd);
+    expect(receipt.total).toBeCloseTo(expectedUsd);
+    expect(receipt.deliveryCost).toBe(0);
+  });
+
+  it('uses the commerce base currency when a cross-currency snapshot has no rate', () => {
+    const { row } = buildPedido();
+    const order = {
+      ...row,
+      total: 28_000,
+      detalles: {
+        ...row.detalles,
+        moneda_base: 'COP',
+        moneda_checkout: 'USD',
+        subtotal: 28_000,
+        total: 28_000,
+        items: [{ nombre: 'Dos carnes', cantidad: 1, precio: 28_000 }],
+      },
+    };
+
+    const receipt = toPublicOrderTrackingResponse(order, 'ORD-78', {
+      nombre: 'Demo',
+      moneda: 'COP',
+    });
+
+    expect(receipt.currency).toBe('COP');
+    expect(receipt.items[0]?.unitPrice).toBe(28_000);
+    expect(receipt.total).toBe(28_000);
+  });
+
   it('does not expose email, phone, tokens, address, coords, or payment proof', () => {
     const { token, row } = buildPedido();
     const publicOrder = toPublicOrderTrackingResponse(row, 'comercio-demo-1710000000000', {

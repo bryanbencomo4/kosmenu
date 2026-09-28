@@ -277,7 +277,6 @@ const kioskFulfillmentStoragePrefix = 'elmenuxfa-kiosk-fulfillment:';
 function isKioskFulfillment(value: string | null | undefined): value is KioskFulfillment {
   return value === 'dine_in' || value === 'takeaway' || value === 'delivery';
 }
-const selectedCurrencyStorageKeyPrefix = 'elmenuxfa:selected-currency:';
 const kioskThemeStoragePrefix = 'elmenuxfa-kiosk-theme:';
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
 const preferLeafletMapPicker = false;
@@ -1667,7 +1666,6 @@ export default function PublicMenuPage() {
   const mapPickerAutocompleteRef = useRef<GoogleAutocomplete | null>(null);
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
   const shouldReturnToMenuOnEmptyCartRef = useRef(false);
-  const userChangedCurrencyRef = useRef(false);
   const checkoutAttemptRef = useRef<CheckoutAttempt | null>(null);
   const [infoSections, setInfoSections] = useState({
     location: true,
@@ -1709,11 +1707,10 @@ export default function PublicMenuPage() {
     if (savedTheme === 'dark' || savedTheme === 'light') {
       setThemeOverride(savedTheme);
     }
-    const savedCurrency = window.sessionStorage.getItem(`${selectedCurrencyStorageKeyPrefix}${commerceIdentifier}`);
-    if (savedCurrency) {
-      userChangedCurrencyRef.current = true;
-      setSelectedCurrency(normalizeCurrencyCode(savedCurrency));
-    }
+  }, [commerceIdentifier]);
+
+  useEffect(() => {
+    setSelectedCurrency('');
   }, [commerceIdentifier]);
 
   useEffect(() => {
@@ -2493,8 +2490,11 @@ export default function PublicMenuPage() {
       ),
     [brandingCheckoutConfig, businessBaseCurrency, businessQuoteCurrency, paymentMethodsByCurrency],
   );
+  const selectedCurrencyForLookup = selectedCurrency.trim()
+    ? normalizeCurrencyCode(selectedCurrency)
+    : businessBaseCurrency;
   const selectedCurrencyGroup =
-    paymentMethodsByCurrency.find((group) => group.currency === normalizeCurrencyCode(selectedCurrency)) ?? null;
+    paymentMethodsByCurrency.find((group) => group.currency === selectedCurrencyForLookup) ?? null;
   const tickerRateEntries = useMemo(
     () =>
       buildConfiguredTickerEntries(businessBaseCurrency, businessCheckoutCurrencies, {
@@ -3198,19 +3198,8 @@ export default function PublicMenuPage() {
     }
 
     const availableCurrencies = new Set(kioskCurrencyOptions);
-    const current = normalizeCurrencyCode(selectedCurrency);
+    const current = selectedCurrency.trim() ? normalizeCurrencyCode(selectedCurrency) : '';
     if (current && availableCurrencies.has(current)) {
-      return;
-    }
-
-    const saved =
-      typeof window !== 'undefined' && commerceIdentifier
-        ? window.sessionStorage.getItem(`${selectedCurrencyStorageKeyPrefix}${commerceIdentifier}`)
-        : null;
-    const savedCode = saved ? normalizeCurrencyCode(saved) : '';
-    if (savedCode && availableCurrencies.has(savedCode)) {
-      userChangedCurrencyRef.current = true;
-      setSelectedCurrency(savedCode);
       return;
     }
 
@@ -3222,11 +3211,7 @@ export default function PublicMenuPage() {
 
   function selectMenuCurrency(currency: string) {
     const next = normalizeCurrencyCode(currency);
-    userChangedCurrencyRef.current = true;
     setSelectedCurrency(next);
-    if (typeof window !== 'undefined' && commerceIdentifier) {
-      window.sessionStorage.setItem(`${selectedCurrencyStorageKeyPrefix}${commerceIdentifier}`, next);
-    }
   }
 
   function toggleKioskTheme() {
