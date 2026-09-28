@@ -58,6 +58,7 @@ function buildPedido(overrides?: {
           mode: 'delivery',
           address: overrides?.address ?? 'Calle secreta 123',
         },
+        delivery_delegate: {} as Record<string, unknown>,
         notifications: { whatsapp_enabled: true },
       },
     },
@@ -167,7 +168,7 @@ describe('public order response scrubbing', () => {
     row.detalles = {
       ...row.detalles,
       delivery_delegate: { status: 'completed' },
-      delivery: { mode: 'delivery' },
+      delivery: { mode: 'delivery', address: 'Calle de prueba 123' },
     };
     const receipt = toPublicOrderTrackingResponse(row, 'ORD-78', {
       nombre: 'Demo',
@@ -497,7 +498,7 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
     pedido.row.detalles = {
       ...pedido.row.detalles,
       delivery_delegate: { status: 'completed' },
-      delivery: { mode: 'delivery' },
+      delivery: { mode: 'delivery', address: 'Calle de prueba 123' },
     };
     const { PATCH } = await loadRouteWithMock(pedido);
     const orderId = pedido.row.detalles.order_id as string;

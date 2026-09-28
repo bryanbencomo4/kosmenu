@@ -299,6 +299,7 @@ async function loadPublicMenuByIdentifierUncached(
       .from('productos')
       .select(PRODUCTO_SELECT)
       .eq('comercio_id', resolvedComercioId)
+      .order('orden', { ascending: true })
       .order('nombre', { ascending: true }),
     supabase
       .from('metodos_pago')

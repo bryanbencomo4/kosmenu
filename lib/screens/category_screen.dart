@@ -203,7 +203,13 @@ class CatalogCategoriesScreen extends StatefulWidget {
       _CatalogCategoriesScreenState();
 }
 
-enum _CategorySortOption { order, nameAsc, nameDesc, mostProducts, leastProducts }
+enum _CategorySortOption {
+  order,
+  nameAsc,
+  nameDesc,
+  mostProducts,
+  leastProducts,
+}
 
 enum _ProductSortOption { order, nameAsc, nameDesc, priceAsc, priceDesc }
 
@@ -214,6 +220,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   bool _hasLoadedInitialSnapshot = false;
   bool _isMutating = false;
   bool _isSavingCategoryOrder = false;
+  bool _isSavingProductOrder = false;
+  bool _hasInitializedProductCategory = false;
   List<CategoryModel> _categories = <CategoryModel>[];
   List<ProductModel> _products = <ProductModel>[];
   final TextEditingController _searchController = TextEditingController();
@@ -224,8 +232,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   Map<String, int> _productCountByCategory = <String, int>{};
   _CategorySortOption _categorySortOption = _CategorySortOption.order;
   _ProductSortOption _productSortOption = _ProductSortOption.order;
-  _VisibilityFilterOption _categoryVisibilityFilter = _VisibilityFilterOption.all;
-  _VisibilityFilterOption _productVisibilityFilter = _VisibilityFilterOption.all;
+  _VisibilityFilterOption _categoryVisibilityFilter =
+      _VisibilityFilterOption.all;
+  _VisibilityFilterOption _productVisibilityFilter =
+      _VisibilityFilterOption.all;
   int _categoryVisibleCount = 20;
   int _productVisibleCount = 24;
   int _desktopProductPage = 0;
@@ -265,9 +275,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       final rate = rateRaw is num
           ? rateRaw.toDouble()
           : double.tryParse(
-                (rateRaw ?? '').toString().trim().replaceAll(',', '.'),
-              ) ??
-              0;
+                  (rateRaw ?? '').toString().trim().replaceAll(',', '.'),
+                ) ??
+                0;
 
       if (!mounted) return;
       setState(() {
@@ -389,20 +399,23 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           .eq('comercio_id', SupabaseConfig.currentComercioId)
           .order('nombre', ascending: true);
 
-      final products = (rows as List<dynamic>)
-          .map(
-            (row) =>
-                ProductModel.fromMap(Map<String, dynamic>.from(row as Map)),
-          )
-          .where((product) => categoryIds.contains(product.categoriaId.trim()))
-          .toList()
-        ..sort((a, b) {
-          final categoryCompare = a.categoriaId.compareTo(b.categoriaId);
-          if (categoryCompare != 0) return categoryCompare;
-          final orderCompare = a.orden.compareTo(b.orden);
-          if (orderCompare != 0) return orderCompare;
-          return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
-        });
+      final products =
+          (rows as List<dynamic>)
+              .map(
+                (row) =>
+                    ProductModel.fromMap(Map<String, dynamic>.from(row as Map)),
+              )
+              .where(
+                (product) => categoryIds.contains(product.categoriaId.trim()),
+              )
+              .toList()
+            ..sort((a, b) {
+              final categoryCompare = a.categoriaId.compareTo(b.categoriaId);
+              if (categoryCompare != 0) return categoryCompare;
+              final orderCompare = a.orden.compareTo(b.orden);
+              if (orderCompare != 0) return orderCompare;
+              return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
+            });
 
       final counts = <String, int>{};
       for (final product in products) {
@@ -415,9 +428,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       setState(() {
         _products = products;
         _productCountByCategory = counts;
-        if (_selectedProductCategoryId != null &&
-            !ids.contains(_selectedProductCategoryId)) {
-          _selectedProductCategoryId = null;
+        if (!_hasInitializedProductCategory && categories.isNotEmpty) {
+          _selectedProductCategoryId = categories.first.id;
+          _hasInitializedProductCategory = true;
+        } else if (_selectedProductCategoryId != null &&
+            !categoryIds.contains(_normalizedId(_selectedProductCategoryId))) {
+          _selectedProductCategoryId = categories.isEmpty
+              ? null
+              : categories.first.id;
         }
       });
       _syncAiImageRefresh(products);
@@ -529,8 +547,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
             final media = MediaQuery.of(sheetContext);
-            final selectedEmojiOption = _categoryEmojiOptionByEmoji(selectedIconValue);
-            final selectedIconKey = _normalizeCategoryIconKey(selectedIconValue);
+            final selectedEmojiOption = _categoryEmojiOptionByEmoji(
+              selectedIconValue,
+            );
+            final selectedIconKey = _normalizeCategoryIconKey(
+              selectedIconValue,
+            );
             final legacyIconOption = selectedIconKey != null
                 ? _categoryIconOptionByKey(selectedIconKey)
                 : null;
@@ -565,7 +587,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               }
 
               final confirmed = await _confirmCategoryAiIconGeneration();
-              if (confirmed != true || isSheetClosed || !mounted || !sheetContext.mounted) {
+              if (confirmed != true ||
+                  isSheetClosed ||
+                  !mounted ||
+                  !sheetContext.mounted) {
                 return;
               }
 
@@ -614,7 +639,11 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 ),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    maxHeight: media.size.height - media.padding.top - media.padding.bottom - 12,
+                    maxHeight:
+                        media.size.height -
+                        media.padding.top -
+                        media.padding.bottom -
+                        12,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -650,7 +679,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                 cursorColor: colorScheme.primary,
                                 decoration: InputDecoration(
                                   labelText: 'Nombre de la categoría',
-                                  hintText: 'Ej: Hamburguesas, Postres, Bebidas',
+                                  hintText:
+                                      'Ej: Hamburguesas, Postres, Bebidas',
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(16),
                                   ),
@@ -663,7 +693,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                 decoration: BoxDecoration(
                                   color: colorScheme.surfaceContainerHigh,
                                   borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(color: colorScheme.outlineVariant),
+                                  border: Border.all(
+                                    color: colorScheme.outlineVariant,
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
@@ -671,7 +703,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       width: 56,
                                       height: 56,
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF6D28D9).withValues(alpha: 0.12),
+                                        color: const Color(
+                                          0xFF6D28D9,
+                                        ).withValues(alpha: 0.12),
                                         borderRadius: BorderRadius.circular(16),
                                       ),
                                       child: Center(
@@ -685,7 +719,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                     const SizedBox(width: 14),
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             nameController.text.trim().isEmpty
@@ -703,7 +738,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                           Text(
                                             previewLabel,
                                             style: GoogleFonts.manrope(
-                                              color: colorScheme.onSurfaceVariant,
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
                                               fontWeight: FontWeight.w600,
                                               fontSize: 12.5,
                                             ),
@@ -727,12 +763,16 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                               ),
                               const SizedBox(height: 12),
                               OutlinedButton.icon(
-                                onPressed: isGeneratingAi ? null : generateWithAi,
+                                onPressed: isGeneratingAi
+                                    ? null
+                                    : generateWithAi,
                                 icon: isGeneratingAi
                                     ? const SizedBox(
                                         width: 16,
                                         height: 16,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
                                       )
                                     : const Icon(Icons.auto_awesome_rounded),
                                 label: Text(
@@ -769,7 +809,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                 spacing: 10,
                                 runSpacing: 10,
                                 children: recommendedEmojiOptions.map((option) {
-                                  final selected = option.emoji == selectedIconValue;
+                                  final selected =
+                                      option.emoji == selectedIconValue;
                                   return InkWell(
                                     onTap: () {
                                       setSheetState(() {
@@ -782,10 +823,15 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                     borderRadius: BorderRadius.circular(16),
                                     child: Container(
                                       width: 88,
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 12,
+                                      ),
                                       decoration: BoxDecoration(
                                         color: selected
-                                            ? const Color(0xFF6D28D9).withValues(alpha: 0.14)
+                                            ? const Color(
+                                                0xFF6D28D9,
+                                              ).withValues(alpha: 0.14)
                                             : colorScheme.surfaceContainerHigh,
                                         borderRadius: BorderRadius.circular(16),
                                         border: Border.all(
@@ -796,7 +842,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       ),
                                       child: Column(
                                         children: [
-                                          _buildCategoryEmojiGlyph(option.emoji, size: 26),
+                                          _buildCategoryEmojiGlyph(
+                                            option.emoji,
+                                            size: 26,
+                                          ),
                                           const SizedBox(height: 6),
                                           Text(
                                             option.label,
@@ -845,14 +894,15 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                 itemCount: filteredEmojiOptions.length,
                                 gridDelegate:
                                     const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 4,
-                                  mainAxisSpacing: 10,
-                                  crossAxisSpacing: 10,
-                                  childAspectRatio: 0.74,
-                                ),
+                                      crossAxisCount: 4,
+                                      mainAxisSpacing: 10,
+                                      crossAxisSpacing: 10,
+                                      childAspectRatio: 0.74,
+                                    ),
                                 itemBuilder: (context, index) {
                                   final option = filteredEmojiOptions[index];
-                                  final selected = option.emoji == selectedIconValue;
+                                  final selected =
+                                      option.emoji == selectedIconValue;
                                   return InkWell(
                                     onTap: () {
                                       setSheetState(() {
@@ -866,7 +916,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                     child: Container(
                                       decoration: BoxDecoration(
                                         color: selected
-                                            ? const Color(0xFF6D28D9).withValues(alpha: 0.14)
+                                            ? const Color(
+                                                0xFF6D28D9,
+                                              ).withValues(alpha: 0.14)
                                             : colorScheme.surfaceContainerHigh,
                                         borderRadius: BorderRadius.circular(16),
                                         border: Border.all(
@@ -878,9 +930,13 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       padding: const EdgeInsets.all(10),
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
-                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
                                         children: [
-                                          _buildCategoryEmojiGlyph(option.emoji, size: 26),
+                                          _buildCategoryEmojiGlyph(
+                                            option.emoji,
+                                            size: 26,
+                                          ),
                                           const SizedBox(height: 6),
                                           Text(
                                             option.label,
@@ -946,8 +1002,11 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
                                   isSheetClosed = true;
                                   FocusManager.instance.primaryFocus?.unfocus();
-                                  final iconToSave = _isEmojiContent(selectedIconValue)
-                                      ? _canonicalCategoryEmoji(selectedIconValue)
+                                  final iconToSave =
+                                      _isEmojiContent(selectedIconValue)
+                                      ? _canonicalCategoryEmoji(
+                                          selectedIconValue,
+                                        )
                                       : selectedIconValue;
                                   navigator.pop(
                                     _CategoryEditorResult(
@@ -1034,8 +1093,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       return;
     }
 
-    final didChange = draft.name != category.nombre ||
-    draft.iconValue != (_normalizeStoredIconValue(category.icono) ?? '') ||
+    final didChange =
+        draft.name != category.nombre ||
+        draft.iconValue != (_normalizeStoredIconValue(category.icono) ?? '') ||
         draft.generatedWithAi != (category.creadoPorIa == true) ||
         (draft.aiConfidence ?? -1) != (category.confianzaIa ?? -1);
 
@@ -1081,7 +1141,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }).toList();
   }
 
-  List<CategoryModel> _applyCategoryFiltersAndSorting(List<CategoryModel> input) {
+  List<CategoryModel> _applyCategoryFiltersAndSorting(
+    List<CategoryModel> input,
+  ) {
     var output = input.where((category) {
       switch (_categoryVisibilityFilter) {
         case _VisibilityFilterOption.visible:
@@ -1095,21 +1157,29 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
     switch (_categorySortOption) {
       case _CategorySortOption.nameAsc:
-        output.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        output.sort(
+          (a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()),
+        );
         break;
       case _CategorySortOption.nameDesc:
-        output.sort((a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()));
+        output.sort(
+          (a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()),
+        );
         break;
       case _CategorySortOption.mostProducts:
         output.sort((a, b) {
-          final delta = (_productCountByCategory[b.id] ?? 0) - (_productCountByCategory[a.id] ?? 0);
+          final delta =
+              (_productCountByCategory[b.id] ?? 0) -
+              (_productCountByCategory[a.id] ?? 0);
           if (delta != 0) return delta;
           return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
         });
         break;
       case _CategorySortOption.leastProducts:
         output.sort((a, b) {
-          final delta = (_productCountByCategory[a.id] ?? 0) - (_productCountByCategory[b.id] ?? 0);
+          final delta =
+              (_productCountByCategory[a.id] ?? 0) -
+              (_productCountByCategory[b.id] ?? 0);
           if (delta != 0) return delta;
           return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
         });
@@ -1131,8 +1201,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
   Map<String, CategoryModel> get _categoryById {
     return {
-      for (final category in _categories)
-        _normalizedId(category.id): category,
+      for (final category in _categories) _normalizedId(category.id): category,
     };
   }
 
@@ -1168,10 +1237,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
     switch (_productSortOption) {
       case _ProductSortOption.nameAsc:
-        output.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        output.sort(
+          (a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()),
+        );
         break;
       case _ProductSortOption.nameDesc:
-        output.sort((a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()));
+        output.sort(
+          (a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()),
+        );
         break;
       case _ProductSortOption.priceAsc:
         output.sort((a, b) => a.precio.compareTo(b.precio));
@@ -1205,7 +1278,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         .toList();
   }
 
-  List<ProductModel> get _desktopPanelProducts => _filteredProductsForCategoryTab;
+  List<ProductModel> get _desktopPanelProducts =>
+      _filteredProductsForCategoryTab;
 
   List<ProductModel> get _desktopPagedProducts {
     final products = _desktopPanelProducts;
@@ -1227,10 +1301,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         .toList();
     switch (_productSortOption) {
       case _ProductSortOption.nameAsc:
-        output.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        output.sort(
+          (a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()),
+        );
         break;
       case _ProductSortOption.nameDesc:
-        output.sort((a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()));
+        output.sort(
+          (a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()),
+        );
         break;
       case _ProductSortOption.priceAsc:
         output.sort((a, b) => a.precio.compareTo(b.precio));
@@ -1257,21 +1335,29 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         .toList();
     switch (_categorySortOption) {
       case _CategorySortOption.nameAsc:
-        output.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
+        output.sort(
+          (a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()),
+        );
         break;
       case _CategorySortOption.nameDesc:
-        output.sort((a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()));
+        output.sort(
+          (a, b) => b.nombre.toLowerCase().compareTo(a.nombre.toLowerCase()),
+        );
         break;
       case _CategorySortOption.mostProducts:
         output.sort((a, b) {
-          final delta = (_productCountByCategory[b.id] ?? 0) - (_productCountByCategory[a.id] ?? 0);
+          final delta =
+              (_productCountByCategory[b.id] ?? 0) -
+              (_productCountByCategory[a.id] ?? 0);
           if (delta != 0) return delta;
           return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
         });
         break;
       case _CategorySortOption.leastProducts:
         output.sort((a, b) {
-          final delta = (_productCountByCategory[a.id] ?? 0) - (_productCountByCategory[b.id] ?? 0);
+          final delta =
+              (_productCountByCategory[a.id] ?? 0) -
+              (_productCountByCategory[b.id] ?? 0);
           if (delta != 0) return delta;
           return a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase());
         });
@@ -1325,7 +1411,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<bool> _updateProductVisibilityInDatabase(
@@ -1762,9 +1850,80 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
   }
 
+  Future<void> _onProductReorder(
+    List<ProductModel> visibleCategoryProducts,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    if (_isSavingProductOrder || _isMutating || oldIndex == newIndex) return;
+
+    final categoryId = _normalizedId(_selectedProductCategoryId);
+    if (categoryId.isEmpty ||
+        visibleCategoryProducts.any(
+          (product) => _normalizedId(product.categoriaId) != categoryId,
+        )) {
+      return;
+    }
+
+    final originalList = List<ProductModel>.from(_products);
+    final updated = List<ProductModel>.from(visibleCategoryProducts);
+    if (newIndex > oldIndex) newIndex -= 1;
+    final moved = updated.removeAt(oldIndex);
+    updated.insert(newIndex, moved);
+    final orderById = <String, int>{
+      for (var index = 0; index < updated.length; index++)
+        updated[index].id: index,
+    };
+
+    setState(() {
+      _isSavingProductOrder = true;
+      _products = _products.map((product) {
+        final order = orderById[product.id];
+        return order == null ? product : product.copyWith(orden: order);
+      }).toList();
+    });
+
+    try {
+      for (var index = 0; index < updated.length; index++) {
+        await Supabase.instance.client
+            .from('productos')
+            .update({'orden': index})
+            .eq('comercio_id', SupabaseConfig.currentComercioId)
+            .eq('categoria_id', categoryId)
+            .eq('id', updated[index].id);
+      }
+      if (mounted) setState(() => _desktopProductPage = 0);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _products = originalList);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo guardar el orden de productos: $error'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingProductOrder = false);
+    }
+  }
+
+  Widget _reorderDragStartListener({
+    required int index,
+    required Widget child,
+  }) {
+    final platform = Theme.of(context).platform;
+    if (platform == TargetPlatform.windows ||
+        platform == TargetPlatform.macOS ||
+        platform == TargetPlatform.linux) {
+      return ReorderableDragStartListener(index: index, child: child);
+    }
+    return ReorderableDelayedDragStartListener(index: index, child: child);
+  }
+
   Future<void> _deleteCategory(CategoryModel category) async {
     if (!MerchantSession.canManageCatalog) {
-      _showMessage(MerchantSession.deniedMessage('eliminar información del menú'));
+      _showMessage(
+        MerchantSession.deniedMessage('eliminar información del menú'),
+      );
       return;
     }
     if (_isMutating) return;
@@ -1896,9 +2055,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         : '${result.createdProducts} productos';
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Menú listo: $categoryLabel y $productLabel.'),
-      ),
+      SnackBar(content: Text('Menú listo: $categoryLabel y $productLabel.')),
     );
 
     if (result.requestAiProductImages) {
@@ -2007,9 +2164,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 onTap: () => Navigator.of(context).pop('category'),
               ),
               ListTile(
-                leading: Icon(Icons.inventory_2_rounded, color: colorScheme.primary),
+                leading: Icon(
+                  Icons.inventory_2_rounded,
+                  color: colorScheme.primary,
+                ),
                 title: const Text('Nuevo producto'),
-                subtitle: const Text('Agrega un producto sin entrar a la categoría'),
+                subtitle: const Text(
+                  'Agrega un producto sin entrar a la categoría',
+                ),
                 onTap: () => Navigator.of(context).pop('product'),
               ),
             ],
@@ -2103,7 +2265,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               onEdit: () => _editCategory(category),
               onDelete: () => _deleteCategory(category),
               onToggleActive: (value) => _toggleCategoryActive(category, value),
-              dragHandle: ReorderableDelayedDragStartListener(
+              dragHandle: _reorderDragStartListener(
                 index: index,
                 child: Icon(
                   Icons.drag_indicator_rounded,
@@ -2126,7 +2288,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 onOpen: () => _openProducts(category),
                 onEdit: () => _editCategory(category),
                 onDelete: () => _deleteCategory(category),
-                onToggleActive: (value) => _toggleCategoryActive(category, value),
+                onToggleActive: (value) =>
+                    _toggleCategoryActive(category, value),
               ),
             )
             .toList(),
@@ -2313,12 +2476,115 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     );
   }
 
+  void _openCategoryOrderMode() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _selectedTabIndex = 1;
+      _categorySortOption = _CategorySortOption.order;
+      _categoryVisibilityFilter = _VisibilityFilterOption.all;
+      _categoryVisibleCount = _categories.length;
+    });
+  }
+
+  void _openProductOrderMode() {
+    if (_categories.isEmpty || _products.isEmpty) return;
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _selectedTabIndex = 2;
+      _selectedProductCategoryId = _categories.first.id;
+      _productSortOption = _ProductSortOption.order;
+      _productVisibilityFilter = _VisibilityFilterOption.all;
+      _productVisibleCount = _products.length;
+      _desktopProductPage = 0;
+      _desktopProductGridView = false;
+    });
+  }
+
   List<Widget> _buildAllTabSections({required bool useAdminTable}) {
     final featuredCategories = _searchedCategories.take(3).toList();
     final featuredProducts = _searchFilteredProducts.take(6).toList();
     final isDesktop = MediaQuery.sizeOf(context).width >= 1024;
 
     return [
+      if (!isDesktop && _categories.isNotEmpty)
+        Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE8EAF2)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Orden de aparición',
+                style: GoogleFonts.manrope(
+                  color: const Color(0xFF1F2555),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Elige qué categorías y productos se muestran primero.',
+                style: GoogleFonts.manrope(
+                  color: const Color(0xFF6B7280),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _isMutating || _isSavingCategoryOrder
+                          ? null
+                          : _openCategoryOrderMode,
+                      icon: const Icon(Icons.category_outlined, size: 18),
+                      label: const Text('Categorías'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF6D28D9),
+                        side: const BorderSide(color: Color(0xFFD8CCF5)),
+                        minimumSize: const Size(0, 42),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed:
+                          _isMutating ||
+                              _isSavingProductOrder ||
+                              _products.isEmpty
+                          ? null
+                          : _openProductOrderMode,
+                      icon: const Icon(Icons.drag_indicator_rounded, size: 18),
+                      label: const Text('Productos'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF6D28D9),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 42),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       _DashboardSectionHeader(
         title: 'Atajos del vendedor',
         subtitle: 'Gestiona categorías y productos sin cambiar de pantalla.',
@@ -2403,25 +2669,27 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         _EmptyMenuState(
           icon: Icons.category_outlined,
           title: 'No hay categorías en este menú',
-          subtitle: 'Crea tu primera categoría para empezar a cargar productos.',
+          subtitle:
+              'Crea tu primera categoría para empezar a cargar productos.',
           actionLabel: 'Crear primera categoría',
           onAction: _isMutating ? null : _createCategory,
         ),
       ];
     }
 
-    final canReorder = _searchQuery.trim().isEmpty &&
+    final canReorder =
+        _searchQuery.trim().isEmpty &&
         _categoryVisibilityFilter == _VisibilityFilterOption.all &&
         _categorySortOption == _CategorySortOption.order;
     final reorderHint = useAdminTable
         ? (canReorder
-            ? 'Arrastra el ícono para cambiar el orden de las categorías.'
-            : 'Desactiva la búsqueda para reordenar categorías.')
+              ? 'Arrastra el ícono para cambiar el orden de las categorías.'
+              : 'Desactiva la búsqueda para reordenar categorías.')
         : (canReorder
-            ? (_isSavingCategoryOrder
-                ? 'Guardando nuevo orden...'
-                : 'Arrastra las categorías para cambiar su orden.')
-            : 'Desactiva la búsqueda para reordenar categorías.');
+              ? (_isSavingCategoryOrder
+                    ? 'Guardando nuevo orden...'
+                    : 'Arrastra las categorías para cambiar su orden.')
+              : 'Desactiva la búsqueda para reordenar categorías.');
 
     final pageItems = filtered.take(_categoryVisibleCount).toList();
     final hasMore = filtered.length > pageItems.length;
@@ -2457,7 +2725,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               setState(() => _categoryVisibleCount += 20);
             },
             icon: const Icon(Icons.expand_more_rounded),
-            label: Text('Cargar más categorías (${filtered.length - pageItems.length})'),
+            label: Text(
+              'Cargar más categorías (${filtered.length - pageItems.length})',
+            ),
           ),
         ),
       ],
@@ -2466,8 +2736,17 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
   List<Widget> _buildProductsTabSections() {
     final products = _filteredProductsForCategoryTab;
-    final pageItems = products.take(_productVisibleCount).toList();
-    final hasMore = products.length > pageItems.length;
+    final canReorderProducts =
+        !_isMutating &&
+        !_isSavingProductOrder &&
+        _productSortOption == _ProductSortOption.order &&
+        _selectedProductCategoryId != null &&
+        _productVisibilityFilter == _VisibilityFilterOption.all &&
+        _searchQuery.trim().isEmpty;
+    final pageItems = canReorderProducts
+        ? products
+        : products.take(_productVisibleCount).toList();
+    final hasMore = !canReorderProducts && products.length > pageItems.length;
     return [
       _buildProductControls(),
       const SizedBox(height: 10),
@@ -2481,7 +2760,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 selected: _selectedProductCategoryId == null,
                 showCheckmark: false,
                 label: const Text('Todas'),
-                onSelected: (_) => setState(() => _selectedProductCategoryId = null),
+                onSelected: (_) =>
+                    setState(() => _selectedProductCategoryId = null),
               ),
             ),
             ..._categories.map(
@@ -2499,6 +2779,19 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           ],
         ),
       ),
+      if (_productSortOption == _ProductSortOption.order &&
+          _selectedProductCategoryId == null)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text(
+            'Selecciona una categoría para reordenar sus productos.',
+            style: GoogleFonts.manrope(
+              color: const Color(0xFF6B7280),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       const SizedBox(height: 14),
       if (products.isEmpty)
         _EmptyMenuState(
@@ -2507,6 +2800,31 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           subtitle: 'Prueba otra categoría o crea un producto nuevo.',
           actionLabel: 'Nuevo producto',
           onAction: _openProductFormDirect,
+        )
+      else if (canReorderProducts)
+        ReorderableListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          buildDefaultDragHandles: false,
+          itemCount: pageItems.length,
+          onReorder: (oldIndex, newIndex) =>
+              _onProductReorder(pageItems, oldIndex, newIndex),
+          itemBuilder: (context, index) {
+            final product = pageItems[index];
+            return _buildProductCard(
+              product,
+              dragHandle: _reorderDragStartListener(
+                index: index,
+                child: Tooltip(
+                  message: 'Arrastra para elegir qué producto aparece primero',
+                  child: const Icon(
+                    Icons.drag_indicator_rounded,
+                    color: Color(0xFF6D28D9),
+                  ),
+                ),
+              ),
+            );
+          },
         )
       else
         ...pageItems.map(_buildProductCard),
@@ -2520,7 +2838,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               setState(() => _productVisibleCount += 24);
             },
             icon: const Icon(Icons.expand_more_rounded),
-            label: Text('Cargar más productos (${products.length - pageItems.length})'),
+            label: Text(
+              'Cargar más productos (${products.length - pageItems.length})',
+            ),
           ),
         ),
       ],
@@ -2536,7 +2856,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         _EmptyMenuState(
           icon: Icons.visibility_rounded,
           title: 'No hay elementos ocultos',
-          subtitle: 'Aquí verás categorías y productos ocultos para reactivarlos rápido.',
+          subtitle:
+              'Aquí verás categorías y productos ocultos para reactivarlos rápido.',
           actionLabel: 'Ir a productos',
           onAction: () => setState(() => _selectedTabIndex = 2),
         ),
@@ -2568,13 +2889,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     ];
   }
 
-  Widget _buildProductCard(ProductModel product) {
+  Widget _buildProductCard(ProductModel product, {Widget? dragHandle}) {
     return _DashboardProductCard(
       key: ValueKey('dashboard-product-${product.id}'),
       product: product,
       categoryName: _categoryNameFor(product.categoriaId),
       priceLabel: _formatProductPrice(product.precio),
       priceSecondaryLabel: _formatProductPriceSecondary(product.precio),
+      dragHandle: dragHandle,
       onEdit: () => _openProductFormDirect(product: product),
       onDelete: () => _deleteProduct(product),
       onToggleVisible: () {
@@ -2602,7 +2924,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }
 
   void _selectDesktopCategory(String categoryId) {
-    if (_normalizedId(_selectedProductCategoryId) == _normalizedId(categoryId)) {
+    if (_normalizedId(_selectedProductCategoryId) ==
+        _normalizedId(categoryId)) {
       return;
     }
     setState(() {
@@ -2621,7 +2944,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
     if (_categories.isEmpty) {
       return Padding(
-        padding: EdgeInsets.fromLTRB(horizontalPadding, 24, horizontalPadding, 24),
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          24,
+          horizontalPadding,
+          24,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -2668,7 +2996,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     selectedCategory ??= categories.isNotEmpty ? categories.first : null;
 
     return Padding(
-      padding: EdgeInsets.fromLTRB(horizontalPadding, 16, horizontalPadding, 24),
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        16,
+        horizontalPadding,
+        24,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2749,10 +3082,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       minimumSize: const Size(0, 44),
       padding: const EdgeInsets.symmetric(horizontal: 14),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      textStyle: GoogleFonts.poppins(
-        fontWeight: FontWeight.w600,
-        fontSize: 14,
-      ),
+      textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
     );
 
     return Row(
@@ -2867,7 +3197,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         isDense: true,
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: borderColor),
@@ -2898,23 +3231,32 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 _desktopProductPage = 0;
               });
             },
-            style: GoogleFonts.poppins(fontSize: 14, color: const Color(0xFF11183C)),
-            decoration: toolbarFieldDecoration('Buscar productos o categorías...').copyWith(
-              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6B6F92)),
-              suffixIcon: _searchQuery.trim().isEmpty
-                  ? null
-                  : IconButton(
-                      onPressed: () {
-                        if (!mounted) return;
-                        _searchController.clear();
-                        setState(() {
-                          _searchQuery = '';
-                          _desktopProductPage = 0;
-                        });
-                      },
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                    ),
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              color: const Color(0xFF11183C),
             ),
+            decoration:
+                toolbarFieldDecoration(
+                  'Buscar productos o categorías...',
+                ).copyWith(
+                  prefixIcon: const Icon(
+                    Icons.search_rounded,
+                    color: Color(0xFF6B6F92),
+                  ),
+                  suffixIcon: _searchQuery.trim().isEmpty
+                      ? null
+                      : IconButton(
+                          onPressed: () {
+                            if (!mounted) return;
+                            _searchController.clear();
+                            setState(() {
+                              _searchQuery = '';
+                              _desktopProductPage = 0;
+                            });
+                          },
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                        ),
+                ),
           ),
         ),
         const SizedBox(width: 12),
@@ -2993,9 +3335,15 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
             padding: EdgeInsets.zero,
             backgroundColor: Colors.white,
             side: BorderSide(color: borderColor),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
-          child: const Icon(Icons.tune_rounded, color: Color(0xFF6B6F92), size: 20),
+          child: const Icon(
+            Icons.tune_rounded,
+            color: Color(0xFF6B6F92),
+            size: 20,
+          ),
         ),
       ],
     );
@@ -3090,6 +3438,13 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     required Color mutedText,
     required bool disabled,
   }) {
+    final canReorderCategories =
+        !disabled &&
+        !_isSavingCategoryOrder &&
+        _categorySortOption == _CategorySortOption.order &&
+        _categoryVisibilityFilter == _VisibilityFilterOption.all &&
+        _searchQuery.trim().isEmpty;
+
     return SizedBox(
       width: 280,
       child: Container(
@@ -3164,17 +3519,20 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                         ),
                       ),
                     )
-                  : ListView.separated(
+                  : ReorderableListView.builder(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      buildDefaultDragHandles: false,
                       itemCount: categories.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      onReorder: canReorderCategories
+                          ? _onCategoryReorder
+                          : (_, _) {},
                       itemBuilder: (context, index) {
                         final category = categories[index];
                         final isSelected =
                             selectedCategoryId == category.id.trim();
-                        final count =
-                            _productCountByCategory[category.id] ?? 0;
+                        final count = _productCountByCategory[category.id] ?? 0;
                         return Material(
+                          key: ValueKey('desktop-category-${category.id}'),
                           color: Colors.transparent,
                           child: InkWell(
                             onTap: () => _selectDesktopCategory(category.id),
@@ -3199,11 +3557,30 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       color: isSelected
                                           ? purple
                                           : Colors.transparent,
-                                      borderRadius: const BorderRadius.horizontal(
-                                        left: Radius.circular(10),
-                                      ),
+                                      borderRadius:
+                                          const BorderRadius.horizontal(
+                                            left: Radius.circular(10),
+                                          ),
                                     ),
                                   ),
+                                  if (canReorderCategories)
+                                    _reorderDragStartListener(
+                                      index: index,
+                                      child: Tooltip(
+                                        message:
+                                            'Arrastra para reordenar categorías',
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          ),
+                                          child: Icon(
+                                            Icons.drag_indicator_rounded,
+                                            size: 19,
+                                            color: mutedText,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   Expanded(
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(
@@ -3232,7 +3609,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                                 Text(
                                                   category.nombre,
                                                   maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                   style: GoogleFonts.poppins(
                                                     fontSize: 14,
                                                     fontWeight: FontWeight.w600,
@@ -3339,16 +3717,31 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }) {
     final panelProducts = _desktopPanelProducts;
     final totalProducts = panelProducts.length;
-    final totalPages = _desktopTotalProductPages;
+    final canReorderProducts =
+        !disabled &&
+        !_isSavingProductOrder &&
+        _productSortOption == _ProductSortOption.order &&
+        selectedCategory != null &&
+        _productVisibilityFilter == _VisibilityFilterOption.all &&
+        _searchQuery.trim().isEmpty;
+    final totalPages = canReorderProducts ? 1 : _desktopTotalProductPages;
     if (_desktopProductPage >= totalPages && totalPages > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         setState(() => _desktopProductPage = totalPages - 1);
       });
     }
-    final pagedProducts = _desktopPagedProducts;
-    final start = totalProducts == 0 ? 0 : (_desktopProductPage * _desktopPageSize) + 1;
-    final end = min((_desktopProductPage + 1) * _desktopPageSize, totalProducts);
+    final pagedProducts = canReorderProducts
+        ? panelProducts
+        : _desktopPagedProducts;
+    final start = totalProducts == 0
+        ? 0
+        : canReorderProducts
+        ? 1
+        : (_desktopProductPage * _desktopPageSize) + 1;
+    final end = canReorderProducts
+        ? totalProducts
+        : min((_desktopProductPage + 1) * _desktopPageSize, totalProducts);
     final title = selectedCategory == null
         ? 'Todos los productos ($totalProducts)'
         : 'Productos en ${selectedCategory.nombre} ($totalProducts)';
@@ -3436,6 +3829,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                   setState(() {
                                     _productSortOption = value;
                                     _desktopProductPage = 0;
+                                    if (value == _ProductSortOption.order) {
+                                      _desktopProductGridView = false;
+                                    }
                                   });
                                 },
                         ),
@@ -3451,11 +3847,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              onPressed: disabled
+                              onPressed:
+                                  disabled ||
+                                      _productSortOption ==
+                                          _ProductSortOption.order
                                   ? null
                                   : () => setState(
-                                        () => _desktopProductGridView = false,
-                                      ),
+                                      () => _desktopProductGridView = false,
+                                    ),
                               icon: Icon(
                                 Icons.view_list_rounded,
                                 size: 20,
@@ -3469,8 +3868,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                               onPressed: disabled
                                   ? null
                                   : () => setState(
-                                        () => _desktopProductGridView = true,
-                                      ),
+                                      () => _desktopProductGridView = true,
+                                    ),
                               icon: Icon(
                                 Icons.grid_view_rounded,
                                 size: 20,
@@ -3486,187 +3885,279 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                     ],
                   ),
                 ),
-                if (!_desktopProductGridView) const Divider(height: 1, color: Color(0xFFE8EAF2)),
-                if (!_desktopProductGridView) const _DesktopProductsTableHeader(),
-                Expanded(
-                  child: totalProducts == 0
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.inventory_2_outlined,
-                            size: 40,
-                            color: mutedText,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Sin productos',
+                if (_productSortOption == _ProductSortOption.order)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.drag_indicator_rounded,
+                          size: 17,
+                          color: const Color(0xFF6D28D9),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            selectedCategory == null
+                                ? 'Selecciona una categoría para reordenar sus productos.'
+                                : 'Arrastra el asa de cada producto para elegir cuál aparece primero.',
                             style: GoogleFonts.poppins(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: darkText,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Agrega tu primer producto para empezar a vender.',
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
+                              fontSize: 12,
                               fontWeight: FontWeight.w500,
                               color: mutedText,
                             ),
                           ),
-                          const SizedBox(height: 16),
-                          FilledButton(
-                            onPressed: disabled
-                                ? null
-                                : () => _openProductFormDirect(
-                                      initialCategoryId:
-                                          _selectedProductCategoryId,
+                        ),
+                      ],
+                    ),
+                  ),
+                if (!_desktopProductGridView)
+                  const Divider(height: 1, color: Color(0xFFE8EAF2)),
+                if (!_desktopProductGridView)
+                  _DesktopProductsTableHeader(
+                    showDragHandle: canReorderProducts,
+                  ),
+                Expanded(
+                  child: totalProducts == 0
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.inventory_2_outlined,
+                                  size: 40,
+                                  color: mutedText,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Sin productos',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                    color: darkText,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Agrega tu primer producto para empezar a vender.',
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: mutedText,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                FilledButton(
+                                  onPressed: disabled
+                                      ? null
+                                      : () => _openProductFormDirect(
+                                          initialCategoryId:
+                                              _selectedProductCategoryId,
+                                        ),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: purple,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                      vertical: 12,
                                     ),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: purple,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 12,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  child: const Text('Crear producto'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : _desktopProductGridView
+                      ? GridView.builder(
+                          padding: const EdgeInsets.all(16),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 12,
+                                childAspectRatio: 1.35,
                               ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                          itemCount: pagedProducts.length,
+                          itemBuilder: (context, index) {
+                            final product = pagedProducts[index];
+                            return _DashboardProductCard(
+                              key: ValueKey('desktop-grid-${product.id}'),
+                              product: product,
+                              categoryName: _categoryNameFor(
+                                product.categoriaId,
+                              ),
+                              priceLabel: _formatProductPrice(product.precio),
+                              priceSecondaryLabel: _formatProductPriceSecondary(
+                                product.precio,
+                              ),
+                              onEdit: () =>
+                                  _openProductFormDirect(product: product),
+                              onDelete: () => _deleteProduct(product),
+                              onToggleVisible: () {
+                                if (product.disponible) {
+                                  unawaited(_hideProduct(product));
+                                } else {
+                                  unawaited(_showProduct(product));
+                                }
+                              },
+                              onImproveImage: () =>
+                                  _generateAiImageForProduct(product),
+                            );
+                          },
+                        )
+                      : canReorderProducts
+                      ? ReorderableListView.builder(
+                          padding: EdgeInsets.zero,
+                          buildDefaultDragHandles: false,
+                          itemCount: panelProducts.length,
+                          onReorder: (oldIndex, newIndex) => _onProductReorder(
+                            panelProducts,
+                            oldIndex,
+                            newIndex,
+                          ),
+                          itemBuilder: (context, index) {
+                            final product = panelProducts[index];
+                            return _DesktopProductsTableRow(
+                              key: ValueKey('desktop-product-${product.id}'),
+                              product: product,
+                              priceLabel: _formatProductPrice(product.precio),
+                              priceSecondaryLabel: _formatProductPriceSecondary(
+                                product.precio,
+                              ),
+                              disabled: disabled || _isSavingProductOrder,
+                              dragHandle: _reorderDragStartListener(
+                                index: index,
+                                child: Tooltip(
+                                  message:
+                                      'Arrastra para elegir qué producto aparece primero',
+                                  child: const Icon(
+                                    Icons.drag_indicator_rounded,
+                                    size: 20,
+                                    color: Color(0xFF6D28D9),
+                                  ),
+                                ),
+                              ),
+                              onEdit: () =>
+                                  _openProductFormDirect(product: product),
+                              onDelete: () => _deleteProduct(product),
+                              onToggleVisibility: () {
+                                if (product.disponible) {
+                                  unawaited(_hideProduct(product));
+                                } else {
+                                  unawaited(_showProduct(product));
+                                }
+                              },
+                              onImproveImage: () =>
+                                  _generateAiImageForProduct(product),
+                            );
+                          },
+                        )
+                      : ListView.separated(
+                          padding: EdgeInsets.zero,
+                          itemCount: pagedProducts.length,
+                          separatorBuilder: (_, _) => const Divider(
+                            height: 1,
+                            color: Color(0xFFF3F4F6),
+                          ),
+                          itemBuilder: (context, index) {
+                            final product = pagedProducts[index];
+                            return _DesktopProductsTableRow(
+                              product: product,
+                              priceLabel: _formatProductPrice(product.precio),
+                              priceSecondaryLabel: _formatProductPriceSecondary(
+                                product.precio,
+                              ),
+                              disabled: disabled,
+                              onEdit: () =>
+                                  _openProductFormDirect(product: product),
+                              onDelete: () => _deleteProduct(product),
+                              onToggleVisibility: () {
+                                if (product.disponible) {
+                                  unawaited(_hideProduct(product));
+                                } else {
+                                  unawaited(_showProduct(product));
+                                }
+                              },
+                              onImproveImage: () =>
+                                  _generateAiImageForProduct(product),
+                            );
+                          },
+                        ),
+                ),
+                const Divider(height: 1, color: Color(0xFFE8EAF2)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 14,
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        totalProducts == 0
+                            ? 'Sin productos para mostrar'
+                            : canReorderProducts
+                            ? 'Mostrando los $totalProducts productos'
+                            : 'Mostrando $start a $end de $totalProducts productos',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: mutedText,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (!canReorderProducts) ...[
+                        IconButton(
+                          onPressed: _desktopProductPage > 0
+                              ? () => setState(() => _desktopProductPage -= 1)
+                              : null,
+                          icon: const Icon(Icons.chevron_left_rounded),
+                          tooltip: 'Página anterior',
+                        ),
+                        ...List.generate(totalPages, (index) {
+                          final isActive = index == _desktopProductPage;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: TextButton(
+                              onPressed: () =>
+                                  setState(() => _desktopProductPage = index),
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(36, 36),
+                                backgroundColor: isActive
+                                    ? purple.withValues(alpha: 0.12)
+                                    : Colors.transparent,
+                                foregroundColor: isActive ? purple : mutedText,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: Text(
+                                '${index + 1}',
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
-                            child: const Text('Crear producto'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : _desktopProductGridView
-                    ? GridView.builder(
-                        padding: const EdgeInsets.all(16),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 1.35,
-                        ),
-                        itemCount: pagedProducts.length,
-                        itemBuilder: (context, index) {
-                          final product = pagedProducts[index];
-                          return _DashboardProductCard(
-                            key: ValueKey('desktop-grid-${product.id}'),
-                            product: product,
-                            categoryName: _categoryNameFor(product.categoriaId),
-                            priceLabel: _formatProductPrice(product.precio),
-                            priceSecondaryLabel:
-                                _formatProductPriceSecondary(product.precio),
-                            onEdit: () => _openProductFormDirect(product: product),
-                            onDelete: () => _deleteProduct(product),
-                            onToggleVisible: () {
-                              if (product.disponible) {
-                                unawaited(_hideProduct(product));
-                              } else {
-                                unawaited(_showProduct(product));
-                              }
-                            },
-                            onImproveImage: () =>
-                                _generateAiImageForProduct(product),
                           );
-                        },
-                      )
-                    : ListView.separated(
-                        padding: EdgeInsets.zero,
-                        itemCount: pagedProducts.length,
-                        separatorBuilder: (_, _) => const Divider(
-                          height: 1,
-                          color: Color(0xFFF3F4F6),
+                        }),
+                        IconButton(
+                          onPressed: _desktopProductPage < totalPages - 1
+                              ? () => setState(() => _desktopProductPage += 1)
+                              : null,
+                          icon: const Icon(Icons.chevron_right_rounded),
+                          tooltip: 'Página siguiente',
                         ),
-                        itemBuilder: (context, index) {
-                          final product = pagedProducts[index];
-                          return _DesktopProductsTableRow(
-                            product: product,
-                            priceLabel: _formatProductPrice(product.precio),
-                            priceSecondaryLabel:
-                                _formatProductPriceSecondary(product.precio),
-                            disabled: disabled,
-                            onEdit: () => _openProductFormDirect(product: product),
-                            onDelete: () => _deleteProduct(product),
-                            onToggleVisibility: () {
-                              if (product.disponible) {
-                                unawaited(_hideProduct(product));
-                              } else {
-                                unawaited(_showProduct(product));
-                              }
-                            },
-                            onImproveImage: () =>
-                                _generateAiImageForProduct(product),
-                          );
-                        },
-                      ),
-          ),
-          const Divider(height: 1, color: Color(0xFFE8EAF2)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            child: Row(
-              children: [
-                Text(
-                  totalProducts == 0
-                      ? 'Sin productos para mostrar'
-                      : 'Mostrando $start a $end de $totalProducts productos',
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: mutedText,
+                      ],
+                    ],
                   ),
                 ),
-                const Spacer(),
-                IconButton(
-                  onPressed: _desktopProductPage > 0
-                      ? () => setState(() => _desktopProductPage -= 1)
-                      : null,
-                  icon: const Icon(Icons.chevron_left_rounded),
-                  tooltip: 'Página anterior',
-                ),
-                ...List.generate(totalPages, (index) {
-                  final isActive = index == _desktopProductPage;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: TextButton(
-                      onPressed: () => setState(() => _desktopProductPage = index),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(36, 36),
-                        backgroundColor: isActive
-                            ? purple.withValues(alpha: 0.12)
-                            : Colors.transparent,
-                        foregroundColor: isActive ? purple : mutedText,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: Text(
-                        '${index + 1}',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-                IconButton(
-                  onPressed: _desktopProductPage < totalPages - 1
-                      ? () => setState(() => _desktopProductPage += 1)
-                      : null,
-                  icon: const Icon(Icons.chevron_right_rounded),
-                  tooltip: 'Página siguiente',
-                ),
-              ],
-            ),
-          ),
               ],
             ),
           ),
@@ -3771,8 +4262,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                     children: [
                       CircleAvatar(
                         radius: 24,
-                        backgroundColor:
-                            const Color(0xFF6D28D9).withValues(alpha: 0.1),
+                        backgroundColor: const Color(
+                          0xFF6D28D9,
+                        ).withValues(alpha: 0.1),
                         child: const Icon(
                           Icons.restaurant_menu,
                           color: Color(0xFF6D28D9),
@@ -3822,8 +4314,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               children: [
                 CircleAvatar(
                   radius: 24,
-                  backgroundColor:
-                      const Color(0xFF6D28D9).withValues(alpha: 0.1),
+                  backgroundColor: const Color(
+                    0xFF6D28D9,
+                  ).withValues(alpha: 0.1),
                   child: const Icon(
                     Icons.restaurant_menu,
                     color: Color(0xFF6D28D9),
@@ -3926,33 +4419,35 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         title: isDesktopLayout
             ? null
             : (_showAppBarSearch
-                ? TextField(
-                    controller: _searchController,
-                    autofocus: true,
-                    onChanged: (value) {
-                      if (!mounted) return;
-                      setState(() {
-                        _searchQuery = value;
-                        _categoryVisibleCount = 20;
-                        _productVisibleCount = 24;
-                      });
-                    },
-                    style: TextStyle(color: colorScheme.onSurface),
-                    cursorColor: colorScheme.primary,
-                    decoration: InputDecoration(
-                      hintText: 'Buscar categorías y productos...',
-                      hintStyle: TextStyle(
-                        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                  ? TextField(
+                      controller: _searchController,
+                      autofocus: true,
+                      onChanged: (value) {
+                        if (!mounted) return;
+                        setState(() {
+                          _searchQuery = value;
+                          _categoryVisibleCount = 20;
+                          _productVisibleCount = 24;
+                        });
+                      },
+                      style: TextStyle(color: colorScheme.onSurface),
+                      cursorColor: colorScheme.primary,
+                      decoration: InputDecoration(
+                        hintText: 'Buscar categorías y productos...',
+                        hintStyle: TextStyle(
+                          color: colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.8,
+                          ),
+                        ),
+                        border: InputBorder.none,
+                        isDense: true,
                       ),
-                      border: InputBorder.none,
-                      isDense: true,
-                    ),
-                  )
-                : Text(
-                    widget.catalog.nombre,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  )),
+                    )
+                  : Text(
+                      widget.catalog.nombre,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    )),
         actions: [
           if (!isDesktopLayout)
             IconButton(
@@ -3960,7 +4455,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               icon: Icon(
                 _showAppBarSearch ? Icons.close_rounded : Icons.search_rounded,
               ),
-              tooltip: _showAppBarSearch ? 'Cerrar búsqueda' : 'Buscar en el menú',
+              tooltip: _showAppBarSearch
+                  ? 'Cerrar búsqueda'
+                  : 'Buscar en el menú',
             ),
         ],
       ),
@@ -3968,8 +4465,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           final viewportWidth = constraints.maxWidth;
-          final contentMaxWidth =
-              viewportWidth >= 1200 ? 1280.0 : double.infinity;
+          final contentMaxWidth = viewportWidth >= 1200
+              ? 1280.0
+              : double.infinity;
           final horizontalPadding = viewportWidth >= 1200
               ? 28.0
               : (viewportWidth >= 720 ? 24.0 : 16.0);
@@ -4006,7 +4504,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 }
 
 class _DesktopProductsTableHeader extends StatelessWidget {
-  const _DesktopProductsTableHeader();
+  const _DesktopProductsTableHeader({this.showDragHandle = false});
+
+  final bool showDragHandle;
 
   @override
   Widget build(BuildContext context) {
@@ -4015,6 +4515,7 @@ class _DesktopProductsTableHeader extends StatelessWidget {
       color: const Color(0xFFF9FAFB),
       child: Row(
         children: [
+          if (showDragHandle) const SizedBox(width: 28),
           const Expanded(
             flex: 5,
             child: Text(
@@ -4068,9 +4569,11 @@ class _DesktopProductsTableHeader extends StatelessWidget {
 
 class _DesktopProductsTableRow extends StatelessWidget {
   const _DesktopProductsTableRow({
+    super.key,
     required this.product,
     required this.priceLabel,
     this.priceSecondaryLabel,
+    this.dragHandle,
     required this.disabled,
     required this.onEdit,
     required this.onDelete,
@@ -4081,6 +4584,7 @@ class _DesktopProductsTableRow extends StatelessWidget {
   final ProductModel product;
   final String priceLabel;
   final String? priceSecondaryLabel;
+  final Widget? dragHandle;
   final bool disabled;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -4091,8 +4595,9 @@ class _DesktopProductsTableRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final description = product.descripcion.trim();
     final statusLabel = product.disponible ? 'Disponible' : 'Agotado';
-    final statusColor =
-        product.disponible ? const Color(0xFF16A34A) : const Color(0xFFF97316);
+    final statusColor = product.disponible
+        ? const Color(0xFF16A34A)
+        : const Color(0xFFF97316);
 
     Widget thumb() {
       final imageUrl = product.imagenUrl?.trim();
@@ -4104,9 +4609,8 @@ class _DesktopProductsTableRow extends StatelessWidget {
             width: 44,
             height: 44,
             fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => const _ProductThumbPlaceholder(
-              icon: Icons.fastfood_rounded,
-            ),
+            errorBuilder: (_, _, _) =>
+                const _ProductThumbPlaceholder(icon: Icons.fastfood_rounded),
           ),
         );
       }
@@ -4122,6 +4626,9 @@ class _DesktopProductsTableRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          if (dragHandle != null) ...[
+            SizedBox(width: 28, child: Center(child: dragHandle)),
+          ],
           Expanded(
             flex: 5,
             child: Row(
@@ -4232,7 +4739,9 @@ class _DesktopProductsTableRow extends StatelessWidget {
                     PopupMenuItem(
                       value: 'toggle',
                       child: Text(
-                        product.disponible ? 'Marcar como agotado' : 'Marcar disponible',
+                        product.disponible
+                            ? 'Marcar como agotado'
+                            : 'Marcar disponible',
                       ),
                     ),
                     const PopupMenuDivider(),
@@ -4331,14 +4840,23 @@ class _CategoryAdminTable extends StatelessWidget {
                   onEdit: () => onEdit(category),
                   onDelete: () => onDelete(category),
                   onToggleActive: (value) => onToggleActive(category, value),
-                  dragHandle: ReorderableDelayedDragStartListener(
-                    index: index,
-                    child: const Icon(
-                      Icons.drag_indicator_rounded,
-                      color: Color(0xFF9CA3AF),
-                      size: 20,
-                    ),
-                  ),
+                  dragHandle: MediaQuery.sizeOf(context).width >= 1024
+                      ? ReorderableDragStartListener(
+                          index: index,
+                          child: const Icon(
+                            Icons.drag_indicator_rounded,
+                            color: Color(0xFF9CA3AF),
+                            size: 20,
+                          ),
+                        )
+                      : ReorderableDelayedDragStartListener(
+                          index: index,
+                          child: const Icon(
+                            Icons.drag_indicator_rounded,
+                            color: Color(0xFF9CA3AF),
+                            size: 20,
+                          ),
+                        ),
                 );
               },
             )
@@ -4372,9 +4890,7 @@ class _CategoryTableHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: const BoxDecoration(
         color: Color(0xFFF8F7FB),
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFEAE7F2)),
-        ),
+        border: Border(bottom: BorderSide(color: Color(0xFFEAE7F2))),
       ),
       child: Row(
         children: [
@@ -4466,8 +4982,9 @@ class _CategoryTableRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor =
-        category.activo ? const Color(0xFF16A34A) : const Color(0xFFEF4444);
+    final statusColor = category.activo
+        ? const Color(0xFF16A34A)
+        : const Color(0xFFEF4444);
 
     return Material(
       color: Colors.white,
@@ -4476,9 +4993,7 @@ class _CategoryTableRow extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: const BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: Color(0xFFF1F2F6)),
-            ),
+            border: Border(bottom: BorderSide(color: Color(0xFFF1F2F6))),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -4541,7 +5056,10 @@ class _CategoryTableRow extends StatelessWidget {
               SizedBox(
                 width: 88,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
@@ -4621,9 +5139,7 @@ class _CategoryTableAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isDanger
-        ? const Color(0xFFDC2626)
-        : const Color(0xFF4B5563);
+    final color = isDanger ? const Color(0xFFDC2626) : const Color(0xFF4B5563);
     return TextButton.icon(
       onPressed: onTap,
       icon: Icon(icon, size: 15, color: color),
@@ -4734,10 +5250,11 @@ class _CategoryCard extends StatelessWidget {
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: (category.activo
-                                ? const Color(0xFF16A34A)
-                                : const Color(0xFFEF4444))
-                            .withValues(alpha: 0.1),
+                        color:
+                            (category.activo
+                                    ? const Color(0xFF16A34A)
+                                    : const Color(0xFFEF4444))
+                                .withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -4873,10 +5390,7 @@ class _StatChip extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      valueText,
-                      labelText,
-                    ],
+                    children: [valueText, labelText],
                   ),
                 ),
               ],
@@ -4935,10 +5449,7 @@ class _CategoryActionButton extends StatelessWidget {
 }
 
 class _DashboardSectionHeader extends StatelessWidget {
-  const _DashboardSectionHeader({
-    required this.title,
-    required this.subtitle,
-  });
+  const _DashboardSectionHeader({required this.title, required this.subtitle});
 
   final String title;
   final String subtitle;
@@ -5099,10 +5610,7 @@ class _AiGeneratorButton extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           gradient: const LinearGradient(
-            colors: [
-              Color(0xFF6D28D9),
-              Color(0xFF9333EA),
-            ],
+            colors: [Color(0xFF6D28D9), Color(0xFF9333EA)],
           ),
           boxShadow: const [
             BoxShadow(
@@ -5128,11 +5636,7 @@ class _AiGeneratorButton extends StatelessWidget {
                 ),
               ),
             ),
-            const Icon(
-              Icons.arrow_forward_ios,
-              size: 16,
-              color: Colors.white,
-            ),
+            const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white),
           ],
         ),
       ),
@@ -5292,6 +5796,7 @@ class _DashboardProductCard extends StatelessWidget {
     required this.categoryName,
     required this.priceLabel,
     this.priceSecondaryLabel,
+    this.dragHandle,
     required this.onEdit,
     required this.onDelete,
     required this.onToggleVisible,
@@ -5302,6 +5807,7 @@ class _DashboardProductCard extends StatelessWidget {
   final String categoryName;
   final String priceLabel;
   final String? priceSecondaryLabel;
+  final Widget? dragHandle;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onToggleVisible;
@@ -5369,6 +5875,14 @@ class _DashboardProductCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (dragHandle != null) ...[
+                SizedBox(
+                  width: 28,
+                  height: 72,
+                  child: Center(child: dragHandle),
+                ),
+                const SizedBox(width: 8),
+              ],
               thumb(),
               const SizedBox(width: 12),
               Expanded(
@@ -5437,96 +5951,96 @@ class _DashboardProductCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final compact = constraints.maxWidth < 520;
-              if (compact) {
-                return Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _CategoryActionButton(
-                            icon: Icons.edit,
-                            label: 'Editar',
-                            onTap: onEdit,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _CategoryActionButton(
-                            icon: product.disponible
-                                ? Icons.visibility_off_rounded
-                                : Icons.visibility_rounded,
-                            label: product.disponible ? 'Ocultar' : 'Mostrar',
-                            onTap: onToggleVisible,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: _CategoryActionButton(
-                        icon: Icons.auto_awesome_rounded,
-                        label: 'Mejorar IA',
-                        onTap: onImproveImage,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: _CategoryActionButton(
-                        icon: Icons.delete_outline_rounded,
-                        label: 'Eliminar producto',
-                        onTap: onDelete,
-                      ),
-                    ),
-                  ],
-                );
-              }
-
-              return Row(
-                children: [
-                  Expanded(
-                    child: _CategoryActionButton(
-                      icon: Icons.edit,
-                      label: 'Editar',
-                      onTap: onEdit,
-                    ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: PopupMenuButton<String>(
+              tooltip: 'Más opciones de ${product.nombre}',
+              icon: const Icon(Icons.more_horiz_rounded),
+              iconColor: const Color(0xFF6B6F92),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              onSelected: (action) {
+                switch (action) {
+                  case 'edit':
+                    onEdit();
+                    break;
+                  case 'visibility':
+                    onToggleVisible();
+                    break;
+                  case 'improve':
+                    onImproveImage();
+                    break;
+                  case 'delete':
+                    onDelete();
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: _ProductActionMenuItem(
+                    icon: Icons.edit_outlined,
+                    label: 'Editar',
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _CategoryActionButton(
-                      icon: product.disponible
-                          ? Icons.visibility_off_rounded
-                          : Icons.visibility_rounded,
-                      label: product.disponible ? 'Ocultar' : 'Mostrar',
-                      onTap: onToggleVisible,
-                    ),
+                ),
+                PopupMenuItem(
+                  value: 'visibility',
+                  child: _ProductActionMenuItem(
+                    icon: product.disponible
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    label: product.disponible ? 'Ocultar' : 'Mostrar',
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _CategoryActionButton(
-                      icon: Icons.auto_awesome_rounded,
-                      label: 'Mejorar IA',
-                      onTap: onImproveImage,
-                    ),
+                ),
+                const PopupMenuItem(
+                  value: 'improve',
+                  child: _ProductActionMenuItem(
+                    icon: Icons.auto_awesome_outlined,
+                    label: 'Mejorar imagen con IA',
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _CategoryActionButton(
-                      icon: Icons.delete_outline_rounded,
-                      label: 'Eliminar',
-                      onTap: onDelete,
-                    ),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: _ProductActionMenuItem(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'Eliminar producto',
+                    color: Theme.of(context).colorScheme.error,
                   ),
-                ],
-              );
-            },
+                ),
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ProductActionMenuItem extends StatelessWidget {
+  const _ProductActionMenuItem({
+    required this.icon,
+    required this.label,
+    this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = color ?? Theme.of(context).colorScheme.onSurface;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 18, color: foreground),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: TextStyle(color: foreground, fontWeight: FontWeight.w600),
+        ),
+      ],
     );
   }
 }
@@ -5671,83 +6185,343 @@ class _CategoryEmojiOption {
 }
 
 const List<_CategoryEmojiOption> _categoryEmojiOptions = [
-  _CategoryEmojiOption(emoji: '🍔', label: 'Hamburguesas', keywords: ['hamburguesa', 'burger', 'fast food']),
-  _CategoryEmojiOption(emoji: '🍕', label: 'Pizzas', keywords: ['pizza', 'italiana']),
-  _CategoryEmojiOption(emoji: '🍗', label: 'Pollo', keywords: ['pollo', 'chicken']),
-  _CategoryEmojiOption(emoji: '🥩', label: 'Carnes', keywords: ['carne', 'parrilla', 'asado']),
-  _CategoryEmojiOption(emoji: '🍣', label: 'Sushi', keywords: ['sushi', 'japonesa']),
-  _CategoryEmojiOption(emoji: '🍝', label: 'Pastas', keywords: ['pasta', 'spaghetti', 'lasagna']),
-  _CategoryEmojiOption(emoji: '🌮', label: 'Mexicana', keywords: ['taco', 'mexicana', 'burrito']),
-  _CategoryEmojiOption(emoji: '🥗', label: 'Saludable', keywords: ['ensalada', 'fit', 'healthy']),
-  _CategoryEmojiOption(emoji: '🍰', label: 'Postres', keywords: ['postre', 'cake', 'torta']),
-  _CategoryEmojiOption(emoji: '🍦', label: 'Helados', keywords: ['helado', 'gelato']),
-  _CategoryEmojiOption(emoji: '🥐', label: 'Panadería', keywords: ['pan', 'panaderia', 'bakery']),
+  _CategoryEmojiOption(
+    emoji: '🍔',
+    label: 'Hamburguesas',
+    keywords: ['hamburguesa', 'burger', 'fast food'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🍕',
+    label: 'Pizzas',
+    keywords: ['pizza', 'italiana'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🍗',
+    label: 'Pollo',
+    keywords: ['pollo', 'chicken'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🥩',
+    label: 'Carnes',
+    keywords: ['carne', 'parrilla', 'asado'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🍣',
+    label: 'Sushi',
+    keywords: ['sushi', 'japonesa'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🍝',
+    label: 'Pastas',
+    keywords: ['pasta', 'spaghetti', 'lasagna'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🌮',
+    label: 'Mexicana',
+    keywords: ['taco', 'mexicana', 'burrito'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🥗',
+    label: 'Saludable',
+    keywords: ['ensalada', 'fit', 'healthy'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🍰',
+    label: 'Postres',
+    keywords: ['postre', 'cake', 'torta'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🍦',
+    label: 'Helados',
+    keywords: ['helado', 'gelato'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🥐',
+    label: 'Panadería',
+    keywords: ['pan', 'panaderia', 'bakery'],
+  ),
   _CategoryEmojiOption(emoji: '☕', label: 'Café', keywords: ['cafe', 'coffee']),
-  _CategoryEmojiOption(emoji: '🥤', label: 'Bebidas', keywords: ['bebida', 'jugo', 'refresco']),
+  _CategoryEmojiOption(
+    emoji: '🥤',
+    label: 'Bebidas',
+    keywords: ['bebida', 'jugo', 'refresco'],
+  ),
   _CategoryEmojiOption(emoji: '🍺', label: 'Bar', keywords: ['cerveza', 'bar']),
   _CategoryEmojiOption(emoji: '🍷', label: 'Vinos', keywords: ['vino', 'wine']),
-  _CategoryEmojiOption(emoji: '🎁', label: 'Promociones', keywords: ['promo', 'oferta', 'descuento', 'regalo']),
-  _CategoryEmojiOption(emoji: '🛵', label: 'Delivery', keywords: ['delivery', 'envio', 'reparto']),
-  _CategoryEmojiOption(emoji: '🛍️', label: 'Tienda', keywords: ['tienda', 'shop', 'store']),
-  _CategoryEmojiOption(emoji: '💊', label: 'Salud', keywords: ['farmacia', 'salud']),
-  _CategoryEmojiOption(emoji: '💄', label: 'Belleza', keywords: ['belleza', 'maquillaje']),
+  _CategoryEmojiOption(
+    emoji: '🎁',
+    label: 'Promociones',
+    keywords: ['promo', 'oferta', 'descuento', 'regalo'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🛵',
+    label: 'Delivery',
+    keywords: ['delivery', 'envio', 'reparto'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🛍️',
+    label: 'Tienda',
+    keywords: ['tienda', 'shop', 'store'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '💊',
+    label: 'Salud',
+    keywords: ['farmacia', 'salud'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '💄',
+    label: 'Belleza',
+    keywords: ['belleza', 'maquillaje'],
+  ),
   _CategoryEmojiOption(emoji: '👕', label: 'Ropa', keywords: ['ropa', 'moda']),
-  _CategoryEmojiOption(emoji: '💻', label: 'Tecnología', keywords: ['tecnologia', 'electronica', 'computadora']),
-  _CategoryEmojiOption(emoji: '🐶', label: 'Mascotas', keywords: ['mascota', 'perro', 'pet']),
-  _CategoryEmojiOption(emoji: '🧽', label: 'Limpieza', keywords: ['limpieza', 'aseo']),
-  _CategoryEmojiOption(emoji: '🏠', label: 'Hogar', keywords: ['hogar', 'casa']),
-  _CategoryEmojiOption(emoji: '🛠️', label: 'Servicios', keywords: ['servicio', 'herramienta', 'ferreteria']),
-  _CategoryEmojiOption(emoji: '🎓', label: 'Educación', keywords: ['educacion', 'curso', 'academia']),
-  _CategoryEmojiOption(emoji: '🏋️', label: 'Deporte', keywords: ['fitness', 'gym', 'deporte']),
-  _CategoryEmojiOption(emoji: '🚗', label: 'Autos', keywords: ['auto', 'carro', 'repuesto']),
-  _CategoryEmojiOption(emoji: '🎵', label: 'Música', keywords: ['musica', 'audio']),
-  _CategoryEmojiOption(emoji: '🎮', label: 'Juegos', keywords: ['juego', 'gaming']),
-  _CategoryEmojiOption(emoji: '💎', label: 'Premium', keywords: ['premium', 'especial', 'destacado', 'deluxe']),
-  _CategoryEmojiOption(emoji: '🏷️', label: 'General', keywords: ['general', 'otros']),
-  _CategoryEmojiOption(emoji: '🎬', label: 'Películas', keywords: ['pelicula', 'películas', 'peliculas', 'cine', 'movie', 'film']),
+  _CategoryEmojiOption(
+    emoji: '💻',
+    label: 'Tecnología',
+    keywords: ['tecnologia', 'electronica', 'computadora'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🐶',
+    label: 'Mascotas',
+    keywords: ['mascota', 'perro', 'pet'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🧽',
+    label: 'Limpieza',
+    keywords: ['limpieza', 'aseo'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🏠',
+    label: 'Hogar',
+    keywords: ['hogar', 'casa'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🛠️',
+    label: 'Servicios',
+    keywords: ['servicio', 'herramienta', 'ferreteria'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🎓',
+    label: 'Educación',
+    keywords: ['educacion', 'curso', 'academia'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🏋️',
+    label: 'Deporte',
+    keywords: ['fitness', 'gym', 'deporte'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🚗',
+    label: 'Autos',
+    keywords: ['auto', 'carro', 'repuesto'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🎵',
+    label: 'Música',
+    keywords: ['musica', 'audio'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🎮',
+    label: 'Juegos',
+    keywords: ['juego', 'gaming'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '💎',
+    label: 'Premium',
+    keywords: ['premium', 'especial', 'destacado', 'deluxe'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🏷️',
+    label: 'General',
+    keywords: ['general', 'otros'],
+  ),
+  _CategoryEmojiOption(
+    emoji: '🎬',
+    label: 'Películas',
+    keywords: ['pelicula', 'películas', 'peliculas', 'cine', 'movie', 'film'],
+  ),
 ];
 
 const List<_CategoryIconOption> _categoryIconOptions = [
-  _CategoryIconOption(key: 'restaurant', label: 'Restaurante', icon: Icons.restaurant_rounded),
-  _CategoryIconOption(key: 'fastfood', label: 'Comida rápida', icon: Icons.fastfood_rounded),
-  _CategoryIconOption(key: 'lunch_dining', label: 'Hamburguesas', icon: Icons.lunch_dining_rounded),
-  _CategoryIconOption(key: 'dinner_dining', label: 'Platos', icon: Icons.dinner_dining_rounded),
-  _CategoryIconOption(key: 'ramen_dining', label: 'Ramen', icon: Icons.ramen_dining_rounded),
-  _CategoryIconOption(key: 'local_pizza', label: 'Pizza', icon: Icons.local_pizza_rounded),
-  _CategoryIconOption(key: 'bakery_dining', label: 'Panadería', icon: Icons.bakery_dining_rounded),
-  _CategoryIconOption(key: 'icecream', label: 'Helados', icon: Icons.icecream_rounded),
+  _CategoryIconOption(
+    key: 'restaurant',
+    label: 'Restaurante',
+    icon: Icons.restaurant_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'fastfood',
+    label: 'Comida rápida',
+    icon: Icons.fastfood_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'lunch_dining',
+    label: 'Hamburguesas',
+    icon: Icons.lunch_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'dinner_dining',
+    label: 'Platos',
+    icon: Icons.dinner_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'ramen_dining',
+    label: 'Ramen',
+    icon: Icons.ramen_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'local_pizza',
+    label: 'Pizza',
+    icon: Icons.local_pizza_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'bakery_dining',
+    label: 'Panadería',
+    icon: Icons.bakery_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'icecream',
+    label: 'Helados',
+    icon: Icons.icecream_rounded,
+  ),
   _CategoryIconOption(key: 'cake', label: 'Postres', icon: Icons.cake_rounded),
-  _CategoryIconOption(key: 'emoji_food_beverage', label: 'Snacks', icon: Icons.emoji_food_beverage_rounded),
-  _CategoryIconOption(key: 'local_cafe', label: 'Café', icon: Icons.local_cafe_rounded),
-  _CategoryIconOption(key: 'local_bar', label: 'Bar', icon: Icons.local_bar_rounded),
-  _CategoryIconOption(key: 'wine_bar', label: 'Vinos', icon: Icons.wine_bar_rounded),
-  _CategoryIconOption(key: 'sports_bar', label: 'Bebidas', icon: Icons.sports_bar_rounded),
-  _CategoryIconOption(key: 'brunch_dining', label: 'Brunch', icon: Icons.brunch_dining_rounded),
-  _CategoryIconOption(key: 'egg_alt', label: 'Huevos', icon: Icons.egg_alt_rounded),
-  _CategoryIconOption(key: 'set_meal', label: 'Combos', icon: Icons.set_meal_rounded),
-  _CategoryIconOption(key: 'kebab_dining', label: 'Parrilla', icon: Icons.kebab_dining_rounded),
-  _CategoryIconOption(key: 'rice_bowl', label: 'Bowls', icon: Icons.rice_bowl_rounded),
-  _CategoryIconOption(key: 'takeout_dining', label: 'Para llevar', icon: Icons.takeout_dining_rounded),
-  _CategoryIconOption(key: 'delivery_dining', label: 'Delivery', icon: Icons.delivery_dining_rounded),
-  _CategoryIconOption(key: 'local_drink', label: 'Jugos', icon: Icons.local_drink_rounded),
-  _CategoryIconOption(key: 'liquor', label: 'Licores', icon: Icons.liquor_rounded),
+  _CategoryIconOption(
+    key: 'emoji_food_beverage',
+    label: 'Snacks',
+    icon: Icons.emoji_food_beverage_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'local_cafe',
+    label: 'Café',
+    icon: Icons.local_cafe_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'local_bar',
+    label: 'Bar',
+    icon: Icons.local_bar_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'wine_bar',
+    label: 'Vinos',
+    icon: Icons.wine_bar_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'sports_bar',
+    label: 'Bebidas',
+    icon: Icons.sports_bar_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'brunch_dining',
+    label: 'Brunch',
+    icon: Icons.brunch_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'egg_alt',
+    label: 'Huevos',
+    icon: Icons.egg_alt_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'set_meal',
+    label: 'Combos',
+    icon: Icons.set_meal_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'kebab_dining',
+    label: 'Parrilla',
+    icon: Icons.kebab_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'rice_bowl',
+    label: 'Bowls',
+    icon: Icons.rice_bowl_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'takeout_dining',
+    label: 'Para llevar',
+    icon: Icons.takeout_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'delivery_dining',
+    label: 'Delivery',
+    icon: Icons.delivery_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'local_drink',
+    label: 'Jugos',
+    icon: Icons.local_drink_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'liquor',
+    label: 'Licores',
+    icon: Icons.liquor_rounded,
+  ),
   _CategoryIconOption(key: 'tapas', label: 'Tapas', icon: Icons.tapas_rounded),
-  _CategoryIconOption(key: 'cookie', label: 'Galletas', icon: Icons.cookie_rounded),
-  _CategoryIconOption(key: 'breakfast_dining', label: 'Desayunos', icon: Icons.breakfast_dining_rounded),
-  _CategoryIconOption(key: 'soup_kitchen', label: 'Sopas', icon: Icons.soup_kitchen_rounded),
-  _CategoryIconOption(key: 'outdoor_grill', label: 'Asados', icon: Icons.outdoor_grill_rounded),
-  _CategoryIconOption(key: 'local_fire_department', label: 'Picante', icon: Icons.local_fire_department_rounded),
+  _CategoryIconOption(
+    key: 'cookie',
+    label: 'Galletas',
+    icon: Icons.cookie_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'breakfast_dining',
+    label: 'Desayunos',
+    icon: Icons.breakfast_dining_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'soup_kitchen',
+    label: 'Sopas',
+    icon: Icons.soup_kitchen_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'outdoor_grill',
+    label: 'Asados',
+    icon: Icons.outdoor_grill_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'local_fire_department',
+    label: 'Picante',
+    icon: Icons.local_fire_department_rounded,
+  ),
   _CategoryIconOption(key: 'spa', label: 'Té', icon: Icons.spa_rounded),
   _CategoryIconOption(key: 'eco', label: 'Veggie', icon: Icons.eco_rounded),
-  _CategoryIconOption(key: 'grass', label: 'Ensaladas', icon: Icons.grass_rounded),
-  _CategoryIconOption(key: 'emoji_nature', label: 'Natural', icon: Icons.emoji_nature_rounded),
-  _CategoryIconOption(key: 'nutrition', label: 'Saludable', icon: Icons.monitor_heart_rounded),
-  _CategoryIconOption(key: 'favorite', label: 'Favoritos', icon: Icons.favorite_rounded),
-  _CategoryIconOption(key: 'celebration', label: 'Especiales', icon: Icons.celebration_rounded),
-  _CategoryIconOption(key: 'redeem', label: 'Promos', icon: Icons.redeem_rounded),
-  _CategoryIconOption(key: 'storefront', label: 'Casa', icon: Icons.storefront_rounded),
+  _CategoryIconOption(
+    key: 'grass',
+    label: 'Ensaladas',
+    icon: Icons.grass_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'emoji_nature',
+    label: 'Natural',
+    icon: Icons.emoji_nature_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'nutrition',
+    label: 'Saludable',
+    icon: Icons.monitor_heart_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'favorite',
+    label: 'Favoritos',
+    icon: Icons.favorite_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'celebration',
+    label: 'Especiales',
+    icon: Icons.celebration_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'redeem',
+    label: 'Promos',
+    icon: Icons.redeem_rounded,
+  ),
+  _CategoryIconOption(
+    key: 'storefront',
+    label: 'Casa',
+    icon: Icons.storefront_rounded,
+  ),
   _CategoryIconOption(key: 'star', label: 'Premium', icon: Icons.star_rounded),
-  _CategoryIconOption(key: 'diamond', label: 'Signature', icon: Icons.diamond_rounded),
+  _CategoryIconOption(
+    key: 'diamond',
+    label: 'Signature',
+    icon: Icons.diamond_rounded,
+  ),
 ];
 
 _CategoryIconOption? _categoryIconOptionByKey(String? iconKey) {
@@ -5800,8 +6574,11 @@ bool _isEmojiContent(String? value) {
   if (normalized.contains(' ')) {
     return false;
   }
-  return RegExp(r'[\u00A9\u00AE\u203C-\u3299\u{1F000}-\u{1FAFF}]', unicode: true)
-      .hasMatch(normalized) && normalized.runes.length <= 8;
+  return RegExp(
+        r'[\u00A9\u00AE\u203C-\u3299\u{1F000}-\u{1FAFF}]',
+        unicode: true,
+      ).hasMatch(normalized) &&
+      normalized.runes.length <= 8;
 }
 
 bool _categoryIconOptionByKeyInternal(String iconKey) {
@@ -5982,7 +6759,8 @@ Widget _buildCategoryEmojiGlyph(String emoji, {required double size}) {
           fontSize: size * 0.95,
           height: 1,
           inherit: false,
-          fontFamily: 'Noto Color Emoji, Apple Color Emoji, Segoe UI Emoji, sans-serif',
+          fontFamily:
+              'Noto Color Emoji, Apple Color Emoji, Segoe UI Emoji, sans-serif',
         ),
       ),
     ),
