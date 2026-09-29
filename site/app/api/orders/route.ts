@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from 'node:crypto';
+
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -32,6 +34,10 @@ import {
 } from '../_lib/supabase-circuit';
 
 export const maxDuration = 10;
+
+function hashCustomerAccessToken(token: string) {
+  return createHash('sha256').update(token.trim(), 'utf8').digest('hex');
+}
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -434,6 +440,8 @@ export async function POST(request: Request) {
     const orderId = await allocateOrderDisplayId(supabase);
     const publicTrackingToken = generatePublicTrackingToken();
     const publicTrackingTokenHash = hashPublicTrackingToken(publicTrackingToken);
+    const customerAccessToken = randomBytes(32).toString('base64url');
+    const customerAccessTokenHash = hashCustomerAccessToken(customerAccessToken);
     const trackingPath = resolvedComercioSlug
       ? `${publicSiteUrl}/v/${encodeURIComponent(resolvedComercioSlug)}/orders/${encodeURIComponent(orderId)}`
       : `${publicSiteUrl}/orders/${encodeURIComponent(orderId)}`;
@@ -443,6 +451,7 @@ export async function POST(request: Request) {
       order_id: orderId,
       tracking_url: trackingUrl,
       public_tracking_token_hash: publicTrackingTokenHash,
+      customer_access_token_hash: customerAccessTokenHash,
       cliente_nombre: clientName,
       cliente_email: clientEmail || null,
       telefono_cliente: clientWhatsapp,
@@ -512,6 +521,7 @@ export async function POST(request: Request) {
     }
 
     let publicOrderUrl = trackingUrl;
+    let publicShortCode = '';
     try {
       const shortLink = await createOrderShortLink({
         supabase,
@@ -520,6 +530,7 @@ export async function POST(request: Request) {
         comercioId: resolvedComercioId,
         trackingTokenHash: publicTrackingTokenHash,
       });
+      publicShortCode = shortLink.code;
       publicOrderUrl = `${publicSiteUrl}/o/${encodeURIComponent(shortLink.code)}`;
       const shortLinkDetalles = {
         ...detalles,
@@ -578,7 +589,19 @@ export async function POST(request: Request) {
     }
 
     supabaseWriteCircuit.recordSuccess();
-    return NextResponse.json(responseBody, { status: 201 });
+      const response = NextResponse.json(responseBody, { status: 201 });
+      if (publicShortCode) {
+        response.cookies.set({
+          name: `elmenuxfa_order_${publicShortCode}`,
+          value: customerAccessToken,
+          httpOnly: true,
+          secure: true,
+          sameSite: 'lax',
+          path: '/',
+          maxAge: 60 * 60 * 24 * 90,
+        });
+      }
+      return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create order.';
     if (isTransientSupabaseFailure(error)) {

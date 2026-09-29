@@ -66,3 +66,45 @@ export async function findOrderShortLink(
   if (error) throw new Error(error.message);
   return (data as OrderShortLink | null) ?? null;
 }
+
+export async function findOrderShortLinkByPedidoId(
+  supabase: SupabaseClient,
+  pedidoId: string,
+) {
+  const id = pedidoId.trim();
+  if (!id) return null;
+
+  const { data, error } = await supabase
+    .from('order_short_links')
+    .select('code,pedido_id,order_id,comercio_id,tracking_token_hash')
+    .eq('pedido_id', id)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return (data as OrderShortLink | null) ?? null;
+}
+
+/** Public shareable URL — never includes ?t= bearer tokens. */
+export function publicOrderShortUrl(code: string, origin: string) {
+  const base = origin.replace(/\/$/, '');
+  return `${base}/o/${encodeURIComponent(code.trim())}`;
+}
+
+export function extractOrderShortCodeFromUrl(rawUrl: string): string {
+  const raw = rawUrl.trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw, 'https://elmenuxfa.com');
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    if (
+      segments.length === 2 &&
+      segments[0] === 'o' &&
+      /^[A-Za-z0-9_-]{10}$/.test(segments[1] ?? '')
+    ) {
+      return segments[1] ?? '';
+    }
+  } catch {
+    // Ignore malformed URLs.
+  }
+  return '';
+}

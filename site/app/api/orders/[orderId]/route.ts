@@ -6,11 +6,10 @@ import {
   isPedidoEstadoEnumError,
 } from '../../_lib/order-customer-actions';
 import { extractComercioId } from '../../_lib/order-utils';
-import { verifyPublicTrackingToken } from '../../_lib/order-tracking-token';
+import { hashPublicTrackingToken } from '../../_lib/order-tracking-token';
 import {
   CONFIRM_RECEIVED_ALLOWED_STATUSES,
   CONFIRMATION_TIMEOUT_MS,
-  extractTokenHashFromPedido,
   normalizePublicStatus,
   toPublicOrderTrackingResponse,
 } from '../../_lib/public-order';
@@ -24,7 +23,7 @@ import {
   createCustomerRatingKey,
   isRateableOrderStatus,
 } from '../../_lib/order-service-rating';
-import { findOrderShortLink, type OrderShortLink } from '../../_lib/order-short-links';
+import { findOrderShortLink } from '../../_lib/order-short-links';
 
 type Params = {
   params: Promise<{ orderId: string }>;
@@ -46,6 +45,7 @@ type PedidoRow = {
     cancellation?: Record<string, unknown> | null;
     [key: string]: unknown;
   } | null;
+  cliente_email?: string | null;
 };
 
 type ComercioSummary = {
@@ -63,19 +63,12 @@ type ComercioSummary = {
 
 const GENERIC_DENIED = { error: 'Pedido no disponible.' } as const;
 
-function extractTrackingToken(request: Request): string {
-  const url = new URL(request.url);
-  const fromQuery = (url.searchParams.get('t') ?? url.searchParams.get('token') ?? '').trim();
-  if (fromQuery) return fromQuery;
-
-  const header = (request.headers.get('x-order-tracking-token') ?? '').trim();
-  if (header) return header;
-
-  return '';
-}
-
 function extractShortCode(request: Request): string {
   return (new URL(request.url).searchParams.get('s') ?? '').trim();
+}
+
+function extractCustomerEmail(request: Request) {
+  return (request.headers.get('x-order-customer-email') ?? '').trim().toLowerCase();
 }
 
 function denyUnauthorized() {
@@ -139,19 +132,28 @@ async function loadComercio(
   return (result.data as ComercioSummary | null) ?? null;
 }
 
-function authorizeOrder(order: PedidoRow | null, token: string): order is PedidoRow {
-  if (!order || !token) return false;
-  const expectedHash = extractTokenHashFromPedido(order);
-  if (!expectedHash) return false;
-  return verifyPublicTrackingToken(token, expectedHash);
-}
-
-function authorizeShortLink(
+function authorizeCustomer(
+  request: Request,
   order: PedidoRow | null,
-  shortLink: OrderShortLink | null,
-): order is PedidoRow {
-  if (!order || !shortLink) return false;
-  return shortLink.pedido_id === order.id && shortLink.comercio_id === order.comercio_id;
+  shortCode: string,
+) {
+  if (!order) return false;
+  const detalles = order.detalles ?? {};
+  const accessHash = (detalles.customer_access_token_hash ?? '').toString().trim();
+  const cookieToken = shortCode
+    ? request.headers.get('cookie')?.match(
+        new RegExp(`(?:^|;\\s*)elmenuxfa_order_${shortCode}=([^;]+)`),
+      )?.[1] ?? ''
+    : '';
+  if (accessHash && cookieToken && hashPublicTrackingToken(cookieToken) === accessHash) {
+    return true;
+  }
+
+  const email = extractCustomerEmail(request);
+  const orderEmail = (
+    order.cliente_email ?? detalles.cliente_email ?? ''
+  ).toString().trim().toLowerCase();
+  return Boolean(email && orderEmail && email === orderEmail);
 }
 
 export async function GET(request: Request, { params }: Params) {
@@ -167,10 +169,9 @@ export async function GET(request: Request, { params }: Params) {
 
     const { orderId: rawOrderId } = await params;
     const orderId = decodeURIComponent(rawOrderId ?? '').trim();
-    const token = extractTrackingToken(request);
     const shortCode = extractShortCode(request);
 
-    if (!orderId || (!token && !shortCode)) {
+    if (!orderId || !shortCode && !new URL(request.url).searchParams.has('t')) {
       return denyUnauthorized();
     }
 
@@ -178,8 +179,14 @@ export async function GET(request: Request, { params }: Params) {
     const order = await findOrderByOrderId(supabase, orderId);
 
     const shortLink = shortCode ? await findOrderShortLink(supabase, shortCode) : null;
-    if (!authorizeOrder(order, token) && !authorizeShortLink(order, shortLink)) {
+    if (shortCode && (!shortLink || shortLink.order_id !== orderId)) {
       return denyUnauthorized();
+    }
+    if (!authorizeCustomer(request, order, shortCode)) {
+      return NextResponse.json(
+        { error: 'customer_verification_required' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
     const comercio = await loadComercio(supabase, order.comercio_id);
@@ -204,10 +211,9 @@ export async function PATCH(request: Request, { params }: Params) {
 
     const { orderId: rawOrderId } = await params;
     const orderId = decodeURIComponent(rawOrderId ?? '').trim();
-    const token = extractTrackingToken(request);
     const shortCode = extractShortCode(request);
 
-    if (!orderId || (!token && !shortCode)) {
+    if (!orderId || !shortCode && !new URL(request.url).searchParams.has('t')) {
       return denyUnauthorized();
     }
 
@@ -221,8 +227,14 @@ export async function PATCH(request: Request, { params }: Params) {
     const order = await findOrderByOrderId(supabase, orderId);
 
     const shortLink = shortCode ? await findOrderShortLink(supabase, shortCode) : null;
-    if (!authorizeOrder(order, token) && !authorizeShortLink(order, shortLink)) {
+    if (shortCode && (!shortLink || shortLink.order_id !== orderId)) {
       return denyUnauthorized();
+    }
+    if (!authorizeCustomer(request, order, shortCode)) {
+      return NextResponse.json(
+        { error: 'customer_verification_required' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
     const action = parsed.data;

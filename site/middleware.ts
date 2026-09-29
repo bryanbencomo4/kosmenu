@@ -12,6 +12,7 @@ import {
 
 const EXCLUDED_PREFIXES = [
   '/api',
+  '/d',
   '/wp-json',
   '/_next',
   '/o',

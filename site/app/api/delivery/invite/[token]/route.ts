@@ -1,6 +1,14 @@
 import { createHash } from 'crypto';
 import { NextResponse } from 'next/server';
 
+import { courierOrderCookie } from '../../../_lib/courier-order-link';
+import {
+  createOrderShortLink,
+  extractOrderShortCodeFromUrl,
+  findOrderShortLinkByPedidoId,
+  publicOrderShortUrl,
+} from '../../../_lib/order-short-links';
+import { publicSiteUrl } from '../../../_lib/public-site-url';
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{24,160}$/;
@@ -34,6 +42,7 @@ type PedidoRow = {
   cliente_email?: string | null;
   comercio_id?: string | null;
   created_at?: string | null;
+  public_tracking_token_hash?: string | null;
 };
 
 type ComercioRow = {
@@ -194,7 +203,7 @@ async function loadInvitationContext(supabase: ReturnType<typeof getServiceSupab
   const [{ data: pedido, error: pedidoError }, { data: comercio, error: comercioError }] = await Promise.all([
     supabase
       .from('pedidos')
-      .select('id,estado,detalles,nombre_cliente,telefono_cliente,cliente_email,comercio_id,created_at')
+      .select('id,estado,detalles,nombre_cliente,telefono_cliente,comercio_id,created_at,public_tracking_token_hash')
       .eq('id', invitation.pedido_id)
       .maybeSingle(),
     supabase
@@ -219,7 +228,73 @@ async function loadInvitationContext(supabase: ReturnType<typeof getServiceSupab
   } satisfies InvitationContext;
 }
 
-function buildPayload(context: InvitationContext) {
+async function resolvePublicTrackingUrl(params: {
+  supabase: ReturnType<typeof getServiceSupabaseClient>;
+  pedido: PedidoRow | null;
+  orderId: string;
+}): Promise<string> {
+  const pedidoId = (params.pedido?.id ?? '').toString().trim();
+  const detalles = asRecord(params.pedido?.detalles);
+  const stored = (detalles.tracking_url ?? '').toString().trim();
+  const storedCode = extractOrderShortCodeFromUrl(stored);
+  if (storedCode) {
+    return publicOrderShortUrl(storedCode, publicSiteUrl);
+  }
+
+  if (!pedidoId) {
+    return '';
+  }
+
+  try {
+    const existing = await findOrderShortLinkByPedidoId(params.supabase, pedidoId);
+    if (existing?.code) {
+      return publicOrderShortUrl(existing.code, publicSiteUrl);
+    }
+
+    const trackingTokenHash = (
+      detalles.public_tracking_token_hash ??
+      params.pedido?.public_tracking_token_hash ??
+      ''
+    )
+      .toString()
+      .trim()
+      .toLowerCase();
+    const comercioId = (params.pedido?.comercio_id ?? '').toString().trim();
+    if (!/^[a-f0-9]{64}$/.test(trackingTokenHash) || !comercioId || !params.orderId) {
+      return '';
+    }
+
+    const created = await createOrderShortLink({
+      supabase: params.supabase,
+      pedidoId,
+      orderId: params.orderId,
+      comercioId,
+      trackingTokenHash,
+    });
+    const shortUrl = publicOrderShortUrl(created.code, publicSiteUrl);
+    await params.supabase
+      .from('pedidos')
+      .update({
+        detalles: {
+          ...detalles,
+          tracking_url: shortUrl,
+        },
+      })
+      .eq('id', pedidoId);
+    return shortUrl;
+  } catch (error) {
+    console.error('[delivery-invite] resolve public tracking url failed', {
+      orderId: params.orderId,
+      message: error instanceof Error ? error.message : 'unknown',
+    });
+    return '';
+  }
+}
+
+async function buildPayload(
+  context: InvitationContext,
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
+) {
   const invitation = context.invitation;
   const pedido = context.pedido;
   const comercio = context.comercio;
@@ -240,6 +315,16 @@ function buildPayload(context: InvitationContext) {
     !orderBlocked &&
     isDeliveryOrder;
 
+  const orderId =
+    (detalles?.order_id ?? detalles?.codigo_orden ?? invitation.order_id ?? '')
+      .toString()
+      .trim();
+  const trackingUrl = await resolvePublicTrackingUrl({
+    supabase,
+    pedido,
+    orderId,
+  });
+
   return {
     ok: true,
     data: {
@@ -257,16 +342,13 @@ function buildPayload(context: InvitationContext) {
       },
       order: {
         id: pedido?.id ?? null,
-        orderId:
-          (detalles?.order_id ?? detalles?.codigo_orden ?? invitation.order_id ?? '')
-            .toString()
-            .trim(),
+        orderId,
         status: orderStatus,
         clientName:
           (pedido?.nombre_cliente ?? detalles?.cliente_nombre ?? '').toString().trim(),
         clientPhone:
           (pedido?.telefono_cliente ?? detalles?.telefono_cliente ?? '').toString().trim(),
-        clientEmail: (pedido?.cliente_email ?? detalles?.cliente_email ?? '').toString().trim(),
+        trackingUrl,
         total: Number(detalles?.total_moneda_checkout ?? detalles?.total ?? 0) || 0,
         currency: (detalles?.moneda_checkout ?? 'COP').toString().trim().toUpperCase(),
         items: Array.isArray(detalles?.items) ? detalles.items : [],
@@ -299,6 +381,24 @@ function buildPayload(context: InvitationContext) {
       },
     },
   };
+}
+
+async function invitationPayloadResponse(
+  context: InvitationContext,
+  supabase: ReturnType<typeof getServiceSupabaseClient>,
+  token: string,
+) {
+  const payload = await buildPayload(context, supabase);
+  const response = NextResponse.json(payload, { status: 200 });
+  const invitationStatus = payload.data.invitation.status;
+  if (invitationStatus === 'accepted' || invitationStatus === 'arrived') {
+    const shortCode = extractOrderShortCodeFromUrl(payload.data.order.trackingUrl);
+    const cookie = shortCode ? courierOrderCookie(shortCode, token) : null;
+    if (cookie) {
+      response.cookies.set(cookie);
+    }
+  }
+  return response;
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ token: string }> }) {
@@ -359,7 +459,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ token: str
       return invitedStatePayload('Este pedido ya no esta disponible.', 'ORDER_NOT_FOUND', 404);
     }
 
-    return NextResponse.json(buildPayload(context), { status: 200 });
+    return await invitationPayloadResponse(context, supabase, token);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo cargar la invitacion.';
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
@@ -419,7 +519,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
       if (normalizeStatus(invitation.status) === 'accepted' || normalizeStatus(invitation.status) === 'arrived') {
         await supabase.from('delivery_invitations').update({ last_seen_at: nowIso }).eq('id', invitation.id);
-        return NextResponse.json(buildPayload(context), { status: 200 });
+        return await invitationPayloadResponse(context, supabase, token);
       }
 
       if (normalizeStatus(invitation.status) !== 'pending') {
@@ -474,7 +574,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
           .eq('id', context.pedido.id)
           .neq('estado', 'cancelado')
           .neq('estado', 'entregado')
-          .select('id,estado,detalles,nombre_cliente,telefono_cliente,cliente_email,comercio_id,created_at')
+          .select('id,estado,detalles,nombre_cliente,telefono_cliente,comercio_id,created_at,public_tracking_token_hash')
           .maybeSingle();
         if (updatedPedido) {
           context.pedido = updatedPedido;
@@ -491,7 +591,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
       });
 
       context.invitation = acceptedInvitation;
-      return NextResponse.json(buildPayload(context), { status: 200 });
+      return await invitationPayloadResponse(context, supabase, token);
     }
 
     const currentStatus = normalizeStatus(invitation.status);
@@ -504,7 +604,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
     if (currentStatus === 'arrived') {
       await supabase.from('delivery_invitations').update({ last_seen_at: nowIso }).eq('id', invitation.id);
-      return NextResponse.json(buildPayload(context), { status: 200 });
+      return await invitationPayloadResponse(context, supabase, token);
     }
 
     const { data: arrivedInvitation, error: arrivedError } = await supabase
@@ -543,7 +643,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
         .eq('id', context.pedido.id)
         .neq('estado', 'cancelado')
         .neq('estado', 'entregado')
-        .select('id,estado,detalles,nombre_cliente,telefono_cliente,cliente_email,comercio_id,created_at')
+        .select('id,estado,detalles,nombre_cliente,telefono_cliente,comercio_id,created_at,public_tracking_token_hash')
         .maybeSingle();
       if (updatedPedido) {
         context.pedido = updatedPedido;
@@ -560,7 +660,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     });
 
     context.invitation = arrivedInvitation;
-    return NextResponse.json(buildPayload(context), { status: 200 });
+    return await invitationPayloadResponse(context, supabase, token);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo procesar la accion del repartidor.';
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

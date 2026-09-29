@@ -4096,42 +4096,22 @@ export default function PublicMenuPage() {
       // Keep the full fallback URL when the tracking URL is not absolute.
     }
 
-    const message =
-      `✅ Pedido recibido.\n` +
-      `Estado: Pendiente.\n` +
-      `Numero de orden: ${orderId}.\n` +
-      `Cliente: ${customerName}.\n` +
-      `Telefono: ${customerWhatsapp}.\n` +
-      `Tipo de entrega: ${delivery.mode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}.\n` +
-      (delivery.mode === 'delivery' ? `Direccion de entrega: ${delivery.address}.\n` : '') +
-      (delivery.mode === 'delivery' && delivery.reference
-        ? `Referencia: ${delivery.reference}.\n`
-        : '') +
-      (delivery.mode === 'delivery' && delivery.instructions
-        ? `Indicaciones: ${delivery.instructions}.\n`
-        : '') +
-      (delivery.mode === 'delivery' && delivery.coordinates
-        ? `Coordenadas: ${delivery.coordinates.lat.toFixed(6)}, ${delivery.coordinates.lng.toFixed(6)}.\n`
-        : '') +
-      (normalizedOrderNotes ? `Notas del pedido: ${normalizedOrderNotes}.\n` : '') +
-      `Metodo de pago: ${paymentLabel}.\n` +
-      (email ? `Correo del cliente: ${email}.\n` : '') +
-      `Moneda seleccionada: ${normalizeCurrencyCode(paymentMeta.currency)}.\n` +
-      (paymentMeta.exchangeRate > 1
-        ? `Tasa aplicada (${exchangeSourceLabel(paymentMeta.exchangeRateSource)}): ${formatTickerRate(paymentMeta.exchangeRate)}.\n`
-        : '') +
-      (paymentMeta.referenceLast4 ? `Referencia digital: ****${paymentMeta.referenceLast4}.\n` : '') +
-      (paymentProofUrl ? `Comprobante: ${paymentProofUrl}.\n` : '') +
-      `Subtotal: ${formatAmountByCurrency(subtotalConverted, paymentMeta.currency)}.\n` +
-      (deliveryCost > 0 ? `Delivery: ${formatAmountByCurrency(deliveryConverted, paymentMeta.currency)}.\n` : '') +
-      (isCashPayment && paymentWithAmount !== null
-        ? `Pago con: ${formatAmountByCurrency(paymentWithAmount, paymentMeta.currency)}.\n`
-        : '') +
-      (isCashPayment && changeAmount > 0
-        ? `Cambio: ${formatAmountByCurrency(changeAmount, paymentMeta.currency)}.\n`
-        : '') +
-      `Total: ${formatAmountByCurrency(totalConverted, paymentMeta.currency)}.\n` +
-      `Seguimiento: ${smartOrderUrl}`;
+    const message = [
+      `🆕 *NUEVO PEDIDO #${orderId}*`,
+      '',
+      `👤 Cliente: ${customerName}`,
+      `📞 ${customerWhatsapp}`,
+      '',
+      `📦 Entrega: ${delivery.mode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}`,
+      `💳 Pago: ${paymentLabel}`,
+      '',
+      `💰 Total: ${formatAmountByCurrency(totalConverted, paymentMeta.currency)}`,
+      '',
+      '⏳ Estado: *Pendiente*',
+      '',
+      '🔗 Ver pedido:',
+      smartOrderUrl,
+    ].join('\n');
 
     checkoutAttemptRef.current = null;
     return {

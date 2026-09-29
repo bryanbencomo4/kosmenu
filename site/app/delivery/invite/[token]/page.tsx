@@ -36,7 +36,7 @@ type InvitePayload = {
     status?: string;
     clientName?: string;
     clientPhone?: string;
-    clientEmail?: string;
+    trackingUrl?: string;
     total?: number;
     currency?: string;
     items?: Array<{ nombre?: string; cantidad?: number; precio?: number }>;
@@ -309,7 +309,12 @@ export default function DeliveryInvitePage() {
         setError((data?.message ?? data?.error ?? 'No se pudo abrir el enlace de delivery.').toString());
         return false;
       }
-      setPayload(data.data as InvitePayload);
+      const nextPayload = data.data as InvitePayload;
+      setPayload(nextPayload);
+      const savedCourierName = nextPayload.invitation?.invitedNote?.trim() ?? '';
+      if (savedCourierName) {
+        setCourierName((current) => current.trim() || savedCourierName);
+      }
       return true;
     } catch {
       setError('No se pudo cargar la informacion del delivery.');
@@ -358,6 +363,7 @@ export default function DeliveryInvitePage() {
     arrivedOptimistic && invitationStatus === 'accepted' ? 'arrived' : invitationStatus;
   const orderStatus = normalizeStatus(payload?.order?.status);
   const canAccept = Boolean(payload?.actions?.canAccept);
+  const canConfirmMission = canAccept && courierName.trim().length >= 2;
   const canMarkArrived = Boolean(payload?.actions?.canMarkArrived);
   const showArrivedButton =
     canMarkArrived && effectiveInvitationStatus !== 'arrived' && effectiveInvitationStatus !== 'completed';
@@ -371,14 +377,47 @@ export default function DeliveryInvitePage() {
   const activeStepIndex = timelineIndex(effectiveInvitationStatus);
   const commercePhoneHref = buildPhoneHref(payload?.comercio?.phone);
   const clientPhoneHref = buildPhoneHref(payload?.order?.clientPhone);
+  const clientName = (payload?.order?.clientName ?? 'cliente').toString().trim() || 'cliente';
+  const courierDisplayName = courierName.trim() || 'el repartidor';
   const commerceWhatsappHref = buildWhatsappHref(
     payload?.comercio?.phone,
     `Hola, te escribo por el pedido ${orderId || ''}.`,
   );
-  const clientWhatsappHref = buildWhatsappHref(
+  const clientEnRouteWhatsappHref = buildWhatsappHref(
     payload?.order?.clientPhone,
-    `Hola, soy el repartidor de tu pedido ${orderId || ''}.`,
+    [
+      `🛵 *PEDIDO EN CAMINO #${orderId || 'N/A'}*`,
+      '',
+      `👋 ¡Hola, ${clientName}! Mi nombre es ${courierDisplayName}, soy el repartidor encargado de tu pedido.`,
+      '',
+      'Ya voy en camino a recogerlo. En cuanto lo tenga conmigo, saldré directamente hacia tu ubicación para entregártelo.',
+      '',
+      '📦 Tu pedido ya está en proceso de entrega.',
+      '',
+      'Por favor, mantente atento a tu teléfono para coordinar la recepción.',
+      ...(payload?.order?.trackingUrl
+        ? ['', '🔗 Ver pedido:', payload.order.trackingUrl]
+        : []),
+      '',
+      '¡Gracias por tu paciencia! 😊',
+    ].join('\n'),
   );
+  const clientArrivalWhatsappHref = buildWhatsappHref(
+    payload?.order?.clientPhone,
+    [
+      `📍 *EL REPARTIDOR LLEGÓ #${orderId || 'N/A'}*`,
+      '',
+      '🛵 Tu pedido ya llegó al lugar de entrega.',
+      '',
+      '✅ Por favor recibe tu pedido y confirma la recepción en el siguiente enlace:',
+      ...(payload?.order?.trackingUrl
+        ? ['', '🔗 Confirmar recepción:', payload.order.trackingUrl]
+        : []),
+    ].join('\n'),
+  );
+  const clientWhatsappHref = effectiveInvitationStatus === 'arrived'
+    ? clientArrivalWhatsappHref
+    : clientEnRouteWhatsappHref;
 
   const navigationUrl = useMemo(() => {
     const coords = payload?.delivery?.coordinates;
@@ -446,6 +485,10 @@ export default function DeliveryInvitePage() {
 
   async function submitAction(action: 'accept' | 'arrived') {
     if (!token || submitting) return;
+    if (action === 'accept' && courierName.trim().length < 2) {
+      setError('Escribe tu nombre antes de confirmar, voy en camino.');
+      return;
+    }
 
     if (action === 'arrived') {
       setArrivedOptimistic(true);
@@ -473,9 +516,15 @@ export default function DeliveryInvitePage() {
         return;
       }
       setPayload(data.data as InvitePayload);
+      if (action === 'accept' && clientEnRouteWhatsappHref) {
+        window.open(clientEnRouteWhatsappHref, '_blank', 'noopener,noreferrer');
+      }
       if (action === 'arrived') {
         const nextStatus = normalizeStatus((data.data as InvitePayload)?.invitation?.status);
         setArrivedOptimistic(nextStatus === 'arrived' || nextStatus === 'completed');
+        if (clientArrivalWhatsappHref) {
+          window.open(clientArrivalWhatsappHref, '_blank', 'noopener,noreferrer');
+        }
       }
     } catch {
       if (action === 'arrived') {
@@ -753,16 +802,16 @@ export default function DeliveryInvitePage() {
             <input
               value={courierName}
               onChange={(event) => setCourierName(event.target.value)}
-              placeholder="Tu nombre (opcional)"
+              placeholder="Tu nombre (obligatorio)"
               className="mt-3 w-full rounded-2xl border border-slate-300 bg-white px-3.5 py-3 text-sm font-semibold outline-none focus:border-slate-500"
             />
             <button
               type="button"
-              disabled={submitting}
+              disabled={submitting || !canConfirmMission}
               onClick={() => void submitAction('accept')}
               className="mt-3 inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-4 py-3.5 text-sm font-black text-white disabled:opacity-60"
             >
-              {submitting ? 'Aceptando...' : 'Aceptar mision'}
+              {submitting ? 'Confirmando...' : 'Confirmar, voy en camino'}
             </button>
           </article>
         ) : null}
@@ -781,11 +830,11 @@ export default function DeliveryInvitePage() {
               {canAccept ? (
                 <button
                   type="button"
-                  disabled={submitting}
+                  disabled={submitting || !canConfirmMission}
                   onClick={() => void submitAction('accept')}
                   className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 px-4 py-3.5 text-sm font-black text-white disabled:opacity-60"
                 >
-                  {submitting ? 'Aceptando...' : 'Aceptar mision'}
+                  {submitting ? 'Confirmando...' : 'Confirmar, voy en camino'}
                 </button>
               ) : null}
 

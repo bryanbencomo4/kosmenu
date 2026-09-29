@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { consumeRateLimit, getClientIp } from '../../../_lib/rate-limit';
+import { createDeliveryInviteShortLink } from '../../../_lib/delivery-invite-short-links';
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 import { getUserFromBearerRequest } from '../../../_lib/supabase-user-auth';
 import { appSiteUrl } from '../../../../_lib/public-site-config';
@@ -86,17 +87,23 @@ export async function POST(request: Request) {
       return jsonResponse(request, GENERIC_ERROR, { status: 404 });
     }
 
-    const inviteUrl = new URL(
-      `/delivery/invite/${encodeURIComponent(token)}`,
-      request.url,
-    ).toString();
+    const shortCode = await createDeliveryInviteShortLink({
+      supabase,
+      invitationId: invitation.id,
+      token,
+    });
+    const inviteUrl = new URL(`/d/${encodeURIComponent(shortCode)}`, request.url).toString();
 
     const recipient = (invitation.invited_phone ?? '').toString().replace(/\D/g, '');
     const message = encodeURIComponent(
       [
-        `Invitacion de delivery para ${comercio.nombre?.toString().trim() || 'el negocio'}.`,
-        `Pedido: ${orderId}.`,
-        `Repartidor: ${courierAlias || 'por confirmar'}.`,
+        `🛵 *INVITACIÓN DE DELIVERY*`,
+        '',
+        `🍽️ Comercio: ${comercio.nombre?.toString().trim() || 'el negocio'}`,
+        `📦 Pedido: ${orderId}`,
+        `👤 Repartidor: ${courierAlias || 'por confirmar'}`,
+        '',
+        '🔗 Aceptar delivery:',
         inviteUrl,
       ].join('\n'),
     );

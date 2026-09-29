@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import { OrderReceipt, OrderReceiptFrame } from './_components/OrderReceipt';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
@@ -383,6 +383,13 @@ function OrderTrackingPageInner() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [customerEmail, setCustomerEmail] = useState(() =>
+    typeof window === 'undefined'
+      ? ''
+      : window.sessionStorage.getItem(`order-customer-email:${orderId}`) ?? '',
+  );
+  const [requiresCustomerVerification, setRequiresCustomerVerification] = useState(false);
+  const [verificationLoading, setVerificationLoading] = useState(false);
   const [order, setOrder] = useState<PedidoRow | null>(null);
   const [comercio, setComercio] = useState<ComercioRow | null>(null);
   const [menuIdentity, setMenuIdentity] = useState<ComercioRow | null>(null);
@@ -403,6 +410,10 @@ function OrderTrackingPageInner() {
   const trackingFetchInFlightRef = useRef(false);
 
   const resolvedStatus = useMemo(() => normalizeStatus(order?.estado), [order?.estado]);
+
+  const customerVerificationHeaders = customerEmail.trim()
+    ? { 'x-order-customer-email': customerEmail.trim() }
+    : undefined;
 
   useEffect(() => {
     // Defense in depth alongside middleware Referrer-Policy: no-referrer.
@@ -474,6 +485,7 @@ function OrderTrackingPageInner() {
       const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
         method: 'PATCH',
         headers: {
+          ...customerVerificationHeaders,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -512,6 +524,41 @@ function OrderTrackingPageInner() {
     }
   }
 
+  async function verifyCustomerEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const email = customerEmail.trim().toLowerCase();
+    if (!email || verificationLoading) return;
+
+    setVerificationLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
+        headers: { 'x-order-customer-email': email },
+        cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.data?.orderId) {
+        throw new Error('El correo no coincide con el cliente de este pedido.');
+      }
+      window.sessionStorage.setItem(`order-customer-email:${orderId}`, email);
+      setCustomerEmail(email);
+      setRequiresCustomerVerification(false);
+      const publicOrder = payload.data as PublicTrackingPayload;
+      const mapped = mapPublicTracking(publicOrder);
+      setOrder(mapped.order);
+      setComercio(mapped.comercio);
+      setLocationHint(mapped.locationHint);
+    } catch (verificationError) {
+      setError(
+        verificationError instanceof Error
+          ? verificationError.message
+          : 'No se pudo verificar el pedido.',
+      );
+    } finally {
+      setVerificationLoading(false);
+    }
+  }
+
   async function confirmDeliveryReceived() {
     if (!orderId || !trackingCredential || deliveryConfirmationLoading) return;
 
@@ -522,6 +569,7 @@ function OrderTrackingPageInner() {
       const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
         method: 'PATCH',
         headers: {
+          ...customerVerificationHeaders,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -563,7 +611,7 @@ function OrderTrackingPageInner() {
     try {
       const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...customerVerificationHeaders, 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'submit_rating', rating }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -601,7 +649,7 @@ function OrderTrackingPageInner() {
       setLoading(false);
       setOrder(null);
       setError(
-        'Este enlace de seguimiento no es valido o ha expirado. Abre el enlace completo que recibiste por WhatsApp o correo (debe incluir ?t=...).',
+        'Este enlace de seguimiento no es valido o ha expirado. Abre el enlace corto que recibiste por WhatsApp o correo.',
       );
       return;
     }
@@ -631,6 +679,7 @@ function OrderTrackingPageInner() {
         }
 
         const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
+          headers: customerVerificationHeaders,
           cache: 'no-store',
           signal: AbortSignal.timeout(8_000),
         });
@@ -642,7 +691,12 @@ function OrderTrackingPageInner() {
           if (mode === 'initial') {
             setOrder(null);
             setComercio(null);
-            setError('Este enlace de seguimiento no es valido o ha expirado.');
+            if (response.status === 401 && payload?.error === 'customer_verification_required') {
+              setRequiresCustomerVerification(true);
+              setError(null);
+            } else {
+              setError('Este enlace de seguimiento no es valido o ha expirado.');
+            }
           } else {
             setSyncMode('sin-senal');
           }
@@ -908,6 +962,41 @@ function OrderTrackingPageInner() {
           <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-slate-300" style={{ borderTopColor: trackingPrimary }} />
           <p className="mt-3 text-sm text-slate-500">Cargando tu pedido...</p>
         </div>
+      </OrderReceiptFrame>
+    );
+  }
+
+  if (requiresCustomerVerification) {
+    return (
+      <OrderReceiptFrame background={trackingBackground} bodyFont={bodyFontFamily}>
+        <form
+          onSubmit={(event) => void verifyCustomerEmail(event)}
+          className="w-full max-w-md rounded-[22px] bg-white p-7 shadow-[0_8px_30px_rgba(15,23,42,0.06)]"
+        >
+          <p className="text-lg font-bold text-slate-950" style={{ fontFamily: titleFontFamily }}>
+            Verifica que eres el cliente
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Para proteger la información del pedido, escribe el correo usado al realizarlo.
+          </p>
+          <input
+            type="email"
+            value={customerEmail}
+            onChange={(event) => setCustomerEmail(event.target.value)}
+            placeholder="Correo del pedido"
+            autoComplete="email"
+            required
+            className="mt-5 w-full rounded-xl border border-slate-300 px-3 py-3 text-sm outline-none focus:border-slate-700"
+          />
+          {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
+          <button
+            type="submit"
+            disabled={verificationLoading}
+            className="mt-4 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+          >
+            {verificationLoading ? 'Verificando...' : 'Ver mi pedido'}
+          </button>
+        </form>
       </OrderReceiptFrame>
     );
   }

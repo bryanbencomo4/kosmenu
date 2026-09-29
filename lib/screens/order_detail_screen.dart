@@ -13,6 +13,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/delivery_courier_service.dart';
+import 'package:kosmenu_app/services/delivery_invite_link_service.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/services/order_rating_service.dart';
 import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
@@ -774,32 +775,95 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     required String status,
     required String trackingUrl,
   }) {
-    final publicTrackingUrl = trackingUrl.trim().isNotEmpty
-        ? trackingUrl.trim()
-        : AppLinks.orderDetailsById(widget.orderId, forceWebView: true);
-    final parsedTrackingUrl = Uri.tryParse(publicTrackingUrl);
-    final trackingSegments = parsedTrackingUrl?.pathSegments ?? const <String>[];
-    final shortCode = trackingSegments.length == 2 &&
-            trackingSegments.first == 'o' &&
-            RegExp(r'^[A-Za-z0-9_-]{10}$').hasMatch(trackingSegments.last)
-        ? trackingSegments.last
-        : '';
-    final resolvedTrackingUrl = shortCode.isNotEmpty
-        ? AppLinks.merchantOrderById(
-            widget.orderId,
-            fallbackShortCode: shortCode,
-          )
-        : AppLinks.merchantOrderById(
-            widget.orderId,
-            fallbackUri: publicTrackingUrl,
-          );
-    return [
-      status == 'confirmado'
-          ? 'Pedido recibido. En breve empezaremos a prepararlo.'
-          : 'Estado del pedido: ${_statusLabel(status)}',
-      'Numero de orden: ${widget.orderId}',
-      resolvedTrackingUrl,
-    ].join('\n');
+    final resolvedTrackingUrl = _resolveCustomerTrackingShareUrl(trackingUrl);
+    final isPickup = _cachedOrderData?.pedido.deliveryMode != 'delivery';
+    final statusContent = switch (status) {
+      'confirmado' => (
+          emoji: '👨‍🍳',
+          title: 'PEDIDO RECIBIDO',
+          body: '✅ Tu pedido fue recibido. En breve empezaremos a prepararlo.',
+          label: 'Recibido',
+        ),
+      'en_camino' => (
+          emoji: '🛵',
+          title: 'PEDIDO EN CAMINO',
+          body: '🚚 ¡Tu pedido ya salió y va rumbo a ti!',
+          label: 'En camino',
+        ),
+      'entregado' when isPickup => (
+          emoji: '📦',
+          title: 'PEDIDO LISTO',
+          body: '✅ Tu pedido está listo para retirar.',
+          label: 'Listo para retirar',
+        ),
+      'entregado' => (
+          emoji: '🎉',
+          title: 'PEDIDO ENTREGADO',
+          body: '✅ ¡Tu pedido fue entregado correctamente!\n\n🙏 Gracias por elegirnos. Esperamos verte pronto.',
+          label: 'Entregado',
+        ),
+      'cancelado' => (
+          emoji: '🚫',
+          title: 'PEDIDO CANCELADO',
+          body: '❌ Tu pedido fue cancelado.',
+          label: 'Cancelado',
+        ),
+      _ => (
+          emoji: '🆕',
+          title: 'NUEVO PEDIDO',
+          body: 'Tu pedido fue recibido.',
+          label: 'Pendiente',
+        ),
+    };
+    final lines = <String>[
+      '${statusContent.emoji} *${statusContent.title} #${widget.orderId}*',
+      '',
+      statusContent.body,
+      '',
+      '📦 Estado: *${statusContent.label}*',
+    ];
+    if (resolvedTrackingUrl.isNotEmpty) {
+      lines.addAll([
+        '',
+        '🔗 Ver pedido:',
+        resolvedTrackingUrl,
+      ]);
+    }
+    return lines.join('\n');
+  }
+
+  /// Shareable customer tracking URL. Prefer `/o/{code}` short links.
+  /// Never rewrite customer links into the merchant panel.
+  String _resolveCustomerTrackingShareUrl(String trackingUrl) {
+    final raw = trackingUrl.trim();
+    if (raw.isEmpty) {
+      return '';
+    }
+
+    final parsed = Uri.tryParse(raw);
+    if (parsed == null) {
+      return '';
+    }
+
+    final segments = parsed.pathSegments;
+    if (segments.length == 2 &&
+        segments.first == 'o' &&
+        RegExp(r'^[A-Za-z0-9_-]{10}$').hasMatch(segments[1])) {
+      return AppLinks.shortOrderByCode(segments[1]);
+    }
+
+    // Legacy token URLs must not be forwarded in WhatsApp now that short links
+    // + cookie/email gate protect tracking.
+    if (parsed.queryParameters.containsKey('t') ||
+        parsed.queryParameters.containsKey('token')) {
+      return '';
+    }
+
+    if (parsed.host.contains('elmenuxfa.com') || parsed.host.isEmpty) {
+      return raw;
+    }
+
+    return '';
   }
 
   Future<void> _openCustomerWhatsapp(
@@ -971,6 +1035,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
   Future<({String token, String url})?> _createDeliveryInviteLink({
     String? invitedPhone,
+    String? invitedAlias,
   }) async {
     final response = await Supabase.instance.client.rpc(
       'create_delivery_invitation',
@@ -978,6 +1043,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         'p_order_id': widget.orderId,
         'p_expires_in_minutes': 180,
         'p_phone': invitedPhone,
+        'p_note': invitedAlias,
       },
     );
 
@@ -1033,7 +1099,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     });
 
     try {
-      final invite = await _createDeliveryInviteLink(invitedPhone: waDigits);
+      final invite = await _createDeliveryInviteLink(
+        invitedPhone: waDigits,
+        invitedAlias: selection.alias,
+      );
       if (invite == null || invite.url.trim().isEmpty) {
         throw Exception('No fue posible generar un enlace valido.');
       }
@@ -1041,16 +1110,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if (!mounted) return;
       setState(() => _deliveryInviteUrl = invite.url);
 
-      final inviteMessage = Uri.encodeComponent(
-        [
-          'Invitacion de delivery para ${comercioNombre.trim()}.',
-          'Pedido: ${widget.orderId}.',
-          'Repartidor: ${selection.alias}.',
-          invite.url,
-        ].join('\n'),
-      );
+      final directWhatsappUrl =
+          await DeliveryInviteLinkService.createDirectWhatsappUrl(
+            orderId: widget.orderId,
+            token: invite.token,
+            courierAlias: selection.alias,
+          );
+      final whatsappUrl = directWhatsappUrl ??
+          'https://wa.me/$waDigits?text=${Uri.encodeComponent(invite.url)}';
       final opened = await launchUrl(
-        Uri.parse('https://wa.me/$waDigits?text=$inviteMessage'),
+        Uri.parse(whatsappUrl),
         mode: LaunchMode.externalApplication,
       );
       if (!opened) {
