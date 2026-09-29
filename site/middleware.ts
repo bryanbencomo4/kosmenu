@@ -14,6 +14,7 @@ const EXCLUDED_PREFIXES = [
   '/api',
   '/wp-json',
   '/_next',
+  '/o',
   '/v',
   '/preview',
   '/orders',

@@ -14,7 +14,6 @@ import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
-import 'package:kosmenu_app/services/order_notification_service.dart';
 import 'package:kosmenu_app/screens/ai_credits_screen.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
@@ -297,17 +296,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         if ((updatedRows as List).isEmpty) {
           continue;
         }
-
-        final publicOrderId =
-            pedido.detalles['order_id']?.toString().trim() ??
-            pedido.detalles['codigo_orden']?.toString().trim() ??
-            pedido.id;
-        unawaited(
-          OrderNotificationService.dispatchStatusChange(
-            orderId: publicOrderId,
-            previousStatus: 'pendiente',
-          ),
-        );
 
         canceledCount += 1;
       } catch (error) {

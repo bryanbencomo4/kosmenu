@@ -73,10 +73,6 @@ type OrderReceiptProps = {
   serviceRatingLoading: boolean;
   serviceRatingMessage: string;
   onRateService: (rating: number) => void;
-  whatsappNotificationsEnabled: boolean;
-  whatsappPreferenceSaving: boolean;
-  notificationMessage: string;
-  onSetWhatsappNotifications: (enabled: boolean) => void;
   colors: {
     primary: string;
     secondary: string;
@@ -93,7 +89,7 @@ const STATUS_COPY: Record<
   { title: string; headline: string }
 > = {
   pendiente: {
-    title: 'Recibido',
+    title: 'Enviando',
     headline: 'El comercio está revisando tu pedido',
   },
   confirmado: {
@@ -119,8 +115,6 @@ const STATUS_COPY: Record<
 };
 
 const WHATSAPP_GREEN = '#25D366';
-const WHATSAPP_DISABLE_CONFIRM =
-  'Si desactivas las actualizaciones, puede que no te enteres de los cambios de tu pedido en tiempo real. ¿Quieres continuar?';
 
 function WhatsAppMark({ className }: { className?: string }) {
   return (
@@ -691,46 +685,6 @@ export function OrderReceipt(props: OrderReceiptProps) {
           </p>
         ) : null}
         {props.cancelMessage ? <p className="mt-2 text-center text-sm text-slate-600">{props.cancelMessage}</p> : null}
-
-        <label
-          className="mt-4 flex cursor-pointer items-start gap-3 rounded-[22px] px-4 py-3"
-          style={{
-            ...cardStyle(props.colors.surface),
-            opacity: props.whatsappPreferenceSaving ? 0.7 : 1,
-          }}
-        >
-          <input
-            type="checkbox"
-            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-slate-800 accent-slate-800"
-            checked={!props.whatsappNotificationsEnabled}
-            disabled={props.whatsappPreferenceSaving}
-            onChange={(event) => {
-              const optOut = event.target.checked;
-              if (optOut) {
-                const accepted =
-                  typeof window === 'undefined' ||
-                  window.confirm(WHATSAPP_DISABLE_CONFIRM);
-                if (!accepted) return;
-                props.onSetWhatsappNotifications(false);
-                return;
-              }
-              props.onSetWhatsappNotifications(true);
-            }}
-          />
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold leading-5 text-slate-800">
-              No quiero recibir las actualizaciones del pedido en WhatsApp
-            </span>
-            <span className="mt-1 block text-[12px] leading-4 text-slate-500">
-              {props.whatsappNotificationsEnabled
-                ? 'Ahora te avisamos por WhatsApp cuando cambie el estado.'
-                : 'No te enviaremos actualizaciones de este pedido por WhatsApp.'}
-            </span>
-          </span>
-        </label>
-        {props.notificationMessage ? (
-          <p className="mt-2 text-center text-sm text-slate-600">{props.notificationMessage}</p>
-        ) : null}
 
         <p className="mt-6 text-center text-[11px] font-medium tracking-wide text-slate-400">
           Powered by elmenuxfa.com

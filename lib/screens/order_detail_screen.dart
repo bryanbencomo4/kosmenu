@@ -13,9 +13,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/delivery_courier_service.dart';
-import 'package:kosmenu_app/services/delivery_invite_notification_service.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
-import 'package:kosmenu_app/services/order_notification_service.dart';
 import 'package:kosmenu_app/services/order_rating_service.dart';
 import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
@@ -24,7 +22,6 @@ import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({
     super.key,
@@ -143,16 +140,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           .eq('id', pedido.id)
           .eq('estado', 'pendiente');
 
-      final publicOrderId =
-          pedido.detalles['order_id']?.toString().trim() ??
-          pedido.detalles['codigo_orden']?.toString().trim() ??
-          widget.orderId;
-      unawaited(
-        OrderNotificationService.dispatchStatusChange(
-          orderId: publicOrderId,
-          previousStatus: 'pendiente',
-        ),
-      );
     } finally {
       _isAutoCancelingExpiredPending = false;
     }
@@ -709,13 +696,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       await _playSuccessOverlay();
 
-      unawaited(
-        OrderNotificationService.dispatchStatusChange(
-          orderId: widget.orderId,
-          previousStatus: latestStatus,
-          onWhatsappFallback: _openOrderNotificationFallback,
-        ),
-      );
+      final updatedOrder = _cachedOrderData?.pedido;
+      if (updatedOrder != null) {
+        await _openCustomerWhatsapp(
+          updatedOrder.clientePhone ?? '',
+          _cachedOrderData?.comercioNombre ?? 'el comercio',
+          message: _buildStatusWhatsappMessage(
+            status: normalizedStatus,
+            trackingUrl: (updatedOrder.detalles['tracking_url'] ?? '').toString(),
+          ),
+        );
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -779,10 +770,43 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     _successController.reset();
   }
 
+  String _buildStatusWhatsappMessage({
+    required String status,
+    required String trackingUrl,
+  }) {
+    final publicTrackingUrl = trackingUrl.trim().isNotEmpty
+        ? trackingUrl.trim()
+        : AppLinks.orderDetailsById(widget.orderId, forceWebView: true);
+    final parsedTrackingUrl = Uri.tryParse(publicTrackingUrl);
+    final trackingSegments = parsedTrackingUrl?.pathSegments ?? const <String>[];
+    final shortCode = trackingSegments.length == 2 &&
+            trackingSegments.first == 'o' &&
+            RegExp(r'^[A-Za-z0-9_-]{10}$').hasMatch(trackingSegments.last)
+        ? trackingSegments.last
+        : '';
+    final resolvedTrackingUrl = shortCode.isNotEmpty
+        ? AppLinks.merchantOrderById(
+            widget.orderId,
+            fallbackShortCode: shortCode,
+          )
+        : AppLinks.merchantOrderById(
+            widget.orderId,
+            fallbackUri: publicTrackingUrl,
+          );
+    return [
+      status == 'confirmado'
+          ? 'Pedido recibido. En breve empezaremos a prepararlo.'
+          : 'Estado del pedido: ${_statusLabel(status)}',
+      'Numero de orden: ${widget.orderId}',
+      resolvedTrackingUrl,
+    ].join('\n');
+  }
+
   Future<void> _openCustomerWhatsapp(
     String phone,
-    String comercioNombre,
-  ) async {
+    String comercioNombre, {
+    String? message,
+  }) async {
     final digits = phone.replaceAll(RegExp(r'\D'), '');
     if (digits.isEmpty) {
       if (!mounted) return;
@@ -793,7 +817,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
 
     final text = Uri.encodeComponent(
-      'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.',
+      message ??
+          'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.',
     );
     final uri = Uri.parse('https://wa.me/$digits?text=$text');
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -803,24 +828,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
       );
     }
-  }
-
-  Future<void> _openOrderNotificationFallback(String url) async {
-    final uri = Uri.tryParse(url);
-    final opened =
-        uri != null &&
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          opened
-              ? 'WASender no pudo enviar la notificacion. WhatsApp esta abierto; presiona Enviar.'
-              : 'WASender no pudo enviar la notificacion y no se pudo abrir WhatsApp.',
-        ),
-      ),
-    );
   }
 
   Future<void> _openCustomerCall(String phone) async {
@@ -1034,11 +1041,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if (!mounted) return;
       setState(() => _deliveryInviteUrl = invite.url);
 
-      final notificationStatus = await DeliveryInviteNotificationService.send(
-        orderId: widget.orderId,
-        token: invite.token,
-        courierAlias: selection.alias,
+      final inviteMessage = Uri.encodeComponent(
+        [
+          'Invitacion de delivery para ${comercioNombre.trim()}.',
+          'Pedido: ${widget.orderId}.',
+          'Repartidor: ${selection.alias}.',
+          invite.url,
+        ].join('\n'),
       );
+      final opened = await launchUrl(
+        Uri.parse('https://wa.me/$waDigits?text=$inviteMessage'),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) {
+        throw Exception('No se pudo abrir WhatsApp.');
+      }
 
       if (!mounted) return;
       final refreshed = await _fetchOrder();
@@ -1046,14 +1063,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
       setState(() {
         _cachedOrderData = refreshed ?? _cachedOrderData;
-        _deliveryInviteFeedback = switch (notificationStatus) {
-          DeliveryInviteNotificationStatus.sent =>
-            'Invitacion enviada por WhatsApp.',
-          DeliveryInviteNotificationStatus.queued =>
-            'Invitacion en la cola de WhatsApp. Puedes copiar el enlace mientras se procesa.',
-          DeliveryInviteNotificationStatus.failed =>
-            'WASender no pudo enviar el mensaje. Copia el enlace para compartirlo manualmente.',
-        };
+        _deliveryInviteFeedback =
+            'WhatsApp esta abierto. Presiona Enviar para compartir la invitacion.';
       });
 
       if (selection.courierId != null && selection.courierId!.isNotEmpty) {
@@ -1269,12 +1280,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           ),
         ];
       case 'confirmado':
+        if (isDelivery) {
+          return const <_OrderStatusAction>[
+            _OrderStatusAction(
+              status: 'en_camino',
+              label: 'Marcar en camino',
+              icon: Icons.delivery_dining_rounded,
+              color: Color(0xFF0EA5E9),
+            ),
+            _OrderStatusAction(
+              status: 'cancelado',
+              label: 'Cancelar pedido',
+              icon: Icons.cancel_rounded,
+              color: Color(0xFFE11D48),
+            ),
+          ];
+        }
         return const <_OrderStatusAction>[
           _OrderStatusAction(
-            status: 'preparando',
-            label: 'Iniciar preparacion',
-            icon: Icons.restaurant_rounded,
-            color: Color(0xFFF59E0B),
+            status: 'entregado',
+            label: 'Marcar retirado',
+            icon: Icons.check_circle_rounded,
+            color: Color(0xFF16A34A),
           ),
           _OrderStatusAction(
             status: 'cancelado',
@@ -1501,7 +1528,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   String _statusLabel(String? estado) {
     switch (_normalizeStatusValue(estado)) {
       case 'confirmado':
-        return 'Confirmado';
+        return 'Pedido recibido';
       case 'preparando':
         return 'Preparando';
       case 'en_camino':

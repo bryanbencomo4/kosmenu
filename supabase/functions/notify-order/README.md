@@ -1,6 +1,6 @@
 # notify-order
 
-Supabase Edge Function that receives webhook payloads from `pedidos` inserts and status updates, then sends Firebase Cloud Messaging push notifications to the commerce owner and WhatsApp notifications to the customer.
+Supabase Edge Function that receives webhook payloads from `pedidos` inserts and status updates, then sends Firebase Cloud Messaging push notifications to the commerce owner and merchant-side WhatsApp notifications when applicable. Customer communication starts from the checkout through a `wa.me` link.
 
 ## Expected webhook payload
 
@@ -11,8 +11,8 @@ Required values:
 - `record.id` and/or `record.detalles.order_id`
 
 Supported events:
-- `INSERT`: owner push notification + customer WhatsApp + merchant WhatsApp to `comercios.whatsapp`
-- `UPDATE`: customer WhatsApp notification only when `estado` actually changes
+- `INSERT`: owner push notification + merchant WhatsApp to `comercios.whatsapp`
+- `UPDATE`: no customer WhatsApp notification is sent when `estado` changes
 
 ## Required env vars
 
@@ -21,12 +21,8 @@ Supported events:
 - `FIREBASE_PROJECT_ID`
 - `FIREBASE_CLIENT_EMAIL`
 - `FIREBASE_PRIVATE_KEY`
-- `WASENDER_API_KEY`
-- Optional: `WASENDER_API_ENDPOINT`
-
 Important:
 - `FIREBASE_PRIVATE_KEY` must be stored in Supabase secrets and can include `\\n`; the function normalizes it to real line breaks.
-- `WASENDER_API_KEY` must exist in Supabase secrets if you want WhatsApp notifications on status changes triggered from the mobile admin.
 
 ## Deploy
 
@@ -36,14 +32,13 @@ Important:
 supabase functions deploy notify-order --no-verify-jwt
 ```
 
-Set secrets:
+Set Firebase secrets:
 
 ```bash
 supabase secrets set \
   FIREBASE_PROJECT_ID=kosmenu-c0983 \
   FIREBASE_CLIENT_EMAIL=firebase-adminsdk-fbsvc@kosmenu-c0983.iam.gserviceaccount.com \
-  FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n" \
-  WASENDER_API_KEY="your_wasender_key"
+  FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
 ## Database setup
@@ -75,7 +70,6 @@ Run:
 - iOS sound: `cash_register.aiff`
 - Data: `{ "orderId": "<detalles.order_id or pedido.id>" }`
 
-## WhatsApp payload sent to WASender
+## Customer WhatsApp flow
 
-- Recipient: customer phone normalized to E.164
-- Message: branded copy with business name, status-specific message, business URL, and direct tracking URL
+After the order is persisted, the public checkout opens `https://wa.me/<restaurant-number>?text=...`. This universal link opens the WhatsApp app on iOS and Android when available, or falls back to WhatsApp Web. Customer delivery-status messages are not queued through WASENDER.

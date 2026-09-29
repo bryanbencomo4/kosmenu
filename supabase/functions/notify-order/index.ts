@@ -82,8 +82,6 @@ Deno.serve(async (req: Request) => {
       statusChanged &&
       currentStatus === 'cancelado' &&
       resolveCancellationSource(record) === 'cliente';
-    const customerPhone = resolveCustomerPhone(record);
-    const customerName = resolveCustomerName(record);
 
     if (!comercioId) {
       return jsonResponse({ ok: false, error: 'Missing comercio_id in webhook payload.' }, 400);
@@ -94,7 +92,6 @@ Deno.serve(async (req: Request) => {
     const firebaseProjectId = (Deno.env.get('FIREBASE_PROJECT_ID') ?? '').trim();
     const firebaseClientEmail = (Deno.env.get('FIREBASE_CLIENT_EMAIL') ?? '').trim();
     const firebasePrivateKey = normalizePrivateKey(Deno.env.get('FIREBASE_PRIVATE_KEY') ?? '');
-    const waSenderApiKey = (Deno.env.get('WASENDER_API_KEY') ?? '').trim();
 
     if (!supabaseUrl || !serviceRoleKey) {
       return jsonResponse(
@@ -110,46 +107,17 @@ Deno.serve(async (req: Request) => {
     const commerce = await loadCommerceInfo(supabase, comercioId);
     const pedidoId = (record.id ?? '').toString().trim();
     const shouldSendPush = eventType === 'INSERT';
-    const shouldSendWhatsapp = eventType === 'INSERT' || statusChanged;
-    const shouldSendMerchantWhatsapp = eventType === 'INSERT' || customerCancelled;
+    const merchantWhatsappResult = {
+      ok: true,
+      skipped: true,
+      reason: 'whatsapp-disabled-use-client-link',
+    };
 
-    const merchantWhatsappResult = eventType === 'INSERT'
-      ? await maybeSendMerchantWhatsappNotification({
-          supabase,
-          apiKey: waSenderApiKey,
-          record,
-          customerName,
-          orderId,
-          commerce,
-          pedidoId,
-          eventType,
-        })
-      : customerCancelled
-      ? await maybeSendMerchantCancellationNotification({
-          supabase,
-          apiKey: waSenderApiKey,
-          record,
-          orderId,
-          commerce,
-          pedidoId,
-          eventType,
-        })
-      : { ok: true, skipped: true, reason: 'not-new-order-or-customer-cancellation' };
-
-    const whatsappResult = shouldSendWhatsapp
-      ? await maybeSendWhatsappNotification({
-          supabase,
-          apiKey: waSenderApiKey,
-          record,
-          customerPhone,
-          customerName,
-          currentStatus,
-          orderId,
-          commerce,
-          pedidoId,
-          eventType,
-        })
-      : { ok: true, skipped: true, reason: 'status-unchanged' };
+    const whatsappResult = {
+      ok: true,
+      skipped: true,
+      reason: 'customer-whatsapp-disabled-use-wa-link',
+    };
 
     const pushResult = shouldSendPush
       ? await maybeSendPushNotifications({

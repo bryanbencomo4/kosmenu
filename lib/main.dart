@@ -228,7 +228,10 @@ class _KosmenuAppState extends State<KosmenuApp> {
       }
       final orderId = OrderGateHandler.extractOrderId(uri);
       if (orderId != null && orderId.isNotEmpty) {
-        MerchantDeepLink.rememberOrder(orderId);
+        MerchantDeepLink.rememberOrder(
+          orderId,
+          fallbackUri: _fallbackOrderUri(uri, orderId),
+        );
         // Enter through AuthGate/dashboard. Flutter would otherwise split
         // `/orders/view/{id}` into `/orders/view` and treat "view" as an order.
         return '/';
@@ -237,6 +240,30 @@ class _KosmenuAppState extends State<KosmenuApp> {
     }
 
     return '/';
+  }
+
+  Uri? _fallbackOrderUri(Uri uri, String orderId) {
+    final fullFallback = uri.queryParameters['fallback'] ?? '';
+    if (fullFallback.trim().isNotEmpty) {
+      return Uri.tryParse(fullFallback);
+    }
+
+    final token = uri.queryParameters['fallbackToken']?.trim() ?? '';
+    if (token.isNotEmpty) {
+      return Uri.parse(
+        AppLinks.orderDetailsById(
+          orderId,
+          forceWebView: true,
+          trackingToken: token,
+        ),
+      );
+    }
+
+    final shortCode = uri.queryParameters['shortCode']?.trim() ?? '';
+    if (shortCode.isEmpty) return null;
+    return Uri.parse(
+      AppLinks.shortOrderByCode(shortCode),
+    );
   }
 
   Future<void> _bindIncomingOrderLinks() async {

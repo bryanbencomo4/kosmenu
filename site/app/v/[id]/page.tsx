@@ -271,6 +271,7 @@ type DeliveryPointSelectionSource = 'none' | 'business-default' | 'user';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const publicBaseUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(/\/$/, '');
+const appBaseUrl = (process.env.NEXT_PUBLIC_APP_SITE_URL ?? 'https://app.elmenuxfa.com').replace(/\/$/, '');
 const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
 const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
 const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';
@@ -4084,10 +4085,21 @@ export default function PublicMenuPage() {
       (responsePayload?.data?.trackingUrl ?? `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`)
         .toString()
         .trim();
+    let smartOrderUrl = `${appBaseUrl}/orders/view/${encodeURIComponent(orderId)}?fallback=${encodeURIComponent(orderUrl)}`;
+    try {
+      const parsedOrderUrl = new URL(orderUrl);
+      const shortCodeMatch = parsedOrderUrl.pathname.match(/^\/o\/([A-Za-z0-9_-]{10})$/);
+      if (shortCodeMatch) {
+        smartOrderUrl = `${appBaseUrl}/orders/view/${encodeURIComponent(orderId)}?shortCode=${encodeURIComponent(shortCodeMatch[1])}`;
+      }
+    } catch {
+      // Keep the full fallback URL when the tracking URL is not absolute.
+    }
 
     const message =
-      `Hola, quiero confirmar este pedido.\n` +
-      `Pedido: ${orderId}.\n` +
+      `✅ Pedido recibido.\n` +
+      `Estado: Pendiente.\n` +
+      `Numero de orden: ${orderId}.\n` +
       `Cliente: ${customerName}.\n` +
       `Telefono: ${customerWhatsapp}.\n` +
       `Tipo de entrega: ${delivery.mode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}.\n` +
@@ -4119,7 +4131,7 @@ export default function PublicMenuPage() {
         ? `Cambio: ${formatAmountByCurrency(changeAmount, paymentMeta.currency)}.\n`
         : '') +
       `Total: ${formatAmountByCurrency(totalConverted, paymentMeta.currency)}.\n` +
-      `Seguimiento: ${orderUrl}`;
+      `Seguimiento: ${smartOrderUrl}`;
 
     checkoutAttemptRef.current = null;
     return {
@@ -4234,6 +4246,10 @@ export default function PublicMenuPage() {
             selectedCurrency: selectedCurrencyCode,
           }),
         );
+        if (persisted.waUrl) {
+          window.location.assign(persisted.waUrl);
+          return;
+        }
       }
 
       const voucherItems = cartItems.map((item) => ({

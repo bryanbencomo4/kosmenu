@@ -78,13 +78,33 @@ type RawComercio = {
   slug?: string | null;
   moneda?: string | null;
   whatsapp?: string | null;
-  telefono?: string | null;
+  telefonos?: unknown;
   direccion?: string | null;
   logo_url?: string | null;
   branding_ia?: Record<string, unknown> | null;
 };
 
 export const CONFIRMATION_TIMEOUT_MS = 15 * 60 * 1000;
+
+function firstPhone(value: unknown): string | null {
+  if (typeof value === 'string' || typeof value === 'number') {
+    const text = value.toString().trim();
+    return text || null;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const phone = firstPhone(entry);
+      if (phone) return phone;
+    }
+  }
+  if (value && typeof value === 'object') {
+    for (const entry of Object.values(value)) {
+      const phone = firstPhone(entry);
+      if (phone) return phone;
+    }
+  }
+  return null;
+}
 
 /** Statuses where customer confirmation of delivery is allowed. */
 export const CONFIRM_RECEIVED_ALLOWED_STATUSES: ReadonlySet<PublicOrderStatus> = new Set([
@@ -94,7 +114,11 @@ export const CONFIRM_RECEIVED_ALLOWED_STATUSES: ReadonlySet<PublicOrderStatus> =
 export function normalizePublicStatus(value: unknown): PublicOrderStatus {
   const raw = (value ?? '').toString().trim().toLowerCase();
   if (raw === 'cancelado' || raw === 'rechazado' || raw === 'anulado') return 'cancelado';
-  if (raw === 'confirmado' || raw === 'preparando' || raw === 'en_camino' || raw === 'entregado') {
+  if (raw === 'confirmado' || raw === 'preparando') {
+    return 'confirmado';
+  }
+  if (raw === 'listo') return 'entregado';
+  if (raw === 'en_camino' || raw === 'entregado') {
     return raw;
   }
   return 'pendiente';
@@ -115,7 +139,7 @@ function buildLocationHint(
   delegateStatus: string | null,
 ): string | null {
   if (deliveryType === 'pickup') {
-    return status === 'preparando' || status === 'confirmado' || status === 'pendiente'
+    return status === 'confirmado' || status === 'pendiente'
       ? 'Retiro en el comercio cuando el pedido esté listo.'
       : null;
   }
@@ -250,7 +274,7 @@ export function toPublicOrderTrackingResponse(
     comercio: {
       nombre: (comercio?.nombre ?? 'Comercio').toString(),
       slug: comercio?.slug ?? null,
-      whatsapp: (comercio?.whatsapp ?? comercio?.telefono ?? null) as string | null,
+      whatsapp: firstPhone(comercio?.whatsapp) ?? firstPhone(comercio?.telefonos),
       pickupAddress: deliveryType === 'pickup' ? (comercio?.direccion ?? null) : null,
       logoUrl: sanitizePublicAssetUrl(comercio?.logo_url),
       branding: sanitizePublicBranding(comercio?.branding_ia ?? null),

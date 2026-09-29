@@ -157,18 +157,39 @@ class AppLinks {
     return Uri.parse('$base#access_token=${Uri.encodeComponent(token)}');
   }
 
-  static String orderDetailsById(String orderId, {bool forceWebView = false}) {
+  static String orderDetailsById(
+    String orderId, {
+    bool forceWebView = false,
+    String? trackingToken,
+  }) {
     final base = productionUrl.endsWith('/')
         ? productionUrl.substring(0, productionUrl.length - 1)
         : productionUrl;
     final encodedId = Uri.encodeComponent(orderId.trim());
-    final suffix = forceWebView ? '?view=web' : '';
+    final query = <String, String>{
+      if (forceWebView) 'view': 'web',
+      if ((trackingToken ?? '').trim().isNotEmpty) 't': trackingToken!.trim(),
+    };
+    final suffix = query.isEmpty
+        ? ''
+        : '?${query.entries.map((entry) => '${entry.key}=${Uri.encodeComponent(entry.value)}').join('&')}';
     return '$base/orders/$encodedId$suffix';
   }
 
-  static String merchantOrderById(String orderId) {
+  static String merchantOrderById(
+    String orderId, {
+    String? fallbackUri,
+    String? fallbackShortCode,
+  }) {
     final encodedId = Uri.encodeComponent(orderId.trim());
-    return '$merchantAppUrl/orders/view/$encodedId';
+    final fallback = (fallbackUri ?? '').trim();
+    final shortCode = (fallbackShortCode ?? '').trim();
+    final query = shortCode.isNotEmpty
+        ? '?shortCode=${Uri.encodeComponent(shortCode)}'
+        : fallback.isEmpty
+        ? ''
+        : '?fallback=${Uri.encodeComponent(fallback)}';
+    return '$merchantAppUrl/orders/view/$encodedId$query';
   }
 
   static String deliveryInviteByToken(String token) {
@@ -177,5 +198,12 @@ class AppLinks {
         : productionUrl;
     final encodedToken = Uri.encodeComponent(token.trim());
     return '$base/delivery/invite/$encodedToken';
+  }
+
+  static String shortOrderByCode(String code) {
+    final base = productionUrl.endsWith('/')
+        ? productionUrl.substring(0, productionUrl.length - 1)
+        : productionUrl;
+    return '$base/o/${Uri.encodeComponent(code.trim())}';
   }
 }

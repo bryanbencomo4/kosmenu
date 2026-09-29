@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { consumeRateLimit, getClientIp } from '../../../_lib/rate-limit';
-import { sendDeliveryInviteWhatsapp } from '../../../_lib/send-delivery-invite-whatsapp';
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 import { getUserFromBearerRequest } from '../../../_lib/supabase-user-auth';
 import { appSiteUrl } from '../../../../_lib/public-site-config';
@@ -92,52 +91,32 @@ export async function POST(request: Request) {
       request.url,
     ).toString();
 
-    try {
-      const queued = await sendDeliveryInviteWhatsapp({
-        phone: invitation.invited_phone ?? '',
-        courierAlias,
-        businessName: comercio.nombre?.toString().trim() || 'el negocio',
-        orderId,
+    const recipient = (invitation.invited_phone ?? '').toString().replace(/\D/g, '');
+    const message = encodeURIComponent(
+      [
+        `Invitacion de delivery para ${comercio.nombre?.toString().trim() || 'el negocio'}.`,
+        `Pedido: ${orderId}.`,
+        `Repartidor: ${courierAlias || 'por confirmar'}.`,
         inviteUrl,
-        invitationId: invitation.id,
-        pedidoId: invitation.pedido_id,
-        comercioId: invitation.comercio_id,
-        actorId: user.id,
-      });
-      await supabase.from('delivery_invitation_events').insert({
-        invitation_id: invitation.id,
-        pedido_id: invitation.pedido_id,
-        order_id: invitation.order_id,
-        event_type: queued.queued ? 'notification_queued' : 'notification_sent',
-        actor: user.id,
-        payload: {
-          channel: 'whatsapp',
-          provider: 'wasender',
-          status: queued.queued ? 'queued' : 'sent',
-          queue_id: queued.response && typeof queued.response === 'object'
-            ? (queued.response as Record<string, unknown>).queueId
-            : null,
-        },
-      });
-      return jsonResponse(
-        request,
-        { ok: true, delivered: !queued.queued, queued: queued.queued },
-        { status: 202, headers: { 'Cache-Control': 'no-store' } },
-      );
-    } catch (error) {
-      await supabase.from('delivery_invitation_events').insert({
-        invitation_id: invitation.id,
-        pedido_id: invitation.pedido_id,
-        order_id: invitation.order_id,
-        event_type: 'notification_failed',
-        actor: user.id,
-        payload: {
-          channel: 'whatsapp',
-          error: error instanceof Error ? error.message.slice(0, 160) : 'unknown',
-        },
-      });
-      return jsonResponse(request, { ok: false, delivered: false }, { status: 502 });
-    }
+      ].join('\n'),
+    );
+    const directWhatsappUrl = recipient
+      ? `https://wa.me/${recipient}?text=${message}`
+      : '';
+
+    await supabase.from('delivery_invitation_events').insert({
+      invitation_id: invitation.id,
+      pedido_id: invitation.pedido_id,
+      order_id: invitation.order_id,
+      event_type: 'notification_link_created',
+      actor: user.id,
+      payload: { channel: 'whatsapp', provider: 'direct_whatsapp' },
+    });
+    return jsonResponse(
+      request,
+      { ok: true, delivered: false, queued: false, directWhatsappUrl },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } },
+    );
   } catch (error) {
     console.error('[delivery-invite-notify] failed', error);
     return jsonResponse(request, GENERIC_ERROR, { status: 500 });

@@ -17,12 +17,11 @@ import {
   consumeRateLimit,
   getClientIp,
 } from '../_lib/rate-limit';
-import { ensureNewOrderMerchantNotify } from '../_lib/ensure-new-order-merchant-notify';
 import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
 import { getServiceSupabaseClient } from '../_lib/supabase-server';
 import { evaluateBusinessOrdering } from '../_lib/business-hours';
-import { merchantPanelOrderHref } from '../../_lib/public-site-config';
 import { convertOrderAmount, normalizeOrderCurrency } from '../_lib/order-currency';
+import { createOrderShortLink } from '../_lib/order-short-links';
 import {
   createCustomerRatingKey,
   loadOrderServiceRatingSummary,
@@ -323,7 +322,6 @@ export async function POST(request: Request) {
         if (cachedOrderId && cachedComercioId) {
           const supabase = getServiceSupabaseClient();
           const currency = validated.moneda_checkout;
-          const currencySymbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency;
           const { data: replayCommerce } = await supabase
             .from('comercios')
             .select('moneda')
@@ -338,20 +336,6 @@ export async function POST(request: Request) {
             currency,
             validated.tasa_cambio_snapshot,
           ) ?? replayTotal;
-          await ensureNewOrderMerchantNotify({
-            supabase,
-            comercioId: cachedComercioId,
-            orderId: cachedOrderId,
-            customerName: validated.cliente_nombre,
-            totalLabel: `${currencySymbol} ${replayTotalCheckout.toFixed(2)}`,
-            comercioNombreFallback: (body.comercioNombre ?? 'Kosmenu').trim() || 'Kosmenu',
-            appOrderUrl: merchantPanelOrderHref(cachedOrderId),
-          }).catch((error) => {
-            console.error('[orders] merchant notify replay failed', {
-              orderId: cachedOrderId,
-              message: error instanceof Error ? error.message : 'unknown',
-            });
-          });
         }
         return NextResponse.json(existing.response, { status: 200 });
       }
@@ -527,8 +511,33 @@ export async function POST(request: Request) {
       throw new Error('Failed to create order.');
     }
 
+    let publicOrderUrl = trackingUrl;
+    try {
+      const shortLink = await createOrderShortLink({
+        supabase,
+        pedidoId: (insertedOrder.id ?? '').toString().trim(),
+        orderId,
+        comercioId: resolvedComercioId,
+        trackingTokenHash: publicTrackingTokenHash,
+      });
+      publicOrderUrl = `${publicSiteUrl}/o/${encodeURIComponent(shortLink.code)}`;
+      const shortLinkDetalles = {
+        ...detalles,
+        tracking_url: publicOrderUrl,
+      };
+      await supabase
+        .from('pedidos')
+        .update({ detalles: shortLinkDetalles })
+        .eq('id', insertedOrder.id);
+    } catch (error) {
+      console.error('[orders] short link creation failed; using long tracking URL', {
+        orderId,
+        message: error instanceof Error ? error.message : 'unknown',
+      });
+    }
+
     let emailStatus: 'queued' | 'skipped' = 'skipped';
-    let whatsappStatus: 'queued' | 'skipped' = 'skipped';
+    const whatsappStatus = 'client_link' as const;
 
     if (clientEmail && canSendOrderEmail()) {
       emailStatus = 'queued';
@@ -536,15 +545,11 @@ export async function POST(request: Request) {
         clientEmail,
         comercioNombre,
         orderId,
-        orderTrackingUrl: trackingUrl,
+        orderTrackingUrl: publicOrderUrl,
         comercioSlug: resolvedComercioSlug,
       }).catch(() => {
         // Keep response fast; email failures are handled asynchronously.
       });
-    }
-
-    if (clientWhatsapp) {
-      whatsappStatus = 'queued';
     }
 
     const responseBody = {
@@ -557,7 +562,7 @@ export async function POST(request: Request) {
         subtotal,
         costoDelivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
         total,
-        trackingUrl,
+        trackingUrl: publicOrderUrl,
         emailStatus,
         whatsappStatus,
       },
@@ -571,19 +576,6 @@ export async function POST(request: Request) {
         response: responseBody,
       });
     }
-
-    const currencySymbol = currency === 'USD' ? 'US$' : currency === 'VES' ? 'Bs.' : currency;
-    const totalLabel = `${currencySymbol} ${totalCheckout.toFixed(2)}`;
-    await ensureNewOrderMerchantNotify({
-      supabase,
-      record: insertedOrder,
-      comercioId: resolvedComercioId,
-      orderId,
-      customerName: clientName,
-      totalLabel,
-      comercioNombreFallback: comercioNombre,
-      appOrderUrl: merchantPanelOrderHref(orderId),
-    });
 
     supabaseWriteCircuit.recordSuccess();
     return NextResponse.json(responseBody, { status: 201 });

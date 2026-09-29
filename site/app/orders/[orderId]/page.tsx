@@ -143,9 +143,8 @@ type ComercioRow = {
 };
 
 const ORDER_FLOW: Array<{ key: OrderStatus; label: string; short: string }> = [
-  { key: 'pendiente', label: 'Pedido recibido', short: 'Pendiente' },
+  { key: 'pendiente', label: 'Enviando', short: 'Enviando' },
   { key: 'confirmado', label: 'Pedido confirmado', short: 'Confirmado' },
-  { key: 'preparando', label: 'Preparando tu pedido', short: 'Preparando' },
   { key: 'en_camino', label: 'Pedido en camino', short: 'En camino' },
   { key: 'cancelado', label: 'Pedido cancelado', short: 'Cancelado' },
   { key: 'entregado', label: 'Pedido entregado', short: 'Entregado' },
@@ -166,8 +165,9 @@ function normalizePhone(value: string | null | undefined) {
 function normalizeStatus(value: unknown): OrderStatus {
   const status = (value ?? 'pendiente').toString().trim().toLowerCase();
   if (status === 'confirmado') return 'confirmado';
-  if (status === 'preparando') return 'preparando';
+  if (status === 'preparando') return 'confirmado';
   if (status === 'en_camino') return 'en_camino';
+  if (status === 'listo') return 'entregado';
   if (status === 'entregado') return 'entregado';
   if (status === 'cancelado' || status === 'rechazado' || status === 'anulado') return 'cancelado';
   return 'pendiente';
@@ -269,9 +269,13 @@ function mapPublicTracking(pub: PublicTrackingPayload): {
   };
 }
 
-function buildOrdersApiUrl(orderId: string, token: string) {
+function buildOrdersApiUrl(orderId: string, token: string, shortCode: string) {
   const url = new URL(`/api/orders/${encodeURIComponent(orderId)}`, window.location.origin);
-  url.searchParams.set('t', token);
+  if (token) {
+    url.searchParams.set('t', token);
+  } else {
+    url.searchParams.set('s', shortCode);
+  }
   return `${url.pathname}${url.search}`;
 }
 
@@ -355,20 +359,16 @@ function buildWhatsAppLink(
   orderId: string,
   status: OrderStatus,
   comercio: ComercioRow | null,
+  fallbackPhone?: string,
 ) {
   if (comercio?.recibe_pedidos_whatsapp === false) return '';
-  const phone = normalizePhone(comercio?.whatsapp);
+  const phone = normalizePhone(comercio?.whatsapp ?? fallbackPhone);
   if (!phone) return '';
 
   const message =
     `Hola, quiero consultar mi pedido ${orderId}.\n` +
     `Estado actual: ${statusLabel(status)}.`;
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-}
-
-function resolveWhatsappNotificationsEnabled(order: PedidoRow | null | undefined) {
-  const value = order?.detalles?.notifications?.whatsapp_enabled;
-  return value !== false;
 }
 
 function OrderTrackingPageInner() {
@@ -378,6 +378,8 @@ function OrderTrackingPageInner() {
   const searchParams = useSearchParams();
   const orderId = decodeURIComponent(params?.orderId ?? '').trim();
   const trackingToken = (searchParams.get('t') ?? searchParams.get('token') ?? '').trim();
+  const shortCode = (searchParams.get('s') ?? '').trim();
+  const trackingCredential = trackingToken || shortCode;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -385,9 +387,6 @@ function OrderTrackingPageInner() {
   const [comercio, setComercio] = useState<ComercioRow | null>(null);
   const [menuIdentity, setMenuIdentity] = useState<ComercioRow | null>(null);
   const [waReceiptUrl, setWaReceiptUrl] = useState('');
-  const [notificationMessage, setNotificationMessage] = useState('');
-  const [whatsappNotificationsEnabled, setWhatsappNotificationsEnabled] = useState(true);
-  const [whatsappPreferenceSaving, setWhatsappPreferenceSaving] = useState(false);
   const [cancelMessage, setCancelMessage] = useState('');
   const [cancelLoading, setCancelLoading] = useState(false);
   const [serviceRatingLoading, setServiceRatingLoading] = useState(false);
@@ -401,7 +400,6 @@ function OrderTrackingPageInner() {
   const [tokenRecoveryChecked, setTokenRecoveryChecked] = useState(false);
   const lastStatusRef = useRef<OrderStatus | null>(null);
   const autoCancelAttemptedRef = useRef(false);
-  const whatsappPreferenceSavingRef = useRef(false);
   const trackingFetchInFlightRef = useRef(false);
 
   const resolvedStatus = useMemo(() => normalizeStatus(order?.estado), [order?.estado]);
@@ -439,7 +437,7 @@ function OrderTrackingPageInner() {
   }, [orderId]);
 
   useEffect(() => {
-    if (trackingToken) {
+    if (trackingCredential) {
       setTokenRecoveryChecked(true);
       return;
     }
@@ -464,16 +462,16 @@ function OrderTrackingPageInner() {
     }
 
     setTokenRecoveryChecked(true);
-  }, [orderId, pathname, router, trackingToken]);
+  }, [orderId, pathname, router, trackingCredential]);
 
   async function cancelOrder(source: 'cliente' | 'timeout', reason?: string) {
-    if (!orderId || !trackingToken || cancelLoading) return;
+    if (!orderId || !trackingCredential || cancelLoading) return;
 
     setCancelLoading(true);
     setCancelMessage('');
 
     try {
-      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
+      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -497,7 +495,6 @@ function OrderTrackingPageInner() {
         setOrder(mapped.order);
         setComercio(mapped.comercio);
         setLocationHint(mapped.locationHint);
-        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
       }
 
       setCancelMessage(
@@ -516,13 +513,13 @@ function OrderTrackingPageInner() {
   }
 
   async function confirmDeliveryReceived() {
-    if (!orderId || !trackingToken || deliveryConfirmationLoading) return;
+    if (!orderId || !trackingCredential || deliveryConfirmationLoading) return;
 
     setDeliveryConfirmationLoading(true);
     setDeliveryConfirmationMessage('');
 
     try {
-      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
+      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -559,12 +556,12 @@ function OrderTrackingPageInner() {
   }
 
   async function submitServiceRating(rating: number) {
-    if (!orderId || !trackingToken || serviceRatingLoading) return;
+    if (!orderId || !trackingCredential || serviceRatingLoading) return;
 
     setServiceRatingLoading(true);
     setServiceRatingMessage('');
     try {
-      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
+      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'submit_rating', rating }),
@@ -589,52 +586,6 @@ function OrderTrackingPageInner() {
     }
   }
 
-  async function updateWhatsappNotificationsPreference(enabled: boolean) {
-    if (!orderId || !trackingToken || whatsappPreferenceSavingRef.current) return;
-
-    const previous = whatsappNotificationsEnabled;
-    whatsappPreferenceSavingRef.current = true;
-    setWhatsappNotificationsEnabled(enabled);
-    setWhatsappPreferenceSaving(true);
-    setNotificationMessage('');
-
-    try {
-      const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          action: 'set_whatsapp_notifications',
-          enabled,
-        }),
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message = (payload?.error ?? '').toString().trim();
-        throw new Error(message || 'No se pudo actualizar la preferencia de WhatsApp.');
-      }
-
-      const publicOrder = (payload?.data ?? null) as PublicTrackingPayload | null;
-      if (publicOrder?.orderId) {
-        const mapped = mapPublicTracking(publicOrder);
-        setOrder(mapped.order);
-        setLocationHint(mapped.locationHint);
-        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
-      }
-    } catch (preferenceError) {
-      setWhatsappNotificationsEnabled(previous);
-      const message = preferenceError instanceof Error
-        ? preferenceError.message
-        : 'No se pudo actualizar la preferencia de WhatsApp.';
-      setNotificationMessage(message);
-    } finally {
-      whatsappPreferenceSavingRef.current = false;
-      setWhatsappPreferenceSaving(false);
-    }
-  }
-
   useEffect(() => {
     if (!tokenRecoveryChecked) {
       return;
@@ -646,7 +597,7 @@ function OrderTrackingPageInner() {
       return;
     }
 
-    if (!trackingToken) {
+    if (!trackingCredential) {
       setLoading(false);
       setOrder(null);
       setError(
@@ -662,16 +613,13 @@ function OrderTrackingPageInner() {
       setOrder(mapped.order);
       setComercio(mapped.comercio);
       setLocationHint(mapped.locationHint);
-      if (!whatsappPreferenceSavingRef.current) {
-        setWhatsappNotificationsEnabled(resolveWhatsappNotificationsEnabled(mapped.order));
-      }
       lastStatusRef.current = normalizeStatus(mapped.order.estado);
       setLastSyncAt(Date.now());
       setSyncMode('polling');
     };
 
     const fetchOrder = async (mode: 'initial' | 'poll') => {
-      if (mode === 'poll' && (whatsappPreferenceSavingRef.current || trackingFetchInFlightRef.current)) {
+      if (mode === 'poll' && trackingFetchInFlightRef.current) {
         return true;
       }
       trackingFetchInFlightRef.current = true;
@@ -682,7 +630,7 @@ function OrderTrackingPageInner() {
           setError(null);
         }
 
-        const response = await fetch(buildOrdersApiUrl(orderId, trackingToken), {
+        const response = await fetch(buildOrdersApiUrl(orderId, trackingToken, shortCode), {
           cache: 'no-store',
           signal: AbortSignal.timeout(8_000),
         });
@@ -758,7 +706,7 @@ function OrderTrackingPageInner() {
       active = false;
       if (pollingTimer) window.clearTimeout(pollingTimer);
     };
-  }, [orderId, tokenRecoveryChecked, trackingToken]);
+  }, [orderId, tokenRecoveryChecked, trackingCredential]);
 
   const delivery = order?.detalles?.delivery ?? null;
   const isDelivery = (delivery?.mode ?? 'pickup') === 'delivery';
@@ -851,10 +799,16 @@ function OrderTrackingPageInner() {
     ''
   ).toString().trim();
   const businessAddress = (resolvedComercio.direccion ?? '').toString().trim();
+  const orderBusinessWhatsapp = (
+    order?.detalles?.telefono_comercio ??
+    order?.detalles?.comercio_telefono ??
+    order?.detalles?.business_phone ??
+    ''
+  ).toString().trim();
 
   const fallbackWaLink = useMemo(
-    () => buildWhatsAppLink(orderId, resolvedStatus, resolvedComercio),
-    [orderId, resolvedComercio, resolvedStatus],
+    () => buildWhatsAppLink(orderId, resolvedStatus, resolvedComercio, orderBusinessWhatsapp),
+    [orderBusinessWhatsapp, orderId, resolvedComercio, resolvedStatus],
   );
   const allowsWhatsapp = resolvedComercio.recibe_pedidos_whatsapp !== false;
   const finalWaLink = allowsWhatsapp ? fallbackWaLink || waReceiptUrl : '';
@@ -871,10 +825,11 @@ function OrderTrackingPageInner() {
 
   useEffect(() => {
     const slug = (comercio?.slug ?? '').trim();
-    if (!slug || !orderId || !trackingToken || !pathname?.startsWith('/orders/')) return;
-    const next = `/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}?t=${encodeURIComponent(trackingToken)}`;
+    if (!slug || !orderId || !trackingCredential || !pathname?.startsWith('/orders/')) return;
+    const queryKey = trackingToken ? 't' : 's';
+    const next = `/v/${encodeURIComponent(slug)}/orders/${encodeURIComponent(orderId)}?${queryKey}=${encodeURIComponent(trackingCredential)}`;
     router.replace(next);
-  }, [comercio?.slug, orderId, pathname, router, trackingToken]);
+  }, [comercio?.slug, orderId, pathname, router, trackingCredential, trackingToken]);
 
   useEffect(() => {
     const match = pathname?.match(/\/v\/([^/]+)\/orders\//i);
@@ -918,9 +873,7 @@ function OrderTrackingPageInner() {
     };
   }, [pathname]);
 
-  const displayStatus: OrderStatus = (!isDelivery && resolvedStatus === 'en_camino')
-    ? 'preparando'
-    : resolvedStatus;
+  const displayStatus: OrderStatus = resolvedStatus;
   const orderCreatedAtMs = order?.created_at ? Date.parse(order.created_at) : NaN;
   const hasCreatedAt = Number.isFinite(orderCreatedAtMs);
   const pendingElapsedMs = (displayStatus === 'pendiente' && hasCreatedAt)
@@ -994,9 +947,8 @@ function OrderTrackingPageInner() {
       }).format(new Date(order.created_at))
     : '';
   const timelineItemsBase = [
-    { key: 'pendiente', label: 'Recibido' },
+    { key: 'pendiente', label: 'Enviando' },
     { key: 'confirmado', label: 'Aceptado' },
-    { key: 'preparando', label: 'Preparando' },
     { key: 'en_camino', label: 'En camino' },
     { key: 'entregado', label: isDelivery ? 'Entregado' : 'Listo' },
   ] as const;
@@ -1141,10 +1093,6 @@ function OrderTrackingPageInner() {
       serviceRatingLoading={serviceRatingLoading}
       serviceRatingMessage={serviceRatingMessage}
       onRateService={(rating) => void submitServiceRating(rating)}
-      whatsappNotificationsEnabled={whatsappNotificationsEnabled}
-      whatsappPreferenceSaving={whatsappPreferenceSaving}
-      notificationMessage={notificationMessage}
-      onSetWhatsappNotifications={(enabled) => void updateWhatsappNotificationsPreference(enabled)}
       colors={{
         primary: trackingPrimary,
         secondary: trackingSecondary,

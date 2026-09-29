@@ -20,7 +20,7 @@ class OrderManagerService {
         raw == 'en_proceso' ||
         raw == 'en proceso' ||
         raw == 'listo') {
-      return 'preparando';
+      return 'confirmado';
     }
     if (raw == 'en_camino' || raw == 'en camino' || raw == 'despachado') {
       return 'en_camino';

@@ -24,6 +24,7 @@ import {
   createCustomerRatingKey,
   isRateableOrderStatus,
 } from '../../_lib/order-service-rating';
+import { findOrderShortLink, type OrderShortLink } from '../../_lib/order-short-links';
 
 type Params = {
   params: Promise<{ orderId: string }>;
@@ -55,7 +56,7 @@ type ComercioSummary = {
   latitud?: number | string | null;
   longitud?: number | string | null;
   whatsapp?: string | null;
-  telefono?: string | null;
+  telefonos?: unknown;
   logo_url?: string | null;
   branding_ia?: Record<string, unknown> | null;
 };
@@ -71,6 +72,10 @@ function extractTrackingToken(request: Request): string {
   if (header) return header;
 
   return '';
+}
+
+function extractShortCode(request: Request): string {
+  return (new URL(request.url).searchParams.get('s') ?? '').trim();
 }
 
 function denyUnauthorized() {
@@ -127,7 +132,7 @@ async function loadComercio(
   if (!comercioId) return null;
   const result = await supabase
     .from('comercios')
-    .select('nombre,slug,moneda,direccion,whatsapp,telefono,logo_url,branding_ia')
+    .select('nombre,slug,moneda,direccion,whatsapp,telefonos,logo_url,branding_ia')
     .eq('id', comercioId)
     .maybeSingle();
   if (result.error) return null;
@@ -139,6 +144,14 @@ function authorizeOrder(order: PedidoRow | null, token: string): order is Pedido
   const expectedHash = extractTokenHashFromPedido(order);
   if (!expectedHash) return false;
   return verifyPublicTrackingToken(token, expectedHash);
+}
+
+function authorizeShortLink(
+  order: PedidoRow | null,
+  shortLink: OrderShortLink | null,
+): order is PedidoRow {
+  if (!order || !shortLink) return false;
+  return shortLink.pedido_id === order.id && shortLink.comercio_id === order.comercio_id;
 }
 
 export async function GET(request: Request, { params }: Params) {
@@ -155,15 +168,17 @@ export async function GET(request: Request, { params }: Params) {
     const { orderId: rawOrderId } = await params;
     const orderId = decodeURIComponent(rawOrderId ?? '').trim();
     const token = extractTrackingToken(request);
+    const shortCode = extractShortCode(request);
 
-    if (!orderId || !token) {
+    if (!orderId || (!token && !shortCode)) {
       return denyUnauthorized();
     }
 
     const supabase = getServiceSupabaseClient();
     const order = await findOrderByOrderId(supabase, orderId);
 
-    if (!authorizeOrder(order, token)) {
+    const shortLink = shortCode ? await findOrderShortLink(supabase, shortCode) : null;
+    if (!authorizeOrder(order, token) && !authorizeShortLink(order, shortLink)) {
       return denyUnauthorized();
     }
 
@@ -190,8 +205,9 @@ export async function PATCH(request: Request, { params }: Params) {
     const { orderId: rawOrderId } = await params;
     const orderId = decodeURIComponent(rawOrderId ?? '').trim();
     const token = extractTrackingToken(request);
+    const shortCode = extractShortCode(request);
 
-    if (!orderId || !token) {
+    if (!orderId || (!token && !shortCode)) {
       return denyUnauthorized();
     }
 
@@ -204,7 +220,8 @@ export async function PATCH(request: Request, { params }: Params) {
     const supabase = getServiceSupabaseClient();
     const order = await findOrderByOrderId(supabase, orderId);
 
-    if (!authorizeOrder(order, token)) {
+    const shortLink = shortCode ? await findOrderShortLink(supabase, shortCode) : null;
+    if (!authorizeOrder(order, token) && !authorizeShortLink(order, shortLink)) {
       return denyUnauthorized();
     }
 

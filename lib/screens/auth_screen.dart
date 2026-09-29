@@ -8,6 +8,7 @@ import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
+import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/models/merchant_panel.dart';
@@ -219,6 +220,18 @@ class _AuthGateState extends State<AuthGate> {
             }
 
             if (session == null) {
+              final pendingOrder = MerchantDeepLink.peekOrder();
+              final fallbackUri = MerchantDeepLink.peekFallbackUri();
+              if (pendingOrder != null && fallbackUri != null) {
+                MerchantDeepLink.clear();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  launchUrl(
+                    fallbackUri,
+                    mode: LaunchMode.externalApplication,
+                  );
+                });
+                return const BrandedLoadingScreen(withScaffold: true);
+              }
               SupabaseConfig.clearCurrentComercioId();
               clearMerchantPresence();
               _resetTargetCache();
