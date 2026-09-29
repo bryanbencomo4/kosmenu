@@ -1221,7 +1221,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     map['tipo']?.toString().trim().replaceAll('_', ' ') ??
                     '')
                 .trim();
-        if (method.toLowerCase().startsWith('transferencia')) {
+        final normalizedMethod = method.toLowerCase();
+        if (rawType.startsWith('transferencia__') ||
+            normalizedMethod == 'transferencia' ||
+            normalizedMethod.startsWith('pago digital:') ||
+            normalizedMethod == 'pago digital') {
           method = 'Transferencia';
         }
         if (method.isEmpty) {
@@ -7558,10 +7562,77 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       }
     }
 
+    if (rows.isEmpty) {
+      throw const FormatException(
+        'No se guardaron cambios: la lista de métodos de pago está vacía.',
+      );
+    }
+
     final client = Supabase.instance.client;
-    await client.from('metodos_pago').delete().eq('comercio_id', comercioId);
-    if (rows.isNotEmpty) {
-      await client.from('metodos_pago').insert(rows);
+    final existingRows = await client
+        .from('metodos_pago')
+        .select('id,tipo')
+        .eq('comercio_id', comercioId);
+    final existingByType = <String, List<Map<String, dynamic>>>{};
+    for (final raw in existingRows as List<dynamic>) {
+      final existing = Map<String, dynamic>.from(raw as Map);
+      final type = (existing['tipo'] ?? '').toString().trim().toLowerCase();
+      final id = (existing['id'] ?? '').toString().trim();
+      if (type.isEmpty || id.isEmpty) continue;
+      existingByType.putIfAbsent(type, () => <Map<String, dynamic>>[]).add(
+        existing,
+      );
+    }
+
+    final retainedIds = <String>{};
+    for (final row in rows) {
+      final type = (row['tipo'] ?? '').toString().trim().toLowerCase();
+      final candidates = existingByType[type] ?? const <Map<String, dynamic>>[];
+      Map<String, dynamic>? existing;
+      for (final candidate in candidates) {
+        final id = (candidate['id'] ?? '').toString().trim();
+        if (!retainedIds.contains(id)) {
+          existing = candidate;
+          break;
+        }
+      }
+
+      if (existing != null) {
+        final id = existing['id'].toString();
+        await client
+            .from('metodos_pago')
+            .update(row)
+            .eq('comercio_id', comercioId)
+            .eq('id', id);
+        retainedIds.add(id);
+      } else {
+        final inserted = await client
+            .from('metodos_pago')
+            .insert(row)
+            .select('id')
+            .single();
+        retainedIds.add(inserted['id'].toString());
+      }
+    }
+
+    final obsoleteManagedIds = existingByType.entries
+        .where(
+          (entry) =>
+              entry.key.startsWith('efectivo__') ||
+              entry.key.startsWith('transferencia__'),
+        )
+        .expand((entry) => entry.value)
+        .map((row) => (row['id'] ?? '').toString().trim())
+        .where((id) => id.isNotEmpty && !retainedIds.contains(id))
+        .toSet()
+        .toList();
+
+    if (obsoleteManagedIds.isNotEmpty) {
+      await client
+          .from('metodos_pago')
+          .delete()
+          .eq('comercio_id', comercioId)
+          .inFilter('id', obsoleteManagedIds);
     }
   }
 
