@@ -3,6 +3,7 @@
  * Never include owner_id, private notes, tokens, or admin flags.
  */
 
+import { toPublicDeliveryConfig } from '../../_lib/delivery-config';
 import { toPublicKioskHomeConfig } from '../../_lib/kiosk-home-config';
 
 const PUBLIC_COMERCIO_KEYS = [
@@ -124,8 +125,12 @@ export function toPublicComercioDto(row: Record<string, unknown> | null | undefi
     picked.inicio_menu = toPublicKioskHomeConfig(
       configRecord.inicio_menu ?? configRecord.kiosk_home ?? configRecord,
     );
+    picked.delivery_tarifas = toPublicDeliveryConfig(
+      configRecord.delivery_config ?? configRecord.delivery_tarifas,
+    );
   } else {
     picked.inicio_menu = toPublicKioskHomeConfig(null);
+    picked.delivery_tarifas = toPublicDeliveryConfig(null);
   }
   // Defense in depth: strip known sensitive keys even if allow-list drifts.
   return omitKeys(picked, SENSITIVE_COMERCIO_KEYS);

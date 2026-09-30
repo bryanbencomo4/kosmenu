@@ -35,6 +35,7 @@ import { KioskCheckout } from './_components/kiosk/KioskCheckout';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
 import { parseKioskHomeConfig } from '../../_lib/kiosk-home-config';
+import { quoteDeliveryFee } from '../../_lib/delivery-config';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
 import { PreCheckoutUpsellSheet } from './_components/upsell/PreCheckoutUpsellSheet';
 import {
@@ -209,6 +210,7 @@ type ComercioRow = {
   celular?: string | null;
   social_links?: Record<string, string | null> | null;
   inicio_menu?: unknown;
+  delivery_tarifas?: unknown;
   direccion?: string | null;
   ciudad?: string | null;
   descripcion?: string | null;
@@ -2438,8 +2440,17 @@ export default function PublicMenuPage() {
   const isClientNameValid = normalizedClientName.length >= 3;
   const isClientWhatsappValid = normalizedClientWhatsapp.length > 0 && isValidPhoneNumber(normalizedClientWhatsapp);
   const isClientEmailValid = normalizedClientEmail.length > 0 && emailRegex.test(normalizedClientEmail);
-  const deliveryCostBase = toNumberOrNull(menuData?.comercio.costo_envio) ?? 0;
-  const deliveryCost = isDeliveryOrder ? Math.max(0, deliveryCostBase) : 0;
+  const deliveryQuote = quoteDeliveryFee({
+    config: menuData?.comercio.delivery_tarifas,
+    isDelivery: isDeliveryOrder,
+    subtotal: cartTotal,
+    origin: hasBusinessCoords && businessLat != null && businessLng != null
+      ? { lat: businessLat, lng: businessLng }
+      : null,
+    destination: deliveryPoint,
+    fallbackFee: toNumberOrNull(menuData?.comercio.costo_envio) ?? 0,
+  });
+  const deliveryCost = deliveryQuote.fee;
   const orderSubtotal = cartTotal;
   const orderGrandTotal = orderSubtotal + deliveryCost;
   const businessBaseCurrency = normalizeCurrencyCode(menuData?.comercio.moneda ?? 'COP');
@@ -2620,6 +2631,27 @@ export default function PublicMenuPage() {
     selectedCurrencyCode,
     selectedExchangeRate,
   );
+  const showEngineDeliveryLine = isDeliveryOrder && deliveryQuote.applied;
+  const deliveryLineLabel = !isDeliveryOrder
+    ? null
+    : showEngineDeliveryLine
+      ? 'Delivery'
+      : 'Costo de envio';
+  const deliveryLineValue = !isDeliveryOrder
+    ? null
+    : showEngineDeliveryLine && deliveryQuote.free
+      ? 'Gratis 🎉'
+      : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode);
+  const deliveryEngineNote = showEngineDeliveryLine
+    ? [
+        deliveryQuote.blockReason ?? '',
+        typeof deliveryQuote.snapshot?.custom_message === 'string'
+          ? deliveryQuote.snapshot.custom_message
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : '';
   const cartTotalConverted = convertFromBaseCurrency(
     cartTotal,
     businessBaseCurrency,
@@ -2932,7 +2964,7 @@ export default function PublicMenuPage() {
   const checkoutItemsCount = checkoutSummaryItems.reduce((sum, item) => sum + item.quantity, 0);
   const canGoNextFromStep0 = checkoutItemsCount > 0;
   const canGoNextFromStep1 = isClientNameValid && isClientWhatsappValid && isClientEmailValid;
-  const canGoNextFromStep2 = isDeliveryReady;
+  const canGoNextFromStep2 = isDeliveryReady && !deliveryQuote.blocked;
   const scheduleStatus = useMemo(
     () => resolveBusinessScheduleStatus(menuData?.comercio?.horarios),
     [menuData?.comercio?.horarios],
@@ -3181,11 +3213,14 @@ export default function PublicMenuPage() {
                   <span>Subtotal</span>
                   <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
                 </div>
-                {isDeliveryOrder ? (
+                {isDeliveryOrder && deliveryLineLabel ? (
                   <div className="flex items-center justify-between gap-3">
-                    <span>Costo de envio</span>
-                    <span className="font-semibold">{formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}</span>
+                    <span>{deliveryLineLabel}</span>
+                    <span className="font-semibold">{deliveryLineValue}</span>
                   </div>
+                ) : null}
+                {deliveryEngineNote ? (
+                  <p className="text-[11px] font-semibold text-slate-500">{deliveryEngineNote}</p>
                 ) : null}
                 <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2.5">
                   <span className="font-semibold text-slate-900">Total</span>
@@ -5725,11 +5760,18 @@ export default function PublicMenuPage() {
                           >
                             {hasDeliveryPoint ? 'Punto confirmado' : 'Falta el punto en el mapa'}
                           </span>
-                          <span className="rounded-full bg-[var(--menu-surface-alt)] px-2.5 py-1 text-[11px] font-black">
-                            Envio {formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}
-                          </span>
+                          {deliveryLineLabel ? (
+                            <span className="rounded-full bg-[var(--menu-surface-alt)] px-2.5 py-1 text-[11px] font-black">
+                              {deliveryQuote.free ? 'Delivery gratis 🎉' : `${deliveryLineLabel} ${deliveryLineValue}`}
+                            </span>
+                          ) : null}
                         </div>
                       </button>
+                      {deliveryQuote.blocked ? (
+                        <p className="text-sm font-semibold text-rose-500">{deliveryQuote.blockReason}</p>
+                      ) : deliveryEngineNote ? (
+                        <p className="text-[12px] font-semibold text-[var(--menu-text-muted)]">{deliveryEngineNote}</p>
+                      ) : null}
                       <label className="block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
                         <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                           Referencia
@@ -6014,10 +6056,10 @@ export default function PublicMenuPage() {
                           <span>Subtotal</span>
                           <span className="font-semibold">{formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}</span>
                         </p>
-                        {isDeliveryOrder ? (
+                        {isDeliveryOrder && deliveryLineLabel ? (
                           <p className="mt-1 flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
-                            <span>Costo de envio</span>
-                            <span className="font-semibold">{formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)}</span>
+                            <span>{deliveryLineLabel}</span>
+                            <span className="font-semibold">{deliveryLineValue}</span>
                           </p>
                         ) : null}
                         <p className="mt-2 flex items-center justify-between border-t border-[var(--menu-border)] pt-2 text-sm font-semibold text-[var(--menu-text)]">

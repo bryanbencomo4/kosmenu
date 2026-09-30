@@ -44,6 +44,7 @@ describe('public menu DTO', () => {
       ubicacion: true,
       redes: true,
     });
+    expect(dto!.delivery_tarifas).toEqual({ enabled: false });
     assertNoSensitivePublicComercioFields(dto!);
   });
 
@@ -76,6 +77,32 @@ describe('public menu DTO', () => {
       calificacion: false,
       ubicacion: true,
       redes: true,
+    });
+    expect(dto!.delivery_tarifas).toEqual({ enabled: false });
+    expect(dto).not.toHaveProperty('branding_ia');
+    assertNoSensitivePublicComercioFields(dto!);
+  });
+
+  it('exposes delivery tariffs only after the merchant enables them', () => {
+    const dto = toPublicComercioDto({
+      id: 'c3',
+      slug: 'con-delivery',
+      nombre: 'Con delivery',
+      branding_ia: {
+        config_negocio: {
+          delivery_config: {
+            enabled: true,
+            pricing_type: 'fixed',
+            fixed_price: 3,
+            internal_note: 'no',
+          },
+        },
+      },
+    });
+    expect(dto!.delivery_tarifas).toMatchObject({
+      enabled: true,
+      pricing_type: 'fixed',
+      fixed_price: 3,
     });
     expect(dto).not.toHaveProperty('branding_ia');
     assertNoSensitivePublicComercioFields(dto!);

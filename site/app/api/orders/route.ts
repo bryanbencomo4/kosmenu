@@ -30,6 +30,7 @@ import {
   type SnapshotProductRow,
 } from '../_lib/order-item-snapshots';
 import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
+import { quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
   createCustomerRatingKey,
   loadOrderServiceRatingSummary,
@@ -366,7 +367,7 @@ export async function POST(request: Request) {
     const clientName = validated.cliente_nombre;
     const clientWhatsapp = validated.telefono_cliente;
     const comercioNombre = (body.comercioNombre ?? 'Kosmenu').trim() || 'Kosmenu';
-    const costoDelivery = validated.costo_delivery;
+    let costoDelivery = validated.costo_delivery;
     const currency = validated.moneda_checkout;
     const exchangeRate = validated.tasa_cambio_snapshot;
     const delivery = validated.delivery;
@@ -387,11 +388,14 @@ export async function POST(request: Request) {
     const cashChangeAmount = Number(body.cashChangeAmount ?? incomingDetalles.cambio_de ?? 0);
 
     const subtotal = items.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
-    const total = subtotal + (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
+    let total = subtotal + (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
     const supabase = getServiceSupabaseClient();
 
     async function loadComercioRow() {
-      const full = supabase.from('comercios').select('id,slug,moneda,en_linea,horarios').limit(1);
+      const full = supabase
+        .from('comercios')
+        .select('id,slug,moneda,en_linea,horarios,latitud,longitud,costo_envio,branding_ia->config_negocio')
+        .limit(1);
       const fullResult = isUuid(comercioId)
         ? await full.eq('id', comercioId)
         : await full.eq('slug', comercioId);
@@ -413,13 +417,57 @@ export async function POST(request: Request) {
     }
 
     const comercioRow = (comercios ?? [])[0] as
-      | { id?: string; slug?: string; moneda?: string | null; en_linea?: boolean | null; horarios?: unknown }
+      | {
+          id?: string;
+          slug?: string;
+          moneda?: string | null;
+          en_linea?: boolean | null;
+          horarios?: unknown;
+          latitud?: number | string | null;
+          longitud?: number | string | null;
+          costo_envio?: number | string | null;
+          branding_ia?: unknown;
+          config_negocio?: unknown;
+        }
       | undefined;
     const resolvedComercioId = comercioRow?.id?.toString().trim() ?? '';
     const resolvedComercioSlug = comercioRow?.slug?.toString().trim() ?? '';
     const baseCurrency = normalizeOrderCurrency(comercioRow?.moneda);
     if (!resolvedComercioId) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
+    }
+
+    const branding = asRecord(comercioRow?.branding_ia);
+    const configNegocio = asRecord(branding.config_negocio) ?? asRecord(comercioRow?.config_negocio);
+    const originLat = Number(comercioRow?.latitud);
+    const originLng = Number(comercioRow?.longitud);
+    const destLat = Number(delivery.coordinates?.lat);
+    const destLng = Number(delivery.coordinates?.lng);
+    const deliveryQuote = quoteDeliveryFee({
+      config: configNegocio?.delivery_config ?? configNegocio,
+      isDelivery: delivery.mode === 'delivery',
+      subtotal,
+      origin: Number.isFinite(originLat) && Number.isFinite(originLng)
+        ? { lat: originLat, lng: originLng }
+        : null,
+      destination: Number.isFinite(destLat) && Number.isFinite(destLng)
+        ? { lat: destLat, lng: destLng }
+        : null,
+      fallbackFee: Number(comercioRow?.costo_envio ?? costoDelivery),
+    });
+    if (deliveryQuote.blocked) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'delivery_not_available',
+          message: deliveryQuote.blockReason ?? 'Delivery no disponible para este pedido.',
+        },
+        { status: 400 },
+      );
+    }
+    if (deliveryQuote.applied) {
+      costoDelivery = deliveryQuote.fee;
+      total = subtotal + costoDelivery;
     }
 
     const customerRatingSummary = await loadOrderServiceRatingSummary(
@@ -522,6 +570,13 @@ export async function POST(request: Request) {
       total,
       total_moneda_checkout: totalCheckout,
       customer_rating_summary: customerRatingSummary.customer,
+      ...(deliveryQuote.applied
+        ? {
+            delivery_fee: deliveryQuote.fee,
+            delivery_method: deliveryQuote.method,
+            delivery_config_snapshot: deliveryQuote.snapshot,
+          }
+        : {}),
     };
 
     const payload = {

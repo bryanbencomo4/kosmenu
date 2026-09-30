@@ -916,6 +916,7 @@ class MerchantSettingsHub extends StatelessWidget {
     required this.onOpenPlan,
     required this.onOpenUsers,
     required this.onOpenKioskHome,
+    required this.onOpenDelivery,
   });
 
   final ComercioModel comercio;
@@ -929,6 +930,7 @@ class MerchantSettingsHub extends StatelessWidget {
   final VoidCallback onOpenPlan;
   final VoidCallback onOpenUsers;
   final VoidCallback onOpenKioskHome;
+  final VoidCallback onOpenDelivery;
 
   @override
   Widget build(BuildContext context) {
@@ -961,6 +963,12 @@ class MerchantSettingsHub extends StatelessWidget {
         title: 'Pantalla de inicio',
         subtitle: 'Menú, comer aquí, para llevar, delivery y calificación',
         onTap: onOpenKioskHome,
+      ),
+      (
+        icon: Icons.delivery_dining_outlined,
+        title: 'Delivery',
+        subtitle: 'Tarifas, zonas y delivery gratis',
+        onTap: onOpenDelivery,
       ),
       (
         icon: Icons.payments_outlined,
