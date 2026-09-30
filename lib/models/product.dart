@@ -1,3 +1,5 @@
+import 'product_option_group.dart';
+
 class ProductModel {
   final String id;
   final String comercioId;
@@ -16,6 +18,7 @@ class ProductModel {
   final String? upsellBadge;
   final double? precioComparacion;
   final bool upsellEnabled;
+  final Map<String, dynamic>? opcionesMenu;
 
   const ProductModel({
     required this.id,
@@ -35,6 +38,7 @@ class ProductModel {
     this.upsellBadge,
     this.precioComparacion,
     this.upsellEnabled = true,
+    this.opcionesMenu,
   });
 
   factory ProductModel.fromMap(Map<String, dynamic> map) {
@@ -69,8 +73,18 @@ class ProductModel {
       upsellEnabled: map['upsell_enabled'] is bool
           ? map['upsell_enabled'] as bool
           : true,
+      opcionesMenu: map['opciones_menu'] is Map
+          ? Map<String, dynamic>.from(map['opciones_menu'] as Map)
+          : null,
     );
   }
+
+  /// Saved groups, including switched-off ones (for the admin editor).
+  List<ProductOptionGroup> get optionGroups =>
+      ProductOptionGroup.listFromMenuOptions(opcionesMenu);
+
+  bool get hasOptionsEnabled =>
+      ProductOptionGroup.isEnabled(opcionesMenu) && optionGroups.isNotEmpty;
 
   ProductModel copyWith({
     String? id,
@@ -94,6 +108,8 @@ class ProductModel {
     double? precioComparacion,
     bool clearPrecioComparacion = false,
     bool? upsellEnabled,
+    Map<String, dynamic>? opcionesMenu,
+    bool clearOpcionesMenu = false,
   }) {
     return ProductModel(
       id: id ?? this.id,
@@ -117,6 +133,9 @@ class ProductModel {
           ? null
           : (precioComparacion ?? this.precioComparacion),
       upsellEnabled: upsellEnabled ?? this.upsellEnabled,
+      opcionesMenu: clearOpcionesMenu
+          ? null
+          : (opcionesMenu ?? this.opcionesMenu),
     );
   }
 
@@ -146,6 +165,7 @@ class ProductModel {
       'upsell_badge': upsellBadge,
       'precio_comparacion': precioComparacion,
       'upsell_enabled': upsellEnabled,
+      'opciones_menu': opcionesMenu,
     };
   }
 

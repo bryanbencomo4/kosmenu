@@ -2,7 +2,7 @@
 
 import { Caveat, Manrope } from 'next/font/google';
 import { useEffect, useState, type ReactNode } from 'react';
-import { BookOpen, ChevronRight, Facebook, Instagram, MapPin, Moon, Music2, ShoppingBag, Sun, Truck, Utensils, Youtube } from 'lucide-react';
+import { BookOpen, ChevronRight, Facebook, Instagram, MapPin, Moon, Music2, ShoppingBag, Star, Sun, Truck, Utensils, Youtube } from 'lucide-react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskImage } from './KioskImage';
@@ -23,6 +23,8 @@ const nameFont = Manrope({
 type KioskHomeProps = {
   businessName: string;
   logoUrl: string | null;
+  ratingAverage: number;
+  ratingCount: number;
   initialLetter: string;
   isOpen: boolean;
   closedCaption: string;
@@ -40,6 +42,8 @@ type KioskHomeProps = {
 export function KioskHome({
   businessName,
   logoUrl,
+  ratingAverage,
+  ratingCount,
   initialLetter,
   isOpen,
   closedCaption,
@@ -116,6 +120,26 @@ export function KioskHome({
           >
             {businessName}
           </h1>
+
+          <p
+            className="mt-2 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-[var(--menu-text-muted)]"
+            aria-label={
+              ratingCount > 0
+                ? `Calificación ${ratingAverage.toFixed(1)} de 5, ${ratingCount} calificaciones`
+                : 'Este comercio aún no tiene calificaciones'
+            }
+          >
+            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
+            {ratingCount > 0 ? (
+              <>
+                <span className="text-[var(--menu-text)]">{ratingAverage.toFixed(1)}</span>
+                <span aria-hidden="true">·</span>
+                {ratingCount} {ratingCount === 1 ? 'calificación' : 'calificaciones'}
+              </>
+            ) : (
+              'Aún sin calificaciones'
+            )}
+          </p>
 
           {locationLabel ? (
             <p className="mt-2 flex max-w-sm items-start justify-center gap-1.5 text-[13px] font-medium leading-5 text-[var(--menu-text-muted)]">

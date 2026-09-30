@@ -60,6 +60,7 @@ const SENSITIVE_COMERCIO_KEYS = [
   'credentials',
   'notas_internas',
   'internal_notes',
+  'upsell_config',
   'rif',
   'nit',
   'documento_fiscal',

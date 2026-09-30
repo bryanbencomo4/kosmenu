@@ -20,18 +20,28 @@ import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({
     super.key,
     required this.orderId,
     this.readOnlyView = false,
+    this.initialPedido,
+    this.initialComercioNombre,
+    this.initialBusinessLogoUrl,
   });
 
   final String orderId;
   final bool readOnlyView;
+  /// When opening from the merchant dashboard, pass the already-loaded pedido
+  /// so kitchen UI paints before the network round-trip.
+  final PedidoModel? initialPedido;
+  final String? initialComercioNombre;
+  final String? initialBusinessLogoUrl;
 
   @override
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
@@ -80,20 +90,51 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   final Map<String, String> _delegatedCourierAliasCache = <String, String>{};
   bool _isLoadingComprobante = false;
   bool _isSubmittingCustomerRating = false;
+  bool _secondaryEnrichmentStarted = false;
+  bool _deferredVisualsReady = false;
   final ComprobanteSignedUrlSession _comprobanteSignedUrlSession =
       ComprobanteSignedUrlSession();
 
   @override
   void initState() {
     super.initState();
+    final seed = widget.initialPedido;
+    if (seed != null && !widget.readOnlyView) {
+      final seedName = (widget.initialComercioNombre ?? '').trim();
+      final seedLogo = (widget.initialBusinessLogoUrl ?? '').trim();
+      _cachedOrderData = _OrderViewData(
+        pedido: seed,
+        comercioNombre: seedName.isEmpty ? 'Kosmenu' : seedName,
+        businessLogoUrl: seedLogo.isEmpty ? null : seedLogo,
+      );
+      _lastKnownStatus = _normalizeStatusValue(seed.estado);
+      _showTopBar = false;
+    }
     _orderFuture = _fetchOrder();
     _successController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
-    _startOrderStatusSync();
-    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+    // The map (Maps JS + canvas marker icons) is the heaviest widget on web;
+    // mount it once the kitchen content is already on screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 600), () {
+        if (!mounted) return;
+        setState(() => _deferredVisualsReady = true);
+      });
+    });
+    // Avoid duplicating the heavy fetch on the same frame as the first open.
+    Future<void>.delayed(const Duration(seconds: 2), () {
       if (!mounted) return;
+      _startOrderStatusSync();
+    });
+    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || widget.readOnlyView) return;
+      final pedido = _cachedOrderData?.pedido;
+      final status = _normalizeStatusValue(pedido?.estado);
+      if (status != 'pendiente' || pedido?.createdAt == null) return;
+      // Customer AppBar clock only; kitchen uses KitchenElapsedTicker.
+      if (!_showTopBar) return;
       setState(() {
         _now = DateTime.now();
       });
@@ -345,53 +386,154 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
   Future<_OrderViewData?> _fetchOrder() async {
     final client = Supabase.instance.client;
-    final comercioId = _extractComercioId(widget.orderId);
+    final orderId = widget.orderId.trim();
+    if (orderId.isEmpty) return _cachedOrderData;
 
-    dynamic query = client.from('pedidos').select('*');
+    PedidoModel? foundPedido = await _loadPedidoByPublicOrderId(orderId);
 
-    if (comercioId != null) {
-      query = query.eq('comercio_id', comercioId);
-    }
-
-    final pedidosRows = await query
-        .order('created_at', ascending: false)
-        .limit(200);
-    final response = (data: pedidosRows as List<dynamic>);
-
-    PedidoModel? foundPedido;
-    for (final row in response.data) {
-      final rawMap = Map<String, dynamic>.from(row as Map);
-      final pedido = PedidoModel.fromMap(rawMap);
-      if (pedido.orderId == widget.orderId) {
-        foundPedido = pedido;
-        break;
+    // Fallback for legacy rows / odd encodings: narrow scan, never 200 rows.
+    if (foundPedido == null) {
+      final scopedComercio = (widget.initialPedido?.comercioId ?? '').trim();
+      dynamic query = client.from('pedidos').select('*');
+      if (scopedComercio.isNotEmpty) {
+        query = query.eq('comercio_id', scopedComercio);
+      } else {
+        final extracted = _extractComercioId(orderId);
+        if (extracted != null && extracted.isNotEmpty) {
+          query = query.eq('comercio_id', extracted);
+        }
+      }
+      final rows =
+          await query.order('created_at', ascending: false).limit(40)
+              as List<dynamic>;
+      for (final row in rows) {
+        final pedido =
+            PedidoModel.fromMap(Map<String, dynamic>.from(row as Map));
+        if ((pedido.orderId ?? '').trim() == orderId) {
+          foundPedido = pedido;
+          break;
+        }
       }
     }
 
-    if (foundPedido == null) return null;
+    if (foundPedido == null) return _cachedOrderData;
 
-    String comercioNombre = 'Kosmenu';
-    double? businessLatitude;
-    double? businessLongitude;
-    String? businessLogoUrl;
-    String? delegatedCourierAlias;
-    if (foundPedido.comercioId.isNotEmpty) {
-      final comercioRow = await client
-          .from('comercios')
-          .select('*')
-          .eq('id', foundPedido.comercioId)
-          .maybeSingle();
+    final seedName = (widget.initialComercioNombre ?? '').trim();
+    final previous = _cachedOrderData;
+    final critical = _OrderViewData(
+      pedido: foundPedido,
+      comercioNombre: (previous?.comercioNombre.trim().isNotEmpty == true
+          ? previous!.comercioNombre
+          : (seedName.isEmpty ? 'Kosmenu' : seedName)),
+      businessLatitude: previous?.businessLatitude,
+      businessLongitude: previous?.businessLongitude,
+      businessLogoUrl: previous?.businessLogoUrl,
+      delegatedCourierAlias: previous?.delegatedCourierAlias,
+      history: previous?.history ?? const <_HistoryOrderViewData>[],
+    );
 
-      final comercioMap = _asMap(comercioRow);
-      final nombre = comercioMap['nombre']?.toString().trim() ?? '';
-      if (nombre.isNotEmpty) {
-        comercioNombre = nombre;
+    if (mounted) {
+      _cachedOrderData = critical;
+    }
+
+    if (!_secondaryEnrichmentStarted) {
+      _secondaryEnrichmentStarted = true;
+      unawaited(_enrichOrderSecondary(foundPedido));
+    }
+
+    return critical;
+  }
+
+  Future<PedidoModel?> _loadPedidoByPublicOrderId(String orderId) async {
+    final client = Supabase.instance.client;
+
+    final knownId =
+        (_cachedOrderData?.pedido.id ?? widget.initialPedido?.id ?? '').trim();
+    if (knownId.isNotEmpty) {
+      try {
+        final byId = await client
+            .from('pedidos')
+            .select('*')
+            .eq('id', knownId)
+            .maybeSingle();
+        if (byId != null) {
+          return PedidoModel.fromMap(Map<String, dynamic>.from(byId));
+        }
+      } catch (_) {
+        // Fall through to the order-code lookup.
       }
-      businessLatitude = _toDoubleOrNull(comercioMap['latitud']);
-      businessLongitude = _toDoubleOrNull(comercioMap['longitud']);
-      businessLogoUrl = _resolveComercioLogoUrl(comercioMap);
+    }
 
-      final delegate = _asMap(foundPedido.detalles['delivery_delegate']);
+    // JSON order codes are not indexed: scope by comercio so Postgres uses
+    // the comercio_id index instead of scanning every tenant's orders.
+    final scopedComercioId = widget.readOnlyView
+        ? ''
+        : (widget.initialPedido?.comercioId ?? SupabaseConfig.currentComercioId)
+              .trim();
+    final scopes = <String>[
+      if (scopedComercioId.isNotEmpty) scopedComercioId,
+      '',
+    ];
+    for (final comercioId in scopes) {
+      for (final column in const <String>[
+        'detalles->>order_id',
+        'detalles->>codigo_orden',
+      ]) {
+        try {
+          dynamic query = client.from('pedidos').select('*').eq(column, orderId);
+          if (comercioId.isNotEmpty) {
+            query = query.eq('comercio_id', comercioId);
+          }
+          final row = await query
+              .order('created_at', ascending: false)
+              .limit(1)
+              .maybeSingle();
+          if (row != null) {
+            return PedidoModel.fromMap(Map<String, dynamic>.from(row as Map));
+          }
+        } catch (_) {
+          // Try the next lookup.
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<void> _enrichOrderSecondary(PedidoModel pedido) async {
+    final client = Supabase.instance.client;
+    String comercioNombre =
+        (_cachedOrderData?.comercioNombre ?? widget.initialComercioNombre ?? '')
+            .trim();
+    if (comercioNombre.isEmpty) comercioNombre = 'Kosmenu';
+    double? businessLatitude = _cachedOrderData?.businessLatitude;
+    double? businessLongitude = _cachedOrderData?.businessLongitude;
+    String? businessLogoUrl = _cachedOrderData?.businessLogoUrl;
+    String? delegatedCourierAlias = _cachedOrderData?.delegatedCourierAlias;
+    var history = _cachedOrderData?.history ?? const <_HistoryOrderViewData>[];
+
+    Future<void> loadComercio() async {
+      if (pedido.comercioId.isEmpty) return;
+      try {
+        final comercioRow = await client
+            .from('comercios')
+            .select('nombre,latitud,longitud,logo_url')
+            .eq('id', pedido.comercioId)
+            .maybeSingle();
+        final comercioMap = _asMap(comercioRow);
+        final nombre = comercioMap['nombre']?.toString().trim() ?? '';
+        if (nombre.isNotEmpty) comercioNombre = nombre;
+        businessLatitude = _toDoubleOrNull(comercioMap['latitud']);
+        businessLongitude = _toDoubleOrNull(comercioMap['longitud']);
+        businessLogoUrl =
+            _resolveComercioLogoUrl(comercioMap) ?? businessLogoUrl;
+      } catch (_) {
+        // Keep critical payload on secondary failures.
+      }
+    }
+
+    Future<void> loadCourierAlias() async {
+      if (pedido.comercioId.isEmpty) return;
+      final delegate = _asMap(pedido.detalles['delivery_delegate']);
       final invitedPhone = (delegate['invited_phone'] ?? '').toString().trim();
       final invitedAlias =
           (delegate['invited_alias'] ??
@@ -402,27 +544,68 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               .trim();
       if (invitedAlias.isNotEmpty) {
         delegatedCourierAlias = invitedAlias;
-      } else {
+        return;
+      }
+      if (invitedPhone.isEmpty) return;
+      try {
         delegatedCourierAlias = await _resolveDelegatedCourierAliasByPhone(
-          comercioId: foundPedido.comercioId,
+          comercioId: pedido.comercioId,
           invitedPhone: invitedPhone,
         );
+      } catch (_) {
+        // Keep critical payload on secondary failures.
       }
     }
 
-    return _OrderViewData(
-      pedido: foundPedido,
-      comercioNombre: comercioNombre,
-      businessLatitude: businessLatitude,
-      businessLongitude: businessLongitude,
-      businessLogoUrl: businessLogoUrl,
-      delegatedCourierAlias: delegatedCourierAlias,
-      history: _buildOrderHistory(
-        pedidosRows,
+    Future<void> loadHistory() async {
+      if (!widget.readOnlyView) return;
+      history = await _loadCustomerHistory(
         currentOrderId: widget.orderId,
-        email: foundPedido.clienteEmail,
-      ),
-    );
+        email: pedido.clienteEmail,
+        comercioId: pedido.comercioId,
+      );
+    }
+
+    await Future.wait<void>([loadComercio(), loadCourierAlias(), loadHistory()]);
+
+    if (!mounted) return;
+    setState(() {
+      _cachedOrderData = _OrderViewData(
+        pedido: _cachedOrderData?.pedido ?? pedido,
+        comercioNombre: comercioNombre,
+        businessLatitude: businessLatitude,
+        businessLongitude: businessLongitude,
+        businessLogoUrl: businessLogoUrl,
+        delegatedCourierAlias: delegatedCourierAlias,
+        history: history,
+      );
+    });
+  }
+
+  Future<List<_HistoryOrderViewData>> _loadCustomerHistory({
+    required String currentOrderId,
+    required String? email,
+    required String comercioId,
+  }) async {
+    final normalizedEmail = _normalizeEmail(email);
+    if (normalizedEmail.isEmpty || comercioId.trim().isEmpty) {
+      return const <_HistoryOrderViewData>[];
+    }
+    try {
+      final rows = await Supabase.instance.client
+          .from('pedidos')
+          .select('*')
+          .eq('comercio_id', comercioId)
+          .order('created_at', ascending: false)
+          .limit(30);
+      return _buildOrderHistory(
+        rows as List<dynamic>,
+        currentOrderId: currentOrderId,
+        email: email,
+      );
+    } catch (_) {
+      return const <_HistoryOrderViewData>[];
+    }
   }
 
   Future<String> _resolveDelegatedCourierAliasByPhone({
@@ -1569,15 +1752,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   }
 
   Future<void> _openExternalGoogleMapsNavigation({
-    required LatLng origin,
+    LatLng? origin,
     required LatLng destination,
   }) async {
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1'
-      '&origin=${origin.latitude},${origin.longitude}'
-      '&destination=${destination.latitude},${destination.longitude}'
-      '&travelmode=driving',
-    );
+    final dest = '${destination.latitude},${destination.longitude}';
+    final Uri uri;
+    if (origin != null) {
+      uri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1'
+        '&origin=${origin.latitude},${origin.longitude}'
+        '&destination=$dest'
+        '&travelmode=driving',
+      );
+    } else {
+      uri = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$dest',
+      );
+    }
 
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && mounted) {
@@ -1919,6 +2110,317 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
+  String _kitchenPaymentTitle(String? method) {
+    final raw = (method ?? '').trim();
+    if (raw.isEmpty) return 'Pago';
+    final lower = raw.toLowerCase();
+    if (lower.contains('efectivo') || lower.contains('cash')) return 'Efectivo';
+    if (lower.contains('pago movil') ||
+        lower.contains('pago móvil') ||
+        lower.contains('pm')) {
+      return 'Pago móvil';
+    }
+    if (lower.contains('zelle')) return 'Zelle';
+    if (lower.contains('transfer')) return 'Transferencia';
+    if (lower.contains('tarjeta') || lower.contains('card')) return 'Tarjeta';
+    return raw;
+  }
+
+  String _kitchenPaymentSubtitle(String? method) {
+    final title = _kitchenPaymentTitle(method).toLowerCase();
+    if (title.contains('efectivo')) return 'Pago al recibir';
+    if (title.contains('móvil') || title.contains('movil')) {
+      return 'Transferencia móvil';
+    }
+    if (title.contains('transfer')) return 'Transferencia bancaria';
+    if (title.contains('tarjeta')) return 'Pago con tarjeta';
+    if (title.contains('zelle')) return 'Transferencia Zelle';
+    return 'Método de pago';
+  }
+
+  Future<void> _runKitchenStatusAction({
+    required String status,
+    required PedidoModel pedido,
+    required bool isDeliveryOrder,
+    required bool isDelegatedDelivery,
+    required String comercioNombre,
+    required String deliveryDelegateInvitedPhone,
+  }) async {
+    final action = _OrderStatusAction(
+      status: status,
+      label: status,
+      icon: Icons.check_rounded,
+      color: KitchenMockupColors.accept,
+    );
+    await _handleOrderStatusAction(
+      action: action,
+      isDeliveryOrder: isDeliveryOrder,
+      hasActiveDelegation: isDelegatedDelivery,
+      comercioNombre: comercioNombre,
+      comercioId: pedido.comercioId,
+      initialDelegatePhone: deliveryDelegateInvitedPhone,
+    );
+  }
+
+  Widget _buildKitchenMerchantBody({
+    required _OrderViewData data,
+    required PedidoModel pedido,
+    required double total,
+    required String? customerName,
+    required String? customerEmail,
+    required String? customerPhone,
+    required String? paymentMethod,
+    required bool isDeliveryOrder,
+    required String? deliveryAddress,
+    required String? deliveryReference,
+    required String? deliveryInstructions,
+    required String? orderNotes,
+    required String visualStatusLabel,
+    required Color visualStatusColor,
+    required bool hasDeliveryCoords,
+    required LatLng? deliveryPoint,
+    required LatLng? businessPoint,
+    required Set<Marker> markers,
+    required Set<Polyline> polylines,
+    required List<LatLng> cameraPoints,
+    required bool shouldShowNextStepCard,
+    required bool whatsappNotificationsEnabled,
+    required bool hasDelegationRecord,
+    required String deliveryDelegateAlias,
+    required String deliveryDelegatePhoneDisplay,
+    required String deliveryDelegateStatusSummary,
+    required bool isManagingDeliveryInvite,
+    required String? deliveryInviteUrl,
+    required String? deliveryInviteFeedback,
+    required bool isDelegatedDelivery,
+    required String deliveryDelegateInvitedPhone,
+  }) {
+    final orderLabel = (pedido.orderId ?? widget.orderId).trim();
+    final phone = (customerPhone ?? '').trim();
+    final email = (customerEmail ?? '').trim();
+    final addressParts = <String>[
+      if ((deliveryAddress ?? '').trim().isNotEmpty) deliveryAddress!.trim(),
+      if ((deliveryReference ?? '').trim().isNotEmpty)
+        'Ref: ${deliveryReference!.trim()}',
+      if ((deliveryInstructions ?? '').trim().isNotEmpty)
+        deliveryInstructions!.trim(),
+    ];
+    final coordsLabel = hasDeliveryCoords &&
+            deliveryPoint != null
+        ? '${deliveryPoint.latitude.toStringAsFixed(6)}, ${deliveryPoint.longitude.toStringAsFixed(6)}'
+        : '';
+
+    Widget? mapPreview;
+    if (hasDeliveryCoords && deliveryPoint != null && !_deferredVisualsReady) {
+      mapPreview = const ColoredBox(
+        color: Color(0xFFE9EEF5),
+        child: Center(
+          child: Icon(Icons.map_outlined, color: Color(0xFF94A3B8), size: 30),
+        ),
+      );
+    } else if (hasDeliveryCoords && deliveryPoint != null) {
+      mapPreview = GoogleMap(
+        initialCameraPosition: CameraPosition(target: deliveryPoint, zoom: 14),
+        markers: markers,
+        polylines: polylines,
+        myLocationButtonEnabled: false,
+        zoomControlsEnabled: false,
+        mapToolbarEnabled: false,
+        compassEnabled: false,
+        liteModeEnabled: !kIsWeb && !Platform.isIOS,
+        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+          Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+        },
+        onMapCreated: (controller) {
+          if (cameraPoints.length >= 2) {
+            controller.moveCamera(
+              CameraUpdate.newLatLngBounds(_buildBounds(cameraPoints), 28),
+            );
+          }
+        },
+      );
+    }
+
+    return ColoredBox(
+      color: KitchenMockupColors.background,
+      child: Column(
+        children: [
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.only(bottom: 20),
+              children: [
+                KitchenOrderHeader(
+                  businessName: data.comercioNombre,
+                  orderId: orderLabel,
+                  statusLabel: visualStatusLabel,
+                  statusColor: visualStatusColor == const Color(0x00000000)
+                      ? KitchenMockupColors.pending
+                      : visualStatusColor,
+                  createdAt: pedido.createdAt,
+                  logoUrl: data.businessLogoUrl,
+                  onBack: () {
+                    if (Navigator.of(context).canPop()) {
+                      Navigator.of(context).pop();
+                    } else {
+                      Navigator.of(
+                        context,
+                      ).pushNamedAndRemoveUntil('/', (route) => false);
+                    }
+                  },
+                ),
+                KitchenSummaryStrip(
+                  isDelivery: isDeliveryOrder,
+                  paymentTitle: _kitchenPaymentTitle(paymentMethod),
+                  paymentSubtitle: _kitchenPaymentSubtitle(paymentMethod),
+                  totalLabel: _formatAmount(total),
+                  customerName: (customerName ?? '').trim(),
+                  onWhatsapp: phone.isEmpty || !whatsappNotificationsEnabled
+                      ? null
+                      : () => unawaited(
+                            _openCustomerWhatsapp(phone, data.comercioNombre),
+                          ),
+                  onCall: phone.isEmpty
+                      ? null
+                      : () => unawaited(_openCustomerCall(phone)),
+                ),
+                KitchenPrepSection(
+                  items: pedido.items,
+                  orderNotes: orderNotes,
+                ),
+                KitchenStatusTimeline(
+                  pedido: pedido,
+                  isDelivery: isDeliveryOrder,
+                ),
+                if (shouldShowNextStepCard)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: KitchenMockupActionsBar(
+                      estado: pedido.estado ?? 'pendiente',
+                      isDelivery: isDeliveryOrder,
+                      isBusy: _isUpdatingStatus,
+                      busyStatus: _pendingStatus,
+                      onStatus: (status) {
+                        unawaited(
+                          _runKitchenStatusAction(
+                            status: status,
+                            pedido: pedido,
+                            isDeliveryOrder: isDeliveryOrder,
+                            isDelegatedDelivery: isDelegatedDelivery,
+                            comercioNombre: data.comercioNombre,
+                            deliveryDelegateInvitedPhone:
+                                deliveryDelegateInvitedPhone,
+                          ),
+                        );
+                      },
+                      onCancel: () {
+                        unawaited(
+                          _runKitchenStatusAction(
+                            status: 'cancelado',
+                            pedido: pedido,
+                            isDeliveryOrder: isDeliveryOrder,
+                            isDelegatedDelivery: isDelegatedDelivery,
+                            comercioNombre: data.comercioNombre,
+                            deliveryDelegateInvitedPhone:
+                                deliveryDelegateInvitedPhone,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                KitchenDeliveryCard(
+                  isDelivery: isDeliveryOrder,
+                  customerName: (customerName ?? '').trim(),
+                  customerEmail: email,
+                  customerPhone: phone,
+                  address: addressParts.join('\n'),
+                  coordinatesLabel: coordsLabel,
+                  mapPreview: mapPreview,
+                  onOpenMap: hasDeliveryCoords && deliveryPoint != null
+                      ? () => unawaited(
+                            _openExternalGoogleMapsNavigation(
+                              origin: businessPoint,
+                              destination: deliveryPoint,
+                            ),
+                          )
+                      : null,
+                ),
+                if (hasDelegationRecord)
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 14,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          deliveryDelegateAlias.isEmpty
+                              ? 'Repartidor'
+                              : deliveryDelegateAlias,
+                          style: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          deliveryDelegateStatusSummary,
+                          style: GoogleFonts.manrope(
+                            color: KitchenMockupColors.muted,
+                          ),
+                        ),
+                        if (deliveryDelegatePhoneDisplay.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            deliveryDelegatePhoneDisplay,
+                            style: GoogleFonts.manrope(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                        if ((deliveryInviteUrl ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          SelectableText(
+                            deliveryInviteUrl!.trim(),
+                            style: GoogleFonts.manrope(fontSize: 12),
+                          ),
+                        ],
+                        if ((deliveryInviteFeedback ?? '')
+                            .trim()
+                            .isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            deliveryInviteFeedback!,
+                            style: GoogleFonts.manrope(
+                              color: KitchenMockupColors.purple,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                        if (isManagingDeliveryInvite) ...[
+                          const SizedBox(height: 10),
+                          const LinearProgressIndicator(),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -2005,7 +2507,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   return const BrandedLoadingScreen();
                 }
 
-                if (!_showTopBar && !_checkingTrustedDevice) {
+                if (!_showTopBar &&
+                    !_checkingTrustedDevice &&
+                    widget.readOnlyView) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted) return;
                     setState(() => _showTopBar = true);
@@ -2115,7 +2619,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 final deliveryLng = pedido.deliveryLongitude;
                 final orderNotes = pedido.orderNotes?.trim();
                 final businessLogoUrl = data.businessLogoUrl?.trim();
-                _prepareMarkerIconsIfNeeded(businessLogoUrl: businessLogoUrl);
+                if (widget.readOnlyView || _deferredVisualsReady) {
+                  _prepareMarkerIconsIfNeeded(businessLogoUrl: businessLogoUrl);
+                }
                 final hasDeliveryCoords =
                     deliveryLat != null && deliveryLng != null;
                 final hasBusinessCoords =
@@ -2414,6 +2920,42 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                         ),
                       ),
                     ],
+                  );
+                }
+
+                if (!isReadOnly) {
+                  return _buildKitchenMerchantBody(
+                    data: data,
+                    pedido: pedido,
+                    total: total,
+                    customerName: customerName,
+                    customerEmail: customerEmail,
+                    customerPhone: customerPhone,
+                    paymentMethod: paymentMethod,
+                    isDeliveryOrder: isDeliveryOrder,
+                    deliveryAddress: deliveryAddress,
+                    deliveryReference: deliveryReference,
+                    deliveryInstructions: deliveryInstructions,
+                    orderNotes: orderNotes,
+                    visualStatusLabel: visualStatusLabel,
+                    visualStatusColor: visualStatusColor,
+                    hasDeliveryCoords: hasDeliveryCoords,
+                    deliveryPoint: deliveryPoint,
+                    businessPoint: businessPoint,
+                    markers: deliveryMarkers,
+                    polylines: deliveryPolylines,
+                    cameraPoints: cameraPoints,
+                    shouldShowNextStepCard: shouldShowNextStepCard,
+                    whatsappNotificationsEnabled: whatsappNotificationsEnabled,
+                    hasDelegationRecord: hasDelegationRecord,
+                    deliveryDelegateAlias: deliveryDelegateAlias,
+                    deliveryDelegatePhoneDisplay: deliveryDelegatePhoneDisplay,
+                    deliveryDelegateStatusSummary: deliveryDelegateStatusSummary,
+                    isManagingDeliveryInvite: _isManagingDeliveryInvite,
+                    deliveryInviteUrl: _deliveryInviteUrl,
+                    deliveryInviteFeedback: _deliveryInviteFeedback,
+                    isDelegatedDelivery: isDelegatedDelivery,
+                    deliveryDelegateInvitedPhone: deliveryDelegateInvitedPhone,
                   );
                 }
 
@@ -3866,12 +4408,45 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                           ),
                                           const SizedBox(width: 10),
                                           Expanded(
-                                            child: Text(
-                                              'x${item.cantidad} ${item.nombre}',
-                                              style: GoogleFonts.manrope(
-                                                color: text,
-                                                fontWeight: FontWeight.w700,
-                                              ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  'x${item.cantidad} ${item.displayName}',
+                                                  style: GoogleFonts.manrope(
+                                                    color: text,
+                                                    fontWeight:
+                                                        FontWeight.w700,
+                                                  ),
+                                                ),
+                                                for (final group
+                                                    in item.modifierGroups) ...[
+                                                  if (group.grupo.isNotEmpty)
+                                                    Text(
+                                                      '${group.grupo}:',
+                                                      style:
+                                                          GoogleFonts.manrope(
+                                                        color: muted,
+                                                        fontSize: 12.5,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                  for (final option
+                                                      in group.opciones)
+                                                    Text(
+                                                      option.nombre,
+                                                      style:
+                                                          GoogleFonts.manrope(
+                                                        color: muted,
+                                                        fontSize: 12.5,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                ],
+                                              ],
                                             ),
                                           ),
                                           Text(

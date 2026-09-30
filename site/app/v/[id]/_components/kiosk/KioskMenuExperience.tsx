@@ -1,7 +1,7 @@
 'use client';
 
 import { Caveat, Manrope } from 'next/font/google';
-import { ArrowLeft, Plus, Search, ShoppingBag, Star, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus, Search, ShoppingBag, Star, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
@@ -53,6 +53,7 @@ type KioskMenuExperienceProps = {
   cartTotalLabel: string;
   onAddProduct: (productId: string) => void;
   onPay: () => void;
+  payCtaLabel?: string;
   addedPrompt: { productName: string } | null;
   onContinueAdding: () => void;
   onPayFromPrompt: () => void;
@@ -92,6 +93,7 @@ export function KioskMenuExperience({
   cartTotalLabel,
   onAddProduct,
   onPay,
+  payCtaLabel = 'Ir a pagar',
   addedPrompt,
   onContinueAdding,
   onPayFromPrompt,
@@ -167,6 +169,8 @@ export function KioskMenuExperience({
         <KioskHome
           businessName={businessName}
           logoUrl={logoUrl}
+          ratingAverage={ratingAverage}
+          ratingCount={ratingCount}
           initialLetter={initialLetter}
           isOpen={isOpen}
           closedCaption={closedCaption}
@@ -354,7 +358,16 @@ export function KioskMenuExperience({
                     ) : null}
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-2">
-                    <p className="text-sm font-bold text-[var(--menu-text)]">{product.priceLabel}</p>
+                    {product.optionsSummary ? (
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[var(--menu-text)]">{product.priceLabel}</p>
+                        <p className="mt-0.5 truncate text-[11px] font-semibold text-[var(--menu-text-muted)]">
+                          {product.optionsSummary}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm font-bold text-[var(--menu-text)]">{product.priceLabel}</p>
+                    )}
                     {!browseOnly ? (
                       <span
                         className="inline-flex min-h-10 items-center gap-1.5 rounded-[14px] px-3.5 py-2 text-xs font-bold"
@@ -364,8 +377,10 @@ export function KioskMenuExperience({
                           opacity: product.available ? 1 : 0.55,
                         }}
                       >
-                        <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-                        {product.available ? 'Agregar' : 'No disponible'}
+                        {product.optionsSummary && product.available ? null : (
+                          <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+                        )}
+                        {!product.available ? 'No disponible' : product.optionsSummary ? 'Elegir' : 'Agregar'}
                       </span>
                     ) : null}
                   </div>
@@ -391,8 +406,12 @@ export function KioskMenuExperience({
               className="inline-flex min-h-12 items-center gap-2 rounded-[16px] px-5 text-sm font-bold"
               style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
             >
-              <ShoppingBag className="h-4 w-4" />
-              Ir a pagar
+              {payCtaLabel === 'Siguiente' ? (
+                <ArrowRight className="h-4 w-4" />
+              ) : (
+                <ShoppingBag className="h-4 w-4" />
+              )}
+              {payCtaLabel}
             </button>
           </div>
         </div>

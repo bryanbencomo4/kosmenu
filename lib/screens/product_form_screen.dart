@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
+import 'package:kosmenu_app/models/product_option_group.dart';
 import 'package:kosmenu_app/models/upsell_config.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
@@ -15,6 +16,7 @@ import 'package:kosmenu_app/services/product_image_optimizer.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
+import 'package:kosmenu_app/widgets/product_options_editor.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProductFormScreen extends StatefulWidget {
@@ -44,6 +46,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _descriptionController = TextEditingController();
   final _priceController = TextEditingController();
   final _compareAtPriceController = TextEditingController();
+  final _optionsEditorKey = GlobalKey<ProductOptionsEditorState>();
   final _picker = ImagePicker();
   final WebCameraHandoffService _webCameraHandoffService =
       const WebCameraHandoffService();
@@ -934,6 +937,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         'upsell_enabled': _upsellEnabled,
       };
 
+      final optionsEditor = _optionsEditorKey.currentState;
+      if (optionsEditor != null) {
+        final current = widget.product?.opcionesMenu;
+        final hadGroups =
+            (current?.containsKey('grupos') ?? false) ||
+            (current?.containsKey('activadas') ?? false);
+        // Simple products that never used options keep their row untouched.
+        if (optionsEditor.active || hadGroups) {
+          payload['opciones_menu'] = ProductOptionGroup.mergeIntoMenuOptions(
+            current,
+            optionsEditor.groups,
+            enabled: optionsEditor.active,
+          );
+        }
+      }
+
       if (widget.isEditing) {
         await Supabase.instance.client
             .from('productos')
@@ -1142,6 +1161,14 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   isGeneratingDescription: _isGeneratingDescription,
                   onGenerateDescription: _onGenerateDescription,
                   onSave: _save,
+                  optionsSection: ProductOptionsEditor(
+                    key: _optionsEditorKey,
+                    initialGroups: widget.product?.optionGroups ?? const [],
+                    initiallyActive:
+                        widget.product?.hasOptionsEnabled ?? false,
+                    currencyCode: _baseCurrency,
+                    enabled: !_isSaving,
+                  ),
                 );
 
                 return Center(
@@ -1583,8 +1610,10 @@ class _FormPanel extends StatelessWidget {
     required this.isGeneratingDescription,
     required this.onGenerateDescription,
     required this.onSave,
+    required this.optionsSection,
   });
 
+  final Widget optionsSection;
   final GlobalKey<FormState> formKey;
   final List<CategoryModel> categories;
   final String? selectedCategoryId;
@@ -1871,6 +1900,8 @@ class _FormPanel extends StatelessWidget {
                   );
                 },
               ),
+              const SizedBox(height: 18),
+              optionsSection,
               const SizedBox(height: 18),
               fieldLabel('Upselling'),
               DropdownButtonFormField<String?>(

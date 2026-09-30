@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -35,21 +37,291 @@ class MerchantOrdersWorkspace extends StatefulWidget {
       _MerchantOrdersWorkspaceState();
 }
 
+/// One paginated window of orders, loaded newest-first with a created_at
+/// cursor. Live rows from the realtime stream are layered on top by id.
+class _OrdersPageWindow {
+  final List<PedidoModel> rows = <PedidoModel>[];
+  final Set<String> ids = <String>{};
+  DateTime? cursor;
+  bool hasMore = true;
+  bool isLoading = false;
+  Object? error;
+  int generation = 0;
+
+  void reset() {
+    rows.clear();
+    ids.clear();
+    cursor = null;
+    hasMore = true;
+    isLoading = false;
+    error = null;
+    generation++;
+  }
+
+  void addAll(Iterable<PedidoModel> page) {
+    for (final pedido in page) {
+      if (ids.add(pedido.id)) rows.add(pedido);
+      final createdAt = pedido.createdAt;
+      if (createdAt != null && (cursor == null || createdAt.isBefore(cursor!))) {
+        cursor = createdAt;
+      }
+    }
+  }
+}
+
 class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
+  static const int _pageSize = 25;
+  static const int _minVisibleWhenFiltered = 12;
+
   OrderStatusBucket? _filter;
   String _query = '';
+  String _activeSearch = '';
+  Timer? _searchDebounce;
+  final ScrollController _scrollController = ScrollController();
+  final _OrdersPageWindow _browse = _OrdersPageWindow();
+  final _OrdersPageWindow _search = _OrdersPageWindow();
+
+  _OrdersPageWindow get _window =>
+      _activeSearch.isEmpty ? _browse : _search;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _seedBrowseFromLive();
+    if (_browse.rows.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _browse.rows.isEmpty) unawaited(_loadMore());
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant MerchantOrdersWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_browse.rows.isEmpty && !_browse.isLoading) {
+      _seedBrowseFromLive();
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// The first page comes from rows the dashboard already has in memory, so
+  /// the list paints without waiting on the network.
+  void _seedBrowseFromLive() {
+    if (widget.orders.isEmpty) return;
+    _browse.addAll(widget.orders.take(_pageSize));
+    _browse.hasMore = true;
+  }
+
+  void _onScroll() {
+    final position = _scrollController.position;
+    if (position.extentAfter < 600) unawaited(_loadMore());
+  }
+
+  void _onQueryChanged(String value) {
+    setState(() => _query = value);
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      final next = _sanitizeSearch(value);
+      if (next == _activeSearch) return;
+      setState(() {
+        _activeSearch = next.length >= 2 ? next : '';
+        _search.reset();
+      });
+      if (_activeSearch.isNotEmpty) unawaited(_loadMore());
+    });
+  }
+
+  String _sanitizeSearch(String value) {
+    // PostgREST `or` filter syntax reserves these characters.
+    return value.trim().replaceAll(RegExp(r'[,()*%\\"' "'" r':]'), ' ').trim();
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _browse.reset();
+      _search.reset();
+      _seedBrowseFromLive();
+    });
+    await _loadMore();
+  }
+
+  Future<void> _loadMore() async {
+    final window = _window;
+    if (window.isLoading || !window.hasMore) return;
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) {
+      setState(() => window.hasMore = false);
+      return;
+    }
+
+    final generation = window.generation;
+    final search = _activeSearch;
+    setState(() {
+      window.isLoading = true;
+      window.error = null;
+    });
+
+    try {
+      dynamic query = Supabase.instance.client
+          .from('pedidos')
+          .select('*')
+          .eq('comercio_id', comercioId);
+      if (search.isNotEmpty) {
+        final pattern = '*$search*';
+        query = query.or(
+          'nombre_cliente.ilike.$pattern,'
+          'telefono_cliente.ilike.$pattern,'
+          'detalles->>order_id.ilike.$pattern,'
+          'detalles->>codigo_orden.ilike.$pattern',
+        );
+      }
+      final cursor = window.cursor;
+      if (cursor != null) {
+        // Web DateTimes are millisecond precision while created_at has
+        // microseconds: include the cursor's millisecond and dedupe by id.
+        final upperBound = cursor.toUtc().add(const Duration(milliseconds: 1));
+        query = query.lt('created_at', upperBound.toIso8601String());
+      }
+      final rows =
+          await query.order('created_at', ascending: false).limit(_pageSize)
+              as List<dynamic>;
+      if (!mounted || generation != window.generation) return;
+
+      final page = rows
+          .map((row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)))
+          .where((pedido) => !pedido.hasParseError)
+          .toList(growable: false);
+      setState(() {
+        window.addAll(page);
+        window.hasMore = rows.length == _pageSize;
+        window.isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted || generation != window.generation) return;
+      setState(() {
+        window.isLoading = false;
+        window.error = error;
+      });
+    }
+  }
+
+  bool _matchesQuery(PedidoModel pedido, String q) {
+    if (q.isEmpty) return true;
+    final name = (pedido.nombreCliente ?? '').toLowerCase();
+    final phone = (pedido.clientePhone ?? '').toLowerCase();
+    final id = (pedido.orderId ?? pedido.id).toLowerCase();
+    return name.contains(q) || phone.contains(q) || id.contains(q);
+  }
+
+  /// Loaded pages, with live rows replacing stale copies and new live orders
+  /// (newer than the loaded window's cursor) added on top.
+  List<PedidoModel> _visibleOrders() {
+    final window = _window;
+    final liveById = <String, PedidoModel>{
+      for (final pedido in widget.orders) pedido.id: pedido,
+    };
+    final cursor = window.cursor;
+    final q = _query.trim().toLowerCase();
+    final merged = <String, PedidoModel>{};
+
+    for (final pedido in window.rows) {
+      merged[pedido.id] = liveById[pedido.id] ?? pedido;
+    }
+    for (final pedido in widget.orders) {
+      if (merged.containsKey(pedido.id)) continue;
+      final createdAt = pedido.createdAt;
+      final insideWindow =
+          cursor == null ||
+          (createdAt != null && !createdAt.isBefore(cursor));
+      if (!insideWindow && window.hasMore) continue;
+      if (_activeSearch.isNotEmpty && !_matchesQuery(pedido, q)) continue;
+      merged[pedido.id] = pedido;
+    }
+
+    final result = merged.values.where((pedido) {
+      if (_filter != null && pedido.statusBucket != _filter) return false;
+      // Server search also matches codigo_orden, which isn't on the model.
+      return _activeSearch.isNotEmpty || _matchesQuery(pedido, q);
+    }).toList();
+    result.sort((a, b) {
+      final aTime = a.createdAt;
+      final bTime = b.createdAt;
+      if (aTime == null && bTime == null) return 0;
+      if (aTime == null) return 1;
+      if (bTime == null) return -1;
+      return bTime.compareTo(aTime);
+    });
+    return result;
+  }
+
+  void _ensureEnoughRows(int visibleCount) {
+    final window = _window;
+    if (window.isLoading || !window.hasMore || window.error != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final underfilled = _filter != null && visibleCount < _minVisibleWhenFiltered;
+      final cannotScroll = !_scrollController.hasClients ||
+          _scrollController.position.maxScrollExtent <= 0;
+      if (underfilled || cannotScroll) unawaited(_loadMore());
+    });
+  }
+
+  Widget _buildFooter(_OrdersPageWindow window) {
+    if (window.isLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 18),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2.4),
+          ),
+        ),
+      );
+    }
+    if (window.error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Center(
+          child: TextButton.icon(
+            onPressed: _loadMore,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('No se pudieron cargar más pedidos. Reintentar'),
+          ),
+        ),
+      );
+    }
+    if (!window.hasMore) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        child: Center(
+          child: Text(
+            'No hay más pedidos',
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              color: const Color(0xFF9CA3AF),
+            ),
+          ),
+        ),
+      );
+    }
+    return const SizedBox(height: 18);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final q = _query.trim().toLowerCase();
-    final filtered = widget.orders.where((pedido) {
-      if (_filter != null && pedido.statusBucket != _filter) return false;
-      if (q.isEmpty) return true;
-      final name = (pedido.nombreCliente ?? '').toLowerCase();
-      final phone = (pedido.clientePhone ?? '').toLowerCase();
-      final id = (pedido.orderId ?? pedido.id).toLowerCase();
-      return name.contains(q) || phone.contains(q) || id.contains(q);
-    }).toList(growable: false);
+    final window = _window;
+    final filtered = _visibleOrders();
+    _ensureEnoughRows(filtered.length);
+    final isInitialLoading = filtered.isEmpty && window.isLoading;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -57,7 +329,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           TextField(
-            onChanged: (value) => setState(() => _query = value),
+            onChanged: _onQueryChanged,
             decoration: InputDecoration(
               hintText: 'Buscar por cliente, teléfono o ID',
               prefixIcon: const Icon(Icons.search_rounded),
@@ -119,19 +391,32 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
                     actionLabel: 'Reintentar',
                     onAction: widget.onRetry,
                   )
-                : filtered.isEmpty
-                    ? const MerchantEmptyPanel(
-                        title: 'Sin pedidos',
-                        subtitle:
-                            'Cuando entren pedidos aparecerán aquí con su estado.',
+                : isInitialLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : filtered.isEmpty && !window.hasMore
+                    ? MerchantEmptyPanel(
+                        title: _activeSearch.isNotEmpty || _filter != null
+                            ? 'Sin resultados'
+                            : 'Sin pedidos',
+                        subtitle: _activeSearch.isNotEmpty || _filter != null
+                            ? 'No hay pedidos que coincidan con este filtro.'
+                            : 'Cuando entren pedidos aparecerán aquí con su estado.',
                         icon: Icons.receipt_long_outlined,
                       )
-                    : ListView.separated(
-                        itemCount: filtered.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          return widget.itemBuilder(filtered[index]);
-                        },
+                    : RefreshIndicator(
+                        onRefresh: _refresh,
+                        child: ListView.separated(
+                          controller: _scrollController,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          itemCount: filtered.length + 1,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            if (index == filtered.length) {
+                              return _buildFooter(window);
+                            }
+                            return widget.itemBuilder(filtered[index]);
+                          },
+                        ),
                       ),
           ),
         ],

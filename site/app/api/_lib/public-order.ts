@@ -1,3 +1,4 @@
+import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
 import { convertOrderAmount, normalizeOrderCurrency } from './order-currency';
 
 export type PublicOrderStatus =
@@ -26,6 +27,7 @@ export type PublicOrderTrackingResponse = {
       tamanoLabel?: string;
       servicioAdicional?: boolean;
       ajusteIds?: string[];
+      grupos?: Record<string, string[]>;
     };
   }>;
   subtotal?: number;
@@ -156,21 +158,8 @@ function buildLocationHint(
 }
 
 function sanitizePublicSelection(raw: unknown): PublicOrderTrackingResponse['items'][number]['selection'] {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const row = raw as Record<string, unknown>;
-  const tamanoId = (row.tamanoId ?? '').toString().trim();
-  const tamanoLabel = (row.tamanoLabel ?? '').toString().trim();
-  const servicioAdicional = row.servicioAdicional === true;
-  const ajusteIds = Array.isArray(row.ajusteIds)
-    ? row.ajusteIds.map((entry) => entry.toString().trim()).filter(Boolean).slice(0, 24)
-    : [];
-  if (!tamanoId && !tamanoLabel && !servicioAdicional && ajusteIds.length === 0) return undefined;
-  return {
-    ...(tamanoId ? { tamanoId } : {}),
-    ...(tamanoLabel ? { tamanoLabel } : {}),
-    ...(servicioAdicional ? { servicioAdicional } : {}),
-    ...(ajusteIds.length > 0 ? { ajusteIds } : {}),
-  };
+  const selection = sanitizeCartLineSelection(raw);
+  return Object.keys(selection).length > 0 ? selection : undefined;
 }
 
 export function toPublicOrderTrackingResponse(
@@ -197,7 +186,10 @@ export function toPublicOrderTrackingResponse(
       const unitPriceBase = Number(row.precio ?? row.price);
       if (!Number.isFinite(quantity) || quantity <= 0) return null;
       const productId = (row.product_id ?? row.productId ?? '').toString().trim();
-      const selection = sanitizePublicSelection(row.opciones ?? row.selection);
+      // New orders store the raw ids in `seleccion` and the frozen snapshot
+      // array in `opciones`; older orders stored the ids in `opciones`.
+      const legacySelection = Array.isArray(row.opciones) ? undefined : row.opciones;
+      const selection = sanitizePublicSelection(row.seleccion ?? legacySelection ?? row.selection);
       return {
         name,
         quantity,

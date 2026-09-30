@@ -35,6 +35,11 @@ import { KioskCheckout } from './_components/kiosk/KioskCheckout';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
+import { PreCheckoutUpsellSheet } from './_components/upsell/PreCheckoutUpsellSheet';
+import {
+  resolvePreCheckoutSuggestions,
+  shouldShowPreCheckoutUpsell,
+} from '../../_lib/pre-checkout-upsell';
 import type { BundleRailItem } from './_components/upsell/BundleRail';
 import { formatPaymentMethodDetails } from '../../_lib/payment-method-display';
 import {
@@ -46,12 +51,14 @@ import {
   buildCartLineKey,
   buildOrderLineLabel,
   formatProductPriceLabel,
+  getProductOptionsSummary,
   getProductMinimumPrice,
   isServicioAdicionalName,
   parseCartLineKey,
   productRequiresConfiguration,
   resolveCartLineUnitPrice,
   summarizeCartLineSelection,
+  validateOptionGroupSelection,
   type CartLineSelection,
 } from '../../_lib/menu-product-options';
 import { consumeRepeatOrder } from '../../_lib/repeat-order';
@@ -76,6 +83,8 @@ type CategoriaRow = {
   orden?: number | null;
   icono?: string | null;
   opciones_menu?: unknown;
+  rol?: string | null;
+  tipo_upselling?: string | null;
 };
 
 type ProductoRow = {
@@ -250,6 +259,17 @@ type MenuData = {
   upsellSettings?: UpsellSettingsRow | null;
   upsellRules?: UpsellRuleRow[] | null;
   bundles?: BundleRow[] | null;
+  preCheckoutUpsell?: {
+    activo?: boolean;
+    tipos?: string[];
+    max_productos?: number;
+    categorias?: Array<{ id?: string; tipo?: string }>;
+    reglas?: Array<{
+      categoria_id?: string | null;
+      categoria_origen?: string | null;
+      sugerir_tipos?: string[];
+    }>;
+  } | null;
 };
 
 type MarketRatesRow = {
@@ -1599,6 +1619,7 @@ export default function PublicMenuPage() {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [isPreCheckoutUpsellOpen, setIsPreCheckoutUpsellOpen] = useState(false);
   const [isCheckoutFooterExpanded, setIsCheckoutFooterExpanded] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
@@ -1958,16 +1979,20 @@ export default function PublicMenuPage() {
       const next: Record<string, number> = {};
 
       for (const [cartKey, quantity] of Object.entries(prev)) {
-        const { productId } = parseCartLineKey(cartKey);
+        const { productId, selection } = parseCartLineKey(cartKey);
         const product = productById.get(productId);
         const unitPrice = product
           ? resolveCartLineUnitPrice(
               product,
               categoryByProductId.get(productId) ?? null,
-              parseCartLineKey(cartKey).selection,
+              selection,
             )
           : 0;
-        if (!product || unitPrice <= 0 || quantity <= 0) {
+        // Lines whose option groups changed since they were added (e.g. an
+        // option was removed) can no longer be ordered as-is.
+        const optionsInvalid =
+          product != null && validateOptionGroupSelection(product, selection).length > 0;
+        if (!product || unitPrice <= 0 || quantity <= 0 || optionsInvalid) {
           changed = true;
           continue;
         }
@@ -2672,6 +2697,36 @@ export default function PublicMenuPage() {
     [menuData?.upsellRules],
   );
 
+  const preCheckoutSuggestionGroups = useMemo(
+    () =>
+      resolvePreCheckoutSuggestions({
+        config: menuData?.preCheckoutUpsell ?? { upselling: false },
+        categories: menuData?.categorias ?? [],
+        products: menuData?.productos ?? [],
+        cart: cartItems.map((item) => ({
+          productId: item.product.id,
+          categoryId: item.product.categoria_id,
+        })),
+      }).map((group) => ({
+        ...group,
+        products: group.products.map((product) => {
+          const fullProduct = productById.get(product.id);
+          const category = categoryByProductId.get(product.id) ?? null;
+          return {
+            ...product,
+            imagen_url: displayProductImage(product.imagen_url, comercioLogoUrl, 280),
+            quantity: getProductCartQuantity(product.id),
+            precio: fullProduct ? getProductMinimumPrice(fullProduct) : product.precio,
+            hasOptions: fullProduct
+              ? productRequiresConfiguration(fullProduct, category)
+              : false,
+          };
+        }),
+      })),
+    [cart, cartItems, categoryByProductId, comercioLogoUrl, menuData?.categorias, menuData?.preCheckoutUpsell, menuData?.productos, productById],
+  );
+  const preCheckoutUpsellActive = Boolean(menuData?.preCheckoutUpsell?.activo);
+
   const engineSettings: EngineSettings | null = useMemo(() => {
     const settings = menuData?.upsellSettings;
     if (!settings) return null;
@@ -2914,6 +2969,7 @@ export default function PublicMenuPage() {
       priceLabel: string;
       imageUrl: string | null;
       available: boolean;
+      optionsSummary: string | null;
     }>> = {};
     for (const categoria of categoriasConProductos) {
       map[categoria.id] = categoria.productos.map((producto) => ({
@@ -2923,6 +2979,7 @@ export default function PublicMenuPage() {
         priceLabel: formatProductPriceLabel(producto, formatUpsellPrice),
         imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl),
         available: producto.disponible !== false,
+        optionsSummary: getProductOptionsSummary(producto),
       }));
     }
     return map;
@@ -3222,13 +3279,13 @@ export default function PublicMenuPage() {
   }
 
   useEffect(() => {
-    if (!isInfoOpen && !isConfirmOpen && !expandedProductImage && !isMapPickerOpen && !isQuickActionsOpen) return;
+    if (!isInfoOpen && !isConfirmOpen && !isPreCheckoutUpsellOpen && !expandedProductImage && !isMapPickerOpen && !isQuickActionsOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen, isQuickActionsOpen]);
+  }, [isInfoOpen, isConfirmOpen, isPreCheckoutUpsellOpen, expandedProductImage, isMapPickerOpen, isQuickActionsOpen]);
 
   useEffect(() => {
     if (isInfoOpen || isConfirmOpen || expandedProductImage || isMapPickerOpen) {
@@ -4123,6 +4180,15 @@ export default function PublicMenuPage() {
     };
   }
 
+  function proceedToCheckoutSheet() {
+    const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
+    void trackMenuFunnelEvent(comercioKey, 'checkout_started', {}, 'checkout');
+    setCheckoutError(null);
+    setCheckoutStep(0);
+    setIsPreCheckoutUpsellOpen(false);
+    setIsConfirmOpen(true);
+  }
+
   function openCheckoutSheet() {
     if (isOwnerPreview) {
       window.alert(
@@ -4134,11 +4200,21 @@ export default function PublicMenuPage() {
       window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
       return;
     }
-    const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
-    void trackMenuFunnelEvent(comercioKey, 'checkout_started', {}, 'checkout');
-    setCheckoutError(null);
-    setCheckoutStep(0);
-    setIsConfirmOpen(true);
+    if (
+      shouldShowPreCheckoutUpsell({
+        config: menuData?.preCheckoutUpsell ?? { upselling: false },
+        categories: menuData?.categorias ?? [],
+        products: menuData?.productos ?? [],
+        cart: cartItems.map((item) => ({
+          productId: item.product.id,
+          categoryId: item.product.categoria_id,
+        })),
+      })
+    ) {
+      setIsPreCheckoutUpsellOpen(true);
+      return;
+    }
+    proceedToCheckoutSheet();
   }
 
   async function confirmOrder() {
@@ -4767,11 +4843,12 @@ export default function PublicMenuPage() {
           cartCount={cartCount}
           cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
           onAddProduct={handleKioskAddProduct}
+          payCtaLabel={preCheckoutUpsellActive ? 'Siguiente' : 'Ir a pagar'}
           onPay={() => {
             setKioskAddedPrompt(null);
             openCheckoutSheet();
           }}
-          addedPrompt={scheduleClosed ? null : kioskAddedPrompt}
+          addedPrompt={scheduleClosed || preCheckoutUpsellActive ? null : kioskAddedPrompt}
           onContinueAdding={() => setKioskAddedPrompt(null)}
           onPayFromPrompt={() => {
             setKioskAddedPrompt(null);
@@ -4794,6 +4871,46 @@ export default function PublicMenuPage() {
           themeMode={themeMode}
           onToggleTheme={toggleKioskTheme}
           stickyOffsetClass={isOwnerPreview ? 'top-12' : 'top-0'}
+        />
+
+        <PreCheckoutUpsellSheet
+          open={isPreCheckoutUpsellOpen}
+          cartItems={cartItems.map((item) => ({
+            id: item.cartKey,
+            name: item.product.nombre,
+            detail: summarizeCartLineSelection(item.product, item.selection, item.category) || null,
+            quantity: item.quantity,
+            priceLabel: formatUpsellPrice(item.unitPrice * item.quantity),
+            imageUrl: displayProductImage(item.product.imagen_url, comercioLogoUrl, 160),
+          }))}
+          cartCount={cartCount}
+          cartTotalLabel={formatUpsellPrice(cartTotal)}
+          groups={preCheckoutSuggestionGroups}
+          formatPrice={formatUpsellPrice}
+          onIncrement={incrementProduct}
+          onDecrement={decrementProductById}
+          onKeepShopping={() => setIsPreCheckoutUpsellOpen(false)}
+          onContinue={proceedToCheckoutSheet}
+          canConfigure={!scheduleClosed}
+          resolveConfigurableProduct={(productId) => {
+            const product = productById.get(productId);
+            if (!product) return null;
+            const category = categoryByProductId.get(productId) ?? null;
+            return {
+              id: product.id,
+              nombre: product.nombre,
+              descripcion: product.descripcion,
+              precio: product.precio,
+              opciones_menu: product.opciones_menu,
+              imagen_url: displayProductImage(product.imagen_url, comercioLogoUrl, 280),
+              category: category
+                ? { nombre: category.nombre, opciones_menu: category.opciones_menu }
+                : null,
+            };
+          }}
+          onConfirmConfigured={(productId, selection, quantity) => {
+            addConfiguredProductToCart(productId, selection, quantity);
+          }}
         />
 
         <AddToCartUpsellSheet
@@ -4835,9 +4952,11 @@ export default function PublicMenuPage() {
             const addedProduct = productById.get(productOptionsSheet.productId);
             addConfiguredProductToCart(productOptionsSheet.productId, selection, quantity);
             setProductOptionsSheet({ open: false, productId: null });
-            setKioskAddedPrompt({
-              productName: addedProduct?.nombre ?? 'Producto',
-            });
+            if (!preCheckoutUpsellActive) {
+              setKioskAddedPrompt({
+                productName: addedProduct?.nombre ?? 'Producto',
+              });
+            }
           }}
         />
 
@@ -5438,7 +5557,7 @@ export default function PublicMenuPage() {
                         </div>
                       )}
 
-                      {checkoutSummaryItems.length > 0 && cartUpsellSuggestions.length > 0 ? (
+                      {checkoutSummaryItems.length > 0 && cartUpsellSuggestions.length > 0 && !preCheckoutUpsellActive ? (
                         <div className="checkout-item-enter" style={{ animationDelay: '90ms' }}>
                           <CartUpsellSection
                             suggestions={cartUpsellSuggestions}
@@ -5642,7 +5761,7 @@ export default function PublicMenuPage() {
                           {normalizedClientName || 'Cliente'} · {checkoutItemsCount} unid.
                         </p>
                       </div>
-                      {checkoutUpsellSuggestions.length > 0 ? (
+                      {checkoutUpsellSuggestions.length > 0 && !preCheckoutUpsellActive ? (
                         <div className="checkout-item-enter">
                           <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
                             Antes de terminar

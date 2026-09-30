@@ -21,6 +21,7 @@ describe('public menu DTO', () => {
       menu_palette_accent: 0xff0ea5e9,
       menu_theme_mode: 'dark',
       color_principal: '#DC2626',
+      upsell_config: { pre_checkout: { activo: true }, secret: 'no' },
     });
 
     expect(dto).toBeTruthy();

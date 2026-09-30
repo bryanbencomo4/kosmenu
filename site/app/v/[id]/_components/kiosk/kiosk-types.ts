@@ -17,6 +17,8 @@ export type KioskProduct = {
   priceLabel: string;
   imageUrl: string | null;
   available: boolean;
+  /** Only set for products with option groups enabled ("3 tamaños disponibles"). */
+  optionsSummary?: string | null;
 };
 
 export type KioskVoucherData = {

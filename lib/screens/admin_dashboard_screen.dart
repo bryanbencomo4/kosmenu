@@ -11,6 +11,7 @@ import 'package:kosmenu_app/models/business_schedule.dart';
 import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
+import 'package:kosmenu_app/services/merchant_orders_repository.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
@@ -56,6 +57,7 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
+  static const int _liveOrdersWindow = 150;
   static const Color _dashboardBg = Color(0xFFF8F7FC);
   static const Color _purple = Color(0xFF6D28D9);
   static const Color _darkText = Color(0xFF11183C);
@@ -78,6 +80,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _didPrimeOrderAlert = false;
   Set<String> _seenOrderIds = <String>{};
   List<PedidoModel> _latestOrders = const <PedidoModel>[];
+
+  /// Orders for the selected sales range (plus today), fetched on demand so
+  /// the realtime stream only has to carry the most recent orders.
+  List<PedidoModel> _metricsOrders = const <PedidoModel>[];
+  int _metricsGeneration = 0;
+  DateTime? _earliestOrderAt;
+  int? _totalOrdersCount;
+  DateTime? _totalOrdersCountedAt;
+  List<PedidoModel>? _clientOrders;
+  bool _clientOrdersLoading = false;
   final Map<String, String> _optimisticStatusByOrderId = <String, String>{};
   final Set<String> _autoCancelInFlight = <String>{};
   final Set<String> _autoCanceledHandledIds = <String>{};
@@ -98,6 +110,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _sidebarCollapsed = false;
   MerchantNavDestination _selectedNav = MerchantNavDestination.home;
   bool _shellHasPushedRoute = false;
+  ComercioModel? _cachedComercio;
   late final NavigatorObserver _contentNavObserver;
 
   bool get _hasComercioId => SupabaseConfig.hasCurrentComercioId;
@@ -124,6 +137,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     unawaited(_refreshBillingGate());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_openPendingMerchantOrder());
+      unawaited(_loadMetricsOrders());
+      unawaited(_loadTotalOrdersCount());
     });
   }
 
@@ -390,7 +405,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
 
     if (comercio.id.trim().isNotEmpty) {
+      _cachedComercio = comercio;
       SupabaseConfig.setCurrentComercioId(comercio.id, slug: comercio.slug);
+      if (_metricsGeneration == 0) unawaited(_loadMetricsOrders());
+      if (_totalOrdersCount == null) unawaited(_loadTotalOrdersCount());
       syncMerchantPresence(
         name: comercio.nombre,
         logoUrl: comercio.logoUrl,
@@ -476,6 +494,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         .stream(primaryKey: ['id'])
         .eq('comercio_id', SupabaseConfig.currentComercioId)
         .order('created_at', ascending: false)
+        .limit(_liveOrdersWindow)
         .map(
           (rows) => rows
               .map((row) => PedidoModel.fromMap(Map<String, dynamic>.from(row)))
@@ -550,9 +569,114 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     setState(() {
       _snapshotFuture = _fetchSnapshot();
       _ordersStream = _buildOrdersStream();
+      _clientOrders = null;
     });
     _subscribeToOrders();
+    unawaited(_loadMetricsOrders());
+    unawaited(_loadTotalOrdersCount());
     await _refreshBillingGate();
+  }
+
+  Future<void> _loadMetricsOrders() async {
+    if (!mounted || !_hasComercioId) return;
+    final comercioId = SupabaseConfig.currentComercioId;
+    final generation = ++_metricsGeneration;
+    try {
+      if (_selectedSalesRange == _SalesRange.allTime) {
+        _earliestOrderAt ??= await MerchantOrdersRepository
+            .fetchEarliestCreatedAt(comercioId: comercioId);
+      }
+      final now = DateTime.now();
+      final todayStart = _startOfDay(now);
+      final tomorrow = _endOfDayExclusive(now);
+      final range = _resolveSalesRangeWindow(const <PedidoModel>[]);
+      final coversToday =
+          !range.startInclusive.isAfter(todayStart) &&
+          !range.endExclusive.isBefore(tomorrow);
+
+      final batches = await Future.wait<List<PedidoModel>>([
+        MerchantOrdersRepository.fetchBetween(
+          comercioId: comercioId,
+          startInclusive: range.startInclusive,
+          endExclusive: range.endExclusive,
+        ),
+        if (!coversToday)
+          MerchantOrdersRepository.fetchBetween(
+            comercioId: comercioId,
+            startInclusive: todayStart,
+            endExclusive: tomorrow,
+          ),
+      ]);
+      if (!mounted || generation != _metricsGeneration) return;
+      final byId = <String, PedidoModel>{
+        for (final batch in batches)
+          for (final pedido in batch) pedido.id: pedido,
+      };
+      setState(() => _metricsOrders = byId.values.toList(growable: false));
+      _bumpShell();
+    } catch (error) {
+      debugPrint('Metrics orders load failed: $error');
+    }
+  }
+
+  Future<void> _loadTotalOrdersCount() async {
+    if (!mounted || !_hasComercioId) return;
+    try {
+      final countedAt = DateTime.now().toUtc();
+      final count = await MerchantOrdersRepository.countOrders(
+        comercioId: SupabaseConfig.currentComercioId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _totalOrdersCount = count;
+        _totalOrdersCountedAt = countedAt;
+      });
+      _bumpShell();
+    } catch (error) {
+      debugPrint('Orders count load failed: $error');
+    }
+  }
+
+  Future<void> _loadClientOrders() async {
+    if (!mounted || !_hasComercioId || _clientOrdersLoading) return;
+    _clientOrdersLoading = true;
+    try {
+      final orders = await MerchantOrdersRepository.fetchClientSummaries(
+        comercioId: SupabaseConfig.currentComercioId,
+      );
+      if (!mounted) return;
+      setState(() => _clientOrders = orders);
+      _bumpShell();
+    } catch (error) {
+      debugPrint('Client orders load failed: $error');
+    } finally {
+      _clientOrdersLoading = false;
+    }
+  }
+
+  /// Fetched rows with fresher live rows (and optimistic statuses) on top.
+  List<PedidoModel> _mergeWithLive(
+    Iterable<PedidoModel> fetched,
+    List<PedidoModel> live,
+  ) {
+    final byId = <String, PedidoModel>{
+      for (final pedido in fetched) pedido.id: pedido,
+    };
+    for (final pedido in live) {
+      byId[pedido.id] = pedido;
+    }
+    return byId.values.toList(growable: false);
+  }
+
+  int _menuOrdersCount(List<PedidoModel> live) {
+    final total = _totalOrdersCount;
+    final countedAt = _totalOrdersCountedAt;
+    if (total == null || countedAt == null) return live.length;
+    final arrivedSince = live
+        .where((pedido) => pedido.createdAt?.isAfter(countedAt) ?? false)
+        .length;
+    final count = total + arrivedSince;
+    return count < live.length ? live.length : count;
   }
 
   Future<MenuAnalyticsSummary> _loadAnalytics(SupabaseClient client) async {
@@ -675,9 +799,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (!mounted) return;
 
     MerchantDeepLink.consumeOrder();
-    await _pushInShell(OrderDetailScreen(orderId: orderId));
-    if (!mounted) return;
-    await _refreshDashboard();
+    await _pushInShell(
+      OrderDetailScreen(
+        orderId: orderId,
+        initialComercioNombre: _cachedComercio?.nombre,
+        initialBusinessLogoUrl: _cachedComercio?.logoUrl,
+      ),
+    );
   }
 
   Future<void> _openOrderDetail(PedidoModel pedido) async {
@@ -692,10 +820,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return;
     }
 
-    await _pushInShell(OrderDetailScreen(orderId: orderId));
-
-    if (!mounted) return;
-    await _refreshDashboard();
+    // The realtime orders stream keeps the dashboard fresh, so there is no
+    // reload on return. Client summaries carry no items, so they can't seed
+    // the kitchen view.
+    final comercio = _cachedComercio;
+    await _pushInShell(
+      OrderDetailScreen(
+        orderId: orderId,
+        initialPedido: pedido.items.isEmpty ? null : pedido,
+        initialComercioNombre: comercio?.nombre,
+        initialBusinessLogoUrl: comercio?.logoUrl,
+      ),
+    );
   }
 
   Future<ComercioModel> _resolveCurrentComercio() async {
@@ -1150,15 +1286,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     List<PedidoModel> validOrders,
   ) async {
     if (range == _SalesRange.custom) {
-      final earliest = validOrders
-          .map((o) => o.createdAt?.toLocal())
-          .whereType<DateTime>()
-          .fold<DateTime?>(null, (acc, date) {
-            if (acc == null || date.isBefore(acc)) {
-              return date;
-            }
-            return acc;
-          });
+      if (_earliestOrderAt == null && _hasComercioId) {
+        try {
+          _earliestOrderAt =
+              await MerchantOrdersRepository.fetchEarliestCreatedAt(
+                comercioId: SupabaseConfig.currentComercioId,
+              );
+        } catch (_) {
+          // Fall back to the loaded orders below.
+        }
+        if (!mounted) return;
+      }
+      final earliest =
+          _earliestOrderAt?.toLocal() ??
+          validOrders
+              .map((o) => o.createdAt?.toLocal())
+              .whereType<DateTime>()
+              .fold<DateTime?>(null, (acc, date) {
+                if (acc == null || date.isBefore(acc)) {
+                  return date;
+                }
+                return acc;
+              });
 
       final firstDate = earliest != null
           ? _startOfDay(earliest)
@@ -1191,11 +1340,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _refreshOrdersForMetrics() async {
-    if (!mounted) return;
-    setState(() {
-      _ordersStream = _buildOrdersStream();
-    });
-    _subscribeToOrders();
+    await _loadMetricsOrders();
   }
 
   _SalesRangeWindow _resolveSalesRangeWindow(Iterable<PedidoModel> orders) {
@@ -1251,7 +1396,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           endExclusive: tomorrow,
         );
       case _SalesRange.allTime:
-        DateTime? earliest;
+        final knownEarliest = _earliestOrderAt;
+        DateTime? earliest = knownEarliest == null
+            ? null
+            : _startOfDay(knownEarliest.toLocal());
         for (final order in orders) {
           final created = order.createdAt?.toLocal();
           if (created == null) continue;
@@ -1277,17 +1425,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           endExclusive: _endOfDayExclusive(custom.end),
         );
     }
-  }
-
-  bool _isWithinSelectedSalesRange(
-    DateTime? date,
-    Iterable<PedidoModel> orders,
-  ) {
-    if (date == null) return false;
-    final local = date.toLocal();
-    final window = _resolveSalesRangeWindow(orders);
-    return !local.isBefore(window.startInclusive) &&
-        local.isBefore(window.endExclusive);
   }
 
   double _toDoubleSafe(dynamic value) {
@@ -1334,9 +1471,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final window = _resolveSalesRangeWindow(orders);
     final filtered = orders
         .where((pedido) => pedido.statusBucket != OrderStatusBucket.canceled)
-        .where(
-          (pedido) => _isWithinSelectedSalesRange(pedido.createdAt, orders),
-        )
+        .where((pedido) => window.contains(pedido.createdAt))
         .toList(growable: false);
 
     if (_selectedSalesRange == _SalesRange.today ||
@@ -1496,9 +1631,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     for (final pedido in orders) {
       if (pedido.statusBucket == OrderStatusBucket.canceled) continue;
       for (final item in pedido.items) {
-        final name = item.nombre.trim().isEmpty
+        final name = item.displayName.trim().isEmpty
             ? 'Producto'
-            : item.nombre.trim();
+            : item.displayName.trim();
         final current = counts[name];
         counts[name] = (
           quantity: (current?.quantity ?? 0) + item.cantidad,
@@ -1934,11 +2069,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                             final recentOrders = validOrders
                                                 .take(3)
                                                 .toList(growable: false);
+                                            final metricsOrders =
+                                                _mergeWithLive(
+                                                  _metricsOrders,
+                                                  validOrders,
+                                                );
 
                                             final todayStart = _startOfDay(
                                               DateTime.now(),
                                             );
-                                            final todayOrders = validOrders
+                                            final todayOrders = metricsOrders
                                                 .where(
                                                   (pedido) => _isOnLocalDay(
                                                     pedido.createdAt,
@@ -1965,9 +2105,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                 _uniqueCustomerCount(
                                                   todayActiveOrders,
                                                 );
-                                            final topProducts = _topProducts(
-                                              validOrders,
-                                            );
                                             final publicUrl = getPublicMenuUrl(
                                               data.comercio,
                                             );
@@ -1975,13 +2112,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                 _displayPublicUrl(
                                                   data.comercio,
                                                 );
-                                            final selectedOrders = validOrders
+                                            final salesWindow =
+                                                _resolveSalesRangeWindow(
+                                                  metricsOrders,
+                                                );
+                                            final selectedOrders = metricsOrders
                                                 .where(
-                                                  (o) =>
-                                                      _isWithinSelectedSalesRange(
-                                                        o.createdAt,
-                                                        validOrders,
-                                                      ),
+                                                  (o) => salesWindow.contains(
+                                                    o.createdAt,
+                                                  ),
                                                 )
                                                 .where(
                                                   (o) =>
@@ -2004,9 +2143,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                 ? 0.0
                                                 : (selectedRevenue /
                                                       selectedCount);
+                                            final topProducts = _topProducts(
+                                              selectedOrders,
+                                            );
                                             final salesSeries =
                                                 _buildSalesHistoryForSelectedRange(
-                                                  validOrders,
+                                                  metricsOrders,
                                                 );
                                             final ordersLabel =
                                                 _selectedSalesRange.ordersLabel;
@@ -2096,6 +2238,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                   child: _buildWorkspace(
                                                     data: data,
                                                     validOrders: validOrders,
+                                                    metricsOrders:
+                                                        metricsOrders,
                                                     ordersSnapshot:
                                                         ordersSnapshot,
                                                     selectedRevenue:
@@ -2263,7 +2407,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                                               displayUrl: displayUrl,
                                                                               visits: data.analytics.visits,
                                                                               scans: data.analytics.scans,
-                                                                              menuOrders: validOrders.length,
+                                                                              menuOrders: _menuOrdersCount(validOrders),
                                                                               onCopy: _copyPublicMenuUrl,
                                                                               onDownloadQr: _openQrGenerator,
                                                                               onOpenUrl: _openPublicMenu,
@@ -2302,7 +2446,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                                                       range,
                                                                                     ) => _onSalesRangeSelected(
                                                                                       range,
-                                                                                      validOrders,
+                                                                                      metricsOrders,
                                                                                     ),
                                                                               ),
                                                                             ),
@@ -2579,8 +2723,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                                   .analytics
                                                                   .scans,
                                                               menuOrders:
-                                                                  validOrders
-                                                                      .length,
+                                                                  _menuOrdersCount(
+                                                                    validOrders,
+                                                                  ),
                                                               onCopy:
                                                                   _copyPublicMenuUrl,
                                                               onDownloadQr:
@@ -2640,7 +2785,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                                       range,
                                                                     ) => _onSalesRangeSelected(
                                                                       range,
-                                                                      validOrders,
+                                                                      metricsOrders,
                                                                     ),
                                                               ),
                                                             ),
@@ -2916,6 +3061,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildWorkspace({
     required _DashboardSnapshot data,
     required List<PedidoModel> validOrders,
+    required List<PedidoModel> metricsOrders,
     required AsyncSnapshot<List<PedidoModel>> ordersSnapshot,
     required double selectedRevenue,
     required int selectedCount,
@@ -2967,8 +3113,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       case MerchantNavDestination.products:
         return const MerchantEmbeddedProducts();
       case MerchantNavDestination.clients:
+        final clientOrders = _clientOrders;
+        if (clientOrders == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            unawaited(_loadClientOrders());
+          });
+          return const Center(child: CircularProgressIndicator());
+        }
         return MerchantClientsWorkspace(
-          orders: validOrders,
+          orders: _mergeWithLive(clientOrders, validOrders),
           onOpenClient: _openClient,
         );
       case MerchantNavDestination.stats:
@@ -2982,7 +3135,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               salesSeries: salesSeries,
               ordersLabel: ordersLabel,
               incomeLabel: incomeLabel,
-              validOrders: validOrders,
+              validOrders: metricsOrders,
               data: data,
             ),
           ),
@@ -5583,6 +5736,12 @@ class _SalesRangeWindow {
 
   final DateTime startInclusive;
   final DateTime endExclusive;
+
+  bool contains(DateTime? date) {
+    if (date == null) return false;
+    final local = date.toLocal();
+    return !local.isBefore(startInclusive) && local.isBefore(endExclusive);
+  }
 }
 
 class _SalesHistorySeries {

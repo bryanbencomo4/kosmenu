@@ -1,8 +1,12 @@
+import { sanitizeCartLineSelection } from './menu-product-options';
+
 export type RepeatOrderSelection = {
   tamanoId?: string;
   tamanoLabel?: string;
   servicioAdicional?: boolean;
   ajusteIds?: string[];
+  grupos?: Record<string, string[]>;
+  textos?: Record<string, Record<string, string>>;
 };
 
 export type RepeatOrderLine = {
@@ -47,14 +51,19 @@ export function consumeRepeatOrder(slug: string): RepeatOrderPayload | null {
             const quantity = Number(item?.quantity);
             if (!productId || !Number.isFinite(quantity) || quantity <= 0) return null;
             const selection = item.selection && typeof item.selection === 'object'
-              ? {
-                  tamanoId: (item.selection.tamanoId ?? '').toString().trim() || undefined,
-                  tamanoLabel: (item.selection.tamanoLabel ?? '').toString().trim() || undefined,
-                  servicioAdicional: item.selection.servicioAdicional === true,
-                  ajusteIds: Array.isArray(item.selection.ajusteIds)
-                    ? item.selection.ajusteIds.map((entry) => entry.toString().trim()).filter(Boolean)
-                    : undefined,
-                }
+              ? (() => {
+                  const sanitized = sanitizeCartLineSelection(item.selection);
+                  return {
+                    tamanoId: (item.selection.tamanoId ?? '').toString().trim() || undefined,
+                    tamanoLabel: (item.selection.tamanoLabel ?? '').toString().trim() || undefined,
+                    servicioAdicional: item.selection.servicioAdicional === true,
+                    ajusteIds: Array.isArray(item.selection.ajusteIds)
+                      ? item.selection.ajusteIds.map((entry) => entry.toString().trim()).filter(Boolean)
+                      : undefined,
+                    grupos: sanitized.grupos,
+                    textos: sanitized.textos,
+                  };
+                })()
               : undefined;
             return { productId, quantity: Math.min(99, Math.round(quantity)), selection };
           })

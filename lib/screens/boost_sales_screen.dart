@@ -8,6 +8,7 @@ import 'package:kosmenu_app/screens/boost_sales_auto_suggestions_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_bundles_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_goal_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_rules_screen.dart';
+import 'package:kosmenu_app/screens/pre_checkout_upsell_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// "Aumentar ventas" hub. Replaces the old chip-cloud Upselling screen with
@@ -176,6 +177,14 @@ class _BoostSalesScreenState extends State<BoostSalesScreen> {
                     style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 14),
                   ),
                   const SizedBox(height: 10),
+                  _navRow(
+                    icon: Icons.add_shopping_cart_outlined,
+                    title: 'Venta sugerida',
+                    subtitle: 'Antes del checkout: bebidas, postres o complementos',
+                    onTap: () => _openAndReload(PreCheckoutUpsellScreen(
+                      categories: widget.categories,
+                    )),
+                  ),
                   _navRow(
                     icon: Icons.auto_awesome_outlined,
                     title: 'Sugerencias automáticas',

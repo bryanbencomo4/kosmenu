@@ -533,6 +533,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     var emojiSearchQuery = '';
     var isSheetClosed = false;
     String? helperMessage;
+    var selectedRol = CategoryModel.upsellKindRoles.contains(category?.rol)
+        ? category?.rol
+        : null;
 
     final result = await showModalBottomSheet<_CategoryEditorResult>(
       context: context,
@@ -686,6 +689,38 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                   ),
                                 ),
                               ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Tipo de categoría',
+                                style: GoogleFonts.manrope(
+                                  color: colorScheme.onSurface,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Por defecto: sin función especial. Se usa solo si activas venta sugerida.',
+                                style: GoogleFonts.manrope(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              ...CategoryModel.upsellKindRoles.map((role) {
+                                return RadioListTile<String?>(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  value: role,
+                                  groupValue: selectedRol,
+                                  onChanged: (value) => setSheetState(() => selectedRol = value),
+                                  title: Text(
+                                    CategoryModel.upsellKindLabel(role),
+                                    style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
+                                  ),
+                                );
+                              }),
                               const SizedBox(height: 16),
                               Container(
                                 width: double.infinity,
@@ -1014,6 +1049,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       iconValue: iconToSave,
                                       generatedWithAi: generatedWithAi,
                                       aiConfidence: aiConfidence,
+                                      rol: selectedRol,
                                     ),
                                   );
                                 },
@@ -1068,6 +1104,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         'confianza_ia': draft.aiConfidence,
         'orden': maxOrder,
         'activo': true,
+        'rol': draft.rol,
       });
 
       await _loadCategories();
@@ -1097,7 +1134,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         draft.name != category.nombre ||
         draft.iconValue != (_normalizeStoredIconValue(category.icono) ?? '') ||
         draft.generatedWithAi != (category.creadoPorIa == true) ||
-        (draft.aiConfidence ?? -1) != (category.confianzaIa ?? -1);
+        (draft.aiConfidence ?? -1) != (category.confianzaIa ?? -1) ||
+        draft.rol != category.rol;
 
     if (!didChange) {
       return;
@@ -1112,6 +1150,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
             'icono': draft.iconValue,
             'creado_por_ia': draft.generatedWithAi,
             'confianza_ia': draft.aiConfidence,
+            'rol': draft.rol,
           })
           .eq('comercio_id', SupabaseConfig.currentComercioId)
           .eq('catalogo_id', _currentCatalogoId)
@@ -6152,12 +6191,14 @@ class _CategoryEditorResult {
     required this.iconValue,
     required this.generatedWithAi,
     required this.aiConfidence,
+    this.rol,
   });
 
   final String name;
   final String iconValue;
   final bool generatedWithAi;
   final double? aiConfidence;
+  final String? rol;
 }
 
 class _CategoryIconOption {

@@ -34,6 +34,24 @@ class CategoryModel {
     'other',
   ];
 
+  /// Optional pre-checkout upsell types shown in the category editor.
+  static const List<String?> upsellKindRoles = [null, 'drink', 'dessert', 'side', 'other'];
+
+  static String upsellKindLabel(String? role) {
+    switch (role) {
+      case 'drink':
+        return 'Bebidas';
+      case 'dessert':
+        return 'Postres';
+      case 'side':
+        return 'Complementos';
+      case 'other':
+        return 'Otro';
+      default:
+        return 'Normal';
+    }
+  }
+
   static String roleLabel(String? role) {
     switch (role) {
       case 'main':

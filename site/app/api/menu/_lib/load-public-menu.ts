@@ -13,6 +13,8 @@ import {
   isTransientSupabaseFailure,
   supabaseReadCircuit,
 } from '../../_lib/supabase-circuit';
+import { slimPublicProductOptions } from '../../../_lib/menu-product-options';
+import { toPublicPreCheckoutUpsell } from '../../../_lib/pre-checkout-upsell';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -23,7 +25,7 @@ const MENU_STALE_MS = 60_000;
 const MARKET_RATES_TTL_MS = 60_000;
 const OWNER_VERIFY_TTL_MS = 5 * 60_000;
 
-const CATEGORIA_SELECT = 'id,comercio_id,nombre,orden,icono,opciones_menu';
+const CATEGORIA_SELECT = 'id,comercio_id,nombre,orden,icono,opciones_menu,rol';
 const PRODUCTO_SELECT = [
   'id',
   'comercio_id',
@@ -57,6 +59,7 @@ export function isMenuUuid(value: string) {
 
 type ProductoRow = {
   disponible?: boolean | null;
+  opciones_menu?: unknown;
 };
 
 export type LoadedPublicMenu = {
@@ -73,6 +76,7 @@ export type LoadedPublicMenu = {
   upsellSettings: Record<string, unknown> | null;
   upsellRules: unknown[];
   bundles: unknown[];
+  preCheckoutUpsell: ReturnType<typeof toPublicPreCheckoutUpsell>;
 };
 
 const COMERCIO_COLUMNS = [
@@ -104,6 +108,7 @@ const COMERCIO_COLUMNS = [
   'exchange_rate_source',
   'exchange_rate_quote_currency',
   'horarios',
+  'upsell_config',
 ];
 
 function comercioSelect(includeFullBranding: boolean) {
@@ -191,10 +196,16 @@ async function loadComercioRow(
   }
 
   const full = await query(comercioSelect(true));
-  if (full.error) {
+  if (!full.error) {
+    return ((full.data ?? [])[0] ?? null) as unknown as Record<string, unknown> | null;
+  }
+
+  const withoutUpsellConfig = comercioSelect(false).replace(',upsell_config', '');
+  const fallback = await query(withoutUpsellConfig);
+  if (fallback.error) {
     throw new Error(full.error.message);
   }
-  return ((full.data ?? [])[0] ?? null) as unknown as Record<string, unknown> | null;
+  return ((fallback.data ?? [])[0] ?? null) as unknown as Record<string, unknown> | null;
 }
 
 export async function isOwnerEmailVerified(
@@ -294,7 +305,15 @@ async function loadPublicMenuByIdentifierUncached(
       .from('categorias')
       .select(CATEGORIA_SELECT)
       .eq('comercio_id', resolvedComercioId)
-      .order('orden', { ascending: true }),
+      .order('orden', { ascending: true })
+      .then(async (result) => {
+        if (!result.error) return result;
+        return supabase
+          .from('categorias')
+          .select('id,comercio_id,nombre,orden,icono,opciones_menu')
+          .eq('comercio_id', resolvedComercioId)
+          .order('orden', { ascending: true });
+      }),
     supabase
       .from('productos')
       .select(PRODUCTO_SELECT)
@@ -334,12 +353,17 @@ async function loadPublicMenuByIdentifierUncached(
     throw new Error(metodosPagoResult.error.message);
   }
 
-  const productos = ((productosResult.data ?? []) as ProductoRow[]).filter((producto) => {
-    if (typeof producto?.disponible === 'boolean') {
-      return producto.disponible;
-    }
-    return true;
-  });
+  const productos = ((productosResult.data ?? []) as ProductoRow[])
+    .filter((producto) => {
+      if (typeof producto?.disponible === 'boolean') {
+        return producto.disponible;
+      }
+      return true;
+    })
+    .map((producto) => ({
+      ...producto,
+      opciones_menu: slimPublicProductOptions(producto.opciones_menu),
+    }));
 
   return {
     resolvedComercioId,
@@ -361,6 +385,7 @@ async function loadPublicMenuByIdentifierUncached(
       : ((upsellSettingsResult.data ?? null) as Record<string, unknown> | null),
     upsellRules: upsellRulesResult.error ? [] : upsellRulesResult.data ?? [],
     bundles: bundlesResult.error ? [] : bundlesResult.data ?? [],
+    preCheckoutUpsell: toPublicPreCheckoutUpsell(comercioRow.upsell_config),
   };
 }
 
@@ -377,6 +402,7 @@ export function toPublicMenuResponseBody(menu: LoadedPublicMenu) {
       upsellSettings: menu.upsellSettings,
       upsellRules: menu.upsellRules,
       bundles: menu.bundles,
+      preCheckoutUpsell: menu.preCheckoutUpsell,
     },
   };
 }

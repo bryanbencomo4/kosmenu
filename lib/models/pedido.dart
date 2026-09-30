@@ -371,24 +371,109 @@ class PedidoModel {
   }
 }
 
+/// One option chosen for an order line, frozen when the order was created
+/// (`detalles.items[].selecciones`).
+class PedidoItemModifier {
+  final String grupo;
+  final String nombre;
+  final double precio;
+
+  const PedidoItemModifier({
+    required this.grupo,
+    required this.nombre,
+    this.precio = 0,
+  });
+
+  static PedidoItemModifier? fromMap(dynamic raw) {
+    if (raw is! Map) return null;
+    final nombre =
+        raw['opcion']?.toString().trim() ??
+        raw['nombre']?.toString().trim() ??
+        '';
+    if (nombre.isEmpty) return null;
+    final rawPrecio = raw['precio'];
+    return PedidoItemModifier(
+      grupo: raw['grupo']?.toString().trim() ?? '',
+      nombre: nombre,
+      precio: rawPrecio is num
+          ? rawPrecio.toDouble()
+          : double.tryParse('$rawPrecio') ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'grupo': grupo,
+    'opcion': nombre,
+    'precio': precio,
+  };
+}
+
+/// Modifiers of one group, in the order the customer saw them.
+class PedidoItemModifierGroup {
+  final String grupo;
+  final List<PedidoItemModifier> opciones;
+
+  const PedidoItemModifierGroup({required this.grupo, required this.opciones});
+
+  /// "Tamaño: Grande" for a single pick, "Extras: ✓ Tocineta ✓ Extra queso"
+  /// for several.
+  String get label {
+    final names = opciones.length == 1
+        ? opciones.first.nombre
+        : opciones.map((option) => '✓ ${option.nombre}').join(' ');
+    return grupo.isEmpty ? names : '$grupo: $names';
+  }
+}
+
 class PedidoItemModel {
   final String nombre;
   final int cantidad;
   final double precio;
   final String? imageUrl;
+  final String? producto;
+  final double? precioBase;
+  final List<PedidoItemModifier> opciones;
 
   const PedidoItemModel({
     required this.nombre,
     required this.cantidad,
     required this.precio,
     this.imageUrl,
+    this.producto,
+    this.precioBase,
+    this.opciones = const [],
   });
 
   double get total => cantidad * precio;
 
+  bool get hasModifiers => opciones.isNotEmpty;
+
+  /// Base product name when the line has modifiers (they are listed apart);
+  /// otherwise the stored label, exactly as before.
+  String get displayName {
+    final base = producto?.trim() ?? '';
+    return hasModifiers && base.isNotEmpty ? base : nombre;
+  }
+
+  List<PedidoItemModifierGroup> get modifierGroups {
+    final byGroup = <String, List<PedidoItemModifier>>{};
+    for (final option in opciones) {
+      byGroup.putIfAbsent(option.grupo, () => []).add(option);
+    }
+    return [
+      for (final entry in byGroup.entries)
+        PedidoItemModifierGroup(grupo: entry.key, opciones: entry.value),
+    ];
+  }
+
   factory PedidoItemModel.fromMap(Map<String, dynamic> map) {
     final rawCantidad = map['cantidad'];
     final rawPrecio = map['precio'];
+    // Older orders may hold the raw selection object under `opciones`; the
+    // frozen snapshot list lives in `selecciones`.
+    final rawOpciones = map['selecciones'];
+    final rawBase = map['precio_base'];
+    final producto = map['producto']?.toString().trim();
 
     return PedidoItemModel(
       nombre: (map['nombre']?.toString().trim() ?? '').isEmpty
@@ -401,6 +486,16 @@ class PedidoItemModel {
           ? rawPrecio.toDouble()
           : double.tryParse(rawPrecio?.toString() ?? '') ?? 0.0,
       imageUrl: _resolveImageUrl(map),
+      producto: producto == null || producto.isEmpty ? null : producto,
+      precioBase: rawBase is num
+          ? rawBase.toDouble()
+          : double.tryParse(rawBase?.toString() ?? ''),
+      opciones: rawOpciones is List
+          ? [
+              for (final entry in rawOpciones)
+                ?PedidoItemModifier.fromMap(entry),
+            ]
+          : const [],
     );
   }
 
@@ -429,6 +524,10 @@ class PedidoItemModel {
       'cantidad': cantidad,
       'precio': precio,
       'imagen_url': imageUrl,
+      'producto': ?producto,
+      'precio_base': ?precioBase,
+      if (opciones.isNotEmpty)
+        'selecciones': opciones.map((option) => option.toMap()).toList(),
     };
   }
 }

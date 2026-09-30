@@ -1,5 +1,6 @@
 import { extractPublicCheckoutExchange } from '../../../api/_lib/checkout-exchange-config';
 import { toPublicComercioDto, toPublicMetodosPagoDto } from '../../../api/_lib/public-menu-dto';
+import { toPublicPreCheckoutUpsell } from '../../../_lib/pre-checkout-upsell';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -35,7 +36,7 @@ const COMERCIO_SELECT = [
   'branding_ia->config_negocio',
 ].join(',');
 
-const CATEGORIA_SELECT = 'id,comercio_id,nombre,orden,icono,opciones_menu';
+const CATEGORIA_SELECT = 'id,comercio_id,nombre,orden,icono,opciones_menu,rol';
 const PRODUCTO_SELECT =
   'id,comercio_id,categoria_id,nombre,descripcion,precio,imagen_url,disponible,upsell_badge,precio_comparacion,upsell_enabled,orden,opciones_menu';
 const STALE_MENU_PREFIX = 'elmenuxfa:menu-stale:';
@@ -132,10 +133,15 @@ export async function loadPublicMenuFromBrowser(comercioId: string) {
     upsellSettings,
     upsellRules,
     bundles,
+    upsellConfigRows,
   ] = await Promise.all([
     restJson<unknown[]>(
       `categorias?comercio_id=eq.${resolvedId}&select=${CATEGORIA_SELECT}&order=orden.asc`,
-    ).catch(() => []),
+    ).catch(() =>
+      restJson<unknown[]>(
+        `categorias?comercio_id=eq.${resolvedId}&select=id,comercio_id,nombre,orden,icono,opciones_menu&order=orden.asc`,
+      ).catch(() => []),
+    ),
     restJson<Array<{ disponible?: boolean | null }>>(
       `productos?comercio_id=eq.${resolvedId}&select=${PRODUCTO_SELECT}&order=nombre.asc`,
     ).catch(() => []),
@@ -153,6 +159,9 @@ export async function loadPublicMenuFromBrowser(comercioId: string) {
     ).catch(() => []),
     restJson<unknown[]>(
       `bundles?comercio_id=eq.${resolvedId}&enabled=eq.true&select=*,bundle_items(*)`,
+    ).catch(() => []),
+    restJson<Array<{ upsell_config?: unknown }>>(
+      `comercios?id=eq.${resolvedId}&select=upsell_config&limit=1`,
     ).catch(() => []),
   ]);
 
@@ -173,6 +182,9 @@ export async function loadPublicMenuFromBrowser(comercioId: string) {
       upsellSettings: upsellSettings[0] ?? null,
       upsellRules,
       bundles,
+      preCheckoutUpsell: toPublicPreCheckoutUpsell(
+        upsellConfigRows[0]?.upsell_config ?? comercioRow.upsell_config,
+      ),
     },
   };
 }

@@ -108,6 +108,7 @@ type PedidoRow = {
         tamanoLabel?: string;
         servicioAdicional?: boolean;
         ajusteIds?: string[];
+        grupos?: Record<string, string[]>;
       };
     }>;
     delivery?: DeliveryPayload | null;
@@ -187,6 +188,7 @@ type PublicTrackingPayload = {
       tamanoLabel?: string;
       servicioAdicional?: boolean;
       ajusteIds?: string[];
+      grupos?: Record<string, string[]>;
     };
   }>;
   subtotal?: number;

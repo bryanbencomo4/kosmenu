@@ -25,6 +25,12 @@ import { evaluateBusinessOrdering } from '../_lib/business-hours';
 import { convertOrderAmount, normalizeOrderCurrency } from '../_lib/order-currency';
 import { createOrderShortLink } from '../_lib/order-short-links';
 import {
+  buildOrderItemSnapshots,
+  type SnapshotCategoryRow,
+  type SnapshotProductRow,
+} from '../_lib/order-item-snapshots';
+import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
+import {
   createCustomerRatingKey,
   loadOrderServiceRatingSummary,
 } from '../_lib/order-service-rating';
@@ -83,6 +89,7 @@ type CreateOrderItemInput = {
   nombre?: unknown;
   cantidad?: unknown;
   precio?: unknown;
+  opciones?: unknown;
 };
 
 type NotificationsInput = {
@@ -258,6 +265,13 @@ export async function POST(request: Request) {
           precio: Number((item as CreateOrderItemInput)?.precio),
         }))
       : [];
+    // Kept outside `items` so the idempotency payload hash is unchanged.
+    const rawItemSelections = Array.isArray(body.items)
+      ? body.items.map((item) => {
+          const raw = (item as CreateOrderItemInput)?.opciones;
+          return raw === undefined || raw === null ? null : sanitizeCartLineSelection(raw);
+        })
+      : [];
 
     const validationResult = OrderSchema.safeParse({
       comercioId: rawComercioId,
@@ -425,6 +439,36 @@ export async function POST(request: Request) {
       );
     }
 
+    const snapshotResult = await buildOrderItemSnapshots({
+      items,
+      selections: rawItemSelections,
+      loadProducts: async (productIds) => {
+        const { data, error } = await supabase
+          .from('productos')
+          .select('id,categoria_id,nombre,precio,opciones_menu')
+          .eq('comercio_id', resolvedComercioId)
+          .in('id', productIds);
+        if (error) throw new Error(error.message);
+        return (data ?? []) as SnapshotProductRow[];
+      },
+      loadCategories: async (categoryIds) => {
+        const { data, error } = await supabase
+          .from('categorias')
+          .select('id,nombre,opciones_menu')
+          .eq('comercio_id', resolvedComercioId)
+          .in('id', categoryIds);
+        if (error) throw new Error(error.message);
+        return (data ?? []) as SnapshotCategoryRow[];
+      },
+    });
+    if (snapshotResult.ok === false) {
+      return NextResponse.json(
+        { ok: false, error: snapshotResult.message, code: snapshotResult.code },
+        { status: snapshotResult.status },
+      );
+    }
+    const storedItems = snapshotResult.items;
+
     const subtotalCheckout = convertOrderAmount(subtotal, baseCurrency, currency, exchangeRate);
     const costoDeliveryCheckout = convertOrderAmount(
       Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
@@ -474,7 +518,7 @@ export async function POST(request: Request) {
       subtotal_moneda_checkout: subtotalCheckout,
       costo_delivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
       costo_delivery_moneda_checkout: costoDeliveryCheckout,
-      items,
+      items: storedItems,
       total,
       total_moneda_checkout: totalCheckout,
       customer_rating_summary: customerRatingSummary.customer,
