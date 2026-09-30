@@ -30,7 +30,7 @@ import {
   type SnapshotProductRow,
 } from '../_lib/order-item-snapshots';
 import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
-import { quoteDeliveryFee } from '../../_lib/delivery-config';
+import { extractDeliveryConfigSource, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
   createCustomerRatingKey,
   loadOrderServiceRatingSummary,
@@ -392,22 +392,23 @@ export async function POST(request: Request) {
     const supabase = getServiceSupabaseClient();
 
     async function loadComercioRow() {
-      const full = supabase
-        .from('comercios')
-        .select('id,slug,moneda,en_linea,horarios,latitud,longitud,costo_envio,branding_ia->config_negocio')
-        .limit(1);
-      const fullResult = isUuid(comercioId)
-        ? await full.eq('id', comercioId)
-        : await full.eq('slug', comercioId);
-      if (!fullResult.error) return fullResult;
-      const missingSchedule =
-        (fullResult.error.message ?? '').toLowerCase().includes('horarios') ||
-        (fullResult.error.message ?? '').toLowerCase().includes('en_linea');
-      if (!missingSchedule) return fullResult;
-      const legacy = supabase.from('comercios').select('id,slug,moneda').limit(1);
-      return isUuid(comercioId)
-        ? await legacy.eq('id', comercioId)
-        : await legacy.eq('slug', comercioId);
+      const selects = [
+        'id,slug,moneda,en_linea,horarios,latitud,longitud,branding_ia->config_negocio',
+        'id,slug,moneda,en_linea,horarios,latitud,longitud,branding_ia',
+        'id,slug,moneda,en_linea,horarios',
+        'id,slug,moneda',
+      ];
+      let last: { data: unknown; error: { message?: string } | null } | null = null;
+      for (const select of selects) {
+        const query = supabase.from('comercios').select(select).limit(1);
+        const result = isUuid(comercioId)
+          ? await query.eq('id', comercioId)
+          : await query.eq('slug', comercioId);
+        last = result;
+        if (!result.error) return result;
+        console.warn('[orders] comercio select fallback', { select, message: result.error.message });
+      }
+      return last ?? { data: null, error: { message: 'Comercio not found.' } };
     }
 
     const { data: comercios, error: comercioError } = await loadComercioRow();
@@ -425,7 +426,6 @@ export async function POST(request: Request) {
           horarios?: unknown;
           latitud?: number | string | null;
           longitud?: number | string | null;
-          costo_envio?: number | string | null;
           branding_ia?: unknown;
           config_negocio?: unknown;
         }
@@ -437,14 +437,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
     }
 
-    const branding = asRecord(comercioRow?.branding_ia);
-    const configNegocio = asRecord(branding.config_negocio) ?? asRecord(comercioRow?.config_negocio);
     const originLat = Number(comercioRow?.latitud);
     const originLng = Number(comercioRow?.longitud);
     const destLat = Number(delivery.coordinates?.lat);
     const destLng = Number(delivery.coordinates?.lng);
     const deliveryQuote = quoteDeliveryFee({
-      config: configNegocio?.delivery_config ?? configNegocio,
+      config: extractDeliveryConfigSource(comercioRow),
       isDelivery: delivery.mode === 'delivery',
       subtotal,
       origin: Number.isFinite(originLat) && Number.isFinite(originLng)
@@ -453,7 +451,7 @@ export async function POST(request: Request) {
       destination: Number.isFinite(destLat) && Number.isFinite(destLng)
         ? { lat: destLat, lng: destLng }
         : null,
-      fallbackFee: Number(comercioRow?.costo_envio ?? costoDelivery),
+      fallbackFee: costoDelivery,
     });
     if (deliveryQuote.blocked) {
       return NextResponse.json(
@@ -597,15 +595,17 @@ export async function POST(request: Request) {
     const insertError = insertResult.error;
 
     if (insertError) {
-      // If the column migration is not applied yet, retry without the dedicated column.
-      const missingColumn =
+      const missingTrackingColumn =
         (insertError.message ?? '').toLowerCase().includes('public_tracking_token_hash');
-      if (!missingColumn) {
+      const missingDeliveryColumn =
+        (insertError.message ?? '').toLowerCase().includes('costo_delivery');
+      if (!missingTrackingColumn && !missingDeliveryColumn) {
         throw new Error(insertError.message ?? 'Failed to create order.');
       }
 
-      const legacyPayload = { ...payload };
-      delete (legacyPayload as { public_tracking_token_hash?: string }).public_tracking_token_hash;
+      const legacyPayload = { ...payload } as Record<string, unknown>;
+      if (missingTrackingColumn) delete legacyPayload.public_tracking_token_hash;
+      if (missingDeliveryColumn) delete legacyPayload.costo_delivery;
       const retry = await supabase.from('pedidos').insert(legacyPayload).select('*').maybeSingle();
       if (retry.error) {
         throw new Error(retry.error.message ?? 'Failed to create order.');
@@ -718,6 +718,14 @@ export async function POST(request: Request) {
       console.error('[orders] privileged supabase client unavailable');
       return NextResponse.json({ ok: false, error: 'unavailable' }, { status: 503 });
     }
-    return NextResponse.json({ error: 'Failed to create order.' }, { status: 500 });
+    console.error('[orders] create failed', message);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'order_create_failed',
+        message: 'No se pudo guardar el pedido. Intenta de nuevo.',
+      },
+      { status: 500 },
+    );
   }
 }

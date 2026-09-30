@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_DELIVERY_CONFIG,
+  extractDeliveryConfigSource,
   parseDeliveryConfig,
   quoteDeliveryFee,
   toPublicDeliveryConfig,
@@ -108,5 +109,51 @@ describe('delivery config', () => {
       }),
     );
     expect(errors.join(' ')).toMatch(/rango inválido/i);
+  });
+
+  it('reads nested delivery_config and ignores the rest of config_negocio', () => {
+    expect(
+      extractDeliveryConfigSource({
+        branding_ia: {
+          config_negocio: {
+            inicio_menu: { delivery: true },
+            enabled: true,
+            delivery_config: { enabled: false, fixed_price: 4 },
+          },
+        },
+      }),
+    ).toEqual({ enabled: false, fixed_price: 4 });
+    expect(
+      extractDeliveryConfigSource({
+        branding_ia: { config_negocio: { inicio_menu: { delivery: true }, enabled: true } },
+      }),
+    ).toBeNull();
+  });
+
+  it('does not treat kiosk home config as an enabled tariff', () => {
+    const quote = quoteDeliveryFee({
+      config: extractDeliveryConfigSource({
+        config_negocio: { inicio_menu: { delivery: true }, enabled: true },
+      }),
+      isDelivery: true,
+      subtotal: 20,
+      fallbackFee: 0,
+    });
+    expect(quote.applied).toBe(false);
+    expect(quote.blocked).toBe(false);
+    expect(quote.fee).toBe(0);
+  });
+
+  it('never throws when quoting garbage config', () => {
+    expect(() =>
+      quoteDeliveryFee({
+        config: Object.create(null),
+        isDelivery: true,
+        subtotal: Number.NaN,
+        origin: { lat: Number.POSITIVE_INFINITY, lng: 0 },
+        destination: { lat: 0, lng: 0 },
+        fallbackFee: 1.25,
+      }),
+    ).not.toThrow();
   });
 });

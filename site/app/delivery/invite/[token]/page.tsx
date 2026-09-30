@@ -284,6 +284,7 @@ export default function DeliveryInvitePage() {
   const [payload, setPayload] = useState<InvitePayload | null>(null);
   const [courierName, setCourierName] = useState('');
   const [arrivedOptimistic, setArrivedOptimistic] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const refresh = useCallback(async (options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent);
@@ -368,7 +369,6 @@ export default function DeliveryInvitePage() {
   const showArrivedButton =
     canMarkArrived && effectiveInvitationStatus !== 'arrived' && effectiveInvitationStatus !== 'completed';
   const showArrivalNotice = effectiveInvitationStatus === 'arrived';
-  const shouldShowBottomBar = canAccept || showArrivedButton || showArrivalNotice;
 
   const orderId = (payload?.order?.orderId ?? '').toString().trim();
   const invitationCreatedAt =
@@ -418,6 +418,8 @@ export default function DeliveryInvitePage() {
   const clientWhatsappHref = effectiveInvitationStatus === 'arrived'
     ? clientArrivalWhatsappHref
     : clientEnRouteWhatsappHref;
+  const shouldShowBottomBar =
+    canAccept || showArrivedButton || showArrivalNotice || Boolean(clientWhatsappHref && !canAccept);
 
   const navigationUrl = useMemo(() => {
     const coords = payload?.delivery?.coordinates;
@@ -497,6 +499,7 @@ export default function DeliveryInvitePage() {
     try {
       setSubmitting(true);
       setError('');
+      setNotice('');
       const response = await fetch(`/api/delivery/invite/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: {
@@ -517,13 +520,13 @@ export default function DeliveryInvitePage() {
       }
       setPayload(data.data as InvitePayload);
       if (action === 'accept' && clientEnRouteWhatsappHref) {
-        window.open(clientEnRouteWhatsappHref, '_blank', 'noopener,noreferrer');
+        setNotice('Pedido aceptado. Avisa al cliente por WhatsApp con el botón del cliente.');
       }
       if (action === 'arrived') {
         const nextStatus = normalizeStatus((data.data as InvitePayload)?.invitation?.status);
         setArrivedOptimistic(nextStatus === 'arrived' || nextStatus === 'completed');
         if (clientArrivalWhatsappHref) {
-          window.open(clientArrivalWhatsappHref, '_blank', 'noopener,noreferrer');
+          setNotice('Llegada marcada. Avisa al cliente por WhatsApp con el botón del cliente.');
         }
       }
     } catch {
@@ -628,8 +631,6 @@ export default function DeliveryInvitePage() {
               {commerceWhatsappHref ? (
                 <a
                   href={commerceWhatsappHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 text-emerald-700 transition hover:bg-emerald-50"
                   aria-label="WhatsApp comercio"
                 >
@@ -660,8 +661,6 @@ export default function DeliveryInvitePage() {
               {clientWhatsappHref ? (
                 <a
                   href={clientWhatsappHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 text-emerald-700 transition hover:bg-emerald-50"
                   aria-label="WhatsApp cliente"
                 >
@@ -816,6 +815,12 @@ export default function DeliveryInvitePage() {
           </article>
         ) : null}
 
+        {notice ? (
+          <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800">
+            {notice}
+          </p>
+        ) : null}
+
         {error ? (
           <p className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">{error}</p>
         ) : null}
@@ -836,6 +841,15 @@ export default function DeliveryInvitePage() {
                 >
                   {submitting ? 'Confirmando...' : 'Confirmar, voy en camino'}
                 </button>
+              ) : null}
+
+              {clientWhatsappHref && !canAccept ? (
+                <a
+                  href={clientWhatsappHref}
+                  className="inline-flex w-full items-center justify-center rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm font-black text-white"
+                >
+                  Avisar al cliente por WhatsApp
+                </a>
               ) : null}
 
               {showArrivedButton ? (

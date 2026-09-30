@@ -958,7 +958,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     required String status,
     required String trackingUrl,
   }) {
-    final resolvedTrackingUrl = AppLinks.merchantOrderShareUrl(
+    final resolvedTrackingUrl = AppLinks.customerOrderTrackingUrl(
       orderId: widget.orderId,
       trackingUrl: trackingUrl,
     );

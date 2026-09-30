@@ -1,5 +1,5 @@
 import './globals.css';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Montserrat, Roboto } from 'next/font/google';
 
 import { publicSiteUrl } from './_lib/public-site-config';
@@ -40,6 +40,16 @@ export const metadata: Metadata = {
     apple: '/branding/isotipo.png',
     shortcut: '/branding/isotipo.png',
   },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: dark)', color: '#0B0F17' },
+    { media: '(prefers-color-scheme: light)', color: '#F6F2FF' },
+  ],
 };
 
 export default function RootLayout({

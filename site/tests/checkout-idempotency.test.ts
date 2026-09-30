@@ -42,4 +42,9 @@ describe('checkout idempotency attempt', () => {
       /Pulsa otra vez/i,
     );
   });
+
+  it('does not show the generic English create-order failure', () => {
+    expect(humanizeOrderSubmitError('Failed to create order.')).toMatch(/No se pudo guardar/i);
+    expect(humanizeOrderSubmitError('order_create_failed')).toMatch(/No se pudo guardar/i);
+  });
 });

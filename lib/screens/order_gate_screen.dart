@@ -2,8 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/order_gate_handler.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:kosmenu_app/services/same_tab_navigation.dart';
 
 class OrderGateScreen extends StatefulWidget {
   const OrderGateScreen({
@@ -49,6 +50,17 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
       }
 
       if (decision.target == OrderGateTarget.publicApp) {
+        final publicUri = _publicTrackerUri() ?? decision.fallbackUri;
+        if (kIsWeb) {
+          setState(() {
+            _loading = false;
+            _fallbackUri = publicUri;
+            _title = 'Abriendo tu pedido';
+            _message = 'Si no continúa, pulsa el botón.';
+          });
+          await openUriWithoutPopup(publicUri);
+          return;
+        }
         Navigator.of(context).pushReplacementNamed(
           '/orders/public/${Uri.encodeComponent(decision.orderId)}',
         );
@@ -80,6 +92,8 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
 
       if (!kIsWeb) {
         _launchFallbackInBackground(decision.fallbackUri);
+      } else {
+        await openUriWithoutPopup(decision.fallbackUri);
       }
     } catch (_) {
       if (!mounted) {
@@ -98,11 +112,21 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
     }
   }
 
+  Uri? _publicTrackerUri() {
+    final remembered = MerchantDeepLink.peekFallbackUri();
+    if (remembered != null) return remembered;
+    if (!kIsWeb) return null;
+    final shortCode = Uri.base.queryParameters['shortCode']?.trim() ?? '';
+    if (shortCode.isNotEmpty) {
+      return Uri.parse(AppLinks.shortOrderByCode(shortCode));
+    }
+    final fallback = Uri.base.queryParameters['fallback']?.trim() ?? '';
+    if (fallback.isEmpty) return null;
+    return Uri.tryParse(fallback);
+  }
+
   Future<void> _launchFallbackInBackground(Uri fallbackUri) async {
-    final launched = await launchUrl(
-      fallbackUri,
-      mode: LaunchMode.externalApplication,
-    );
+    final launched = await openUriWithoutPopup(fallbackUri);
 
     if (!mounted || launched) {
       return;
@@ -118,13 +142,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
     if (fallbackUri == null) {
       return;
     }
-    await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
-  }
-
-  void _openPublicOrderView() {
-    Navigator.of(context).pushReplacementNamed(
-      '/orders/public/${Uri.encodeComponent(widget.orderId)}',
-    );
+    await openUriWithoutPopup(fallbackUri);
   }
 
   @override
@@ -187,9 +205,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
                 if (!_loading && _fallbackUri != null) ...[
                   const SizedBox(height: 18),
                   FilledButton(
-                    onPressed: _showAccountMismatchNotice
-                        ? _openPublicOrderView
-                        : _openFallbackManually,
+                    onPressed: _openFallbackManually,
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFFF6B00),
                       foregroundColor: Colors.white,
@@ -197,7 +213,7 @@ class _OrderGateScreenState extends State<OrderGateScreen> {
                     child: Text(
                       _showAccountMismatchNotice
                           ? 'Ver pedido como cliente'
-                          : 'Abrir en navegador',
+                          : 'Ver pedido',
                     ),
                   ),
                 ],

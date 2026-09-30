@@ -70,5 +70,14 @@ export function humanizeOrderSubmitError(error: string) {
   if (code === 'idempotency_key_reuse_with_different_payload') {
     return 'No se pudo confirmar este pedido. Pulsa otra vez para enviarlo.';
   }
+  if (code === 'Failed to create order.' || code === 'order_create_failed') {
+    return 'No se pudo guardar el pedido. Intenta de nuevo.';
+  }
+  if (code === 'delivery_not_available') {
+    return 'Delivery no disponible para este pedido.';
+  }
+  if (code === 'service_unavailable' || code === 'unavailable') {
+    return 'Estamos actualizando el sistema. Intenta el pedido de nuevo en unos segundos.';
+  }
   return code || 'No se pudo guardar el pedido.';
 }

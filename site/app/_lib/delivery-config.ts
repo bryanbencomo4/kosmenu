@@ -1,6 +1,6 @@
 /**
  * Optional delivery tariff engine.
- * Missing or disabled config keeps today's checkout (costo_envio / client fee).
+ * Missing or disabled config keeps today's checkout (client costo_delivery).
  */
 
 export type DeliveryPricingType = 'fixed' | 'distance' | 'zones' | 'free';
@@ -116,13 +116,28 @@ function parseZones(raw: unknown): DeliveryZone[] {
     .filter((zone): zone is DeliveryZone => zone != null);
 }
 
+export function extractDeliveryConfigSource(row: unknown): unknown {
+  const record = asRecord(row);
+  if (!record) return null;
+  const branding = asRecord(record.branding_ia);
+  const config = asRecord(record.config_negocio) ?? asRecord(branding?.config_negocio);
+  const nested =
+    asRecord(config?.delivery_config) ??
+    asRecord(config?.delivery_tarifas) ??
+    asRecord(config?.tarifas_delivery) ??
+    asRecord(record.delivery_config) ??
+    asRecord(record.delivery_tarifas) ??
+    asRecord(record.tarifas_delivery);
+  return nested;
+}
+
 export function parseDeliveryConfig(raw: unknown): DeliveryConfig {
   const root = asRecord(raw);
   const nested =
     asRecord(root?.delivery_config) ??
     asRecord(root?.delivery_tarifas) ??
     asRecord(root?.tarifas_delivery) ??
-    root;
+    (root && (root.enabled != null || root.pricing_type != null || root.pricingType != null) ? root : null);
   const source = nested ?? {};
   const times = asRecord(source.estimated_times) ?? asRecord(source.estimatedTimes) ?? {};
   const free = asRecord(source.free_delivery) ?? asRecord(source.freeDelivery) ?? {};
@@ -264,6 +279,19 @@ function feeForZones(config: DeliveryConfig, distanceKm: number): { fee: number 
   return { fee: null, outOfRange: true };
 }
 
+function fallbackDeliveryQuote(isDelivery: boolean, fallbackFee: number, distanceKm: number | null): DeliveryQuote {
+  return {
+    applied: false,
+    fee: isDelivery ? roundMoney(fallbackFee) : 0,
+    free: false,
+    method: null,
+    blocked: false,
+    blockReason: null,
+    distanceKm,
+    snapshot: null,
+  };
+}
+
 export function quoteDeliveryFee(input: {
   config: unknown;
   isDelivery: boolean;
@@ -272,21 +300,34 @@ export function quoteDeliveryFee(input: {
   destination?: { lat: number; lng: number } | null;
   fallbackFee?: number;
 }): DeliveryQuote {
-  const config = parseDeliveryConfig(input.config);
   const fallback = Math.max(0, Number.isFinite(input.fallbackFee) ? Number(input.fallbackFee) : 0);
+  try {
+    return computeDeliveryQuote(input, fallback);
+  } catch (error) {
+    console.error('[delivery] quote failed; using client fee', error);
+    return fallbackDeliveryQuote(
+      input.isDelivery,
+      fallback,
+      haversineKm(input.origin, input.destination),
+    );
+  }
+}
+
+function computeDeliveryQuote(
+  input: {
+    config: unknown;
+    isDelivery: boolean;
+    subtotal: number;
+    origin?: { lat: number; lng: number } | null;
+    destination?: { lat: number; lng: number } | null;
+  },
+  fallback: number,
+): DeliveryQuote {
+  const config = parseDeliveryConfig(input.config);
   const distanceKm = haversineKm(input.origin, input.destination);
 
   if (!config.enabled) {
-    return {
-      applied: false,
-      fee: input.isDelivery ? roundMoney(fallback) : 0,
-      free: false,
-      method: null,
-      blocked: false,
-      blockReason: null,
-      distanceKm,
-      snapshot: null,
-    };
+    return fallbackDeliveryQuote(input.isDelivery, fallback, distanceKm);
   }
 
   const snapshot = deliveryConfigToJson(config);

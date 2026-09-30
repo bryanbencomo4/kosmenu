@@ -7,3 +7,12 @@ bool isLikelyMobileWebBrowser() {
   ).hasMatch(userAgent);
   return hasMobileToken;
 }
+
+/// Replaces the current tab. Never uses `window.open`, so iOS/WhatsApp
+/// in-app browsers cannot block it as a popup.
+bool openUrlInSameTab(String url) {
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) return false;
+  html.window.location.assign(trimmed);
+  return true;
+}

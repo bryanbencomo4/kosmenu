@@ -4146,7 +4146,7 @@ export default function PublicMenuPage() {
         : [];
 
       let message = humanizeOrderSubmitError(
-        (responsePayload?.error ?? 'No se pudo guardar el pedido.').toString(),
+        (responsePayload?.message ?? responsePayload?.error ?? 'No se pudo guardar el pedido.').toString(),
       );
       if (response.status === 400 && validationDetails.length > 0) {
         const fieldMessages = validationDetails.map((detail: ValidationDetail) => {
@@ -4849,12 +4849,14 @@ export default function PublicMenuPage() {
         }
       `}</style>
       <main
-        className={`min-h-screen ${isOwnerPreview ? 'pt-12' : ''}`}
+        className={`min-h-[100svh] min-h-[100dvh] ${isOwnerPreview ? 'pt-12' : ''}`}
         data-menu-theme={themeMode}
         style={{
           ...containerStyle,
           background: 'var(--menu-background)',
           color: 'var(--menu-text)',
+          colorScheme: themeMode,
+          minHeight: '-webkit-fill-available',
         }}
       >
         {isOwnerPreview ? (

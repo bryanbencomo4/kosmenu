@@ -9,6 +9,7 @@ import { KioskHome } from './KioskHome';
 import { KioskImage } from './KioskImage';
 import { KioskTopBar } from './KioskTopBar';
 import { KioskVoucher } from './KioskVoucher';
+import { useKioskPageChrome } from './useKioskPageChrome';
 import {
   FULFILLMENT_LABEL,
   type KioskCategory,
@@ -138,6 +139,7 @@ export function KioskMenuExperience({
   }, [activeProducts, searchQuery, screen]);
 
   const browseOnly = !fulfillment || !isOpen;
+  useKioskPageChrome({ themeMode });
   const topBar = (
     <KioskTopBar
       tickerEntries={tickerEntries}

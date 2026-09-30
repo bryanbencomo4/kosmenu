@@ -69,8 +69,13 @@ export function CookieConsentBanner() {
   const isAdminSurface =
     pathname.startsWith('/admin') ||
     (typeof window !== 'undefined' && window.location.hostname.toLowerCase() === adminSiteHost);
+  const isKioskSurface =
+    pathname.startsWith('/v/') ||
+    pathname.startsWith('/o/') ||
+    pathname.startsWith('/orders/') ||
+    pathname.startsWith('/preview/');
 
-  if (isAdminSurface || !isVisible) {
+  if (isAdminSurface || isKioskSurface || !isVisible) {
     return null;
   }
 

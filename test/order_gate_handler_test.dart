@@ -20,6 +20,20 @@ void main() {
     );
   });
 
+  test('customerOrderTrackingUrl keeps the public tracker for the diner', () {
+    expect(
+      AppLinks.customerOrderTrackingUrl(
+        orderId: 'EMXFA-000130',
+        trackingUrl: 'https://elmenuxfa.com/o/jjyYZ_1KbL',
+      ),
+      'https://elmenuxfa.com/o/jjyYZ_1KbL',
+    );
+    expect(
+      AppLinks.customerOrderTrackingUrl(orderId: 'EMXFA-000130'),
+      isNot(contains('app.elmenuxfa.com')),
+    );
+  });
+
   test('extractOrderId reads /orders/view/{id}', () {
     expect(
       OrderGateHandler.extractOrderId(
