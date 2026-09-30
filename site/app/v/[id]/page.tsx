@@ -34,6 +34,7 @@ import { KioskMenuExperience } from './_components/kiosk/KioskMenuExperience';
 import { KioskCheckout } from './_components/kiosk/KioskCheckout';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
+import { parseKioskHomeConfig } from '../../_lib/kiosk-home-config';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
 import { PreCheckoutUpsellSheet } from './_components/upsell/PreCheckoutUpsellSheet';
 import {
@@ -207,6 +208,7 @@ type ComercioRow = {
   telefonos?: string | null;
   celular?: string | null;
   social_links?: Record<string, string | null> | null;
+  inicio_menu?: unknown;
   direccion?: string | null;
   ciudad?: string | null;
   descripcion?: string | null;
@@ -2400,6 +2402,7 @@ export default function PublicMenuPage() {
   const socialLinks = Object.entries(menuData?.comercio.social_links ?? {})
     .map(([network, value]) => ({ network, href: normalizeSocialUrl(value) }))
     .filter((item) => item.href);
+  const kioskHomeConfig = parseKioskHomeConfig(menuData?.comercio.inicio_menu);
   const supportsDelivery = menuData?.comercio.permite_delivery === true;
   const normalizedDeliveryAddress = deliveryAddress.trim();
   const normalizedDeliveryReference = deliveryReference.trim();
@@ -3017,6 +3020,7 @@ export default function PublicMenuPage() {
   }, [scheduleClosed, commerceIdentifier]);
 
   function handleKioskAddProduct(productId: string) {
+    if (scheduleClosed || !kioskFulfillment) return;
     setProductOptionsSheet({ open: true, productId });
   }
 
@@ -4200,6 +4204,9 @@ export default function PublicMenuPage() {
       window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
       return;
     }
+    if (!kioskFulfillment) {
+      return;
+    }
     if (
       shouldShowPreCheckoutUpsell({
         config: menuData?.preCheckoutUpsell ?? { upselling: false },
@@ -4833,6 +4840,7 @@ export default function PublicMenuPage() {
           openCaption={kioskOpenCaption}
           closedCaption={kioskClosedCaption}
           supportsDelivery={supportsDelivery}
+          homeConfig={kioskHomeConfig}
           fulfillment={kioskFulfillment}
           onSelectFulfillment={selectKioskFulfillment}
           onResetFulfillment={resetKioskFulfillment}
@@ -4925,6 +4933,7 @@ export default function PublicMenuPage() {
           open={productOptionsSheet.open && !kioskVoucher}
           canAdd={
             !scheduleClosed &&
+            Boolean(kioskFulfillment) &&
             productById.get(productOptionsSheet.productId ?? '')?.disponible !== false
           }
           product={

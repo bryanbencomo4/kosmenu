@@ -27,6 +27,7 @@ import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
+import 'package:kosmenu_app/screens/kiosk_home_settings_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_pages.dart';
@@ -736,6 +737,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Future<void> _openStaff() async {
     await _pushInShell(const ComercioStaffScreen());
+  }
+
+  Future<void> _openKioskHome() async {
+    await _pushInShell(const KioskHomeSettingsScreen());
   }
 
   Future<void> _openClient(MerchantClient client) async {
@@ -3173,6 +3178,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           onOpenHours: () => _openHours(data.schedule),
           onOpenPlan: () => _selectNav(MerchantNavDestination.plan),
           onOpenUsers: _openStaff,
+          onOpenKioskHome: _openKioskHome,
         );
       case MerchantNavDestination.plan:
         return const MerchantEmbeddedBilling();

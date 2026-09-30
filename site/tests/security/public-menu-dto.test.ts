@@ -35,6 +35,49 @@ describe('public menu DTO', () => {
     expect(dto).not.toHaveProperty('owner_id');
     expect(dto).not.toHaveProperty('email');
     expect(dto).not.toHaveProperty('branding_ia');
+    expect(dto!.inicio_menu).toEqual({
+      verMenu: false,
+      comerAqui: true,
+      paraLlevar: true,
+      delivery: true,
+      calificacion: true,
+      ubicacion: true,
+      redes: true,
+    });
+    assertNoSensitivePublicComercioFields(dto!);
+  });
+
+  it('exposes inicio_menu and social links from config_negocio without leaking branding_ia', () => {
+    const dto = toPublicComercioDto({
+      id: 'c2',
+      slug: 'solo-menu',
+      nombre: 'Solo menú',
+      branding_ia: {
+        config_negocio: {
+          social_links: { instagram: 'https://instagram.com/solo' },
+          inicio_menu: {
+            ver_menu: true,
+            comer_aqui: false,
+            para_llevar: false,
+            delivery: false,
+            calificacion: false,
+          },
+        },
+      },
+    });
+
+    expect(dto).toBeTruthy();
+    expect(dto!.social_links).toEqual({ instagram: 'https://instagram.com/solo' });
+    expect(dto!.inicio_menu).toEqual({
+      verMenu: true,
+      comerAqui: false,
+      paraLlevar: false,
+      delivery: false,
+      calificacion: false,
+      ubicacion: true,
+      redes: true,
+    });
+    expect(dto).not.toHaveProperty('branding_ia');
     assertNoSensitivePublicComercioFields(dto!);
   });
 

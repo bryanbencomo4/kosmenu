@@ -98,19 +98,19 @@ class OrderManagerService {
   static String visualStatusLabelForPedido(PedidoModel pedido) {
     switch (visualStatusCodeForPedido(pedido)) {
       case 'confirmado':
-        return 'Confirmado';
+        return 'Aceptado';
       case 'preparando':
-        return 'Preparando';
+        return 'Aceptado';
       case 'en_camino':
         return 'En camino';
       case 'espera_cliente':
-        return 'Espera cliente';
+        return 'En camino';
       case 'entregado':
         return 'Entregado';
       case 'cancelado':
         return 'Cancelado';
       default:
-        return 'Pendiente';
+        return 'Recibido';
     }
   }
 

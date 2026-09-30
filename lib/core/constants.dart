@@ -192,6 +192,41 @@ class AppLinks {
     return '$merchantAppUrl/orders/view/$encodedId$query';
   }
 
+  /// WhatsApp / share URL that opens the merchant panel order, with a public
+  /// `/o/{code}` fallback encoded as `shortCode` for the order gate.
+  static String merchantOrderShareUrl({
+    required String orderId,
+    String? trackingUrl,
+  }) {
+    final raw = (trackingUrl ?? '').trim();
+    final parsed = Uri.tryParse(raw);
+    if (parsed != null) {
+      final segments =
+          parsed.pathSegments.where((segment) => segment.isNotEmpty).toList();
+      if (segments.length >= 2) {
+        final oIndex = segments.lastIndexOf('o');
+        if (oIndex >= 0 && oIndex + 1 < segments.length) {
+          final code = segments[oIndex + 1];
+          if (RegExp(r'^[A-Za-z0-9_-]{10}$').hasMatch(code)) {
+            return merchantOrderById(orderId, fallbackShortCode: code);
+          }
+        }
+      }
+      final existingShort = (parsed.queryParameters['shortCode'] ?? '').trim();
+      if (existingShort.isNotEmpty) {
+        return merchantOrderById(orderId, fallbackShortCode: existingShort);
+      }
+      if (parsed.queryParameters.containsKey('t') ||
+          parsed.queryParameters.containsKey('token')) {
+        return merchantOrderById(orderId);
+      }
+    }
+    if (raw.isNotEmpty) {
+      return merchantOrderById(orderId, fallbackUri: raw);
+    }
+    return merchantOrderById(orderId);
+  }
+
   static String deliveryInviteByToken(String token) {
     final base = productionUrl.endsWith('/')
         ? productionUrl.substring(0, productionUrl.length - 1)

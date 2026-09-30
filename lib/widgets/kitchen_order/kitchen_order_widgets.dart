@@ -796,28 +796,27 @@ class KitchenStatusTimeline extends StatelessWidget {
   static int activeStepIndex(PedidoModel pedido, {required bool isDelivery}) {
     final code = OrderManagerService.visualStatusCodeForPedido(pedido);
     if (code == 'cancelado') return -1;
-    if (code == 'pendiente') return 0;
-    if (code == 'confirmado' || code == 'preparando' || code == 'espera_cliente') {
-      return 1;
-    }
-    if (code == 'en_camino' || code == 'listo') return 2;
     if (code == 'entregado') return 3;
+    if (code == 'en_camino' || code == 'espera_cliente') {
+      return 2;
+    }
+    if (code == 'confirmado' || code == 'preparando') return 1;
+    if (code == 'pendiente') return 0;
     final raw = OrderManagerService.normalizedRawStatus(pedido.estado);
-    if (raw == 'pendiente') return 0;
-    if (raw == 'confirmado') return 1;
-    if (raw == 'en_camino') return isDelivery ? 2 : 2;
     if (raw == 'entregado') return 3;
+    if (raw == 'en_camino') return 2;
+    if (raw == 'confirmado') return 1;
     return 0;
   }
 
   @override
   Widget build(BuildContext context) {
     final active = activeStepIndex(pedido, isDelivery: isDelivery);
-    final steps = <({String label, IconData icon})>[
+    const steps = <({String label, IconData icon})>[
       (label: 'Recibido', icon: Icons.description_outlined),
-      (label: 'En preparación', icon: Icons.soup_kitchen_outlined),
-      (label: 'Listo', icon: Icons.check_rounded),
-      (label: 'Entregado', icon: Icons.delivery_dining_rounded),
+      (label: 'Aceptado', icon: Icons.check_circle_outline_rounded),
+      (label: 'En camino', icon: Icons.delivery_dining_rounded),
+      (label: 'Entregado', icon: Icons.home_outlined),
     ];
 
     return Container(
@@ -835,14 +834,14 @@ class KitchenStatusTimeline extends StatelessWidget {
                     height: 36,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: active == i
+                      color: active >= i && active >= 0
                           ? KitchenMockupColors.pending
                           : KitchenMockupColors.notesSoft,
                     ),
                     child: Icon(
                       steps[i].icon,
                       size: 18,
-                      color: active == i
+                      color: active >= i && active >= 0
                           ? Colors.white
                           : KitchenMockupColors.muted,
                     ),
@@ -894,6 +893,7 @@ class KitchenMockupActionsBar extends StatelessWidget {
     required this.busyStatus,
     required this.onStatus,
     this.onCancel,
+    this.hidePrimaryAction = false,
   });
 
   final String estado;
@@ -902,79 +902,73 @@ class KitchenMockupActionsBar extends StatelessWidget {
   final String? busyStatus;
   final void Function(String status) onStatus;
   final VoidCallback? onCancel;
+  final bool hidePrimaryAction;
+
+  static ({String status, String label, IconData icon, Color color})?
+      nextAction({
+    required String estado,
+    required bool isDelivery,
+  }) {
+    final raw = OrderManagerService.normalizedRawStatus(estado);
+    if (raw == 'pendiente') {
+      return (
+        status: 'confirmado',
+        label: 'Aceptar pedido',
+        icon: Icons.check_circle_rounded,
+        color: KitchenMockupColors.accept,
+      );
+    }
+    if (raw == 'confirmado') {
+      return (
+        status: 'en_camino',
+        label: 'Marcar en camino',
+        icon: Icons.delivery_dining_rounded,
+        color: const Color(0xFF0EA5E9),
+      );
+    }
+    if (raw == 'en_camino') {
+      return (
+        status: 'entregado',
+        label: 'Marcar entregado',
+        icon: Icons.check_circle_rounded,
+        color: KitchenMockupColors.accept,
+      );
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final raw = OrderManagerService.normalizedRawStatus(estado);
-    final showAccept = raw == 'pendiente';
-    final showPrep = raw == 'pendiente' || raw == 'confirmado';
-    final showReady = raw == 'pendiente' ||
-        raw == 'confirmado' ||
-        raw == 'preparando' ||
-        (raw == 'en_camino' && !isDelivery);
-    final pendingMockup = raw == 'pendiente';
+    final action = hidePrimaryAction
+        ? null
+        : nextAction(estado: estado, isDelivery: isDelivery);
+    final isWide = MediaQuery.sizeOf(context).width >= 840;
+    final canCancel = onCancel != null;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (showAccept)
-            _BigActionButton(
-              label: 'Aceptar pedido',
-              icon: Icons.check_circle_rounded,
-              color: KitchenMockupColors.accept,
-              loading: isBusy && busyStatus == 'confirmado',
-              enabled: !isBusy,
-              onPressed: () => onStatus('confirmado'),
+          if (action != null)
+            Align(
+              alignment: isWide ? Alignment.center : Alignment.center,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: isWide ? 420 : double.infinity,
+                ),
+                child: _BigActionButton(
+                  label: action.label,
+                  icon: action.icon,
+                  color: action.color,
+                  loading: isBusy && busyStatus == action.status,
+                  enabled: !isBusy,
+                  compact: !isWide,
+                  onPressed: () => onStatus(action.status),
+                ),
+              ),
             ),
-          if (pendingMockup || showPrep || showReady) ...[
-            if (showAccept) const SizedBox(height: 8),
-            Row(
-              children: [
-                if (showPrep || pendingMockup)
-                  Expanded(
-                    child: _BigActionButton(
-                      label: 'Marcar en preparación',
-                      icon: Icons.soup_kitchen_rounded,
-                      color: KitchenMockupColors.prep,
-                      loading: isBusy && busyStatus == 'preparando',
-                      enabled: !isBusy,
-                      onPressed: () => onStatus('preparando'),
-                    ),
-                  ),
-                if ((showPrep || pendingMockup) &&
-                    (showReady || pendingMockup))
-                  const SizedBox(width: 8),
-                if (showReady || pendingMockup)
-                  Expanded(
-                    child: _BigActionButton(
-                      label: pendingMockup
-                          ? 'Marcar listo'
-                          : (isDelivery ? 'Marcar en camino' : 'Marcar listo'),
-                      icon: Icons.check_rounded,
-                      color: KitchenMockupColors.ready,
-                      loading: isBusy &&
-                          (busyStatus == 'en_camino' ||
-                              busyStatus == 'listo' ||
-                              busyStatus == 'entregado'),
-                      enabled: !isBusy,
-                      onPressed: () {
-                        if (isDelivery) {
-                          onStatus('en_camino');
-                        } else if (raw == 'confirmado' ||
-                            raw == 'preparando') {
-                          onStatus('entregado');
-                        } else {
-                          onStatus('listo');
-                        }
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ],
-          if (onCancel != null) ...[
+          if (canCancel) ...[
             const SizedBox(height: 4),
             TextButton(
               onPressed: isBusy ? null : onCancel,
@@ -1001,6 +995,7 @@ class _BigActionButton extends StatelessWidget {
     required this.onPressed,
     this.loading = false,
     this.enabled = true,
+    this.compact = true,
   });
 
   final String label;
@@ -1009,24 +1004,25 @@ class _BigActionButton extends StatelessWidget {
   final VoidCallback onPressed;
   final bool loading;
   final bool enabled;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      height: 52,
+      height: compact ? 52 : 56,
       child: FilledButton.icon(
         style: FilledButton.styleFrom(
           backgroundColor: color,
           disabledBackgroundColor: color.withValues(alpha: 0.45),
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 22),
           textStyle: GoogleFonts.manrope(
-            fontSize: 14,
+            fontSize: compact ? 15 : 16,
             fontWeight: FontWeight.w800,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
           ),
         ),
         onPressed: enabled && !loading ? onPressed : null,
@@ -1039,12 +1035,215 @@ class _BigActionButton extends StatelessWidget {
                   color: Colors.white,
                 ),
               )
-            : Icon(icon, size: 20),
+            : Icon(icon, size: compact ? 20 : 22),
         label: Text(
           label,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
+      ),
+    );
+  }
+}
+
+class KitchenDelegationCard extends StatelessWidget {
+  const KitchenDelegationCard({
+    super.key,
+    required this.courierName,
+    required this.courierPhone,
+    required this.statusLabel,
+    required this.pendingAcceptance,
+    required this.isBusy,
+    required this.onRevoke,
+    required this.onInviteAnother,
+    required this.onDeliverManually,
+    this.feedback,
+  });
+
+  final String courierName;
+  final String courierPhone;
+  final String statusLabel;
+  final bool pendingAcceptance;
+  final bool isBusy;
+  final VoidCallback onRevoke;
+  final VoidCallback onInviteAnother;
+  final VoidCallback onDeliverManually;
+  final String? feedback;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE9D5FF)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3E8FF),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.delivery_dining_rounded,
+                  color: Color(0xFF7C3AED),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pendingAcceptance
+                          ? 'Invitación de delivery enviada'
+                          : 'El repartidor se encarga de aquí en adelante',
+                      style: GoogleFonts.manrope(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: KitchenMockupColors.text,
+                      ),
+                    ),
+                    if (statusLabel.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        statusLabel,
+                        style: GoogleFonts.manrope(
+                          color: KitchenMockupColors.muted,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            pendingAcceptance
+                ? 'El repartidor recibió el enlace. Cuando lo acepte, él marca en camino y entrega. Tú no tienes que avanzar el pedido.'
+                : 'A partir de ahora el avance de la ruta lo gestiona el repartidor. No hace falta marcar en camino ni entregado desde aquí.',
+            style: GoogleFonts.manrope(
+              color: KitchenMockupColors.muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
+          ),
+          if (courierName.trim().isNotEmpty || courierPhone.trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F5FC),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    courierName.trim().isEmpty ? 'Repartidor' : courierName.trim(),
+                    style: GoogleFonts.manrope(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                    ),
+                  ),
+                  if (courierPhone.trim().isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      courierPhone.trim(),
+                      style: GoogleFonts.manrope(
+                        color: KitchenMockupColors.muted,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          if ((feedback ?? '').trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              feedback!.trim(),
+              style: GoogleFonts.manrope(
+                color: KitchenMockupColors.purple,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ],
+          if (isBusy) ...[
+            const SizedBox(height: 12),
+            const LinearProgressIndicator(),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: isBusy ? null : onInviteAnother,
+              icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+              label: const Text('Invitar a otro repartidor'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF7C3AED),
+                side: const BorderSide(color: Color(0xFFDDD6FE)),
+                minimumSize: const Size.fromHeight(46),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: isBusy ? null : onDeliverManually,
+              icon: const Icon(Icons.storefront_rounded, size: 18),
+              label: const Text('Hacer el delivery manualmente'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF2563EB),
+                side: const BorderSide(color: Color(0xFFBFDBFE)),
+                minimumSize: const Size.fromHeight(46),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.center,
+            child: TextButton(
+              onPressed: isBusy ? null : onRevoke,
+              child: Text(
+                'Revocar invitación',
+                style: GoogleFonts.manrope(
+                  color: KitchenMockupColors.qty,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

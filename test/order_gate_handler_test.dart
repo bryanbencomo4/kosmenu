@@ -10,6 +10,16 @@ void main() {
     );
   });
 
+  test('merchantOrderShareUrl uses panel link with shortCode from /o/{code}', () {
+    expect(
+      AppLinks.merchantOrderShareUrl(
+        orderId: 'EMXFA-000130',
+        trackingUrl: 'https://elmenuxfa.com/o/jjyYZ_1KbL',
+      ),
+      'https://app.elmenuxfa.com/orders/view/EMXFA-000130?shortCode=jjyYZ_1KbL',
+    );
+  });
+
   test('extractOrderId reads /orders/view/{id}', () {
     expect(
       OrderGateHandler.extractOrderId(

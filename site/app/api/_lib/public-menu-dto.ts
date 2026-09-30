@@ -3,6 +3,8 @@
  * Never include owner_id, private notes, tokens, or admin flags.
  */
 
+import { toPublicKioskHomeConfig } from '../../_lib/kiosk-home-config';
+
 const PUBLIC_COMERCIO_KEYS = [
   'id',
   'slug',
@@ -110,7 +112,8 @@ export function toPublicComercioDto(row: Record<string, unknown> | null | undefi
     : null;
   const config = row.config_negocio ?? brandingConfig;
   if (config && typeof config === 'object') {
-    const socialLinks = (config as Record<string, unknown>).social_links;
+    const configRecord = config as Record<string, unknown>;
+    const socialLinks = configRecord.social_links;
     if (socialLinks && typeof socialLinks === 'object' && !Array.isArray(socialLinks)) {
       picked.social_links = Object.fromEntries(
         Object.entries(socialLinks)
@@ -118,6 +121,11 @@ export function toPublicComercioDto(row: Record<string, unknown> | null | undefi
           .map(([key, value]) => [key, String(value).trim()]),
       );
     }
+    picked.inicio_menu = toPublicKioskHomeConfig(
+      configRecord.inicio_menu ?? configRecord.kiosk_home ?? configRecord,
+    );
+  } else {
+    picked.inicio_menu = toPublicKioskHomeConfig(null);
   }
   // Defense in depth: strip known sensitive keys even if allow-list drifts.
   return omitKeys(picked, SENSITIVE_COMERCIO_KEYS);

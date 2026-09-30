@@ -915,6 +915,7 @@ class MerchantSettingsHub extends StatelessWidget {
     required this.onOpenHours,
     required this.onOpenPlan,
     required this.onOpenUsers,
+    required this.onOpenKioskHome,
   });
 
   final ComercioModel comercio;
@@ -927,6 +928,7 @@ class MerchantSettingsHub extends StatelessWidget {
   final VoidCallback onOpenHours;
   final VoidCallback onOpenPlan;
   final VoidCallback onOpenUsers;
+  final VoidCallback onOpenKioskHome;
 
   @override
   Widget build(BuildContext context) {
@@ -953,6 +955,12 @@ class MerchantSettingsHub extends StatelessWidget {
         title: 'Logo y apariencia',
         subtitle: 'Colores, tipografía y diseño del menú',
         onTap: onOpenAppearance,
+      ),
+      (
+        icon: Icons.home_outlined,
+        title: 'Pantalla de inicio',
+        subtitle: 'Menú, comer aquí, para llevar, delivery y calificación',
+        onTap: onOpenKioskHome,
       ),
       (
         icon: Icons.payments_outlined,

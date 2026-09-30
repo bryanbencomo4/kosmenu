@@ -1,7 +1,7 @@
 'use client';
 
 import { Caveat, Manrope } from 'next/font/google';
-import { ArrowLeft, ArrowRight, Plus, Search, ShoppingBag, Star, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus, Search, ShoppingBag, SlidersHorizontal, Star, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
@@ -17,6 +17,7 @@ import {
   type KioskScreen,
   type KioskVoucherData,
 } from './kiosk-types';
+import { DEFAULT_KIOSK_HOME_CONFIG, type KioskHomeConfig } from '../../../../_lib/kiosk-home-config';
 import type { MenuThemeMode } from '../../_lib/menu-theme';
 
 const hintFont = Caveat({
@@ -42,6 +43,7 @@ type KioskMenuExperienceProps = {
   openCaption: string;
   closedCaption: string;
   supportsDelivery: boolean;
+  homeConfig?: KioskHomeConfig;
   fulfillment: KioskFulfillment | null;
   onSelectFulfillment: (fulfillment: KioskFulfillment) => void;
   onResetFulfillment: () => void;
@@ -82,6 +84,7 @@ export function KioskMenuExperience({
   openCaption,
   closedCaption,
   supportsDelivery,
+  homeConfig = DEFAULT_KIOSK_HOME_CONFIG,
   fulfillment,
   onSelectFulfillment,
   onResetFulfillment,
@@ -134,7 +137,7 @@ export function KioskMenuExperience({
     });
   }, [activeProducts, searchQuery, screen]);
 
-  const browseOnly = !isOpen;
+  const browseOnly = !fulfillment || !isOpen;
   const topBar = (
     <KioskTopBar
       tickerEntries={tickerEntries}
@@ -164,7 +167,7 @@ export function KioskMenuExperience({
 
   if (!fulfillment && screen === 'home') {
     return (
-      <div className="relative flex min-h-[100dvh] flex-col bg-[var(--menu-background)] text-[var(--menu-text)]">
+      <div className="relative flex h-[100svh] max-h-[100svh] flex-col overflow-hidden bg-[var(--menu-background)] text-[var(--menu-text)]">
         <div className={stickyChromeClass}>{topBar}</div>
         <KioskHome
           businessName={businessName}
@@ -179,6 +182,7 @@ export function KioskMenuExperience({
           socialLinks={socialLinks}
           tagline={tagline}
           supportsDelivery={supportsDelivery}
+          homeConfig={homeConfig}
           themeMode={themeMode}
           onToggleTheme={onToggleTheme}
           onSelect={(next) => {
@@ -286,7 +290,9 @@ export function KioskMenuExperience({
           style={{ color: 'color-mix(in srgb, var(--menu-primary) 72%, var(--menu-text))' }}
         >
           {browseOnly
-            ? 'Estamos cerrados. Puedes ver el menú y pedir cuando abramos.'
+            ? isOpen
+              ? 'Solo consulta. Para pedir, vuelve y elige cómo lo quieres.'
+              : 'Estamos cerrados. Puedes ver el menú y pedir cuando abramos.'
             : screen === 'products'
               ? 'Arma tu pedido a tu ritmo.'
               : '¿Qué se te antoja hoy?'}
@@ -336,9 +342,16 @@ export function KioskMenuExperience({
               <button
                 key={product.id}
                 type="button"
-                aria-label={`Ver detalles de ${product.name}`}
-                onClick={() => onAddProduct(product.id)}
-                className="kiosk-card flex w-full overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--menu-primary)]"
+                aria-label={browseOnly ? product.name : `Ver detalles de ${product.name}`}
+                onClick={() => {
+                  if (browseOnly) return;
+                  onAddProduct(product.id);
+                }}
+                className={`kiosk-card flex w-full overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] ${
+                  browseOnly
+                    ? 'cursor-default'
+                    : 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--menu-primary)]'
+                }`}
                 style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
               >
                 <div className="h-32 w-32 shrink-0 bg-[var(--menu-surface-alt)] sm:h-36 sm:w-36">
@@ -370,17 +383,27 @@ export function KioskMenuExperience({
                     )}
                     {!browseOnly ? (
                       <span
-                        className="inline-flex min-h-10 items-center gap-1.5 rounded-[14px] px-3.5 py-2 text-xs font-bold"
+                        className={`inline-flex shrink-0 items-center justify-center rounded-[14px] font-bold ${
+                          product.available
+                            ? 'h-10 w-10 sm:h-auto sm:min-h-10 sm:w-auto sm:gap-1.5 sm:px-3.5 sm:py-2 sm:text-xs'
+                            : 'min-h-10 px-2.5 py-2 text-[10px] sm:px-3.5 sm:text-xs'
+                        }`}
                         style={{
                           backgroundColor: 'var(--menu-primary)',
                           color: 'var(--menu-on-primary)',
                           opacity: product.available ? 1 : 0.55,
                         }}
                       >
-                        {product.optionsSummary && product.available ? null : (
-                          <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-                        )}
-                        {!product.available ? 'No disponible' : product.optionsSummary ? 'Elegir' : 'Agregar'}
+                        {product.available ? (
+                          product.optionsSummary ? (
+                            <SlidersHorizontal className="h-4 w-4" strokeWidth={2.4} />
+                          ) : (
+                            <Plus className="h-4 w-4" strokeWidth={2.5} />
+                          )
+                        ) : null}
+                        <span className={product.available ? 'hidden sm:inline' : undefined}>
+                          {!product.available ? 'No disponible' : product.optionsSummary ? 'Elegir' : 'Agregar'}
+                        </span>
                       </span>
                     ) : null}
                   </div>

@@ -958,7 +958,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     required String status,
     required String trackingUrl,
   }) {
-    final resolvedTrackingUrl = _resolveCustomerTrackingShareUrl(trackingUrl);
+    final resolvedTrackingUrl = AppLinks.merchantOrderShareUrl(
+      orderId: widget.orderId,
+      trackingUrl: trackingUrl,
+    );
     final isPickup = _cachedOrderData?.pedido.deliveryMode != 'delivery';
     final statusContent = switch (status) {
       'confirmado' => (
@@ -1013,40 +1016,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       ]);
     }
     return lines.join('\n');
-  }
-
-  /// Shareable customer tracking URL. Prefer `/o/{code}` short links.
-  /// Never rewrite customer links into the merchant panel.
-  String _resolveCustomerTrackingShareUrl(String trackingUrl) {
-    final raw = trackingUrl.trim();
-    if (raw.isEmpty) {
-      return '';
-    }
-
-    final parsed = Uri.tryParse(raw);
-    if (parsed == null) {
-      return '';
-    }
-
-    final segments = parsed.pathSegments;
-    if (segments.length == 2 &&
-        segments.first == 'o' &&
-        RegExp(r'^[A-Za-z0-9_-]{10}$').hasMatch(segments[1])) {
-      return AppLinks.shortOrderByCode(segments[1]);
-    }
-
-    // Legacy token URLs must not be forwarded in WhatsApp now that short links
-    // + cookie/email gate protect tracking.
-    if (parsed.queryParameters.containsKey('t') ||
-        parsed.queryParameters.containsKey('token')) {
-      return '';
-    }
-
-    if (parsed.host.contains('elmenuxfa.com') || parsed.host.isEmpty) {
-      return raw;
-    }
-
-    return '';
   }
 
   Future<void> _openCustomerWhatsapp(
@@ -1193,9 +1162,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       }
     }
 
-    if (action.status == 'en_camino' &&
-        isDeliveryOrder &&
-        !hasActiveDelegation) {
+    if (action.status == 'en_camino' && !hasActiveDelegation) {
       final mode = await _promptDeliveryExecutionMode();
       if (!mounted || mode == null) {
         return;
@@ -1243,6 +1210,45 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return (token: token, url: AppLinks.deliveryInviteByToken(token));
   }
 
+  Future<bool> _ensureDeliveryModeForInvitation() async {
+    final current = _cachedOrderData?.pedido;
+    if (current == null) return false;
+    if ((current.deliveryMode ?? '').trim().toLowerCase() == 'delivery') {
+      return true;
+    }
+
+    final detalles = Map<String, dynamic>.from(current.detalles);
+    final rawDelivery = detalles['delivery'];
+    final delivery = rawDelivery is Map
+        ? Map<String, dynamic>.from(rawDelivery)
+        : <String, dynamic>{};
+    delivery['mode'] = 'delivery';
+    detalles['delivery'] = delivery;
+
+    try {
+      await Supabase.instance.client
+          .from('pedidos')
+          .update({'detalles': detalles})
+          .eq('id', current.id);
+      final refreshed = await _fetchOrder();
+      if (!mounted) return false;
+      if (refreshed != null) {
+        setState(() => _cachedOrderData = refreshed);
+      }
+      return true;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('No se pudo preparar el pedido para el repartidor: $error'),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
   Future<void> _generateAndSendDeliveryInviteWhatsapp({
     required String comercioId,
     required String comercioNombre,
@@ -1282,6 +1288,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     });
 
     try {
+      final prepared = await _ensureDeliveryModeForInvitation();
+      if (!prepared || !mounted) {
+        return;
+      }
+
       final invite = await _createDeliveryInviteLink(
         invitedPhone: waDigits,
         invitedAlias: selection.alias,
@@ -1359,17 +1370,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     );
   }
 
-  Future<void> _revokeDeliveryInvite() async {
-    if (_isManagingDeliveryInvite) return;
-
+  Future<bool> _confirmDeliveryInviteDialog({
+    required String title,
+    required String body,
+    required String confirmLabel,
+  }) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Revocar enlace de repartidor'),
-          content: const Text(
-            'Esta accion invalida el enlace actual de delivery. Podras generar uno nuevo cuando quieras.',
-          ),
+          title: Text(title),
+          content: Text(body),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -1377,14 +1388,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Revocar'),
+              child: Text(confirmLabel),
             ),
           ],
         );
       },
     );
+    return confirmed == true;
+  }
 
-    if (confirmed != true || !mounted) return;
+  Future<bool> _revokeDeliveryInvite({bool confirm = true}) async {
+    if (_isManagingDeliveryInvite) return false;
+
+    if (confirm) {
+      final confirmed = await _confirmDeliveryInviteDialog(
+        title: 'Revocar invitación',
+        body:
+            'Esta acción invalida el enlace actual. El repartidor ya no podrá gestionar este pedido y tú volverás a controlarlo.',
+        confirmLabel: 'Revocar',
+      );
+      if (!confirmed || !mounted) return false;
+    }
 
     setState(() {
       _isManagingDeliveryInvite = true;
@@ -1398,25 +1422,73 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       );
 
       final refreshed = await _fetchOrder();
-      if (!mounted) return;
+      if (!mounted) return false;
 
       setState(() {
         _cachedOrderData = refreshed ?? _cachedOrderData;
-        _deliveryInviteFeedback = 'Enlace revocado.';
+        _deliveryInviteFeedback = 'Invitación revocada.';
         _deliveryInviteUrl = null;
       });
+      return true;
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('No se pudo revocar el enlace: $error'),
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('No se pudo revocar el enlace: $error'),
+          ),
+        );
+      }
+      return false;
     } finally {
       if (mounted) {
         setState(() => _isManagingDeliveryInvite = false);
       }
+    }
+  }
+
+  Future<void> _reinviteCourier({
+    required String comercioId,
+    required String comercioNombre,
+    String? initialPhone,
+  }) async {
+    if (_isManagingDeliveryInvite) return;
+
+    final confirmed = await _confirmDeliveryInviteDialog(
+      title: 'Invitar a otro repartidor',
+      body:
+          'Se revocará la invitación actual. Después podrás elegir otro repartidor y enviarle el enlace.',
+      confirmLabel: 'Continuar',
+    );
+    if (!confirmed || !mounted) return;
+
+    final revoked = await _revokeDeliveryInvite(confirm: false);
+    if (!revoked || !mounted) return;
+
+    await _generateAndSendDeliveryInviteWhatsapp(
+      comercioId: comercioId,
+      comercioNombre: comercioNombre,
+      initialPhone: (initialPhone ?? '').trim().isEmpty ? null : initialPhone,
+    );
+  }
+
+  Future<void> _takeOverDeliveryManually({required String currentStatus}) async {
+    if (_isManagingDeliveryInvite) return;
+
+    final confirmed = await _confirmDeliveryInviteDialog(
+      title: 'Hacer el delivery manualmente',
+      body:
+          'Se revocará la invitación del repartidor. A partir de ahora tú marcarás en camino y entregado.',
+      confirmLabel: 'Continuar yo',
+    );
+    if (!confirmed || !mounted) return;
+
+    final revoked = await _revokeDeliveryInvite(confirm: false);
+    if (!revoked || !mounted) return;
+
+    final status = _normalizeStatusValue(currentStatus);
+    if (status == 'confirmado' || status == 'pendiente') {
+      await _updateOrderStatus('en_camino');
     }
   }
 
@@ -1520,7 +1592,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         return const <_OrderStatusAction>[
           _OrderStatusAction(
             status: 'confirmado',
-            label: 'Confirmar pedido',
+            label: 'Aceptar pedido',
             icon: Icons.thumb_up_alt_outlined,
             color: Color(0xFF2563EB),
           ),
@@ -1532,59 +1604,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           ),
         ];
       case 'confirmado':
-        if (isDelivery) {
-          return const <_OrderStatusAction>[
-            _OrderStatusAction(
-              status: 'en_camino',
-              label: 'Marcar en camino',
-              icon: Icons.delivery_dining_rounded,
-              color: Color(0xFF0EA5E9),
-            ),
-            _OrderStatusAction(
-              status: 'cancelado',
-              label: 'Cancelar pedido',
-              icon: Icons.cancel_rounded,
-              color: Color(0xFFE11D48),
-            ),
-          ];
-        }
-        return const <_OrderStatusAction>[
-          _OrderStatusAction(
-            status: 'entregado',
-            label: 'Marcar retirado',
-            icon: Icons.check_circle_rounded,
-            color: Color(0xFF16A34A),
-          ),
-          _OrderStatusAction(
-            status: 'cancelado',
-            label: 'Cancelar pedido',
-            icon: Icons.cancel_rounded,
-            color: Color(0xFFE11D48),
-          ),
-        ];
       case 'preparando':
-        if (isDelivery) {
-          return const <_OrderStatusAction>[
-            _OrderStatusAction(
-              status: 'en_camino',
-              label: 'Marcar en camino',
-              icon: Icons.delivery_dining_rounded,
-              color: Color(0xFF0EA5E9),
-            ),
-            _OrderStatusAction(
-              status: 'cancelado',
-              label: 'Cancelar pedido',
-              icon: Icons.cancel_rounded,
-              color: Color(0xFFE11D48),
-            ),
-          ];
-        }
         return const <_OrderStatusAction>[
           _OrderStatusAction(
-            status: 'entregado',
-            label: 'Marcar retirado',
-            icon: Icons.check_circle_rounded,
-            color: Color(0xFF16A34A),
+            status: 'en_camino',
+            label: 'Marcar en camino',
+            icon: Icons.delivery_dining_rounded,
+            color: Color(0xFF0EA5E9),
           ),
           _OrderStatusAction(
             status: 'cancelado',
@@ -1615,7 +1641,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         return const <_OrderStatusAction>[
           _OrderStatusAction(
             status: 'confirmado',
-            label: 'Confirmar pedido',
+            label: 'Aceptar pedido',
             icon: Icons.thumb_up_alt_outlined,
             color: Color(0xFF2563EB),
           ),
@@ -2185,12 +2211,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     required List<LatLng> cameraPoints,
     required bool shouldShowNextStepCard,
     required bool whatsappNotificationsEnabled,
-    required bool hasDelegationRecord,
+    required bool isOrderFinalized,
+    required bool pendingDelegationAcceptance,
     required String deliveryDelegateAlias,
     required String deliveryDelegatePhoneDisplay,
     required String deliveryDelegateStatusSummary,
     required bool isManagingDeliveryInvite,
-    required String? deliveryInviteUrl,
     required String? deliveryInviteFeedback,
     required bool isDelegatedDelivery,
     required String deliveryDelegateInvitedPhone,
@@ -2291,6 +2317,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   pedido: pedido,
                   isDelivery: isDeliveryOrder,
                 ),
+                if (isDelegatedDelivery && !isOrderFinalized)
+                  KitchenDelegationCard(
+                    courierName: deliveryDelegateAlias,
+                    courierPhone: deliveryDelegatePhoneDisplay,
+                    statusLabel: deliveryDelegateStatusSummary,
+                    pendingAcceptance: pendingDelegationAcceptance,
+                    isBusy: isManagingDeliveryInvite || _isUpdatingStatus,
+                    feedback: deliveryInviteFeedback,
+                    onRevoke: () => unawaited(_revokeDeliveryInvite()),
+                    onInviteAnother: () => unawaited(
+                      _reinviteCourier(
+                        comercioId: pedido.comercioId,
+                        comercioNombre: data.comercioNombre,
+                        initialPhone: deliveryDelegateInvitedPhone,
+                      ),
+                    ),
+                    onDeliverManually: () => unawaited(
+                      _takeOverDeliveryManually(
+                        currentStatus: pedido.estado ?? 'pendiente',
+                      ),
+                    ),
+                  ),
                 if (shouldShowNextStepCard)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -2299,6 +2347,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       isDelivery: isDeliveryOrder,
                       isBusy: _isUpdatingStatus,
                       busyStatus: _pendingStatus,
+                      hidePrimaryAction: isDelegatedDelivery,
                       onStatus: (status) {
                         unawaited(
                           _runKitchenStatusAction(
@@ -2344,75 +2393,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                           )
                       : null,
                 ),
-                if (hasDelegationRecord)
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 14,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          deliveryDelegateAlias.isEmpty
-                              ? 'Repartidor'
-                              : deliveryDelegateAlias,
-                          style: GoogleFonts.manrope(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          deliveryDelegateStatusSummary,
-                          style: GoogleFonts.manrope(
-                            color: KitchenMockupColors.muted,
-                          ),
-                        ),
-                        if (deliveryDelegatePhoneDisplay.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            deliveryDelegatePhoneDisplay,
-                            style: GoogleFonts.manrope(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                        if ((deliveryInviteUrl ?? '').trim().isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          SelectableText(
-                            deliveryInviteUrl!.trim(),
-                            style: GoogleFonts.manrope(fontSize: 12),
-                          ),
-                        ],
-                        if ((deliveryInviteFeedback ?? '')
-                            .trim()
-                            .isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            deliveryInviteFeedback!,
-                            style: GoogleFonts.manrope(
-                              color: KitchenMockupColors.purple,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                        if (isManagingDeliveryInvite) ...[
-                          const SizedBox(height: 10),
-                          const LinearProgressIndicator(),
-                        ],
-                      ],
-                    ),
-                  ),
               ],
             ),
           ),
@@ -2684,7 +2664,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       }
                       return 0;
                     });
-                if (isDelegationControlTransferred) {
+                if (isDelegatedDelivery) {
                   statusActionsForBar.removeWhere(
                     (action) =>
                         action.status == 'en_camino' ||
@@ -2947,12 +2927,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     cameraPoints: cameraPoints,
                     shouldShowNextStepCard: shouldShowNextStepCard,
                     whatsappNotificationsEnabled: whatsappNotificationsEnabled,
-                    hasDelegationRecord: hasDelegationRecord,
+                    isOrderFinalized: isOrderFinalized,
+                    pendingDelegationAcceptance: isAwaitingDelegateConfirmation,
                     deliveryDelegateAlias: deliveryDelegateAlias,
                     deliveryDelegatePhoneDisplay: deliveryDelegatePhoneDisplay,
                     deliveryDelegateStatusSummary: deliveryDelegateStatusSummary,
                     isManagingDeliveryInvite: _isManagingDeliveryInvite,
-                    deliveryInviteUrl: _deliveryInviteUrl,
                     deliveryInviteFeedback: _deliveryInviteFeedback,
                     isDelegatedDelivery: isDelegatedDelivery,
                     deliveryDelegateInvitedPhone: deliveryDelegateInvitedPhone,
@@ -3849,7 +3829,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   deliveryDelegateStatusNormalized !=
                                                       'arrived')
                                           ? null
-                                          : _revokeDeliveryInvite,
+                                          : () => unawaited(
+                                              _revokeDeliveryInvite(),
+                                            ),
                                       icon: const Icon(
                                         Icons.block_rounded,
                                         size: 17,
