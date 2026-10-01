@@ -97,6 +97,7 @@ flutter:
     - assets/branding/isotipo.png
     - assets/branding/logotipo.png
     - assets/branding/full_logo.png
+    - assets/branding/full_logo_auth.webp
 
 flutter_launcher_icons:
   android: true
