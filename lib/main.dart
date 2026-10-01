@@ -104,7 +104,6 @@ Future<void> main() async {
   );
 
   await _initializeSupabase();
-  await Future<void>.delayed(const Duration(milliseconds: 150));
 
   runApp(const KosmenuApp());
 }
