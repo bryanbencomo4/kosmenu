@@ -5872,26 +5872,44 @@ class _DashboardProductCard extends StatelessWidget {
 
     Widget thumb() {
       final imageUrl = product.imagenUrl?.trim();
-      if (imageUrl != null && imageUrl.isNotEmpty) {
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Image.network(
-            imageUrl,
-            width: 72,
-            height: 72,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => _ProductThumbPlaceholder(
+      final image = imageUrl != null && imageUrl.isNotEmpty
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.network(
+                imageUrl,
+                width: 72,
+                height: 72,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => _ProductThumbPlaceholder(
+                  icon: product.isAiGeneratedImage
+                      ? Icons.auto_awesome_rounded
+                      : Icons.fastfood_rounded,
+                ),
+              ),
+            )
+          : _ProductThumbPlaceholder(
               icon: product.isAiGeneratedImage
                   ? Icons.auto_awesome_rounded
                   : Icons.fastfood_rounded,
-            ),
-          ),
-        );
+            );
+
+      if (!product.hasAiImageInProgress) {
+        return image;
       }
-      return _ProductThumbPlaceholder(
-        icon: product.isAiGeneratedImage
-            ? Icons.auto_awesome_rounded
-            : Icons.fastfood_rounded,
+
+      return SizedBox(
+        width: 72,
+        height: 72,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            image,
+            const ClipRRect(
+              borderRadius: BorderRadius.all(Radius.circular(14)),
+              child: AiImageGeneratingScrim(compact: true),
+            ),
+          ],
+        ),
       );
     }
 

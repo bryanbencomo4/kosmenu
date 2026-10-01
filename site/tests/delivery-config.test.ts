@@ -144,6 +144,47 @@ describe('delivery config', () => {
     expect(quote.fee).toBe(0);
   });
 
+  it('parses tariff currency and keeps it on the public snapshot', () => {
+    const config = parseDeliveryConfig({
+      enabled: true,
+      pricing_type: 'fixed',
+      fixed_price: 5000,
+      currency: 'cop',
+    });
+    expect(config.currency).toBe('COP');
+    expect(toPublicDeliveryConfig(config)).toMatchObject({
+      enabled: true,
+      currency: 'COP',
+      fixed_price: 5000,
+    });
+  });
+
+  it('converts tariff amounts into shop base currency when quoting', () => {
+    const config = {
+      enabled: true,
+      pricing_type: 'fixed',
+      fixed_price: 2,
+      currency: 'USD',
+      min_order: 5,
+    };
+    const blocked = quoteDeliveryFee({
+      config,
+      isDelivery: true,
+      subtotal: 10_000,
+      convertToBase: (amount) => amount * 4000,
+    });
+    expect(blocked.blocked).toBe(true);
+
+    const quoted = quoteDeliveryFee({
+      config,
+      isDelivery: true,
+      subtotal: 25_000,
+      convertToBase: (amount) => amount * 4000,
+    });
+    expect(quoted.blocked).toBe(false);
+    expect(quoted.fee).toBe(8000);
+  });
+
   it('never throws when quoting garbage config', () => {
     expect(() =>
       quoteDeliveryFee({

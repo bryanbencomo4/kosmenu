@@ -13,24 +13,10 @@ void main() {
   test('merchantOrderShareUrl uses panel link with shortCode from /o/{code}', () {
     expect(
       AppLinks.merchantOrderShareUrl(
-        orderId: 'EMXFA-000130',
-        trackingUrl: 'https://elmenuxfa.com/o/jjyYZ_1KbL',
+        orderId: 'EMXFA-000136',
+        trackingUrl: 'https://elmenuxfa.com/o/qQ2vtV8HSY',
       ),
-      'https://app.elmenuxfa.com/orders/view/EMXFA-000130?shortCode=jjyYZ_1KbL',
-    );
-  });
-
-  test('customerOrderTrackingUrl keeps the public tracker for the diner', () {
-    expect(
-      AppLinks.customerOrderTrackingUrl(
-        orderId: 'EMXFA-000130',
-        trackingUrl: 'https://elmenuxfa.com/o/jjyYZ_1KbL',
-      ),
-      'https://elmenuxfa.com/o/jjyYZ_1KbL',
-    );
-    expect(
-      AppLinks.customerOrderTrackingUrl(orderId: 'EMXFA-000130'),
-      isNot(contains('app.elmenuxfa.com')),
+      'https://app.elmenuxfa.com/orders/view/EMXFA-000136?shortCode=qQ2vtV8HSY',
     );
   });
 

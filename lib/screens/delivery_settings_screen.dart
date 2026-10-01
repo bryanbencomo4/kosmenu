@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/delivery_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,9 +21,15 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
 
   bool _loading = true;
   bool _saving = false;
+  bool _hydrating = false;
+  Timer? _saveDebounce;
   Map<String, dynamic> _branding = const {};
   Map<String, dynamic> _configNegocio = const {};
   DeliveryConfig _config = const DeliveryConfig();
+  String _baseCurrency = 'COP';
+  String _quoteCurrency = '';
+  double? _exchangeRateValue;
+  final Map<String, double> _exchangeRates = {};
 
   late final TextEditingController _fixedPrice;
   late final TextEditingController _basePrice;
@@ -45,6 +54,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     _prepMinutes = TextEditingController();
     _deliveryMinutes = TextEditingController();
     _customMessage = TextEditingController();
+    _bindMainListeners();
     _load();
   }
 
@@ -59,13 +69,50 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     _prepMinutes.dispose();
     _deliveryMinutes.dispose();
     _customMessage.dispose();
+    _saveDebounce?.cancel();
     for (final zone in _zones) {
       zone.dispose();
     }
     super.dispose();
   }
 
+  void _onDraftChanged() {
+    if (!mounted || _hydrating || _loading || !_config.enabled) return;
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(milliseconds: 800), () {
+      if (!mounted || _hydrating || !_config.enabled) return;
+      unawaited(_save(_draft(), silent: true));
+    });
+    setState(() {});
+  }
+
+  void _listen(TextEditingController controller) {
+    controller.addListener(_onDraftChanged);
+  }
+
+  void _bindMainListeners() {
+    _listen(_fixedPrice);
+    _listen(_basePrice);
+    _listen(_includedKm);
+    _listen(_extraKm);
+    _listen(_freeMinimum);
+    _listen(_minOrder);
+    _listen(_prepMinutes);
+    _listen(_deliveryMinutes);
+    _listen(_customMessage);
+  }
+
+  void _bindZoneListeners() {
+    for (final zone in _zones) {
+      _listen(zone.name);
+      _listen(zone.minKm);
+      _listen(zone.maxKm);
+      _listen(zone.price);
+    }
+  }
+
   void _hydrate(DeliveryConfig config) {
+    _hydrating = true;
     _config = config;
     _fixedPrice.text = _num(config.fixedPrice);
     _basePrice.text = _num(config.distance.basePrice);
@@ -89,6 +136,8 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                 : config.zones)
             .map(_ZoneControllers.fromZone),
       );
+    _bindZoneListeners();
+    _hydrating = false;
   }
 
   String _num(double value) {
@@ -99,11 +148,22 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final row = await Supabase.instance.client
-          .from('comercios')
-          .select('branding_ia')
-          .eq('id', SupabaseConfig.currentComercioId.trim())
-          .maybeSingle();
+      Map<String, dynamic>? row;
+      try {
+        row = await Supabase.instance.client
+            .from('comercios')
+            .select(
+              'moneda, exchange_rate_value, exchange_rate_quote_currency, branding_ia',
+            )
+            .eq('id', SupabaseConfig.currentComercioId.trim())
+            .maybeSingle();
+      } catch (_) {
+        row = await Supabase.instance.client
+            .from('comercios')
+            .select('moneda, branding_ia')
+            .eq('id', SupabaseConfig.currentComercioId.trim())
+            .maybeSingle();
+      }
       final brandingRaw = row?['branding_ia'];
       final branding = brandingRaw is Map
           ? Map<String, dynamic>.from(brandingRaw)
@@ -111,11 +171,39 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
       final configRaw = branding['config_negocio'];
       final configNegocio =
           configRaw is Map ? Map<String, dynamic>.from(configRaw) : <String, dynamic>{};
+      final baseCurrency = _normalizeCurrency(
+        row?['moneda'] ?? configNegocio['moneda_default'] ?? 'COP',
+      );
+      final quoteCurrency = _normalizeCurrency(
+        row?['exchange_rate_quote_currency'] ??
+            configNegocio['exchange_rate_quote_currency'],
+      );
+      final exchangeRateValue = _readPositiveRate(row?['exchange_rate_value']);
+      final parsedRates = <String, double>{};
+      final rawRates = configNegocio['exchange_rates'];
+      if (rawRates is Map) {
+        for (final entry in rawRates.entries) {
+          final code = _normalizeCurrency(entry.key);
+          final rate = _readPositiveRate(entry.value);
+          if (code.isNotEmpty && rate != null) parsedRates[code] = rate;
+        }
+      }
       if (!mounted) return;
+      final loaded = DeliveryConfig.fromConfigNegocio(configNegocio);
       setState(() {
         _branding = branding;
         _configNegocio = configNegocio;
-        _hydrate(DeliveryConfig.fromConfigNegocio(configNegocio));
+        _baseCurrency = baseCurrency.isEmpty ? 'COP' : baseCurrency;
+        _quoteCurrency = quoteCurrency;
+        _exchangeRateValue = exchangeRateValue;
+        _exchangeRates
+          ..clear()
+          ..addAll(parsedRates);
+        _hydrate(
+          loaded.currency.isEmpty
+              ? loaded.copyWith(currency: _baseCurrency)
+              : loaded,
+        );
         _loading = false;
       });
     } catch (error) {
@@ -127,8 +215,99 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     }
   }
 
+  String _normalizeCurrency(dynamic raw) {
+    final value = '${raw ?? ''}'.trim().toUpperCase();
+    if (value.isEmpty || value == 'SIN MONEDA') return '';
+    return value;
+  }
+
+  double? _readPositiveRate(dynamic raw) {
+    final value = raw is num ? raw.toDouble() : double.tryParse('${raw ?? ''}'.replaceAll(',', '.'));
+    if (value == null || value.isNaN || value <= 0) return null;
+    return value;
+  }
+
+  List<String> _acceptedCurrencies() {
+    final codes = <String>{};
+    if (_baseCurrency.isNotEmpty) codes.add(_baseCurrency);
+    void addAll(dynamic raw) {
+      if (raw is! List) return;
+      for (final item in raw) {
+        final code = _normalizeCurrency(item);
+        if (code.isNotEmpty) codes.add(code);
+      }
+    }
+
+    addAll(_configNegocio['checkout_currencies']);
+    addAll(_configNegocio['currencies']);
+    for (final code in _exchangeRates.keys) {
+      if (code.isNotEmpty) codes.add(code);
+    }
+    if (_quoteCurrency.isNotEmpty) codes.add(_quoteCurrency);
+    if (_config.currency.isNotEmpty) codes.add(_config.currency);
+    final list = codes.toList()
+      ..sort((a, b) {
+        if (a == _baseCurrency) return -1;
+        if (b == _baseCurrency) return 1;
+        return a.compareTo(b);
+      });
+    return list;
+  }
+
+  String get _tariffCurrency {
+    final selected = _config.currency.trim().toUpperCase();
+    if (selected.isNotEmpty) return selected;
+    return _baseCurrency.isEmpty ? 'COP' : _baseCurrency;
+  }
+
+  double? _rateFor(String currency) {
+    final code = _normalizeCurrency(currency);
+    if (code.isEmpty) return null;
+    if (code == _baseCurrency) return 1;
+    final configured = _exchangeRates[code];
+    if (configured != null && configured > 0) return configured;
+    if (code == _quoteCurrency && _exchangeRateValue != null && _exchangeRateValue! > 0) {
+      return _exchangeRateValue;
+    }
+    return null;
+  }
+
+  double? _convertAmount(double amount, String from, String to) {
+    final source = _normalizeCurrency(from);
+    final target = _normalizeCurrency(to);
+    if (source.isEmpty || target.isEmpty) return null;
+    if (source == target) return amount;
+    final fromRate = _rateFor(source);
+    final toRate = _rateFor(target);
+    if (fromRate == null || toRate == null || fromRate <= 0 || toRate <= 0) {
+      return null;
+    }
+    final inBase = source == _baseCurrency ? amount : amount / fromRate;
+    return target == _baseCurrency ? inBase : inBase * toRate;
+  }
+
+  String _formatMoney(double value, String currency) {
+    final code = _normalizeCurrency(currency);
+    final digits = code == 'COP' ? 0 : 2;
+    final format = NumberFormat.decimalPattern('es_CO')
+      ..minimumFractionDigits = digits
+      ..maximumFractionDigits = digits;
+    return '${format.format(value)} $code';
+  }
+
+  double _previewAmount() {
+    final draft = _draft();
+    if (draft.pricingType == DeliveryConfig.pricingFixed) return draft.fixedPrice;
+    if (draft.pricingType == DeliveryConfig.pricingDistance) {
+      return draft.distance.basePrice;
+    }
+    if (draft.zones.isNotEmpty) return draft.zones.first.price;
+    return 0;
+  }
+
   DeliveryConfig _draft() {
     return _config.copyWith(
+      currency: _tariffCurrency,
       fixedPrice: double.tryParse(_fixedPrice.text.replaceAll(',', '.')) ?? 0,
       distance: DeliveryDistanceConfig(
         basePrice: double.tryParse(_basePrice.text.replaceAll(',', '.')) ?? 0,
@@ -148,15 +327,21 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
   Future<void> _save(DeliveryConfig next, {bool silent = false}) async {
     final errors = next.enabled ? next.validate() : const <String>[];
     if (errors.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errors.first)),
-      );
+      if (!silent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errors.first)),
+        );
+      }
       return;
     }
-    setState(() {
-      _saving = true;
+    if (!silent) {
+      setState(() {
+        _saving = true;
+        _config = next;
+      });
+    } else {
       _config = next;
-    });
+    }
     try {
       final mergedConfig = next.mergeIntoConfigNegocio(_configNegocio);
       final branding = Map<String, dynamic>.from(_branding);
@@ -255,6 +440,84 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                 ] else ...[
                   const SizedBox(height: 16),
                   Text(
+                    'Moneda de las tarifas',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                  const SizedBox(height: 8),
+                  _card(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: _acceptedCurrencies().contains(_tariffCurrency)
+                              ? _tariffCurrency
+                              : (_acceptedCurrencies().isNotEmpty
+                                  ? _acceptedCurrencies().first
+                                  : _tariffCurrency),
+                          decoration: InputDecoration(
+                            labelText: 'Las tarifas están en',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          items: _acceptedCurrencies()
+                              .map(
+                                (code) => DropdownMenuItem(
+                                  value: code,
+                                  child: Text(
+                                    code == _baseCurrency ? '$code (principal)' : code,
+                                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _saving
+                              ? null
+                              : (next) {
+                                  if (next == null) return;
+                                  final updated = _draft().copyWith(currency: next);
+                                  setState(() => _config = updated);
+                                  unawaited(_save(updated, silent: true));
+                                },
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'El checkout convierte este monto a cada moneda que aceptas, según la tasa configurada.',
+                          style: GoogleFonts.poppins(fontSize: 13, color: _muted, height: 1.35),
+                        ),
+                        if (_previewAmount() > 0) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            'Equivalente aproximado',
+                            style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 13),
+                          ),
+                          const SizedBox(height: 6),
+                          ..._acceptedCurrencies().map((code) {
+                            final converted = _convertAmount(
+                              _previewAmount(),
+                              _tariffCurrency,
+                              code,
+                            );
+                            final label = converted == null
+                                ? 'Sin tasa para $code'
+                                : _formatMoney(converted, code);
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text(
+                                '• $label',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  color: const Color(0xFF374151),
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
                     '¿Cómo calcular el delivery?',
                     style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15),
                   ),
@@ -276,6 +539,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                         label: 'Delivery cuesta',
                         hint: '3',
                         helper: 'Todos los pedidos de delivery tendrán este costo.',
+                        suffix: _tariffCurrency,
                       ),
                     ),
                   if (_config.pricingType == DeliveryConfig.pricingDistance)
@@ -286,6 +550,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                             controller: _basePrice,
                             label: 'Precio base',
                             hint: '2',
+                            suffix: _tariffCurrency,
                           ),
                           const SizedBox(height: 10),
                           _moneyField(
@@ -298,6 +563,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                             controller: _extraKm,
                             label: 'Costo adicional por km',
                             hint: '0.50',
+                            suffix: _tariffCurrency,
                           ),
                         ],
                       ),
@@ -356,6 +622,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                                 controller: zone.price,
                                 label: 'Precio',
                                 hint: '2',
+                                suffix: _tariffCurrency,
                               ),
                             ],
                           ),
@@ -365,16 +632,19 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                     OutlinedButton.icon(
                       onPressed: () => setState(() {
                         final last = _zones.isEmpty ? 0.0 : double.tryParse(_zones.last.maxKm.text) ?? 0;
-                        _zones.add(
-                          _ZoneControllers.fromZone(
-                            DeliveryZone(
-                              name: 'Zona ${_zones.length + 1}',
-                              minDistance: last,
-                              maxDistance: last + 5,
-                              price: 0,
-                            ),
+                        final created = _ZoneControllers.fromZone(
+                          DeliveryZone(
+                            name: 'Zona ${_zones.length + 1}',
+                            minDistance: last,
+                            maxDistance: last + 5,
+                            price: 0,
                           ),
                         );
+                        _zones.add(created);
+                        _listen(created.name);
+                        _listen(created.minKm);
+                        _listen(created.maxKm);
+                        _listen(created.price);
                       }),
                       icon: const Icon(Icons.add_rounded),
                       label: const Text('Agregar zona'),
@@ -393,15 +663,18 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                           ),
                           value: _config.freeDeliveryEnabled,
                           activeThumbColor: _purple,
-                          onChanged: (value) => setState(
-                            () => _config = _config.copyWith(freeDeliveryEnabled: value),
-                          ),
+                          onChanged: (value) {
+                            final next = _draft().copyWith(freeDeliveryEnabled: value);
+                            setState(() => _config = next);
+                            unawaited(_save(next, silent: true));
+                          },
                         ),
                         if (_config.freeDeliveryEnabled)
                           _moneyField(
                             controller: _freeMinimum,
                             label: 'Pedido mayor a',
                             hint: '20',
+                            suffix: _tariffCurrency,
                           ),
                       ],
                     ),
@@ -415,6 +688,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
                           label: 'Mínimo de compra para delivery',
                           hint: '5',
                           helper: '0 = aceptar cualquier monto.',
+                          suffix: _tariffCurrency,
                         ),
                         const SizedBox(height: 10),
                         Row(
@@ -492,9 +766,11 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
       value: value,
       groupValue: _config.pricingType,
       activeColor: _purple,
-      onChanged: (next) {
+                    onChanged: (next) {
         if (next == null) return;
-        setState(() => _config = _config.copyWith(pricingType: next));
+        final updated = _draft().copyWith(pricingType: next);
+        setState(() => _config = updated);
+        unawaited(_save(updated, silent: true));
       },
     );
   }
@@ -523,6 +799,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
     required String label,
     required String hint,
     String? helper,
+    String? suffix,
   }) {
     return TextField(
       controller: controller,
@@ -532,6 +809,7 @@ class _DeliverySettingsScreenState extends State<DeliverySettingsScreen> {
         labelText: label,
         hintText: hint,
         helperText: helper,
+        suffixText: suffix,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       ),
     );

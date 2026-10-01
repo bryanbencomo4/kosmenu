@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { extractPublicCheckoutExchange } from '../app/api/_lib/checkout-exchange-config';
 import {
+  convertAmountBetweenCurrencies,
   derivedExchangeRateForCurrency,
   resolveCheckoutCurrencyRate,
   resolveCheckoutCurrencySource,
@@ -126,5 +127,40 @@ describe('resolveCheckoutCurrencySource', () => {
         },
       }),
     ).toBe('p2p_binance');
+  });
+});
+
+describe('convertAmountBetweenCurrencies', () => {
+  const checkoutExchange = {
+    exchangeRates: { USD: 1 / 4100, VES: 976.9 / 3257.79 },
+    exchangeRateModes: { USD: 'manual', VES: 'manual' },
+    exchangeRateSources: { USD: 'google', VES: 'bcv' },
+  };
+
+  it('keeps the same amount when currencies match', () => {
+    expect(
+      convertAmountBetweenCurrencies(5000, 'COP', 'COP', {
+        baseCurrency: 'COP',
+        checkoutExchange,
+      }),
+    ).toBe(5000);
+  });
+
+  it('converts a USD tariff into COP base using quote units per base', () => {
+    expect(
+      convertAmountBetweenCurrencies(2, 'USD', 'COP', {
+        baseCurrency: 'COP',
+        checkoutExchange,
+      }),
+    ).toBeCloseTo(8200, 4);
+  });
+
+  it('converts a COP tariff into VES for checkout display', () => {
+    expect(
+      convertAmountBetweenCurrencies(5000, 'COP', 'VES', {
+        baseCurrency: 'COP',
+        checkoutExchange,
+      }),
+    ).toBeCloseTo(5000 * (976.9 / 3257.79), 4);
   });
 });

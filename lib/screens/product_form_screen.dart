@@ -68,6 +68,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   bool _isUploadingImage = false;
   bool _isLoadingAiCredits = false;
   bool _isGeneratingDescription = false;
+  bool _isGeneratingAiImage = false;
+  String _aiImageStatus = 'none';
+  Timer? _aiImagePollTimer;
   double _aiCreditsBalance = 0;
   final AiImageService _aiImageService = const AiImageService();
   final ProductDescriptionAiService _productDescriptionAiService =
@@ -93,13 +96,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         widget.initialCategoryId ??
         (widget.categories.isNotEmpty ? widget.categories.first.id : null);
     _remoteImageUrl = product?.imagenUrl;
+    _aiImageStatus = product?.aiImageStatus ?? 'none';
+    _isGeneratingAiImage = product?.hasAiImageInProgress ?? false;
     _loadAiCredits();
     _loadBusinessLogo();
     _loadPricingConfig();
+    if (product != null && product.hasAiImageInProgress) {
+      _startAiImagePolling(product.id);
+    }
   }
 
   @override
   void dispose() {
+    _aiImagePollTimer?.cancel();
     _nameController.dispose();
     _descriptionController.dispose();
     _priceController.dispose();
@@ -763,6 +772,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _showMessage('Guarda el producto primero para generar su imagen con IA.');
       return;
     }
+    if (_isGeneratingAiImage) {
+      return;
+    }
 
     final comercioId = SupabaseConfig.currentComercioId.trim();
     if (comercioId.isEmpty) {
@@ -801,6 +813,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       return;
     }
 
+    setState(() {
+      _isGeneratingAiImage = true;
+      _aiImageStatus = 'pending';
+    });
+    _startAiImagePolling(product.id);
+
     try {
       final response = await _aiImageService.enqueueProductImage(
         comercioId: comercioId,
@@ -816,20 +834,95 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       );
 
       if (!mounted) return;
+      final imageUrl = response['image_url']?.toString().trim() ?? '';
+      final status = response['ai_image_status']?.toString().trim() ?? '';
+      if (imageUrl.isNotEmpty && isAiImageGenerationSettled(status)) {
+        _applyAiImageSnapshot(imageUrl: imageUrl, status: status);
+      } else if (!isAiImageGenerationSettled(status)) {
+        await _pollAiImageOnce(product.id);
+      }
+
+      if (!mounted) return;
       final message = response['message']?.toString().trim();
       _showMessage(
         message?.isNotEmpty == true
-            ? message!
+            ? formatAiImageUserMessage(message)
             : 'Imagen IA en cola para ${product.nombre}.',
       );
-      if (mounted) {
-        setState(() {
-          _aiCreditsBalance = (_aiCreditsBalance - 1).clamp(0, double.infinity);
-        });
-      }
+      unawaited(_loadAiCredits());
     } catch (error) {
       if (!mounted) return;
-      _showMessage('No se pudo generar la imagen IA: $error');
+      await _pollAiImageOnce(product.id);
+      if (!mounted) return;
+      if (_aiImageStatus == 'failed') {
+        _showMessage(
+          formatAiImageUserMessage(
+            error.toString().replaceFirst('Bad state: ', ''),
+          ),
+        );
+        return;
+      }
+      _showMessage(
+        'La imagen se está generando. Quédate en esta pantalla, la foto aparecerá al terminar.',
+      );
+    }
+  }
+
+  void _applyAiImageSnapshot({required String imageUrl, required String status}) {
+    _aiImagePollTimer?.cancel();
+    _aiImagePollTimer = null;
+    setState(() {
+      _remoteImageUrl = imageUrl;
+      _pickedImage = null;
+      _aiImageStatus = status;
+      _isGeneratingAiImage = !isAiImageGenerationSettled(status);
+    });
+  }
+
+  void _startAiImagePolling(String productId) {
+    _aiImagePollTimer?.cancel();
+    _aiImagePollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      unawaited(_pollAiImageOnce(productId));
+    });
+  }
+
+  Future<void> _pollAiImageOnce(String productId) async {
+    if (!mounted || productId.trim().isEmpty) return;
+    try {
+      final row = await Supabase.instance.client
+          .from('productos')
+          .select(
+            'imagen_url, ai_image_status, ai_image_error_message, imagen_source_type',
+          )
+          .eq('id', productId)
+          .maybeSingle();
+      if (!mounted || row == null) return;
+      final status = row['ai_image_status']?.toString() ?? 'none';
+      final imageUrl = row['imagen_url']?.toString().trim() ?? '';
+      if (isAiImageGenerationSettled(status)) {
+        _aiImagePollTimer?.cancel();
+        _aiImagePollTimer = null;
+        setState(() {
+          if (imageUrl.isNotEmpty) {
+            _remoteImageUrl = imageUrl;
+            _pickedImage = null;
+          }
+          _aiImageStatus = status;
+          _isGeneratingAiImage = false;
+        });
+        if (status == 'failed') {
+          final errorMessage = row['ai_image_error_message']?.toString().trim();
+          if (errorMessage != null && errorMessage.isNotEmpty) {
+            _showMessage(formatAiImageUserMessage(errorMessage));
+          }
+        }
+        return;
+      }
+      if (!_isGeneratingAiImage) {
+        setState(() => _isGeneratingAiImage = true);
+      }
+    } catch (_) {
+      // Keep the overlay while the worker finishes.
     }
   }
 
@@ -1116,6 +1209,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   canGenerateAiImage: _canGenerateAiImage,
                   isSaving: _isSaving,
                   isUploadingImage: _isUploadingImage,
+                  isGeneratingAiImage: _isGeneratingAiImage,
                   isGeneratingDescription: _isGeneratingDescription,
                   isLoadingAiCredits: _isLoadingAiCredits,
                   onTapImageAction: _showImageOptions,
@@ -1245,6 +1339,7 @@ class _ImagePanel extends StatelessWidget {
     required this.canGenerateAiImage,
     required this.isSaving,
     required this.isUploadingImage,
+    required this.isGeneratingAiImage,
     required this.isGeneratingDescription,
     required this.isLoadingAiCredits,
     required this.onTapImageAction,
@@ -1259,6 +1354,7 @@ class _ImagePanel extends StatelessWidget {
   final bool canGenerateAiImage;
   final bool isSaving;
   final bool isUploadingImage;
+  final bool isGeneratingAiImage;
   final bool isGeneratingDescription;
   final bool isLoadingAiCredits;
   final VoidCallback onTapImageAction;
@@ -1415,6 +1511,13 @@ class _ImagePanel extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (isGeneratingAiImage)
+                  const Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                      child: AiImageGeneratingScrim(),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1461,12 +1564,22 @@ class _ImagePanel extends StatelessWidget {
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton.icon(
-                              onPressed: (!canGenerateAiImage || isSaving)
+                              onPressed: (!canGenerateAiImage || isSaving || isGeneratingAiImage)
                                   ? null
                                   : onGenerateAiImageAction,
-                              icon: const Icon(Icons.auto_awesome),
+                              icon: isGeneratingAiImage
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.auto_awesome),
                               label: Text(
-                                canGenerateAiImage
+                                isGeneratingAiImage
+                                    ? 'Generando imagen...'
+                                    : canGenerateAiImage
                                     ? 'Mejorar imagen'
                                     : 'Guarda para imagen IA',
                               ),
@@ -1509,12 +1622,22 @@ class _ImagePanel extends StatelessWidget {
                       children: [
                         Expanded(
                           child: FilledButton.icon(
-                            onPressed: (!canGenerateAiImage || isSaving)
+                            onPressed: (!canGenerateAiImage || isSaving || isGeneratingAiImage)
                                 ? null
                                 : onGenerateAiImageAction,
-                            icon: const Icon(Icons.auto_awesome),
+                            icon: isGeneratingAiImage
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.auto_awesome),
                             label: Text(
-                              canGenerateAiImage
+                              isGeneratingAiImage
+                                  ? 'Generando imagen...'
+                                  : canGenerateAiImage
                                   ? 'Mejorar imagen'
                                   : 'Guarda para imagen IA',
                             ),

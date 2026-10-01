@@ -215,6 +215,45 @@ class _ImagePreviewEmpty extends StatelessWidget {
   }
 }
 
+class AiImageGeneratingScrim extends StatelessWidget {
+  const AiImageGeneratingScrim({super.key, this.compact = false});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black.withValues(alpha: 0.45),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: compact ? 20 : 28,
+              height: compact ? 20 : 28,
+              child: const CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: Colors.white,
+              ),
+            ),
+            if (!compact) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'Generando imagen...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Returns `null` if cancelled, empty string for auto prompt, or custom text.
 Future<String?> showAiImagePromptDialog(
   BuildContext context, {

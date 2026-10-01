@@ -12,12 +12,31 @@ void main() {
       expect(isAiImageOnboardingLimitMessage(message), isTrue);
     });
 
+    test('maps already-queued retry without charging again', () {
+      expect(
+        formatAiImageUserMessage('already_queued'),
+        contains('sin cobrar otro crédito'),
+      );
+    });
+
     test('keeps spanish soft-skip message readable', () {
       const raw =
           'La generacion de imagenes IA ya se uso una vez en onboarding. El menu se importo bien; no se vuelven a encolar imagenes.';
       expect(isAiImageOnboardingLimitMessage(raw), isTrue);
       final message = formatAiImageUserMessage(raw);
       expect(message, contains('una vez durante el onboarding'));
+    });
+  });
+
+  group('isAiImageGenerationSettled', () {
+    test('completed and failed are settled', () {
+      expect(isAiImageGenerationSettled('completed'), isTrue);
+      expect(isAiImageGenerationSettled('failed'), isTrue);
+    });
+
+    test('pending and processing are not settled', () {
+      expect(isAiImageGenerationSettled('pending'), isFalse);
+      expect(isAiImageGenerationSettled('processing'), isFalse);
     });
   });
 }

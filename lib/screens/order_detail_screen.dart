@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/delivery_courier_service.dart';
@@ -429,6 +430,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       businessLongitude: previous?.businessLongitude,
       businessLogoUrl: previous?.businessLogoUrl,
       delegatedCourierAlias: previous?.delegatedCourierAlias,
+      moneda: previous?.moneda,
       history: previous?.history ?? const <_HistoryOrderViewData>[],
     );
 
@@ -509,6 +511,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     double? businessLongitude = _cachedOrderData?.businessLongitude;
     String? businessLogoUrl = _cachedOrderData?.businessLogoUrl;
     String? delegatedCourierAlias = _cachedOrderData?.delegatedCourierAlias;
+    String? moneda = _cachedOrderData?.moneda;
     var history = _cachedOrderData?.history ?? const <_HistoryOrderViewData>[];
 
     Future<void> loadComercio() async {
@@ -516,7 +519,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       try {
         final comercioRow = await client
             .from('comercios')
-            .select('nombre,latitud,longitud,logo_url')
+            .select('nombre,latitud,longitud,logo_url,moneda')
             .eq('id', pedido.comercioId)
             .maybeSingle();
         final comercioMap = _asMap(comercioRow);
@@ -526,6 +529,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         businessLongitude = _toDoubleOrNull(comercioMap['longitud']);
         businessLogoUrl =
             _resolveComercioLogoUrl(comercioMap) ?? businessLogoUrl;
+        final loadedMoneda = comercioMap['moneda']?.toString().trim() ?? '';
+        if (loadedMoneda.isNotEmpty) moneda = loadedMoneda;
       } catch (_) {
         // Keep critical payload on secondary failures.
       }
@@ -577,6 +582,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         businessLongitude: businessLongitude,
         businessLogoUrl: businessLogoUrl,
         delegatedCourierAlias: delegatedCourierAlias,
+        moneda: moneda,
         history: history,
       );
     });
@@ -958,7 +964,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     required String status,
     required String trackingUrl,
   }) {
-    final resolvedTrackingUrl = AppLinks.customerOrderTrackingUrl(
+    final resolvedTrackingUrl = AppLinks.merchantOrderShareUrl(
       orderId: widget.orderId,
       trackingUrl: trackingUrl,
     );
@@ -1804,11 +1810,38 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
-  String _formatAmount(double value) {
-    final isWhole = value == value.roundToDouble();
-    return isWhole
-        ? '\$${value.toStringAsFixed(0)}'
-        : '\$${value.toStringAsFixed(2)}';
+  String _orderCurrency(PedidoModel pedido, {String? fallback}) {
+    final base = (pedido.detalles['moneda_base'] ?? '').toString().trim();
+    if (base.isNotEmpty) return base.toUpperCase();
+    final shop = (fallback ?? '').trim();
+    if (shop.isNotEmpty) return shop.toUpperCase();
+    final checkout = (pedido.detalles['moneda_checkout'] ?? '')
+        .toString()
+        .trim();
+    if (checkout.isNotEmpty) return checkout.toUpperCase();
+    return 'COP';
+  }
+
+  String _formatAmount(double value, [String? currency]) {
+    final code = (currency ?? 'COP').trim().toUpperCase();
+    final normalized = code.isEmpty || code == 'SIN MONEDA' ? 'COP' : code;
+    final digits = normalized == 'COP' ? 0 : 2;
+    final format = NumberFormat.decimalPattern('es_CO')
+      ..minimumFractionDigits = digits
+      ..maximumFractionDigits = digits;
+    return '${format.format(value)} $normalized';
+  }
+
+  double _deliveryCostOf(PedidoModel pedido) {
+    return pedido.deliveryCost;
+  }
+
+  double _subtotalOf(PedidoModel pedido, double total) {
+    final stored = _toDoubleOrNull(pedido.detalles['subtotal']);
+    if (stored != null && stored > 0) return stored;
+    final delivery = _deliveryCostOf(pedido);
+    final inferred = total - delivery;
+    return inferred > 0 ? inferred : total;
   }
 
   String _statusLabel(String? estado) {
@@ -2298,7 +2331,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   isDelivery: isDeliveryOrder,
                   paymentTitle: _kitchenPaymentTitle(paymentMethod),
                   paymentSubtitle: _kitchenPaymentSubtitle(paymentMethod),
-                  totalLabel: _formatAmount(total),
+                  totalLabel: _formatAmount(
+                    total,
+                    _orderCurrency(pedido, fallback: data.moneda),
+                  ),
+                  deliveryLabel: isDeliveryOrder
+                      ? (_deliveryCostOf(pedido) <= 0
+                          ? 'Envío gratis'
+                          : 'Envío ${_formatAmount(_deliveryCostOf(pedido), _orderCurrency(pedido, fallback: data.moneda))}')
+                      : null,
                   customerName: (customerName ?? '').trim(),
                   onWhatsapp: phone.isEmpty || !whatsappNotificationsEnabled
                       ? null
@@ -2528,6 +2569,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
                 final pedido = data.pedido;
                 final total = pedido.total ?? 0.0;
+                final currency = _orderCurrency(pedido, fallback: data.moneda);
+                final deliveryCost = _deliveryCostOf(pedido);
+                final subtotal = _subtotalOf(pedido, total);
                 final customerName = pedido.nombreCliente?.trim();
                 final customerEmail = pedido.clienteEmail?.trim();
                 final customerPhone = pedido.clientePhone?.trim();
@@ -3241,7 +3285,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                           ),
                                           const SizedBox(width: 6),
                                           Text(
-                                            _formatAmount(total),
+                                            _formatAmount(total, currency),
                                             style: GoogleFonts.manrope(
                                               color: text.withValues(
                                                 alpha: 0.82,
@@ -4432,7 +4476,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                             ),
                                           ),
                                           Text(
-                                            _formatAmount(item.total),
+                                            _formatAmount(item.total, currency),
                                             style: GoogleFonts.manrope(
                                               color: success,
                                               fontWeight: FontWeight.w700,
@@ -4446,6 +4490,53 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                 Row(
                                   children: [
                                     Text(
+                                      'Subtotal',
+                                      style: GoogleFonts.manrope(
+                                        color: muted,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      _formatAmount(subtotal, currency),
+                                      style: GoogleFonts.manrope(
+                                        color: text,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (isDeliveryOrder) ...[
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'Delivery',
+                                        style: GoogleFonts.manrope(
+                                          color: muted,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        deliveryCost <= 0
+                                            ? 'Gratis'
+                                            : _formatAmount(
+                                                deliveryCost,
+                                                currency,
+                                              ),
+                                        style: GoogleFonts.manrope(
+                                          color: text,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    Text(
                                       'Total de la orden',
                                       style: GoogleFonts.manrope(
                                         color: muted,
@@ -4454,7 +4545,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                     ),
                                     const Spacer(),
                                     Text(
-                                      _formatAmount(total),
+                                      _formatAmount(total, currency),
                                       style: GoogleFonts.manrope(
                                         color: text,
                                         fontSize: 20,
@@ -4713,7 +4804,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                               ),
                                             ),
                                             Text(
-                                              _formatAmount(historyItem.total),
+                                              _formatAmount(
+                                                historyItem.total,
+                                                currency,
+                                              ),
                                               style: GoogleFonts.manrope(
                                                 color: success,
                                                 fontWeight: FontWeight.w700,
@@ -5156,6 +5250,7 @@ class _OrderViewData {
     this.businessLongitude,
     this.businessLogoUrl,
     this.delegatedCourierAlias,
+    this.moneda,
     this.history = const <_HistoryOrderViewData>[],
   });
 
@@ -5165,6 +5260,7 @@ class _OrderViewData {
   final double? businessLongitude;
   final String? businessLogoUrl;
   final String? delegatedCourierAlias;
+  final String? moneda;
   final List<_HistoryOrderViewData> history;
 }
 

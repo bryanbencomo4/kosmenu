@@ -192,18 +192,9 @@ class AppLinks {
     return '$merchantAppUrl/orders/view/$encodedId$query';
   }
 
-  /// Link the diner should open: public tracker, never the merchant panel.
-  static String customerOrderTrackingUrl({
-    required String orderId,
-    String? trackingUrl,
-  }) {
-    final raw = (trackingUrl ?? '').trim();
-    if (raw.isNotEmpty) return raw;
-    return orderDetailsById(orderId);
-  }
-
-  /// WhatsApp / share URL that opens the merchant panel order, with a public
-  /// `/o/{code}` fallback encoded as `shortCode` for the order gate.
+  /// WhatsApp / share URL that both the diner and the merchant can open.
+  /// The panel route serves the shop; `shortCode` lets guests fall through
+  /// to the public `/o/{code}` tracker without a popup.
   static String merchantOrderShareUrl({
     required String orderId,
     String? trackingUrl,

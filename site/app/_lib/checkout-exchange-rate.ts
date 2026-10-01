@@ -305,3 +305,50 @@ export function resolveCheckoutCurrencySource(
     .trim()
     .toLowerCase();
 }
+
+export type ConvertAmountOptions = {
+  baseCurrency: string;
+  paymentExchangeRate?: number | null;
+  checkoutExchange: CheckoutExchangeConfigInput;
+  businessExchangeRate?: number | null;
+  businessQuoteCurrency?: string | null;
+  businessExchangeSource?: string;
+  businessExchangeMode?: string;
+  marketRates?: MarketRatesInput | null;
+};
+
+/**
+ * Converts `amount` from `fromCurrency` into `toCurrency`.
+ * Rates from `resolveCheckoutCurrencyRate` are quote units per 1 base unit.
+ */
+export function convertAmountBetweenCurrencies(
+  amount: number,
+  fromCurrency: string,
+  toCurrency: string,
+  options: ConvertAmountOptions,
+) {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  const from = normalizeCurrencyCode(fromCurrency);
+  const to = normalizeCurrencyCode(toCurrency);
+  if (from === to) return safeAmount;
+
+  const toBase = (value: number, currency: string) => {
+    const code = normalizeCurrencyCode(currency);
+    const base = normalizeCurrencyCode(options.baseCurrency);
+    if (code === base) return value;
+    const rate = resolveCheckoutCurrencyRate(code, options);
+    if (!Number.isFinite(rate) || rate <= 0) return value;
+    return value / rate;
+  };
+
+  const fromBase = (valueInBase: number, currency: string) => {
+    const code = normalizeCurrencyCode(currency);
+    const base = normalizeCurrencyCode(options.baseCurrency);
+    if (code === base) return valueInBase;
+    const rate = resolveCheckoutCurrencyRate(code, options);
+    if (!Number.isFinite(rate) || rate <= 0) return valueInBase;
+    return valueInBase * rate;
+  };
+
+  return fromBase(toBase(safeAmount, from), to);
+}

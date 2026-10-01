@@ -59,6 +59,7 @@ class DeliveryConfig {
 
   final bool enabled;
   final String pricingType;
+  final String currency;
   final double fixedPrice;
   final DeliveryDistanceConfig distance;
   final List<DeliveryZone> zones;
@@ -72,6 +73,7 @@ class DeliveryConfig {
   const DeliveryConfig({
     this.enabled = false,
     this.pricingType = pricingFixed,
+    this.currency = '',
     this.fixedPrice = 0,
     this.distance = const DeliveryDistanceConfig(),
     this.zones = const [],
@@ -116,6 +118,13 @@ class DeliveryConfig {
     return pricingFixed;
   }
 
+  static String _readCurrency(dynamic raw) {
+    final value = '${raw ?? ''}'.trim().toUpperCase();
+    if (value.isEmpty || value == 'SIN MONEDA') return '';
+    if (!RegExp(r'^[A-Z]{3,8}$').hasMatch(value)) return '';
+    return value;
+  }
+
   factory DeliveryConfig.fromConfigNegocio(dynamic raw) {
     final root = _asMap(raw);
     final nested = _asMap(root['delivery_config']).isNotEmpty
@@ -153,6 +162,7 @@ class DeliveryConfig {
     return DeliveryConfig(
       enabled: _readBool(nested['enabled'], false),
       pricingType: _pricingType(nested['pricing_type'] ?? nested['pricingType']),
+      currency: _readCurrency(nested['currency'] ?? nested['moneda']),
       fixedPrice: _nonNegative(nested['fixed_price'] ?? nested['fixedPrice'], 0),
       distance: DeliveryDistanceConfig(
         basePrice: _nonNegative(distance['base_price'] ?? distance['basePrice'], 0),
@@ -227,18 +237,22 @@ class DeliveryConfig {
 
   String summary() {
     if (!enabled) return 'Delivery inactivo. El checkout no cambia.';
+    final money = currency.isEmpty ? '' : ' $currency';
     final parts = <String>['Delivery activo', 'Método: $pricingLabel'];
+    if (currency.isNotEmpty) {
+      parts.add('Moneda de tarifas: $currency');
+    }
     if (pricingType == pricingFixed) {
-      parts.add('Precio: $fixedPrice');
+      parts.add('Precio: $fixedPrice$money');
     } else if (pricingType == pricingDistance) {
-      parts.add('Base: ${distance.basePrice}');
+      parts.add('Base: ${distance.basePrice}$money');
       parts.add('Incluye: ${distance.includedKm} km');
-      parts.add('Extra: ${distance.extraPricePerKm}/km');
+      parts.add('Extra: ${distance.extraPricePerKm}$money/km');
     } else if (pricingType == pricingZones) {
       parts.add('${zones.length} zona${zones.length == 1 ? '' : 's'}');
     }
     if (freeDeliveryEnabled) {
-      parts.add('Gratis desde $freeDeliveryMinimum');
+      parts.add('Gratis desde $freeDeliveryMinimum$money');
     }
     return parts.join('\n');
   }
@@ -246,6 +260,7 @@ class DeliveryConfig {
   DeliveryConfig copyWith({
     bool? enabled,
     String? pricingType,
+    String? currency,
     double? fixedPrice,
     DeliveryDistanceConfig? distance,
     List<DeliveryZone>? zones,
@@ -259,6 +274,7 @@ class DeliveryConfig {
     return DeliveryConfig(
       enabled: enabled ?? this.enabled,
       pricingType: pricingType ?? this.pricingType,
+      currency: currency ?? this.currency,
       fixedPrice: fixedPrice ?? this.fixedPrice,
       distance: distance ?? this.distance,
       zones: zones ?? this.zones,
@@ -274,6 +290,7 @@ class DeliveryConfig {
   Map<String, dynamic> toJson() => {
         'enabled': enabled,
         'pricing_type': pricingType,
+        if (currency.isNotEmpty) 'currency': currency,
         'fixed_price': fixedPrice,
         'distance_config': distance.toJson(),
         'zones': zones.map((zone) => zone.toJson()).toList(),

@@ -162,6 +162,13 @@ function buildWhatsappHref(value?: string | null, message?: string) {
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 
+function openWhatsappSameTab(href?: string | null) {
+  const url = (href ?? '').trim();
+  if (!url) return false;
+  window.location.assign(url);
+  return true;
+}
+
 function safeNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -519,16 +526,19 @@ export default function DeliveryInvitePage() {
         return;
       }
       setPayload(data.data as InvitePayload);
-      if (action === 'accept' && clientEnRouteWhatsappHref) {
-        setNotice('Pedido aceptado. Avisa al cliente por WhatsApp con el botón del cliente.');
-      }
       if (action === 'arrived') {
         const nextStatus = normalizeStatus((data.data as InvitePayload)?.invitation?.status);
         setArrivedOptimistic(nextStatus === 'arrived' || nextStatus === 'completed');
-        if (clientArrivalWhatsappHref) {
-          setNotice('Llegada marcada. Avisa al cliente por WhatsApp con el botón del cliente.');
-        }
       }
+      const whatsappHref = action === 'accept' ? clientEnRouteWhatsappHref : clientArrivalWhatsappHref;
+      if (openWhatsappSameTab(whatsappHref)) {
+        return;
+      }
+      setNotice(
+        action === 'accept'
+          ? 'Pedido aceptado. No hay WhatsApp del cliente para avisar.'
+          : 'Llegada marcada. No hay WhatsApp del cliente para avisar.',
+      );
     } catch {
       if (action === 'arrived') {
         setArrivedOptimistic(false);

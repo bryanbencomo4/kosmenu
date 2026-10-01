@@ -21,6 +21,8 @@ export type DeliveryZone = {
 export type DeliveryConfig = {
   enabled: boolean;
   pricingType: DeliveryPricingType;
+  /** ISO currency the tariff amounts are expressed in. Empty = shop base currency. */
+  currency: string;
   fixedPrice: number;
   distance: DeliveryDistanceConfig;
   zones: DeliveryZone[];
@@ -34,6 +36,7 @@ export type DeliveryConfig = {
 export const DEFAULT_DELIVERY_CONFIG: DeliveryConfig = {
   enabled: false,
   pricingType: 'fixed',
+  currency: '',
   fixedPrice: 0,
   distance: {
     basePrice: 0,
@@ -87,6 +90,13 @@ function readPricingType(value: unknown): DeliveryPricingType {
     return raw;
   }
   return DEFAULT_DELIVERY_CONFIG.pricingType;
+}
+
+function readCurrency(value: unknown): string {
+  const code = String(value ?? '').trim().toUpperCase();
+  if (!code || code === 'SIN MONEDA') return '';
+  if (!/^[A-Z]{3,8}$/.test(code)) return '';
+  return code;
 }
 
 function parseDistance(raw: unknown): DeliveryDistanceConfig {
@@ -145,6 +155,7 @@ export function parseDeliveryConfig(raw: unknown): DeliveryConfig {
   return {
     enabled: readBool(source.enabled, DEFAULT_DELIVERY_CONFIG.enabled),
     pricingType: readPricingType(source.pricing_type ?? source.pricingType),
+    currency: readCurrency(source.currency ?? source.moneda),
     fixedPrice: readNonNegative(source.fixed_price ?? source.fixedPrice, DEFAULT_DELIVERY_CONFIG.fixedPrice),
     distance: parseDistance(source.distance_config ?? source.distance),
     zones: parseZones(source.zones),
@@ -176,6 +187,7 @@ export function deliveryConfigToJson(config: DeliveryConfig) {
   return {
     enabled: config.enabled,
     pricing_type: config.pricingType,
+    currency: config.currency || undefined,
     fixed_price: config.fixedPrice,
     distance_config: {
       base_price: config.distance.basePrice,
@@ -299,6 +311,8 @@ export function quoteDeliveryFee(input: {
   origin?: { lat: number; lng: number } | null;
   destination?: { lat: number; lng: number } | null;
   fallbackFee?: number;
+  /** Convert a tariff-currency amount into shop base currency. */
+  convertToBase?: (amountInTariffCurrency: number) => number;
 }): DeliveryQuote {
   const fallback = Math.max(0, Number.isFinite(input.fallbackFee) ? Number(input.fallbackFee) : 0);
   try {
@@ -313,6 +327,25 @@ export function quoteDeliveryFee(input: {
   }
 }
 
+function applyTariffConversion(
+  amount: number,
+  convertToBase?: (amountInTariffCurrency: number) => number,
+) {
+  const safe = Math.max(0, Number.isFinite(amount) ? amount : 0);
+  if (!convertToBase) return roundMoney(safe);
+  try {
+    const converted = convertToBase(safe);
+    return roundMoney(Number.isFinite(converted) ? converted : safe);
+  } catch {
+    return roundMoney(safe);
+  }
+}
+
+function moneyLabel(amount: number, currency: string) {
+  const code = currency.trim();
+  return code ? `${roundMoney(amount)} ${code}` : `${roundMoney(amount)}`;
+}
+
 function computeDeliveryQuote(
   input: {
     config: unknown;
@@ -320,11 +353,13 @@ function computeDeliveryQuote(
     subtotal: number;
     origin?: { lat: number; lng: number } | null;
     destination?: { lat: number; lng: number } | null;
+    convertToBase?: (amountInTariffCurrency: number) => number;
   },
   fallback: number,
 ): DeliveryQuote {
   const config = parseDeliveryConfig(input.config);
   const distanceKm = haversineKm(input.origin, input.destination);
+  const toBase = (amount: number) => applyTariffConversion(amount, input.convertToBase);
 
   if (!config.enabled) {
     return fallbackDeliveryQuote(input.isDelivery, fallback, distanceKm);
@@ -344,14 +379,15 @@ function computeDeliveryQuote(
     };
   }
 
-  if (config.minOrder > 0 && input.subtotal < config.minOrder) {
+  const minOrderBase = toBase(config.minOrder);
+  if (config.minOrder > 0 && input.subtotal < minOrderBase) {
     return {
       applied: true,
       fee: 0,
       free: false,
       method: config.pricingType,
       blocked: true,
-      blockReason: `El delivery está disponible desde ${config.minOrder}.`,
+      blockReason: `El delivery está disponible desde ${moneyLabel(config.minOrder, config.currency)}.`,
       distanceKm,
       snapshot,
     };
@@ -361,9 +397,9 @@ function computeDeliveryQuote(
   if (config.pricingType === 'free') {
     fee = 0;
   } else if (config.pricingType === 'fixed') {
-    fee = roundMoney(config.fixedPrice);
+    fee = toBase(config.fixedPrice);
   } else if (config.pricingType === 'distance') {
-    fee = feeForDistance(config, distanceKm ?? 0);
+    fee = toBase(feeForDistance(config, distanceKm ?? 0));
   } else {
     if (config.zones.length === 0) {
       return {
@@ -390,12 +426,13 @@ function computeDeliveryQuote(
         snapshot,
       };
     }
-    fee = zoned.fee;
+    fee = toBase(zoned.fee);
   }
 
+  const freeMinimumBase = toBase(config.freeDelivery.minimumOrder);
   const free =
     config.pricingType === 'free' ||
-    (config.freeDelivery.enabled && input.subtotal >= config.freeDelivery.minimumOrder && config.freeDelivery.minimumOrder > 0);
+    (config.freeDelivery.enabled && input.subtotal >= freeMinimumBase && config.freeDelivery.minimumOrder > 0);
 
   return {
     applied: true,

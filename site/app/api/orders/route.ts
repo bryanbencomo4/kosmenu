@@ -23,6 +23,12 @@ import { canSendOrderEmail, sendOrderEmail } from '../_lib/send-order-email';
 import { getServiceSupabaseClient } from '../_lib/supabase-server';
 import { evaluateBusinessOrdering } from '../_lib/business-hours';
 import { convertOrderAmount, normalizeOrderCurrency } from '../_lib/order-currency';
+import { extractPublicCheckoutExchange } from '../_lib/checkout-exchange-config';
+import {
+  convertAmountBetweenCurrencies,
+  parseExchangeRate,
+  type MarketRatesInput,
+} from '../../_lib/checkout-exchange-rate';
 import { createOrderShortLink } from '../_lib/order-short-links';
 import {
   buildOrderItemSnapshots,
@@ -30,7 +36,7 @@ import {
   type SnapshotProductRow,
 } from '../_lib/order-item-snapshots';
 import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
-import { extractDeliveryConfigSource, quoteDeliveryFee } from '../../_lib/delivery-config';
+import { extractDeliveryConfigSource, parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
   createCustomerRatingKey,
   loadOrderServiceRatingSummary,
@@ -393,6 +399,7 @@ export async function POST(request: Request) {
 
     async function loadComercioRow() {
       const selects = [
+        'id,slug,moneda,en_linea,horarios,latitud,longitud,exchange_rate_value,exchange_rate_source,exchange_rate_mode,exchange_rate_quote_currency,branding_ia->config_negocio',
         'id,slug,moneda,en_linea,horarios,latitud,longitud,branding_ia->config_negocio',
         'id,slug,moneda,en_linea,horarios,latitud,longitud,branding_ia',
         'id,slug,moneda,en_linea,horarios',
@@ -426,6 +433,10 @@ export async function POST(request: Request) {
           horarios?: unknown;
           latitud?: number | string | null;
           longitud?: number | string | null;
+          exchange_rate_value?: number | string | null;
+          exchange_rate_source?: string | null;
+          exchange_rate_mode?: string | null;
+          exchange_rate_quote_currency?: string | null;
           branding_ia?: unknown;
           config_negocio?: unknown;
         }
@@ -441,8 +452,68 @@ export async function POST(request: Request) {
     const originLng = Number(comercioRow?.longitud);
     const destLat = Number(delivery.coordinates?.lat);
     const destLng = Number(delivery.coordinates?.lng);
+    const deliveryConfigSource = extractDeliveryConfigSource(comercioRow);
+    const deliveryConfig = parseDeliveryConfig(deliveryConfigSource);
+    const brandingRecord = asRecord(comercioRow?.branding_ia);
+    const configFromColumn = asRecord(comercioRow?.config_negocio);
+    const configNegocio = Object.keys(configFromColumn).length > 0
+      ? configFromColumn
+      : asRecord(brandingRecord.config_negocio);
+    const checkoutExchange = extractPublicCheckoutExchange(
+      brandingRecord.config_negocio ? brandingRecord : { config_negocio: configNegocio },
+    );
+    const tariffCurrency = normalizeOrderCurrency(
+      deliveryConfig.currency || baseCurrency,
+      baseCurrency,
+    );
+    let marketRates: MarketRatesInput | null = null;
+    try {
+      const { data: marketRow } = await supabase
+        .from('global_market_rates')
+        .select('bcv_rate, p2p_binance_rate, payload')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (marketRow && typeof marketRow === 'object') {
+        marketRates = marketRow as MarketRatesInput;
+      }
+    } catch (error) {
+      console.warn('[orders] market rates unavailable for delivery conversion', error);
+    }
+    const convertDeliveryToBase = (amount: number) =>
+      convertAmountBetweenCurrencies(amount, tariffCurrency, baseCurrency, {
+        baseCurrency,
+        checkoutExchange,
+        businessExchangeRate:
+          parseExchangeRate(comercioRow?.exchange_rate_value) ??
+          parseExchangeRate(configNegocio.exchange_rate_value) ??
+          parseExchangeRate(configNegocio.tasa_cambio_pesos),
+        businessQuoteCurrency:
+          (comercioRow?.exchange_rate_quote_currency ??
+            configNegocio.exchange_rate_quote_currency ??
+            '')
+            .toString()
+            .trim() || null,
+        businessExchangeSource: (
+          comercioRow?.exchange_rate_source ??
+          configNegocio.exchange_rate_source ??
+          'google'
+        )
+          .toString()
+          .trim()
+          .toLowerCase(),
+        businessExchangeMode: (
+          comercioRow?.exchange_rate_mode ??
+          configNegocio.exchange_rate_mode ??
+          'auto'
+        )
+          .toString()
+          .trim()
+          .toLowerCase(),
+        marketRates,
+      });
     const deliveryQuote = quoteDeliveryFee({
-      config: extractDeliveryConfigSource(comercioRow),
+      config: deliveryConfigSource,
       isDelivery: delivery.mode === 'delivery',
       subtotal,
       origin: Number.isFinite(originLat) && Number.isFinite(originLng)
@@ -452,6 +523,7 @@ export async function POST(request: Request) {
         ? { lat: destLat, lng: destLng }
         : null,
       fallbackFee: costoDelivery,
+      convertToBase: convertDeliveryToBase,
     });
     if (deliveryQuote.blocked) {
       return NextResponse.json(
@@ -572,6 +644,7 @@ export async function POST(request: Request) {
         ? {
             delivery_fee: deliveryQuote.fee,
             delivery_method: deliveryQuote.method,
+            delivery_tariff_currency: tariffCurrency,
             delivery_config_snapshot: deliveryQuote.snapshot,
           }
         : {}),

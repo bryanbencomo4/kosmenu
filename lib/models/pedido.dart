@@ -21,6 +21,7 @@ class PedidoModel {
   final double? deliveryLatitude;
   final double? deliveryLongitude;
   final String? orderNotes;
+  final double? costoDelivery;
   final List<PedidoItemModel> items;
   final Map<String, dynamic> detalles;
   final bool hasParseError;
@@ -54,6 +55,7 @@ class PedidoModel {
     this.deliveryLatitude,
     this.deliveryLongitude,
     this.orderNotes,
+    this.costoDelivery,
     this.items = const <PedidoItemModel>[],
     this.detalles = const <String, dynamic>{},
     this.hasParseError = false,
@@ -138,6 +140,7 @@ class PedidoModel {
       deliveryLatitude: deliveryLatitude,
       deliveryLongitude: deliveryLongitude,
       orderNotes: _asTrimmedString(detallesMap['order_notes']),
+      costoDelivery: _resolveCostoDelivery(map, detallesMap),
       items: orderItems,
       detalles: detallesMap,
     );
@@ -217,6 +220,19 @@ class PedidoModel {
       },
     };
   }
+
+  static double? _resolveCostoDelivery(
+    Map<String, dynamic> map,
+    Map<String, dynamic> detallesMap,
+  ) {
+    return _toDoubleOrNull(map['costo_delivery']) ??
+        _toDoubleOrNull(map['costo_envio']) ??
+        _toDoubleOrNull(detallesMap['costo_delivery']) ??
+        _toDoubleOrNull(detallesMap['delivery_fee']) ??
+        _toDoubleOrNull(detallesMap['costo_envio']);
+  }
+
+  double get deliveryCost => costoDelivery ?? 0;
 
   static String? _resolveOrderId(Map<String, dynamic> detallesMap) {
     final candidates = <dynamic>[

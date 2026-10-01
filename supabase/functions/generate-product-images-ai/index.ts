@@ -165,114 +165,112 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const plannedCreditsCost = items.length * COST_IMAGE;
-    await hasEnoughCredits(supabase, commerceId, plannedCreditsCost);
-
+    const activeProductIds = await loadActiveJobProductIds(
+      supabase,
+      items.map((item) => item.id),
+    );
+    const itemsToEnqueue = items.filter((item) => !activeProductIds.has(item.id));
+    const waitForWorker = manualRequest && items.length === 1;
     const commerce = await loadCommerce(supabase, commerceId);
     const batchId = crypto.randomUUID();
+    let plannedCreditsCost = 0;
     let creditsCharged = false;
     let triggerRequestId: number | null = null;
     let triggerWarning: string | null = null;
 
     try {
-      await deductCredits(
-        supabase,
-        commerceId,
-        plannedCreditsCost,
-        'ai_image_generation_queue',
-        {
-          function: 'generate-product-images-ai',
-          batch_id: batchId,
-          items: items.length,
-        },
-      );
-      creditsCharged = true;
-
-      const jobRows = items.map((item) => {
-        const basePrompt = buildProductImagePrompt({
-          productName: item.name,
-          description: item.description,
-          categoryName: item.categoryName,
-          businessName: commerce?.nombre ?? undefined,
-          businessCategory: commerce?.categoria ?? undefined,
-        });
-        const promptOverride = normalizeString(item.imagePrompt);
-        const knownBrand = detectKnownBrandRecord(
-          item.name,
-          item.description,
-          item.categoryName,
-        );
-        const brandGuard = knownBrand
-          ? ` Marca detectada (${knownBrand.label}): NO dibujes logo ni texto de marca; el sistema superpone el logo oficial después.`
-          : '';
-        const prompt = promptOverride
-          ? [
-              'Sigue EXACTAMENTE la solicitud del cliente como instrucción principal.',
-              `Solicitud del cliente (obligatoria): ${promptOverride}`,
-              'Si hay conflicto, prioriza la solicitud del cliente sobre sugerencias automáticas.',
-              'Restricciones mínimas: composición 1:1, alta calidad, sin texto legible, sin logos inventados.',
-              brandGuard,
-            ].join(' ')
-          : basePrompt;
-
-        return {
-          batch_id: batchId,
-          commerce_id: commerceId,
-          catalog_id: catalogId || null,
-          product_id: item.id,
-          prompt,
-          status: 'pending',
-          provider: 'google',
-          credits_charged: COST_IMAGE,
-        };
-      });
-
-      const { error: insertJobsError } = await supabase.from('ai_image_jobs').insert(jobRows);
-      if (insertJobsError) {
-        throw new Error(`Error creating AI image jobs: ${insertJobsError.message}`);
-      }
-
-      const productIds = items.map((item) => item.id);
-      const { error: updateProductsError } = await supabase
-        .from('productos')
-        .update({
-          ai_image_status: 'pending',
-          ai_image_error_message: null,
-        })
-        .in('id', productIds);
-
-      if (updateProductsError) {
-        throw new Error(`Error updating product AI image status: ${updateProductsError.message}`);
-      }
-
-      if (state != null) {
-        await supabase
-          .from('comercios')
-          .update({ ai_image_generation_used: true })
-          .eq('id', commerceId);
-      }
-
-      try {
-        const { data: triggerData, error: triggerError } = await supabase.rpc(
-          'trigger_ai_image_job_processing',
+      if (itemsToEnqueue.length > 0) {
+        plannedCreditsCost = itemsToEnqueue.length * COST_IMAGE;
+        await hasEnoughCredits(supabase, commerceId, plannedCreditsCost);
+        await deductCredits(
+          supabase,
+          commerceId,
+          plannedCreditsCost,
+          'ai_image_generation_queue',
           {
-            p_commerce_id: commerceId,
-            p_limit: Math.min(2, items.length),
+            function: 'generate-product-images-ai',
+            batch_id: batchId,
+            items: itemsToEnqueue.length,
           },
         );
+        creditsCharged = true;
 
-        if (triggerError) {
-          triggerWarning = `No se pudo disparar el worker inmediato: ${triggerError.message}`;
-        } else {
-          triggerRequestId = Number(triggerData ?? 0) || null;
+        const jobRows = itemsToEnqueue.map((item) => {
+          const basePrompt = buildProductImagePrompt({
+            productName: item.name,
+            description: item.description,
+            categoryName: item.categoryName,
+            businessName: commerce?.nombre ?? undefined,
+            businessCategory: commerce?.categoria ?? undefined,
+          });
+          const promptOverride = normalizeString(item.imagePrompt);
+          const knownBrand = detectKnownBrandRecord(
+            item.name,
+            item.description,
+            item.categoryName,
+          );
+          const brandGuard = knownBrand
+            ? ` Marca detectada (${knownBrand.label}): NO dibujes logo ni texto de marca; el sistema superpone el logo oficial después.`
+            : '';
+          const prompt = promptOverride
+            ? [
+                'Sigue EXACTAMENTE la solicitud del cliente como instrucción principal.',
+                `Solicitud del cliente (obligatoria): ${promptOverride}`,
+                'Si hay conflicto, prioriza la solicitud del cliente sobre sugerencias automáticas.',
+                'Restricciones mínimas: composición 1:1, alta calidad, sin texto legible, sin logos inventados.',
+                brandGuard,
+              ].join(' ')
+            : basePrompt;
+
+          return {
+            batch_id: batchId,
+            commerce_id: commerceId,
+            catalog_id: catalogId || null,
+            product_id: item.id,
+            prompt,
+            status: 'pending',
+            provider: 'google',
+            credits_charged: COST_IMAGE,
+          };
+        });
+
+        const { error: insertJobsError } = await supabase.from('ai_image_jobs').insert(jobRows);
+        if (insertJobsError) {
+          throw new Error(`Error creating AI image jobs: ${insertJobsError.message}`);
         }
-      } catch (error) {
-        triggerWarning = error instanceof Error
-            ? `No se pudo disparar el worker inmediato: ${error.message}`
-            : 'No se pudo disparar el worker inmediato.';
+
+        const productIds = itemsToEnqueue.map((item) => item.id);
+        const { error: updateProductsError } = await supabase
+          .from('productos')
+          .update({
+            ai_image_status: 'pending',
+            ai_image_error_message: null,
+          })
+          .in('id', productIds);
+
+        if (updateProductsError) {
+          throw new Error(`Error updating product AI image status: ${updateProductsError.message}`);
+        }
+
+        if (state != null) {
+          await supabase
+            .from('comercios')
+            .update({ ai_image_generation_used: true })
+            .eq('id', commerceId);
+        }
       }
+
+      const trigger = await invokeImageWorker({
+        supabase,
+        supabaseUrl,
+        commerceId,
+        limit: Math.min(2, items.length),
+        waitForCompletion: waitForWorker,
+      });
+      triggerRequestId = trigger.triggerRequestId;
+      triggerWarning = trigger.triggerWarning;
     } catch (error) {
-      const productIds = items.map((item) => item.id);
+      const productIds = itemsToEnqueue.map((item) => item.id);
       await supabase.from('ai_image_jobs').delete().eq('batch_id', batchId);
       if (productIds.length > 0) {
         await supabase
@@ -283,7 +281,7 @@ Deno.serve(async (req: Request) => {
           })
           .in('id', productIds);
       }
-      if (state != null) {
+      if (state != null && itemsToEnqueue.length > 0) {
         await supabase
           .from('comercios')
           .update({ ai_image_generation_used: false })
@@ -299,6 +297,9 @@ Deno.serve(async (req: Request) => {
       throw error;
     }
 
+    const snapshot = items.length === 1 ? await loadProductImageSnapshot(supabase, items[0].id) : null;
+    const alreadyQueuedOnly = itemsToEnqueue.length === 0;
+
     return jsonResponse(
       {
         ok: true,
@@ -306,7 +307,8 @@ Deno.serve(async (req: Request) => {
         batch_id: batchId,
         commerce_id: commerceId,
         requested_items: items.length,
-        enqueued_jobs: items.length,
+        enqueued_jobs: itemsToEnqueue.length,
+        already_queued_jobs: items.length - itemsToEnqueue.length,
         planned_credits_cost: plannedCreditsCost,
         request_scope: state == null ? 'manual' : 'onboarding',
         remaining_quota_before_generation:
@@ -315,12 +317,17 @@ Deno.serve(async (req: Request) => {
             : MAX_AI_IMAGES_ONBOARDING - state.ai_images_generated_count,
         trigger_request_id: triggerRequestId,
         trigger_warning: triggerWarning,
+        image_url: snapshot?.imagen_url ?? null,
+        ai_image_status: snapshot?.ai_image_status ?? null,
         credits_strategy:
           'Los creditos se reservan al encolar. Si una generacion falla, el worker reembolsa ese credito y revierte el uso neto para dejar la wallet intacta.',
-        message:
-          state == null
-            ? 'Se encolo la generacion de imagen y el backend disparo el worker server-side.'
-            : 'Se encolo la generacion de imagenes y el backend disparo el worker server-side. El cron de respaldo volvera a intentar cada minuto si quedan jobs pendientes.',
+        message: alreadyQueuedOnly
+          ? 'Esa imagen ya estaba en proceso. Reintentamos generarla sin cobrar otro crédito.'
+          : state == null
+            ? waitForWorker && normalizeString(snapshot?.ai_image_status) === 'completed'
+              ? 'Imagen generada con IA.'
+              : 'Se encoló la generación de imagen y el backend disparó el worker.'
+            : 'Se encoló la generación de imágenes y el backend disparó el worker. El cron de respaldo volverá a intentar cada minuto si quedan jobs pendientes.',
         items,
       },
       200,
@@ -419,6 +426,146 @@ async function loadCommerce(
   }
 
   return (data as CommerceRow | null) ?? null;
+}
+
+async function loadActiveJobProductIds(
+  supabase: ReturnType<typeof createClient>,
+  productIds: string[],
+): Promise<Set<string>> {
+  const ids = productIds.map((id) => normalizeString(id)).filter((id) => id.length > 0);
+  if (ids.length === 0) {
+    return new Set();
+  }
+
+  const { data, error } = await supabase
+    .from('ai_image_jobs')
+    .select('product_id')
+    .in('product_id', ids)
+    .in('status', ['pending', 'processing']);
+
+  if (error) {
+    throw new Error(`Error loading active AI image jobs: ${error.message}`);
+  }
+
+  return new Set(
+    ((data as Array<{ product_id?: string }> | null) ?? [])
+      .map((row) => normalizeString(row.product_id))
+      .filter((id) => id.length > 0),
+  );
+}
+
+async function loadProductImageSnapshot(
+  supabase: ReturnType<typeof createClient>,
+  productId: string,
+): Promise<{
+  imagen_url?: string | null;
+  ai_image_status?: string | null;
+} | null> {
+  const { data, error } = await supabase
+    .from('productos')
+    .select('imagen_url, ai_image_status')
+    .eq('id', productId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Error loading generated product image: ${error.message}`);
+  }
+
+  return (data as { imagen_url?: string | null; ai_image_status?: string | null } | null) ?? null;
+}
+
+async function invokeImageWorker(params: {
+  supabase: ReturnType<typeof createClient>;
+  supabaseUrl: string;
+  commerceId: string;
+  limit: number;
+  waitForCompletion: boolean;
+}): Promise<{ triggerRequestId: number | null; triggerWarning: string | null }> {
+  if (params.waitForCompletion) {
+    try {
+      const { data: secretRow, error: secretError } = await params.supabase
+        .from('internal_worker_secrets')
+        .select('secret')
+        .eq('worker_name', 'ai_image_jobs_worker')
+        .maybeSingle();
+
+      if (secretError) {
+        throw new Error(secretError.message);
+      }
+
+      const secret = normalizeString(secretRow?.secret);
+      if (!secret) {
+        throw new Error('Missing internal worker secret for ai_image_jobs_worker.');
+      }
+
+      const response = await fetch(`${params.supabaseUrl}/functions/v1/process-ai-image-jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ai-image-worker-secret': secret,
+        },
+        body: JSON.stringify({
+          comercio_id: params.commerceId,
+          limit: params.limit,
+          source: 'enqueue_wait',
+        }),
+        signal: AbortSignal.timeout(50_000),
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Worker HTTP ${response.status}: ${body.slice(0, 180)}`);
+      }
+
+      return { triggerRequestId: null, triggerWarning: null };
+    } catch (error) {
+      const waitWarning = error instanceof Error
+        ? `No se pudo esperar al worker: ${error.message}`
+        : 'No se pudo esperar al worker.';
+      const fallback = await triggerImageWorkerRpc(params.supabase, params.commerceId, params.limit);
+      return {
+        triggerRequestId: fallback.triggerRequestId,
+        triggerWarning: [waitWarning, fallback.triggerWarning].filter(Boolean).join(' '),
+      };
+    }
+  }
+
+  return triggerImageWorkerRpc(params.supabase, params.commerceId, params.limit);
+}
+
+async function triggerImageWorkerRpc(
+  supabase: ReturnType<typeof createClient>,
+  commerceId: string,
+  limit: number,
+): Promise<{ triggerRequestId: number | null; triggerWarning: string | null }> {
+  try {
+    const { data: triggerData, error: triggerError } = await supabase.rpc(
+      'trigger_ai_image_job_processing',
+      {
+        p_commerce_id: commerceId,
+        p_limit: limit,
+      },
+    );
+
+    if (triggerError) {
+      return {
+        triggerRequestId: null,
+        triggerWarning: `No se pudo disparar el worker inmediato: ${triggerError.message}`,
+      };
+    }
+
+    return {
+      triggerRequestId: Number(triggerData ?? 0) || null,
+      triggerWarning: null,
+    };
+  } catch (error) {
+    return {
+      triggerRequestId: null,
+      triggerWarning: error instanceof Error
+        ? `No se pudo disparar el worker inmediato: ${error.message}`
+        : 'No se pudo disparar el worker inmediato.',
+    };
+  }
 }
 
 function normalizeItems(value: unknown): ImageGenerationItem[] {

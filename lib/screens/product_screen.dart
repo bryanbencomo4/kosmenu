@@ -1545,6 +1545,10 @@ class _ProductThumb extends StatelessWidget {
       child: Stack(
         children: [
           thumbChild,
+          if (isAiPending)
+            const Positioned.fill(
+              child: AiImageGeneratingScrim(compact: true),
+            ),
           if (isAiGeneratedImage && !isAiPending && !isAiFailed)
             Positioned(
               top: 6,

@@ -10,9 +10,9 @@ El flujo correcto es:
 
 1. Flutter crea el comercio/menu.
 2. Flutter llama `generate-product-images-ai` para encolar jobs.
-3. El backend dispara inmediatamente el worker con `trigger_ai_image_job_processing(...)`.
-4. `pg_cron` vuelve a disparar el worker cada minuto como respaldo.
-5. Flutter solo consulta estado y muestra progreso.
+3. El backend dispara el worker y, en generación manual de un producto, espera a que termine para devolver `image_url`.
+4. `pg_cron` vuelve a disparar el worker cada minuto como respaldo (timeout 120s).
+5. Flutter muestra loading sobre la imagen y consulta estado hasta `completed` o `failed`.
 
 ## Seguridad
 

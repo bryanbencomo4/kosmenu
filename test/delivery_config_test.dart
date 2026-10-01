@@ -24,6 +24,7 @@ void main() {
     expect(config.enabled, isTrue);
     expect(config.pricingType, DeliveryConfig.pricingDistance);
     expect(config.distance.basePrice, 2);
+    expect(config.currency, isEmpty);
     final merged = config.mergeIntoConfigNegocio({
       'inicio_menu': {'ver_menu': true},
     });
@@ -40,5 +41,24 @@ void main() {
       ],
     );
     expect(config.validate(), isNotEmpty);
+  });
+
+  test('persists tariff currency so checkout can convert', () {
+    final config = DeliveryConfig.fromConfigNegocio({
+      'delivery_config': {
+        'enabled': true,
+        'pricing_type': 'distance',
+        'currency': 'cop',
+        'distance_config': {
+          'base_price': 5000,
+          'included_km': 3,
+          'extra_price_per_km': 1000,
+        },
+      },
+    });
+    expect(config.currency, 'COP');
+    expect(config.distance.basePrice, 5000);
+    expect(config.toJson()['currency'], 'COP');
+    expect(config.summary(), contains('COP'));
   });
 }

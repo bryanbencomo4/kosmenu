@@ -35,7 +35,7 @@ import { KioskCheckout } from './_components/kiosk/KioskCheckout';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
 import { parseKioskHomeConfig } from '../../_lib/kiosk-home-config';
-import { quoteDeliveryFee } from '../../_lib/delivery-config';
+import { parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
 import { PreCheckoutUpsellSheet } from './_components/upsell/PreCheckoutUpsellSheet';
 import {
@@ -45,6 +45,7 @@ import {
 import type { BundleRailItem } from './_components/upsell/BundleRail';
 import { formatPaymentMethodDetails } from '../../_lib/payment-method-display';
 import {
+  convertAmountBetweenCurrencies,
   exchangeSourceLabel,
   resolveCheckoutCurrencyRate,
   resolveCheckoutCurrencySource,
@@ -2440,19 +2441,7 @@ export default function PublicMenuPage() {
   const isClientNameValid = normalizedClientName.length >= 3;
   const isClientWhatsappValid = normalizedClientWhatsapp.length > 0 && isValidPhoneNumber(normalizedClientWhatsapp);
   const isClientEmailValid = normalizedClientEmail.length > 0 && emailRegex.test(normalizedClientEmail);
-  const deliveryQuote = quoteDeliveryFee({
-    config: menuData?.comercio.delivery_tarifas,
-    isDelivery: isDeliveryOrder,
-    subtotal: cartTotal,
-    origin: hasBusinessCoords && businessLat != null && businessLng != null
-      ? { lat: businessLat, lng: businessLng }
-      : null,
-    destination: deliveryPoint,
-    fallbackFee: toNumberOrNull(menuData?.comercio.costo_envio) ?? 0,
-  });
-  const deliveryCost = deliveryQuote.fee;
   const orderSubtotal = cartTotal;
-  const orderGrandTotal = orderSubtotal + deliveryCost;
   const businessBaseCurrency = normalizeCurrencyCode(menuData?.comercio.moneda ?? 'COP');
   const businessQuoteCurrencyRaw = (menuData?.comercio.exchange_rate_quote_currency ?? '').toString().trim();
   const businessQuoteCurrency = businessQuoteCurrencyRaw ? normalizeCurrencyCode(businessQuoteCurrencyRaw) : null;
@@ -2468,6 +2457,31 @@ export default function PublicMenuPage() {
     }),
     [menuData?.checkoutExchange],
   );
+  const deliveryTariffCurrency = normalizeCurrencyCode(
+    parseDeliveryConfig(menuData?.comercio.delivery_tarifas).currency || businessBaseCurrency,
+  );
+  const deliveryQuote = quoteDeliveryFee({
+    config: menuData?.comercio.delivery_tarifas,
+    isDelivery: isDeliveryOrder,
+    subtotal: cartTotal,
+    origin: hasBusinessCoords && businessLat != null && businessLng != null
+      ? { lat: businessLat, lng: businessLng }
+      : null,
+    destination: deliveryPoint,
+    fallbackFee: toNumberOrNull(menuData?.comercio.costo_envio) ?? 0,
+    convertToBase: (amount) =>
+      convertAmountBetweenCurrencies(amount, deliveryTariffCurrency, businessBaseCurrency, {
+        baseCurrency: businessBaseCurrency,
+        checkoutExchange: checkoutExchangeConfig,
+        businessExchangeRate,
+        businessQuoteCurrency,
+        businessExchangeSource,
+        businessExchangeMode,
+        marketRates: menuData?.marketRates,
+      }),
+  });
+  const deliveryCost = deliveryQuote.fee;
+  const orderGrandTotal = orderSubtotal + deliveryCost;
   const brandingCheckoutConfig = useMemo(
     () => ({
       currencies: menuData?.checkoutExchange?.currencies ?? [],

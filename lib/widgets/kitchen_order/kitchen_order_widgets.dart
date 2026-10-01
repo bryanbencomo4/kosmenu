@@ -275,6 +275,7 @@ class KitchenSummaryStrip extends StatelessWidget {
     required this.paymentSubtitle,
     required this.totalLabel,
     required this.customerName,
+    this.deliveryLabel,
     this.onWhatsapp,
     this.onCall,
   });
@@ -284,6 +285,7 @@ class KitchenSummaryStrip extends StatelessWidget {
   final String paymentSubtitle;
   final String totalLabel;
   final String customerName;
+  final String? deliveryLabel;
   final VoidCallback? onWhatsapp;
   final VoidCallback? onCall;
 
@@ -358,6 +360,17 @@ class KitchenSummaryStrip extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if ((deliveryLabel ?? '').trim().isNotEmpty)
+                      Text(
+                        deliveryLabel!.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.manrope(
+                          color: KitchenMockupColors.muted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                   ],
                 ),
               ),

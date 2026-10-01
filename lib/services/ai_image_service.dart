@@ -118,6 +118,11 @@ class AiImageService {
   }
 }
 
+bool isAiImageGenerationSettled(String? status) {
+  final normalized = (status ?? '').trim().toLowerCase();
+  return normalized == 'completed' || normalized == 'failed';
+}
+
 /// Whether [message] means onboarding AI product images were already consumed.
 bool isAiImageOnboardingLimitMessage(String? message) {
   final normalized = (message ?? '').toLowerCase();
@@ -161,6 +166,12 @@ String formatAiImageUserMessage(String? rawMessage) {
 
   if (normalized.contains('producto no encontrado')) {
     return 'No se encontró el producto para generar su imagen IA.';
+  }
+
+  if (normalized.contains('ya estaba en proceso') ||
+      normalized.contains('already queued') ||
+      normalized.contains('already_queued')) {
+    return 'Esa imagen ya estaba en proceso. Reintentamos generarla sin cobrar otro crédito.';
   }
 
   if (normalized.contains('ya tiene una imagen manual')) {

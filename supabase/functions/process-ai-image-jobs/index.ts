@@ -93,6 +93,8 @@ Deno.serve(async (req: Request) => {
     const commerceId = normalizeString(body.commerce_id ?? body.comercio_id);
     const maxJobs = Math.min(5, Math.max(1, normalizeInteger(body.limit) || 2));
 
+    await requeueStuckJobs(supabase, commerceId);
+
     let jobsQuery = supabase
       .from('ai_image_jobs')
       .select('id, commerce_id, product_id, catalog_id, prompt, status, credits_charged')
@@ -212,6 +214,53 @@ class HttpError extends Error {
   ) {
     super(message);
   }
+}
+
+async function requeueStuckJobs(
+  supabase: ReturnType<typeof createClient>,
+  commerceId: string,
+): Promise<void> {
+  const stuckCutoff = new Date(Date.now() - 90_000).toISOString();
+  let stuckQuery = supabase
+    .from('ai_image_jobs')
+    .update({
+      status: 'pending',
+      error_message: 'Requeued after stuck processing',
+      started_at: null,
+    })
+    .eq('status', 'processing')
+    .lt('started_at', stuckCutoff)
+    .select('product_id');
+
+  if (commerceId) {
+    stuckQuery = stuckQuery.eq('commerce_id', commerceId);
+  }
+
+  const { data, error } = await stuckQuery;
+  if (error) {
+    console.warn('Could not requeue stuck AI image jobs', error.message);
+    return;
+  }
+
+  const productIds = Array.from(
+    new Set(
+      ((data as Array<{ product_id?: string }> | null) ?? [])
+        .map((row) => normalizeString(row.product_id))
+        .filter((id) => id.length > 0),
+    ),
+  );
+  if (productIds.length === 0) {
+    return;
+  }
+
+  await supabase
+    .from('productos')
+    .update({
+      ai_image_status: 'pending',
+      ai_image_error_message: null,
+    })
+    .in('id', productIds)
+    .eq('ai_image_status', 'processing');
 }
 
 async function processJob(params: {
