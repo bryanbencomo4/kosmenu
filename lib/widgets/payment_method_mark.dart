@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:kosmenu_app/services/payment_catalog.dart';
 
 /// Brand mark for a catalog payment method.
@@ -25,12 +26,12 @@ class PaymentMethodMark extends StatelessWidget {
     if (method.logoUrl != null && method.logoUrl!.startsWith('http')) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(size * 0.28),
-        child: Image.network(
-          method.logoUrl!,
+        child: CachedNetworkImage(
+          imageUrl: method.logoUrl!,
           width: size,
           height: size,
           fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => _Badge(
+          errorWidget: (_, _, _) => _Badge(
             size: size,
             color: color,
             onColor: onColor,

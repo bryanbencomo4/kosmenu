@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -3121,14 +3122,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                         child:
                                             (businessLogoUrl != null &&
                                                 businessLogoUrl.isNotEmpty)
-                                            ? Image.network(
-                                                businessLogoUrl,
+                                            ? CachedNetworkImage(
+                                                imageUrl: businessLogoUrl,
                                                 fit: BoxFit.cover,
-                                                errorBuilder:
+                                                errorWidget:
                                                     (
                                                       context,
+                                                      url,
                                                       error,
-                                                      stackTrace,
                                                     ) => Container(
                                                       color: surfaceAlt,
                                                       alignment:

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -3880,10 +3881,10 @@ class _CompactBusinessConfigBanner extends StatelessWidget {
                           ),
                           child: ClipOval(
                             child: hasLogo
-                                ? Image.network(
-                                    businessLogoUrl!.trim(),
+                                ? CachedNetworkImage(
+                                    imageUrl: businessLogoUrl!.trim(),
                                     fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) => Icon(
+                                    errorWidget: (_, _, _) => Icon(
                                       Icons.storefront_rounded,
                                       color: accentText,
                                       size: denseDesktop ? 24 : 28,

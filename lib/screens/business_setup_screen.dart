@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
@@ -11432,12 +11433,12 @@ class _LogoPreview extends StatelessWidget {
             border: Border.all(color: const Color(0xFFD8B4FE), width: 1.5),
           ),
           child: ClipOval(
-            child: Image.network(
-              trimmedLogoUrl,
+            child: CachedNetworkImage(
+              imageUrl: trimmedLogoUrl,
               width: 56,
               height: 56,
               fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => _fallbackAvatar(),
+              errorWidget: (_, _, _) => _fallbackAvatar(),
             ),
           ),
         );

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -254,10 +255,10 @@ class _LogoBubble extends StatelessWidget {
         height: 40,
         child: url.isEmpty
             ? Image.asset('assets/branding/logotipo.png', fit: BoxFit.cover)
-            : Image.network(
-                url,
+            : CachedNetworkImage(
+                imageUrl: url,
                 fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Image.asset(
+                errorWidget: (context, url, error) => Image.asset(
                   'assets/branding/logotipo.png',
                   fit: BoxFit.cover,
                 ),
