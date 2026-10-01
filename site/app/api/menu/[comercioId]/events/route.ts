@@ -63,11 +63,11 @@ export async function POST(request: Request, { params }: Params) {
     });
 
     if (insert.error) {
-      return NextResponse.json({ ok: false }, { status: 204 });
+      return new NextResponse(null, { status: 204 });
     }
 
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch {
-    return NextResponse.json({ ok: false }, { status: 204 });
+    return new NextResponse(null, { status: 204 });
   }
 }
