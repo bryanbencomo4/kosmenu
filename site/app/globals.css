@@ -68,6 +68,46 @@ body {
   display: none;
 }
 
+/* Sleek theme-adaptive scrollbar for kiosk views that doesn't disrupt dark/light UI */
+.kiosk-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.kiosk-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.kiosk-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kiosk-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease-in-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .kiosk-scrollbar:hover,
+  .kiosk-scrollbar:active,
+  .kiosk-scrollbar:focus-within {
+    scrollbar-color: color-mix(in srgb, var(--menu-text, currentColor) 22%, transparent) transparent;
+  }
+
+  .kiosk-scrollbar:hover::-webkit-scrollbar-thumb,
+  .kiosk-scrollbar:active::-webkit-scrollbar-thumb,
+  .kiosk-scrollbar:focus-within::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--menu-text, currentColor) 22%, transparent);
+  }
+
+  .kiosk-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--menu-text, currentColor) 40%, transparent);
+  }
+}
+
 .hero-features-next {
   position: relative;
   z-index: 20;

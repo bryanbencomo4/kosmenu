@@ -56,6 +56,21 @@ Deno.test('commerce mapping keeps only public fields and whitelisted checkout co
   });
 });
 
+Deno.test('exchange rate adjustments reach Preview only when present', () => {
+  const adjustments = {
+    VES: { enabled: true, factor: 1.149425287, reference_value: 3, reference_inverted: true },
+  };
+  assertEquals(
+    toPreviewCommerceRow({ id: 'c1', exchange_rate_adjustments: adjustments }).branding_ia,
+    { config_negocio: { exchange_rate_adjustments: adjustments } },
+  );
+  assertEquals(
+    toPreviewCommerceRow({ id: 'c1', exchange_rate_adjustments: null }).branding_ia,
+    null,
+  );
+  assertEquals(toPreviewCommerceRow({ id: 'c1' }).branding_ia, null);
+});
+
 Deno.test('catalog references hidden by Production RLS are cleared for Preview foreign keys', () => {
   const categories = clearInvisibleCatalogReferences(
     [{ id: 'visible-catalog' }],

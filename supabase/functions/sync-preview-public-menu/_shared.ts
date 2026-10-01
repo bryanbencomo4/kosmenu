@@ -42,6 +42,7 @@ const PUBLIC_CHECKOUT_CONFIG_FIELDS = [
   'exchange_rates',
   'exchange_rate_modes',
   'exchange_rate_sources',
+  'exchange_rate_adjustments',
 ] as const;
 
 const PUBLIC_SOCIAL_NETWORKS = new Set([
@@ -86,9 +87,10 @@ export function toPreviewCommerceRow(
 
   const config: Record<string, unknown> = {};
   for (const field of PUBLIC_CHECKOUT_CONFIG_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(source, field)) {
-      config[field] = source[field];
-    }
+    if (!Object.prototype.hasOwnProperty.call(source, field)) continue;
+    // Legacy businesses have no adjustments: keep their config untouched.
+    if (field === 'exchange_rate_adjustments' && source[field] == null) continue;
+    config[field] = source[field];
   }
 
   const sourceSocialLinks = source.social_links;

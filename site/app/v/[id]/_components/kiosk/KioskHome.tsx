@@ -91,8 +91,9 @@ export function KioskHome({
         </button>
       </div>
 
-      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-[560px] flex-1 flex-col justify-center overflow-y-auto overscroll-none px-4 py-2 sm:px-5 sm:py-5">
-        <div className="flex flex-col items-center text-center">
+      <div className="kiosk-scrollbar relative z-10 mx-auto flex min-h-0 w-full max-w-[560px] flex-1 flex-col overflow-y-auto overscroll-none px-4 py-2 sm:px-5 sm:py-4">
+        <div className="my-auto flex w-full flex-col">
+          <div className="flex flex-col items-center text-center">
           <p
             aria-live="polite"
             className={`${greetingFont.className} min-h-[1.9rem] max-w-[18rem] px-8 text-[22px] font-semibold leading-6 sm:min-h-[2.6rem] sm:max-w-[26rem] sm:px-2 sm:text-[32px] sm:leading-8`}
@@ -312,6 +313,7 @@ export function KioskHome({
             ) : null}
           </div>
           ) : null}
+        </div>
         </div>
       </div>
 

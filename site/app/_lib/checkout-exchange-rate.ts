@@ -10,10 +10,33 @@ export type MarketRatesInput = {
   } | null;
 };
 
+/**
+ * Relative commercial adjustment on top of an automatic source ("Tasa automatica con ajuste").
+ * `factor` multiplies the live source rate: effective = source * factor.
+ * Stored per quote currency in `branding_ia.config_negocio.exchange_rate_adjustments`.
+ * Mode stays `auto`; the derived mode `automatic_adjusted` only exists when the
+ * adjustment is enabled and has a valid factor, so legacy readers keep working.
+ */
+export type ExchangeRateAdjustment = {
+  enabled: boolean;
+  factor: number | null;
+  referenceValue: number | null;
+  /** true => reference reads "1 quote = X base"; false => "1 base = X quote". */
+  referenceInverted: boolean;
+};
+
+export type ExchangeRateConfig = {
+  mode?: string | null;
+  adjustment?: ExchangeRateAdjustment | null;
+};
+
+export const EXCHANGE_MODE_AUTOMATIC_ADJUSTED = 'automatic_adjusted';
+
 export type CheckoutExchangeConfigInput = {
   exchangeRates: Record<string, number | null>;
   exchangeRateModes: Record<string, string>;
   exchangeRateSources: Record<string, string>;
+  exchangeRateAdjustments?: Record<string, ExchangeRateAdjustment>;
 };
 
 export function normalizeCurrencyCode(value: string | null | undefined) {
@@ -29,6 +52,55 @@ export function parseExchangeRate(value: unknown) {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
+
+function positiveNumberOrNull(value: unknown) {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** Reads one persisted adjustment (snake_case JSON). Returns null when absent or malformed. */
+export function parseExchangeRateAdjustment(raw: unknown): ExchangeRateAdjustment | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  return {
+    enabled: record.enabled === true,
+    factor: positiveNumberOrNull(record.factor),
+    referenceValue: positiveNumberOrNull(record.reference_value),
+    referenceInverted: record.reference_inverted === true,
+  };
+}
+
+export function isExchangeRateAdjustmentActive(adjustment: ExchangeRateAdjustment | null | undefined) {
+  return Boolean(adjustment && adjustment.enabled && adjustment.factor != null && adjustment.factor > 0);
+}
+
+/** factor = commercialRate / sourceRate. Null when either rate is not a positive number. */
+export function computeAdjustmentFactor(commercialRate: number, sourceRate: number) {
+  const commercial = positiveNumberOrNull(commercialRate);
+  const source = positiveNumberOrNull(sourceRate);
+  if (commercial == null || source == null) return null;
+  return commercial / source;
+}
+
+/**
+ * Single entry point that turns an automatic/manual source rate into the rate used for
+ * conversions. Manual rates and non-adjusted automatic rates are returned untouched.
+ * No rounding is applied here.
+ */
+export function resolveEffectiveExchangeRate(
+  config: ExchangeRateConfig | null | undefined,
+  sourceRate: number,
+) {
+  if (!Number.isFinite(sourceRate) || sourceRate <= 0) return 0;
+  const mode = (config?.mode ?? '').toString().trim().toLowerCase();
+  if (mode === 'manual') return sourceRate;
+  if (isExchangeRateAdjustmentActive(config?.adjustment)) {
+    return sourceRate * (config!.adjustment!.factor as number);
+  }
+  return sourceRate;
+}
+
+const ADJUSTABLE_SOURCES = new Set(['bcv', 'bcv_usd', 'bcv_eur', 'p2p_binance']);
 
 function pairKey(baseCurrency: string, quoteCurrency: string) {
   return `${normalizeCurrencyCode(baseCurrency)}/${normalizeCurrencyCode(quoteCurrency)}`;
@@ -244,7 +316,7 @@ export function resolveCheckoutCurrencyRate(
     .toLowerCase();
   const snapshotRate = options.checkoutExchange.exchangeRates[quote];
 
-  if (currencyMode === 'auto') {
+  if (currencyMode === 'auto' || currencyMode === EXCHANGE_MODE_AUTOMATIC_ADJUSTED) {
     const liveRate = derivedExchangeRateForCurrency(
       base,
       quote,
@@ -254,7 +326,15 @@ export function resolveCheckoutCurrencyRate(
       null,
     );
     if (liveRate > 0 && liveRate !== 1) {
-      return liveRate;
+      return resolveEffectiveExchangeRate(
+        {
+          mode: 'auto',
+          adjustment: ADJUSTABLE_SOURCES.has(currencySource)
+            ? options.checkoutExchange.exchangeRateAdjustments?.[quote]
+            : null,
+        },
+        liveRate,
+      );
     }
   }
 

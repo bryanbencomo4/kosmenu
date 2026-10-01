@@ -1,8 +1,14 @@
+import {
+  parseExchangeRateAdjustment,
+  type ExchangeRateAdjustment,
+} from '../../_lib/checkout-exchange-rate';
+
 export type PublicCheckoutExchangeConfig = {
   currencies: string[];
   exchangeRates: Record<string, number | null>;
   exchangeRateModes: Record<string, string>;
   exchangeRateSources: Record<string, string>;
+  exchangeRateAdjustments: Record<string, ExchangeRateAdjustment>;
 };
 
 function normalizeCurrencyCode(value: unknown) {
@@ -68,10 +74,21 @@ export function extractPublicCheckoutExchange(
     exchangeRateSources[normalizeCurrencyCode(key)] = (value ?? '').toString().trim().toLowerCase();
   }
 
+  const exchangeRateAdjustments: Record<string, ExchangeRateAdjustment> = {};
+  const rawAdjustments =
+    config.exchange_rate_adjustments && typeof config.exchange_rate_adjustments === 'object'
+      ? (config.exchange_rate_adjustments as Record<string, unknown>)
+      : {};
+  for (const [key, value] of Object.entries(rawAdjustments)) {
+    const adjustment = parseExchangeRateAdjustment(value);
+    if (adjustment) exchangeRateAdjustments[normalizeCurrencyCode(key)] = adjustment;
+  }
+
   return {
     currencies: Array.from(currencies),
     exchangeRates,
     exchangeRateModes,
     exchangeRateSources,
+    exchangeRateAdjustments,
   };
 }

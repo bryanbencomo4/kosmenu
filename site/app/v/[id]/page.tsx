@@ -47,8 +47,10 @@ import { formatPaymentMethodDetails } from '../../_lib/payment-method-display';
 import {
   convertAmountBetweenCurrencies,
   exchangeSourceLabel,
+  parseExchangeRateAdjustment,
   resolveCheckoutCurrencyRate,
   resolveCheckoutCurrencySource,
+  type ExchangeRateAdjustment,
 } from '../../_lib/checkout-exchange-rate';
 import {
   buildCartLineKey,
@@ -179,6 +181,7 @@ type BrandingConfig = {
     exchange_rates?: Record<string, number | string | null> | null;
     exchange_rate_modes?: Record<string, string | null> | null;
     exchange_rate_sources?: Record<string, string | null> | null;
+    exchange_rate_adjustments?: Record<string, unknown> | null;
   } | null;
   colores_personalizados?: {
     background?: string | null;
@@ -259,6 +262,7 @@ type MenuData = {
     exchangeRates?: Record<string, number | null>;
     exchangeRateModes?: Record<string, string>;
     exchangeRateSources?: Record<string, string>;
+    exchangeRateAdjustments?: Record<string, ExchangeRateAdjustment>;
   } | null;
   marketRates?: MarketRatesRow | null;
   upsellSettings?: UpsellSettingsRow | null;
@@ -1153,6 +1157,7 @@ type BrandingCheckoutConfig = {
   exchangeRates: Record<string, number | null>;
   exchangeRateModes: Record<string, string>;
   exchangeRateSources: Record<string, string>;
+  exchangeRateAdjustments: Record<string, ExchangeRateAdjustment>;
 };
 
 function readBrandingCheckoutConfig(branding?: BrandingConfig | null): BrandingCheckoutConfig {
@@ -1190,11 +1195,18 @@ function readBrandingCheckoutConfig(branding?: BrandingConfig | null): BrandingC
     exchangeRateSources[normalizeCurrencyCode(key)] = (value ?? '').toString().trim().toLowerCase();
   }
 
+  const exchangeRateAdjustments: Record<string, ExchangeRateAdjustment> = {};
+  for (const [key, value] of Object.entries(config.exchange_rate_adjustments ?? {})) {
+    const adjustment = parseExchangeRateAdjustment(value);
+    if (adjustment) exchangeRateAdjustments[normalizeCurrencyCode(key)] = adjustment;
+  }
+
   return {
     currencies: Array.from(currencies),
     exchangeRates,
     exchangeRateModes,
     exchangeRateSources,
+    exchangeRateAdjustments,
   };
 }
 
@@ -1243,6 +1255,7 @@ function resolveTickerExchangeRate(
       exchangeRates: Record<string, number | null>;
       exchangeRateModes: Record<string, string>;
       exchangeRateSources: Record<string, string>;
+      exchangeRateAdjustments?: Record<string, ExchangeRateAdjustment>;
     };
     businessExchangeRate: number | null | undefined;
     businessQuoteCurrency: string | null;
@@ -2454,6 +2467,7 @@ export default function PublicMenuPage() {
       exchangeRates: menuData?.checkoutExchange?.exchangeRates ?? {},
       exchangeRateModes: menuData?.checkoutExchange?.exchangeRateModes ?? {},
       exchangeRateSources: menuData?.checkoutExchange?.exchangeRateSources ?? {},
+      exchangeRateAdjustments: menuData?.checkoutExchange?.exchangeRateAdjustments ?? {},
     }),
     [menuData?.checkoutExchange],
   );

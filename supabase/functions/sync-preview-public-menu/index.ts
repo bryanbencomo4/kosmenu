@@ -58,6 +58,7 @@ const COMMERCE_SELECT = [
   'exchange_rates:branding_ia->config_negocio->exchange_rates',
   'exchange_rate_modes:branding_ia->config_negocio->exchange_rate_modes',
   'exchange_rate_sources:branding_ia->config_negocio->exchange_rate_sources',
+  'exchange_rate_adjustments:branding_ia->config_negocio->exchange_rate_adjustments',
   'social_links:branding_ia->config_negocio->social_links',
 ].join(',');
 

@@ -15,6 +15,7 @@ import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:intl_phone_field/phone_number.dart' as intl_phone_number;
 import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/exchange_rate_adjustment.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
@@ -29,6 +30,7 @@ import 'package:kosmenu_app/services/logo_palette.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/exchange_adjustment_panel.dart';
 import 'package:kosmenu_app/widgets/logo_crop_editor.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -264,6 +266,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _exchangeRateSource = _exchangeSourceBcvEur;
   final Map<String, String> _exchangeRateModeByCurrency = <String, String>{};
   final Map<String, String> _exchangeRateSourceByCurrency = <String, String>{};
+  // "Tasa automatica con ajuste": per quote currency, nullable and additive.
+  final Map<String, ExchangeRateAdjustment> _adjustmentByCurrency =
+      <String, ExchangeRateAdjustment>{};
+  // Per-currency input problem. '' = still empty (neutral, no message shown).
+  final Map<String, String> _adjustmentIssueByCurrency = <String, String>{};
+  // Edited before market rates finished loading: factor is re-anchored once.
+  final Set<String> _adjustmentDirtyCurrencies = <String>{};
+  final TextEditingController _adjustmentReferenceController =
+      TextEditingController();
+  bool _marketRatesLoadedOnce = false;
   final Map<String, double> _marketRates = <String, double>{
     _exchangeSourceBcv: 300.2144,
     _exchangeSourceBcvUsd: 300.2144,
@@ -501,6 +513,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _nameController.dispose();
     _slugController.dispose();
     _exchangeRateController.dispose();
+    _adjustmentReferenceController.dispose();
     _whatsappController.dispose();
     _addressController.dispose();
     _locationNoteController.dispose();
@@ -895,6 +908,43 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (dynamicRate > 0) {
       _marketRates[_exchangeRateSource] = dynamicRate;
     }
+
+    _hydrateExchangeAdjustments(seedBusinessConfig);
+  }
+
+  /// Restores saved adjustments (and the auto mode/source they depend on).
+  /// Legacy businesses have no `exchange_rate_adjustments` key: nothing changes.
+  void _hydrateExchangeAdjustments(Map<String, dynamic> configNegocio) {
+    final rawAdjustments = _toStringDynamicMap(
+      configNegocio['exchange_rate_adjustments'],
+    );
+    if (rawAdjustments.isEmpty) {
+      return;
+    }
+    final rawModes = _toStringDynamicMap(configNegocio['exchange_rate_modes']);
+    final rawSources = _toStringDynamicMap(
+      configNegocio['exchange_rate_sources'],
+    );
+    for (final entry in rawAdjustments.entries) {
+      final code = entry.key.trim().toUpperCase();
+      final adjustment = ExchangeRateAdjustment.fromMap(entry.value);
+      if (adjustment == null || !_currencies.contains(code)) {
+        continue;
+      }
+      _adjustmentByCurrency[code] = adjustment;
+      if (!adjustment.enabled) {
+        continue;
+      }
+      _exchangeRateModeByCurrency[code] = _exchangeModeAuto;
+      final source = (rawSources[code]?.toString() ?? '').trim().toLowerCase();
+      if (_isKnownExchangeSource(source)) {
+        _exchangeRateSourceByCurrency[code] = _canonicalExchangeSource(source);
+      }
+      if ((rawModes[code]?.toString() ?? '').trim().toLowerCase() ==
+          _exchangeModeManual) {
+        _exchangeRateModeByCurrency[code] = _exchangeModeManual;
+      }
+    }
   }
 
   String get _currentCurrency {
@@ -1173,6 +1223,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       text: value,
       selection: TextSelection.collapsed(offset: value.length),
     );
+    _syncAdjustmentController(currency);
   }
 
   Future<void> _hydrateEditingComercioId(String userId) async {
@@ -1477,6 +1528,23 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             _exchangeRateSource;
       }
 
+      _adjustmentByCurrency.clear();
+      _adjustmentIssueByCurrency.clear();
+      final draftAdjustments = _toStringDynamicMap(
+        map['exchangeRateAdjustments'],
+      );
+      for (final entry in draftAdjustments.entries) {
+        final currencyCode = entry.key.trim().toUpperCase();
+        final adjustment = ExchangeRateAdjustment.fromMap(entry.value);
+        if (adjustment == null || !_currencies.contains(currencyCode)) {
+          continue;
+        }
+        _adjustmentByCurrency[currencyCode] = adjustment;
+        if (adjustment.enabled && !adjustment.isActive) {
+          _adjustmentIssueByCurrency[currencyCode] = '';
+        }
+      }
+
       final draftBcv = _parseExchangeRate(map['marketRateBcv']);
       if (draftBcv > 0) {
         _marketRates[_exchangeSourceBcv] = draftBcv;
@@ -1718,6 +1786,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'exchangeRateSource': _exchangeRateSource,
       'exchangeRateModes': _exchangeRateModeByCurrency,
       'exchangeRateSources': _exchangeRateSourceByCurrency,
+      'exchangeRateAdjustments': _adjustmentByCurrency.map(
+        (currency, adjustment) =>
+            MapEntry<String, dynamic>(currency, adjustment.toMap()),
+      ),
       'marketRateBcv':
           _marketRates[_exchangeSourceBcvUsd] ??
           _marketRates[_exchangeSourceBcv],
@@ -5433,6 +5505,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         }
         _latestMarketRatesUpdatedAt = updatedAt;
         _latestGoogleIsFallback = _isGoogleFallbackPayload(payload);
+        _reanchorDirtyAdjustments();
+        _marketRatesLoadedOnce = true;
 
         final shouldApplyAutoRate =
             applyToCurrentAutoRate &&
@@ -5774,15 +5848,301 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final source = availableSources.contains(selectedSource)
           ? selectedSource!
           : availableSources.first;
-      return _rateForSource(source, quoteCurrency: currency);
+      return _resolveAutoRate(
+        currency,
+        source,
+        _rateForSource(source, quoteCurrency: currency),
+      );
     }
 
     return _parseExchangeRate(_exchangeRateByCurrency[currency]);
   }
 
+  /// Applies the optional commercial adjustment to an automatic source rate.
+  /// Single place used by every conversion in this screen.
+  double _resolveAutoRate(String currency, String source, double sourceRate) {
+    return resolveEffectiveExchangeRate(
+      ExchangeRateConfig(
+        mode: _exchangeModeAuto,
+        adjustment: isAdjustableExchangeSource(source)
+            ? _adjustmentByCurrency[currency]
+            : null,
+      ),
+      sourceRate,
+    );
+  }
+
+  bool _adjustmentAppliesTo(String currency) {
+    if (!_requiresExchangeRateForCurrency(currency)) {
+      return false;
+    }
+    final mode = _exchangeRateModeByCurrency[currency] ?? _exchangeRateMode;
+    if (mode != _exchangeModeAuto || !_hasAutoSourcesForCurrency(currency)) {
+      return false;
+    }
+    final source = _exchangeRateSourceByCurrency[currency] ?? _exchangeRateSource;
+    return isAdjustableExchangeSource(source);
+  }
+
+  /// An enabled adjustment without a valid factor must not be saved.
+  bool _adjustmentBlocksSave(String currency) {
+    final adjustment = _adjustmentByCurrency[currency];
+    if (adjustment == null || !adjustment.enabled) {
+      return false;
+    }
+    if (!_adjustmentAppliesTo(currency)) {
+      return false;
+    }
+    return _adjustmentIssueByCurrency.containsKey(currency) ||
+        !adjustment.isActive;
+  }
+
+  bool _adjustmentIsInverted(String currency, double sourceRate) {
+    final adjustment = _adjustmentByCurrency[currency];
+    if (adjustment?.referenceValue != null) {
+      return adjustment!.referenceInverted;
+    }
+    return sourceRate > 0 && sourceRate < 1;
+  }
+
+  void _syncAdjustmentController(String currency) {
+    final adjustment = _adjustmentByCurrency[currency];
+    final reference = adjustment?.referenceValue;
+    final text =
+        (adjustment?.enabled == true &&
+            reference != null &&
+            !_adjustmentIssueByCurrency.containsKey(currency))
+        ? formatAdjustmentReferenceInput(reference)
+        : '';
+    _adjustmentReferenceController.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  void _onAdjustmentToggled(bool enabled) {
+    final currency = _currentCurrency;
+    setState(() {
+      final existing = _adjustmentByCurrency[currency];
+      if (!enabled) {
+        if (existing != null) {
+          // Factor and reference are kept, but no longer applied.
+          _adjustmentByCurrency[currency] = existing.copyWith(enabled: false);
+        }
+        _adjustmentIssueByCurrency.remove(currency);
+        _adjustmentDirtyCurrencies.remove(currency);
+        _syncAdjustmentController(currency);
+        return;
+      }
+
+      var next = (existing ?? const ExchangeRateAdjustment(enabled: true))
+          .copyWith(enabled: true);
+      final reference = next.referenceValue;
+      if (reference == null) {
+        _adjustmentIssueByCurrency[currency] = '';
+      } else if (next.factor == null) {
+        // No stored factor yet: derive it from the reference at today's source.
+        final sourceRate = _rateForSource(
+          _exchangeRateSource,
+          quoteCurrency: currency,
+        );
+        final commercial = commercialRateFromReference(
+          referenceValue: reference,
+          inverted: next.referenceInverted,
+        );
+        final factor = commercial == null
+            ? null
+            : computeAdjustmentFactor(
+                commercialRate: commercial,
+                sourceRate: sourceRate,
+              );
+        if (factor == null) {
+          _adjustmentIssueByCurrency[currency] =
+              'La fuente seleccionada no esta disponible ahora.';
+        } else {
+          next = next.copyWith(factor: factor);
+          _adjustmentIssueByCurrency.remove(currency);
+        }
+      }
+      _adjustmentByCurrency[currency] = next;
+      _syncAdjustmentController(currency);
+    });
+    unawaited(_saveDraft());
+  }
+
+  void _onAdjustmentReferenceChanged(String text) {
+    final currency = _currentCurrency;
+    final parsed = parseAdjustmentReference(text);
+    setState(() {
+      final existing =
+          _adjustmentByCurrency[currency] ??
+          const ExchangeRateAdjustment(enabled: true);
+      if (parsed.status != AdjustmentReferenceStatus.valid) {
+        // Empty is neutral while typing; zero/negative shows the error text.
+        // Factor and reference of the last valid value are kept untouched.
+        _adjustmentByCurrency[currency] = existing.copyWith(enabled: true);
+        _adjustmentIssueByCurrency[currency] = parsed.errorMessage ?? '';
+        return;
+      }
+
+      final sourceRate = _rateForSource(
+        _exchangeRateSource,
+        quoteCurrency: currency,
+      );
+      final inverted = _adjustmentIsInverted(currency, sourceRate);
+      final commercial = commercialRateFromReference(
+        referenceValue: parsed.value!,
+        inverted: inverted,
+      );
+      final factor = commercial == null
+          ? null
+          : computeAdjustmentFactor(
+              commercialRate: commercial,
+              sourceRate: sourceRate,
+            );
+      _adjustmentByCurrency[currency] = existing.copyWith(
+        enabled: true,
+        factor: factor,
+        referenceValue: parsed.value,
+        referenceInverted: inverted,
+      );
+      if (factor == null) {
+        _adjustmentIssueByCurrency[currency] =
+            'La fuente seleccionada no esta disponible ahora.';
+      } else {
+        _adjustmentIssueByCurrency.remove(currency);
+      }
+      if (!_marketRatesLoadedOnce) {
+        _adjustmentDirtyCurrencies.add(currency);
+      }
+    });
+    unawaited(_saveDraft());
+  }
+
+  /// Re-anchors factors typed before the live market rates arrived.
+  void _reanchorDirtyAdjustments() {
+    if (_adjustmentDirtyCurrencies.isEmpty) {
+      return;
+    }
+    for (final currency in _adjustmentDirtyCurrencies.toList()) {
+      final adjustment = _adjustmentByCurrency[currency];
+      final reference = adjustment?.referenceValue;
+      if (adjustment == null || reference == null || !adjustment.enabled) {
+        continue;
+      }
+      final source =
+          _exchangeRateSourceByCurrency[currency] ?? _exchangeRateSource;
+      final sourceRate = _rateForSource(source, quoteCurrency: currency);
+      final commercial = commercialRateFromReference(
+        referenceValue: reference,
+        inverted: adjustment.referenceInverted,
+      );
+      final factor = commercial == null
+          ? null
+          : computeAdjustmentFactor(
+              commercialRate: commercial,
+              sourceRate: sourceRate,
+            );
+      if (factor != null) {
+        _adjustmentByCurrency[currency] = adjustment.copyWith(factor: factor);
+        _adjustmentIssueByCurrency.remove(currency);
+      }
+    }
+    _adjustmentDirtyCurrencies.clear();
+  }
+
+  /// Asks what to do with the adjustment when the reference source changes.
+  /// Returns false when the change must be cancelled.
+  Future<bool> _confirmSourceChangeWithAdjustment(
+    String currency,
+    String oldSource,
+    String newSource,
+  ) async {
+    final adjustment = _adjustmentByCurrency[currency];
+    if (adjustment == null || !adjustment.isActive) {
+      return true;
+    }
+
+    if (!isAdjustableExchangeSource(newSource)) {
+      setState(() {
+        _adjustmentByCurrency[currency] = adjustment.copyWith(enabled: false);
+        _adjustmentIssueByCurrency.remove(currency);
+        _syncAdjustmentController(currency);
+        _exchangeRateIsError = false;
+        _exchangeRateMessage =
+            'El ajuste solo aplica a la tasa oficial BCV o a P2P. Se desactivo para esta fuente.';
+      });
+      return true;
+    }
+
+    final oldRate = _rateForSource(oldSource, quoteCurrency: currency);
+    final newRate = _rateForSource(newSource, quoteCurrency: currency);
+    if (newRate <= 0 || oldRate <= 0) {
+      setState(() {
+        _exchangeRateIsError = true;
+        _exchangeRateMessage =
+            'La fuente seleccionada no esta disponible ahora. Se conserva tu ajuste.';
+      });
+      return false;
+    }
+
+    final keep = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Cambio de fuente'),
+          content: const Text(
+            'Cambiaste la fuente de referencia. Podemos mantener el mismo cambio comercial usando la nueva fuente.',
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(minimumSize: const Size(64, 44)),
+              onPressed: () => Navigator.of(dialogContext).pop(null),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(minimumSize: const Size(64, 44)),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Quitar ajuste'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(64, 44)),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Mantener mi cambio'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || keep == null) {
+      return false;
+    }
+
+    setState(() {
+      if (keep) {
+        // Same commercial rate on top of the new source:
+        // factor = commercialRate / newSourceRate.
+        final commercial = oldRate * adjustment.factor!;
+        final factor = computeAdjustmentFactor(
+          commercialRate: commercial,
+          sourceRate: newRate,
+        );
+        if (factor != null) {
+          _adjustmentByCurrency[currency] = adjustment.copyWith(factor: factor);
+        }
+      } else {
+        _adjustmentByCurrency[currency] = adjustment.copyWith(enabled: false);
+        _adjustmentIssueByCurrency.remove(currency);
+      }
+      _adjustmentDirtyCurrencies.remove(currency);
+      _syncAdjustmentController(currency);
+    });
+    return true;
+  }
+
   bool _isCurrencyExchangeRateConfigured(String currency) {
     final rate = _effectiveExchangeRateForCurrency(currency);
-    return rate > 0;
+    return rate > 0 && !_adjustmentBlocksSave(currency);
   }
 
   bool _hasPaymentDetailsForCurrency(String currency) {
@@ -7774,6 +8134,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     configNegocio['exchange_rates'] = exchangeRates;
     configNegocio['exchange_rate_modes'] = exchangeRateModes;
     configNegocio['exchange_rate_sources'] = exchangeRateSources;
+    // Additive and optional: legacy businesses never get this key.
+    final exchangeRateAdjustments = <String, dynamic>{};
+    for (final currency in _selectedCurrencies) {
+      final adjustment = _adjustmentByCurrency[currency];
+      if (currency == _baseCurrency || adjustment == null) {
+        continue;
+      }
+      exchangeRateAdjustments[currency] = adjustment.toMap();
+    }
+    if (exchangeRateAdjustments.isNotEmpty ||
+        configNegocio.containsKey('exchange_rate_adjustments')) {
+      configNegocio['exchange_rate_adjustments'] = exchangeRateAdjustments;
+    }
     merged['config_negocio'] = configNegocio;
 
     return merged;
@@ -8790,6 +9163,46 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
   }
 
+  Widget _buildExchangeAdjustmentSection({
+    required String baseCurrency,
+    required String quoteCurrency,
+  }) {
+    final adjustment = _adjustmentByCurrency[quoteCurrency];
+    final sourceRate = _rateForSource(
+      _exchangeRateSource,
+      quoteCurrency: quoteCurrency,
+    );
+    final inverted = _adjustmentIsInverted(quoteCurrency, sourceRate);
+    final applied =
+        adjustment != null &&
+        adjustment.isActive &&
+        !_adjustmentIssueByCurrency.containsKey(quoteCurrency);
+    return ExchangeAdjustmentPanel(
+      baseCurrency: baseCurrency,
+      quoteCurrency: quoteCurrency,
+      enabled: adjustment?.enabled == true,
+      referenceController: _adjustmentReferenceController,
+      referenceFromCode: inverted ? quoteCurrency : baseCurrency,
+      referenceToCode: inverted ? baseCurrency : quoteCurrency,
+      issue: _adjustmentIssueByCurrency[quoteCurrency] ?? '',
+      sourceRate: sourceRate,
+      effectiveRate: _resolveAutoRate(
+        quoteCurrency,
+        _exchangeRateSource,
+        sourceRate,
+      ),
+      sourceLabel: switch (_exchangeRateSource) {
+        _exchangeSourceBcvEur => 'BCV EUR',
+        _exchangeSourceP2pBinance => 'P2P',
+        _ => 'BCV USD',
+      },
+      factor: applied ? adjustment.factor : null,
+      referenceValue: adjustment?.referenceValue,
+      accent: _palette.primary,
+      onToggled: _onAdjustmentToggled,
+      onReferenceChanged: _onAdjustmentReferenceChanged,
+    );
+  }
   Widget _buildCheckoutStep() {
     if (_selectedCurrencies.isEmpty) {
       _selectedCurrencies.add('USD');
@@ -8818,9 +9231,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     );
     final currentDisplayedRate = requiresRate
         ? (_exchangeRateMode == _exchangeModeAuto
-              ? _rateForSource(
+              ? _resolveAutoRate(
+                  currentCurrency,
                   _exchangeRateSource,
-                  quoteCurrency: currentCurrency,
+                  _rateForSource(
+                    _exchangeRateSource,
+                    quoteCurrency: currentCurrency,
+                  ),
                 )
               : _parseExchangeRate(_exchangeRateByCurrency[currentCurrency]))
         : 1.0;
@@ -8971,6 +9388,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                 _selectedPaymentsByCurrency.remove(currency);
                                 _paymentMethodDraftsByCurrency.remove(currency);
                                 _exchangeRateByCurrency.remove(currency);
+                                _adjustmentByCurrency.remove(currency);
+                                _adjustmentIssueByCurrency.remove(currency);
+                                _adjustmentDirtyCurrencies.remove(currency);
                                 if (_activeCheckoutCurrency == currency) {
                                   _activeCheckoutCurrency = baseCurrency;
                                 }
@@ -9253,6 +9673,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       if (value == null) {
                         return;
                       }
+                      if (value != _exchangeRateSource) {
+                        final proceed =
+                            await _confirmSourceChangeWithAdjustment(
+                              currentCurrency,
+                              _exchangeRateSource,
+                              value,
+                            );
+                        if (!proceed || !mounted) {
+                          return;
+                        }
+                      }
                       setState(() {
                         _exchangeRateSource = value;
                         // Persist per-currency, otherwise the stale saved
@@ -9385,6 +9816,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  if (isAdjustableExchangeSource(_exchangeRateSource))
+                    _buildExchangeAdjustmentSection(
+                      baseCurrency: baseCurrency,
+                      quoteCurrency: currentCurrency,
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
