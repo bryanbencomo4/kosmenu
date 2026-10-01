@@ -15,6 +15,7 @@ import 'package:kosmenu_app/services/checkout_attempt_state.dart';
 import 'package:kosmenu_app/services/public_menu_api_service.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class PublicMenuView extends StatefulWidget {
@@ -673,27 +674,32 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                           borderRadius: BorderRadius.circular(22),
                           child: Stack(
                             children: [
-                              GoogleMap(
-                                initialCameraPosition: CameraPosition(
-                                  target: initialPosition,
-                                  zoom: 16,
+                              GoogleMapsSdkGate(
+                                loading: const ColoredBox(
+                                  color: Color(0xFFE9EEF5),
                                 ),
-                                myLocationButtonEnabled: true,
-                                myLocationEnabled: true,
-                                zoomControlsEnabled: false,
-                                mapToolbarEnabled: false,
-                                onMapCreated: (controller) {
-                                  mapController = controller;
-                                  if (resolvedAddress.isEmpty) {
+                                child: GoogleMap(
+                                  initialCameraPosition: CameraPosition(
+                                    target: initialPosition,
+                                    zoom: 16,
+                                  ),
+                                  myLocationButtonEnabled: true,
+                                  myLocationEnabled: true,
+                                  zoomControlsEnabled: false,
+                                  mapToolbarEnabled: false,
+                                  onMapCreated: (controller) {
+                                    mapController = controller;
+                                    if (resolvedAddress.isEmpty) {
+                                      unawaited(resolveAddress(setModalState));
+                                    }
+                                  },
+                                  onCameraMove: (position) {
+                                    selectedPosition = position.target;
+                                  },
+                                  onCameraIdle: () {
                                     unawaited(resolveAddress(setModalState));
-                                  }
-                                },
-                                onCameraMove: (position) {
-                                  selectedPosition = position.target;
-                                },
-                                onCameraIdle: () {
-                                  unawaited(resolveAddress(setModalState));
-                                },
+                                  },
+                                ),
                               ),
                               IgnorePointer(
                                 child: Center(

@@ -32,6 +32,7 @@ import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/exchange_adjustment_panel.dart';
+import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
 import 'package:kosmenu_app/widgets/logo_crop_editor.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -3781,34 +3782,39 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                     child: Stack(
                       alignment: Alignment.center,
                       children: [
-                        GoogleMap(
-                          initialCameraPosition: CameraPosition(
-                            target: initial,
-                            zoom: _businessLatitude == null ? 14 : 17,
+                        GoogleMapsSdkGate(
+                          loading: const SizedBox.expand(
+                            child: ColoredBox(color: Color(0xFFE9EEF5)),
                           ),
-                          onMapCreated: (controller) {
-                            if (!mapController.isCompleted) {
-                              mapController.complete(controller);
-                            }
-                            unawaited(syncAddress());
-                          },
-                          myLocationButtonEnabled: false,
-                          myLocationEnabled: false,
-                          zoomControlsEnabled: false,
-                          onCameraMove: (position) {
-                            selected = position.target;
-                          },
-                          onCameraIdle: () {
-                            if (lastGeocodedPoint != null &&
-                                !movedEnough(lastGeocodedPoint!, selected)) {
-                              return;
-                            }
-                            geocodeDebounce?.cancel();
-                            geocodeDebounce = Timer(
-                              const Duration(milliseconds: 350),
-                              () => unawaited(syncAddress()),
-                            );
-                          },
+                          child: GoogleMap(
+                            initialCameraPosition: CameraPosition(
+                              target: initial,
+                              zoom: _businessLatitude == null ? 14 : 17,
+                            ),
+                            onMapCreated: (controller) {
+                              if (!mapController.isCompleted) {
+                                mapController.complete(controller);
+                              }
+                              unawaited(syncAddress());
+                            },
+                            myLocationButtonEnabled: false,
+                            myLocationEnabled: false,
+                            zoomControlsEnabled: false,
+                            onCameraMove: (position) {
+                              selected = position.target;
+                            },
+                            onCameraIdle: () {
+                              if (lastGeocodedPoint != null &&
+                                  !movedEnough(lastGeocodedPoint!, selected)) {
+                                return;
+                              }
+                              geocodeDebounce?.cancel();
+                              geocodeDebounce = Timer(
+                                const Duration(milliseconds: 350),
+                                () => unawaited(syncAddress()),
+                              );
+                            },
+                          ),
                         ),
                         const IgnorePointer(
                           child: Icon(

@@ -32,27 +32,62 @@
   <title>elmenuxfa.com</title>
   <link rel="manifest" href="manifest.json">
 
-  <!-- Required by google_maps_flutter_web + place search (same key as SupabaseConfig.googleMapsApiKey). -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB9WNMyQma0-n4sMXN_lWJwYNxxkWDEmyQ&libraries=places&loading=async"></script>
   <script>
+    // Load Maps/Places once, only when a map or place lookup is requested.
+    var elmenuxfaMapsReady = null;
+    function ensureElmenuxfaMaps() {
+      if (
+        window.google &&
+        window.google.maps &&
+        window.google.maps.places &&
+        window.google.maps.Geocoder
+      ) {
+        return Promise.resolve();
+      }
+      if (elmenuxfaMapsReady) return elmenuxfaMapsReady;
+
+      elmenuxfaMapsReady = new Promise(function (resolve, reject) {
+        var script = document.createElement('script');
+        var started = Date.now();
+        var settled = false;
+        var finish = function () {
+          if (
+            window.google &&
+            window.google.maps &&
+            window.google.maps.places &&
+            window.google.maps.Geocoder
+          ) {
+            settled = true;
+            resolve();
+            return;
+          }
+          if (Date.now() - started > 15000) {
+            settled = true;
+            elmenuxfaMapsReady = null;
+            reject(new Error('Google Maps/Places unavailable'));
+            return;
+          }
+          setTimeout(finish, 40);
+        };
+        script.async = true;
+        script.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyB9WNMyQma0-n4sMXN_lWJwYNxxkWDEmyQ&libraries=places&loading=async';
+        script.onload = finish;
+        script.onerror = function () {
+          if (settled) return;
+          settled = true;
+          elmenuxfaMapsReady = null;
+          reject(new Error('Google Maps script failed to load'));
+        };
+        document.head.appendChild(script);
+        setTimeout(finish, 40);
+      });
+      return elmenuxfaMapsReady;
+    }
+
     // Thin bridge so Flutter web can use Places/Geocoder without dart:io HttpClient.
     window.__elmenuxfaPlaces = {
       whenReady: function () {
-        return new Promise(function (resolve, reject) {
-          var started = Date.now();
-          var tick = function () {
-            if (window.google && google.maps && google.maps.places && google.maps.Geocoder) {
-              resolve();
-              return;
-            }
-            if (Date.now() - started > 15000) {
-              reject(new Error('Google Places unavailable'));
-              return;
-            }
-            setTimeout(tick, 40);
-          };
-          tick();
-        });
+        return ensureElmenuxfaMaps();
       },
       autocomplete: function (input, lat, lng, radiusMeters) {
         var self = this;

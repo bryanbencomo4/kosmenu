@@ -22,6 +22,7 @@ import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
 import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -2355,25 +2356,33 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         ),
       );
     } else if (hasDeliveryCoords && deliveryPoint != null) {
-      mapPreview = GoogleMap(
-        initialCameraPosition: CameraPosition(target: deliveryPoint, zoom: 14),
-        markers: markers,
-        polylines: polylines,
-        myLocationButtonEnabled: false,
-        zoomControlsEnabled: false,
-        mapToolbarEnabled: false,
-        compassEnabled: false,
-        liteModeEnabled: !kIsWeb && !Platform.isIOS,
-        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-          Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-        },
-        onMapCreated: (controller) {
-          if (cameraPoints.length >= 2) {
-            controller.moveCamera(
-              CameraUpdate.newLatLngBounds(_buildBounds(cameraPoints), 28),
-            );
-          }
-        },
+      mapPreview = GoogleMapsSdkGate(
+        loading: const ColoredBox(
+          color: Color(0xFFE9EEF5),
+          child: Center(
+            child: Icon(Icons.map_outlined, color: Color(0xFF94A3B8), size: 30),
+          ),
+        ),
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: deliveryPoint, zoom: 14),
+          markers: markers,
+          polylines: polylines,
+          myLocationButtonEnabled: false,
+          zoomControlsEnabled: false,
+          mapToolbarEnabled: false,
+          compassEnabled: false,
+          liteModeEnabled: !kIsWeb && !Platform.isIOS,
+          gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+            Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+          },
+          onMapCreated: (controller) {
+            if (cameraPoints.length >= 2) {
+              controller.moveCamera(
+                CameraUpdate.newLatLngBounds(_buildBounds(cameraPoints), 28),
+              );
+            }
+          },
+        ),
       );
     }
 
@@ -3500,62 +3509,78 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                       height: 250,
                                       child: IgnorePointer(
                                         ignoring: !_isMapInteractionEnabled,
-                                        child: GoogleMap(
-                                          initialCameraPosition: CameraPosition(
-                                            target: hasBusinessCoords
-                                                ? _midpoint(
-                                                    businessPoint!,
-                                                    deliveryPoint!,
-                                                  )
-                                                : deliveryPoint!,
-                                            zoom: hasBusinessCoords
-                                                ? 13.8
-                                                : 15.2,
+                                        child: GoogleMapsSdkGate(
+                                          loading: const ColoredBox(
+                                            color: Color(0xFFE9EEF5),
                                           ),
-                                          onMapCreated: (controller) async {
-                                            if (cameraPoints.length < 2) {
-                                              return;
-                                            }
-                                            await controller.animateCamera(
-                                              CameraUpdate.newLatLngBounds(
-                                                _buildBounds(cameraPoints),
-                                                60,
-                                              ),
-                                            );
-                                          },
-                                          myLocationEnabled: false,
-                                          myLocationButtonEnabled: false,
-                                          zoomControlsEnabled: false,
-                                          scrollGesturesEnabled:
-                                              _isMapInteractionEnabled,
-                                          zoomGesturesEnabled:
-                                              _isMapInteractionEnabled,
-                                          rotateGesturesEnabled:
-                                              _isMapInteractionEnabled,
-                                          tiltGesturesEnabled:
-                                              _isMapInteractionEnabled,
-                                          gestureRecognizers:
-                                              _isMapInteractionEnabled
-                                              ? <
-                                                  Factory<
-                                                    OneSequenceGestureRecognizer
-                                                  >
-                                                >{
-                                                  Factory<
-                                                    OneSequenceGestureRecognizer
-                                                  >(
-                                                    () =>
-                                                        EagerGestureRecognizer(),
+                                          child: IgnorePointer(
+                                            ignoring:
+                                                !_isMapInteractionEnabled,
+                                            child: GoogleMap(
+                                              initialCameraPosition:
+                                                  CameraPosition(
+                                                    target: hasBusinessCoords
+                                                        ? _midpoint(
+                                                            businessPoint!,
+                                                            deliveryPoint!,
+                                                          )
+                                                        : deliveryPoint!,
+                                                    zoom: hasBusinessCoords
+                                                        ? 13.8
+                                                        : 15.2,
                                                   ),
-                                                }
-                                              : <
-                                                  Factory<
-                                                    OneSequenceGestureRecognizer
-                                                  >
-                                                >{},
-                                          mapToolbarEnabled: false,
-                                          markers: deliveryMarkers,
-                                          polylines: deliveryPolylines,
+                                              onMapCreated:
+                                                  (controller) async {
+                                                    if (cameraPoints.length <
+                                                        2) {
+                                                      return;
+                                                    }
+                                                    await controller
+                                                        .animateCamera(
+                                                          CameraUpdate
+                                                              .newLatLngBounds(
+                                                                _buildBounds(
+                                                                  cameraPoints,
+                                                                ),
+                                                                60,
+                                                              ),
+                                                        );
+                                                  },
+                                              myLocationEnabled: false,
+                                              myLocationButtonEnabled: false,
+                                              zoomControlsEnabled: false,
+                                              scrollGesturesEnabled:
+                                                  _isMapInteractionEnabled,
+                                              zoomGesturesEnabled:
+                                                  _isMapInteractionEnabled,
+                                              rotateGesturesEnabled:
+                                                  _isMapInteractionEnabled,
+                                              tiltGesturesEnabled:
+                                                  _isMapInteractionEnabled,
+                                              gestureRecognizers:
+                                                  _isMapInteractionEnabled
+                                                  ? <
+                                                      Factory<
+                                                        OneSequenceGestureRecognizer
+                                                      >
+                                                    >{
+                                                      Factory<
+                                                        OneSequenceGestureRecognizer
+                                                      >(
+                                                        () =>
+                                                            EagerGestureRecognizer(),
+                                                      ),
+                                                    }
+                                                  : <
+                                                      Factory<
+                                                        OneSequenceGestureRecognizer
+                                                      >
+                                                    >{},
+                                              mapToolbarEnabled: false,
+                                              markers: deliveryMarkers,
+                                              polylines: deliveryPolylines,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),

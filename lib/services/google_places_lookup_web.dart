@@ -6,6 +6,8 @@ import 'package:kosmenu_app/services/google_places_rest_parser.dart';
 external JSElmenuxfaPlaces? get _elmenuxfaPlaces;
 
 extension type JSElmenuxfaPlaces._(JSObject _) implements JSObject {
+  external JSPromise<JSAny?> whenReady();
+
   external JSPromise<JSAny?> autocomplete(
     String input,
     JSNumber? lat,
@@ -19,6 +21,17 @@ extension type JSElmenuxfaPlaces._(JSObject _) implements JSObject {
 }
 
 JSNumber? _jsNumberOrNull(double? value) => value?.toJS;
+
+Future<void> ensureGoogleMapsLoadedImpl() async {
+  final bridge = _elmenuxfaPlaces;
+  if (bridge == null) {
+    throw const GooglePlacesLookupException(
+      'Google Places bridge unavailable.',
+      status: 'BRIDGE_MISSING',
+    );
+  }
+  await bridge.whenReady().toDart;
+}
 
 Future<List<PlaceSuggestion>> lookupPlaceAutocompleteImpl({
   required String query,

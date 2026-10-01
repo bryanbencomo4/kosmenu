@@ -1,6 +1,9 @@
 import 'package:kosmenu_app/services/google_places_lookup_stub.dart'
-    if (dart.library.html) 'package:kosmenu_app/services/google_places_lookup_web.dart'
-    if (dart.library.io) 'package:kosmenu_app/services/google_places_lookup_io.dart';
+    if (dart.library.html)
+      'package:kosmenu_app/services/google_places_lookup_web.dart'
+    if (dart.library.io)
+      'package:kosmenu_app/services/google_places_lookup_io.dart'
+    as lookup_platform;
 import 'package:kosmenu_app/services/google_places_rest_parser.dart';
 
 export 'package:kosmenu_app/services/google_places_rest_parser.dart';
@@ -12,13 +15,25 @@ export 'package:kosmenu_app/services/google_places_rest_parser.dart';
 class GooglePlacesLookup {
   const GooglePlacesLookup._();
 
+  static Future<void>? _mapsReady;
+
+  static Future<void> ensureReady() async {
+    final future = _mapsReady ??= lookup_platform.ensureGoogleMapsLoadedImpl();
+    try {
+      await future;
+    } catch (_) {
+      _mapsReady = null;
+      rethrow;
+    }
+  }
+
   static Future<List<PlaceSuggestion>> autocomplete({
     required String query,
     double? nearLatitude,
     double? nearLongitude,
     int radiusMeters = 30000,
   }) {
-    return lookupPlaceAutocompleteImpl(
+    return lookup_platform.lookupPlaceAutocompleteImpl(
       query: query,
       nearLatitude: nearLatitude,
       nearLongitude: nearLongitude,
@@ -27,14 +42,14 @@ class GooglePlacesLookup {
   }
 
   static Future<Map<String, dynamic>?> details(String placeId) {
-    return lookupPlaceDetailsImpl(placeId);
+    return lookup_platform.lookupPlaceDetailsImpl(placeId);
   }
 
   static Future<String?> reverseGeocode({
     required double latitude,
     required double longitude,
   }) {
-    return lookupReverseGeocodeImpl(
+    return lookup_platform.lookupReverseGeocodeImpl(
       latitude: latitude,
       longitude: longitude,
     );

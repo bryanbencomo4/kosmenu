@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/services/google_places_rest_parser.dart';
 
+Future<void> ensureGoogleMapsLoadedImpl() async {}
+
 Future<List<PlaceSuggestion>> lookupPlaceAutocompleteImpl({
   required String query,
   double? nearLatitude,
