@@ -513,6 +513,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     String? delegatedCourierAlias = _cachedOrderData?.delegatedCourierAlias;
     String? moneda = _cachedOrderData?.moneda;
     var history = _cachedOrderData?.history ?? const <_HistoryOrderViewData>[];
+    final catalogProducts = <String, Map<String, dynamic>>{};
+    final catalogCategories = <String, Map<String, dynamic>>{};
 
     Future<void> loadComercio() async {
       if (pedido.comercioId.isEmpty) return;
@@ -571,12 +573,77 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       );
     }
 
-    await Future.wait<void>([loadComercio(), loadCourierAlias(), loadHistory()]);
+    Future<void> loadLegacyItemCatalog() async {
+      if (widget.readOnlyView) return;
+      final productIds = pedido.items
+          .where(
+            (item) =>
+                item.productId != null &&
+                (!item.hasImageSnapshot || !item.hasCategorySnapshot),
+          )
+          .map((item) => item.productId!)
+          .toSet()
+          .toList(growable: false);
+      if (pedido.comercioId.isEmpty || productIds.isEmpty) return;
+      try {
+        final rows = await client
+            .from('productos')
+            .select('id,imagen_url,categoria_id')
+            .eq('comercio_id', pedido.comercioId)
+            .inFilter('id', productIds);
+        final productRows = rows as List<dynamic>;
+        for (final row in productRows) {
+          final product = _asMap(row);
+          final id = (product['id'] ?? '').toString().trim();
+          if (id.isNotEmpty) catalogProducts[id] = product;
+        }
+
+        final categoryIds = catalogProducts.values
+            .map((product) => (product['categoria_id'] ?? '').toString().trim())
+            .where((id) => id.isNotEmpty)
+            .toSet()
+            .toList(growable: false);
+        if (categoryIds.isEmpty) return;
+        final categoryRows = await client
+            .from('categorias')
+            .select('id,nombre')
+            .eq('comercio_id', pedido.comercioId)
+            .inFilter('id', categoryIds);
+        for (final row in categoryRows as List<dynamic>) {
+          final category = _asMap(row);
+          final id = (category['id'] ?? '').toString().trim();
+          if (id.isNotEmpty) catalogCategories[id] = category;
+        }
+      } catch (_) {
+        // Historical orders still render their immutable stored data.
+      }
+    }
+
+    await Future.wait<void>([
+      loadComercio(),
+      loadCourierAlias(),
+      loadHistory(),
+      loadLegacyItemCatalog(),
+    ]);
 
     if (!mounted) return;
+    final latestPedido = _cachedOrderData?.pedido ?? pedido;
+    final enrichedItems = latestPedido.items
+        .map((item) {
+          final product = catalogProducts[item.productId];
+          if (product == null) return item;
+          final categoryId = (product['categoria_id'] ?? '').toString().trim();
+          final category = catalogCategories[categoryId];
+          return item.withCatalogFallback(
+            imageUrl: product['imagen_url']?.toString().trim(),
+            categoryName: category?['nombre']?.toString().trim(),
+          );
+        })
+        .toList(growable: false);
+    final enrichedPedido = latestPedido.copyWithItems(enrichedItems);
     setState(() {
       _cachedOrderData = _OrderViewData(
-        pedido: _cachedOrderData?.pedido ?? pedido,
+        pedido: enrichedPedido,
         comercioNombre: comercioNombre,
         businessLatitude: businessLatitude,
         businessLongitude: businessLongitude,
@@ -1811,15 +1878,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   }
 
   String _orderCurrency(PedidoModel pedido, {String? fallback}) {
+    if (!widget.readOnlyView) {
+      return pedido.currencyForDisplay(fallback: fallback);
+    }
     final base = (pedido.detalles['moneda_base'] ?? '').toString().trim();
     if (base.isNotEmpty) return base.toUpperCase();
     final shop = (fallback ?? '').trim();
     if (shop.isNotEmpty) return shop.toUpperCase();
-    final checkout = (pedido.detalles['moneda_checkout'] ?? '')
-        .toString()
-        .trim();
-    if (checkout.isNotEmpty) return checkout.toUpperCase();
-    return 'COP';
+    return pedido.checkoutCurrencySnapshot ?? 'COP';
+  }
+
+  double _displayTotal(PedidoModel pedido, String currency) {
+    return widget.readOnlyView
+        ? pedido.total ?? 0
+        : pedido.totalForDisplay(currency);
   }
 
   String _formatAmount(double value, [String? currency]) {
@@ -1832,16 +1904,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     return '${format.format(value)} $normalized';
   }
 
-  double _deliveryCostOf(PedidoModel pedido) {
-    return pedido.deliveryCost;
+  double _deliveryCostOf(PedidoModel pedido, {String? currency}) {
+    return pedido.deliveryForDisplay(currency ?? _orderCurrency(pedido));
   }
 
-  double _subtotalOf(PedidoModel pedido, double total) {
-    final stored = _toDoubleOrNull(pedido.detalles['subtotal']);
-    if (stored != null && stored > 0) return stored;
-    final delivery = _deliveryCostOf(pedido);
-    final inferred = total - delivery;
-    return inferred > 0 ? inferred : total;
+  double _subtotalOf(PedidoModel pedido, double total, {String? currency}) {
+    return pedido.subtotalForDisplay(currency ?? _orderCurrency(pedido), total);
+  }
+
+  double _itemTotalForDisplay(
+    PedidoItemModel item,
+    PedidoModel pedido,
+    String currency,
+  ) {
+    return pedido.itemTotalForDisplay(item, currency);
   }
 
   String _statusLabel(String? estado) {
@@ -2335,10 +2411,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     total,
                     _orderCurrency(pedido, fallback: data.moneda),
                   ),
+                  paymentReference: pedido.paymentReference,
+                  hasPaymentProof: pedido.hasComprobante,
+                  isLoadingPaymentProof: _isLoadingComprobante,
+                  onViewPaymentProof: () =>
+                      unawaited(_openComprobanteViewer(pedido)),
                   deliveryLabel: isDeliveryOrder
-                      ? (_deliveryCostOf(pedido) <= 0
-                          ? 'Envío gratis'
-                          : 'Envío ${_formatAmount(_deliveryCostOf(pedido), _orderCurrency(pedido, fallback: data.moneda))}')
+                      ? (_deliveryCostOf(
+                                  pedido,
+                                  currency: _orderCurrency(
+                                    pedido,
+                                    fallback: data.moneda,
+                                  ),
+                                ) <=
+                                0
+                            ? 'Envío gratis'
+                            : 'Envío ${_formatAmount(_deliveryCostOf(pedido, currency: _orderCurrency(pedido, fallback: data.moneda)), _orderCurrency(pedido, fallback: data.moneda))}')
                       : null,
                   customerName: (customerName ?? '').trim(),
                   onWhatsapp: phone.isEmpty || !whatsappNotificationsEnabled
@@ -2568,10 +2656,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 }
 
                 final pedido = data.pedido;
-                final total = pedido.total ?? 0.0;
                 final currency = _orderCurrency(pedido, fallback: data.moneda);
-                final deliveryCost = _deliveryCostOf(pedido);
-                final subtotal = _subtotalOf(pedido, total);
+                final total = _displayTotal(pedido, currency);
+                final deliveryCost = _deliveryCostOf(
+                  pedido,
+                  currency: currency,
+                );
+                final subtotal = _subtotalOf(pedido, total, currency: currency);
                 final customerName = pedido.nombreCliente?.trim();
                 final customerEmail = pedido.clienteEmail?.trim();
                 final customerPhone = pedido.clientePhone?.trim();
@@ -2641,7 +2732,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     ?.trim();
                 final deliveryLat = pedido.deliveryLatitude;
                 final deliveryLng = pedido.deliveryLongitude;
-                final orderNotes = pedido.orderNotes?.trim();
+                final orderNotes = (widget.readOnlyView
+                    ? pedido.orderNotes
+                    : pedido.merchantOrderNotes)
+                  ?.trim();
                 final businessLogoUrl = data.businessLogoUrl?.trim();
                 if (widget.readOnlyView || _deferredVisualsReady) {
                   _prepareMarkerIconsIfNeeded(businessLogoUrl: businessLogoUrl);
@@ -4476,7 +4570,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                             ),
                                           ),
                                           Text(
-                                            _formatAmount(item.total, currency),
+                                            _formatAmount(
+                                              _itemTotalForDisplay(
+                                                item,
+                                                pedido,
+                                                currency,
+                                              ),
+                                              currency,
+                                            ),
                                             style: GoogleFonts.manrope(
                                               color: success,
                                               fontWeight: FontWeight.w700,

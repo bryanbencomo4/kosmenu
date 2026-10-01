@@ -35,6 +35,86 @@ class PedidoModel {
 
   bool get hasComprobante => comprobanteRef != null;
 
+  String? get paymentReference => _asTrimmedString(detalles['referencia_pago']);
+
+  String? get merchantOrderNotes => _resolveOrderNotes(orderNotes);
+
+  String? get checkoutCurrencySnapshot =>
+      _asTrimmedString(detalles['moneda_checkout'])?.toUpperCase();
+
+  double? get checkoutTotalSnapshot =>
+      _toDoubleOrNull(detalles['total_moneda_checkout']);
+
+  double? get checkoutSubtotalSnapshot =>
+      _toDoubleOrNull(detalles['subtotal_moneda_checkout']);
+
+  double? get checkoutDeliverySnapshot =>
+      _toDoubleOrNull(detalles['costo_delivery_moneda_checkout']);
+
+  double? get exchangeRateSnapshot =>
+      _toDoubleOrNull(detalles['tasa_cambio_snapshot']);
+
+  String currencyForDisplay({String? fallback}) {
+    final checkout = checkoutCurrencySnapshot;
+    if (checkout != null && checkoutTotalSnapshot != null) return checkout;
+    final base = _asTrimmedString(detalles['moneda_base']);
+    if (base != null) return base.toUpperCase();
+    final shop = _asTrimmedString(fallback);
+    if (shop != null) return shop.toUpperCase();
+    return checkout ?? 'COP';
+  }
+
+  double totalForDisplay(String currency) {
+    final checkout = checkoutCurrencySnapshot;
+    final checkoutTotal = checkoutTotalSnapshot;
+    if (checkout != null &&
+        checkoutTotal != null &&
+        currency.trim().toUpperCase() == checkout) {
+      return checkoutTotal;
+    }
+    return total ?? 0;
+  }
+
+  double deliveryForDisplay(String currency) {
+    final checkout = checkoutCurrencySnapshot;
+    final checkoutDelivery = checkoutDeliverySnapshot;
+    if (checkout != null &&
+        checkoutDelivery != null &&
+        currency.trim().toUpperCase() == checkout) {
+      return checkoutDelivery;
+    }
+    return deliveryCost;
+  }
+
+  double subtotalForDisplay(String currency, double displayTotal) {
+    final checkout = checkoutCurrencySnapshot;
+    final checkoutSubtotal = checkoutSubtotalSnapshot;
+    if (checkout != null &&
+        checkoutSubtotal != null &&
+        currency.trim().toUpperCase() == checkout) {
+      return checkoutSubtotal;
+    }
+    final stored = _toDoubleOrNull(detalles['subtotal']);
+    if (stored != null && stored > 0) return stored;
+    final inferred = displayTotal - deliveryForDisplay(currency);
+    return inferred > 0 ? inferred : displayTotal;
+  }
+
+  double itemTotalForDisplay(PedidoItemModel item, String currency) {
+    final checkout = checkoutCurrencySnapshot;
+    final base = _asTrimmedString(detalles['moneda_base'])?.toUpperCase();
+    final rate = exchangeRateSnapshot;
+    if (checkout != null &&
+        currency.trim().toUpperCase() == checkout &&
+        base != null &&
+        base != checkout &&
+        rate != null &&
+        rate > 0) {
+      return item.total * rate;
+    }
+    return item.total;
+  }
+
   const PedidoModel({
     required this.id,
     required this.comercioId,
@@ -61,6 +141,35 @@ class PedidoModel {
     this.hasParseError = false,
     this.parseErrorMessage,
   });
+
+  PedidoModel copyWithItems(List<PedidoItemModel> nextItems) {
+    return PedidoModel(
+      id: id,
+      comercioId: comercioId,
+      orderId: orderId,
+      nombreCliente: nombreCliente,
+      clienteEmail: clienteEmail,
+      clientePhone: clientePhone,
+      estado: estado,
+      total: total,
+      createdAt: createdAt,
+      creadoPorIa: creadoPorIa,
+      confianzaIa: confianzaIa,
+      metodoPago: metodoPago,
+      deliveryMode: deliveryMode,
+      deliveryAddress: deliveryAddress,
+      deliveryReference: deliveryReference,
+      deliveryInstructions: deliveryInstructions,
+      deliveryLatitude: deliveryLatitude,
+      deliveryLongitude: deliveryLongitude,
+      orderNotes: orderNotes,
+      costoDelivery: costoDelivery,
+      items: nextItems,
+      detalles: detalles,
+      hasParseError: hasParseError,
+      parseErrorMessage: parseErrorMessage,
+    );
+  }
 
   factory PedidoModel.fromMap(Map<String, dynamic> map) {
     try {
@@ -256,6 +365,27 @@ class PedidoModel {
     return trimmed.isEmpty ? null : trimmed;
   }
 
+  static String? _resolveOrderNotes(dynamic value) {
+    var notes = _asTrimmedString(value);
+    if (notes == null) return null;
+    const fulfillmentPrefix =
+        r'^Tipo:\s*(?:Comer aqui|Para llevar|Delivery)(?:\.\s*|$)';
+    notes = notes
+        .replaceFirst(RegExp(fulfillmentPrefix, caseSensitive: false), '')
+        .trim();
+    if (notes.isEmpty) return null;
+    if (const <String>{
+      'delivery',
+      'pickup',
+      'retiro',
+      'comer aqui',
+      'para llevar',
+    }.contains(notes.toLowerCase())) {
+      return null;
+    }
+    return notes;
+  }
+
   static double? _toDoubleOrNull(dynamic value) {
     if (value is num) return value.toDouble();
     final raw = value?.toString().trim() ?? '';
@@ -442,10 +572,14 @@ class PedidoItemModifierGroup {
 }
 
 class PedidoItemModel {
+  final String? productId;
   final String nombre;
   final int cantidad;
   final double precio;
   final String? imageUrl;
+  final String? categoryName;
+  final bool hasImageSnapshot;
+  final bool hasCategorySnapshot;
   final String? producto;
   final double? precioBase;
   final List<PedidoItemModifier> opciones;
@@ -454,13 +588,38 @@ class PedidoItemModel {
     required this.nombre,
     required this.cantidad,
     required this.precio,
+    this.productId,
     this.imageUrl,
+    this.categoryName,
+    this.hasImageSnapshot = false,
+    this.hasCategorySnapshot = false,
     this.producto,
     this.precioBase,
     this.opciones = const [],
   });
 
   double get total => cantidad * precio;
+
+  PedidoItemModel withCatalogFallback({
+    String? imageUrl,
+    String? categoryName,
+  }) {
+    return PedidoItemModel(
+      productId: productId,
+      nombre: nombre,
+      cantidad: cantidad,
+      precio: precio,
+      imageUrl: hasImageSnapshot ? this.imageUrl : (imageUrl ?? this.imageUrl),
+      categoryName: hasCategorySnapshot
+          ? this.categoryName
+          : (categoryName ?? this.categoryName),
+      hasImageSnapshot: hasImageSnapshot,
+      hasCategorySnapshot: hasCategorySnapshot,
+      producto: producto,
+      precioBase: precioBase,
+      opciones: opciones,
+    );
+  }
 
   bool get hasModifiers => opciones.isNotEmpty;
 
@@ -490,6 +649,10 @@ class PedidoItemModel {
     final rawOpciones = map['selecciones'];
     final rawBase = map['precio_base'];
     final producto = map['producto']?.toString().trim();
+    final rawCategory = map.containsKey('categoria_nombre')
+        ? map['categoria_nombre']
+        : map['category_name'];
+    final categoryName = PedidoModel._asTrimmedString(rawCategory);
 
     return PedidoItemModel(
       nombre: (map['nombre']?.toString().trim() ?? '').isEmpty
@@ -501,7 +664,21 @@ class PedidoItemModel {
       precio: rawPrecio is num
           ? rawPrecio.toDouble()
           : double.tryParse(rawPrecio?.toString() ?? '') ?? 0.0,
+      productId: PedidoModel._asTrimmedString(
+        map['product_id'] ?? map['productId'],
+      ),
       imageUrl: _resolveImageUrl(map),
+      categoryName: categoryName,
+      hasImageSnapshot: const <String>[
+        'imagen_url',
+        'image_url',
+        'foto_url',
+        'imagen',
+        'foto',
+      ].any(map.containsKey),
+      hasCategorySnapshot:
+          map.containsKey('categoria_nombre') ||
+          map.containsKey('category_name'),
       producto: producto == null || producto.isEmpty ? null : producto,
       precioBase: rawBase is num
           ? rawBase.toDouble()
@@ -536,10 +713,12 @@ class PedidoItemModel {
 
   Map<String, dynamic> toMap() {
     return {
+      if (productId != null) 'product_id': productId,
       'nombre': nombre,
       'cantidad': cantidad,
       'precio': precio,
-      'imagen_url': imageUrl,
+      if (hasImageSnapshot) 'imagen_url': imageUrl,
+      if (hasCategorySnapshot) 'categoria_nombre': categoryName,
       'producto': ?producto,
       'precio_base': ?precioBase,
       if (opciones.isNotEmpty)

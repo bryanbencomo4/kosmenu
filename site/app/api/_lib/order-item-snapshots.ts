@@ -15,6 +15,8 @@ export type OrderItemInput = {
 };
 
 export type StoredOrderItem = OrderItemInput & {
+  imagen_url?: string | null;
+  categoria_nombre?: string | null;
   producto?: string;
   precio_base?: number;
   selecciones?: OrderLineOptionSnapshot[];
@@ -26,6 +28,7 @@ export type SnapshotProductRow = {
   id: string;
   categoria_id?: string | null;
   nombre?: string | null;
+  imagen_url?: string | null;
   precio?: number | null;
   opciones_menu?: unknown;
 };
@@ -72,9 +75,7 @@ export async function buildOrderItemSnapshots(params: {
   const { items, selections } = params;
   const idsToLoad = [
     ...new Set(
-      items
-        .filter((_, index) => selections[index] != null)
-        .map((item) => item.product_id),
+      items.map((item) => item.product_id).filter(Boolean),
     ),
   ];
   if (idsToLoad.length === 0) {
@@ -84,16 +85,13 @@ export async function buildOrderItemSnapshots(params: {
   const products = await params.loadProducts(idsToLoad);
   const productById = new Map(products.map((row) => [row.id, row]));
 
-  const needsCategories = selections.some((selection) => selection?.servicioAdicional === true);
-  const categoryIds = needsCategories
-    ? [
-        ...new Set(
-          products
-            .map((row) => (row.categoria_id ?? '').toString().trim())
-            .filter(Boolean),
-        ),
-      ]
-    : [];
+  const categoryIds = [
+    ...new Set(
+      products
+        .map((row) => (row.categoria_id ?? '').toString().trim())
+        .filter(Boolean),
+    ),
+  ];
   const categories = categoryIds.length > 0 ? await params.loadCategories(categoryIds) : [];
   const categoryById = new Map(categories.map((row) => [row.id, row]));
 
@@ -101,15 +99,9 @@ export async function buildOrderItemSnapshots(params: {
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     const selection = selections[index];
-    if (selection == null) {
-      stored.push({ ...item });
-      continue;
-    }
-
     const product = productById.get(item.product_id);
-    const selectsGroups = Object.keys(selection.grupos ?? {}).length > 0;
     if (!product) {
-      if (selectsGroups) {
+      if (Object.keys(selection?.grupos ?? {}).length > 0) {
         return {
           ok: false,
           status: 409,
@@ -122,6 +114,16 @@ export async function buildOrderItemSnapshots(params: {
     }
 
     const category = categoryById.get((product.categoria_id ?? '').toString().trim()) ?? null;
+    const catalogSnapshot = {
+      imagen_url: product.imagen_url ?? null,
+      categoria_nombre: category?.nombre ?? null,
+    };
+    if (selection == null) {
+      stored.push({ ...item, ...catalogSnapshot });
+      continue;
+    }
+
+    const selectsGroups = Object.keys(selection.grupos ?? {}).length > 0;
     const productName = (product.nombre ?? '').toString().trim() || item.nombre;
     const hasGroups = (parseProductMenuOptions(product.opciones_menu)?.grupos?.length ?? 0) > 0;
 
@@ -147,13 +149,13 @@ export async function buildOrderItemSnapshots(params: {
     }
 
     if (!hasAnySelection(selection)) {
-      stored.push({ ...item });
+      stored.push({ ...item, ...catalogSnapshot });
       continue;
     }
 
     const snapshot = buildOrderLineSnapshot(product, category, selection);
     if (snapshot.selecciones.length === 0) {
-      stored.push({ ...item, seleccion: selection });
+      stored.push({ ...item, ...catalogSnapshot, seleccion: selection });
       continue;
     }
 
@@ -163,6 +165,7 @@ export async function buildOrderItemSnapshots(params: {
     const seleccionesTotal = snapshot.selecciones.reduce((sum, option) => sum + option.precio, 0);
     stored.push({
       ...item,
+      ...catalogSnapshot,
       producto: snapshot.producto,
       precio_base: roundMoney(precioFinal - seleccionesTotal),
       selecciones: snapshot.selecciones,

@@ -57,7 +57,12 @@ void main() {
             'max': 9,
             'opciones': [
               {'id': 'o_queso', 'nombre': 'Extra queso', 'precio': 1000},
-              {'id': 'o_off', 'nombre': 'Aguacate', 'precio': 1, 'activo': false},
+              {
+                'id': 'o_off',
+                'nombre': 'Aguacate',
+                'precio': 1,
+                'activo': false,
+              },
               {'id': 'bad id', 'nombre': 'X'},
               {'id': 'o_queso', 'nombre': 'Duplicado'},
             ],
@@ -74,12 +79,15 @@ void main() {
       expect(extras.min, 0);
     });
 
-    test('normalizes single-choice and required rules like the public menu', () {
-      final group = _tamano.copyWith(min: 0, max: 3).normalized();
-      expect(group.max, 1);
-      expect(group.min, 1);
-      expect(group.toMap()['tipo'], 'unica');
-    });
+    test(
+      'normalizes single-choice and required rules like the public menu',
+      () {
+        final group = _tamano.copyWith(min: 0, max: 3).normalized();
+        expect(group.max, 1);
+        expect(group.min, 1);
+        expect(group.toMap()['tipo'], 'unica');
+      },
+    );
 
     test('merge writes activadas + grupos and keeps legacy keys', () {
       final current = <String, dynamic>{
@@ -129,8 +137,16 @@ void main() {
         id: 'queso_extra',
         nombre: 'Extra queso',
         reglasPrecio: [
-          ProductOptionPriceRule(grupo: 'tamano', opcion: 'normal', precio: 2000),
-          ProductOptionPriceRule(grupo: 'tamano', opcion: 'grande', precio: 5000),
+          ProductOptionPriceRule(
+            grupo: 'tamano',
+            opcion: 'normal',
+            precio: 2000,
+          ),
+          ProductOptionPriceRule(
+            grupo: 'tamano',
+            opcion: 'grande',
+            precio: 5000,
+          ),
         ],
       );
       final encoded = extra.toMap();
@@ -166,7 +182,10 @@ void main() {
       expect(encoded['predeterminada'], isTrue);
       expect(encoded['texto_libre'], isTrue);
       expect(
-        const ProductOptionChoice(id: 'o_nor', nombre: 'Normal').toMap().containsKey('predeterminada'),
+        const ProductOptionChoice(
+          id: 'o_nor',
+          nombre: 'Normal',
+        ).toMap().containsKey('predeterminada'),
         isFalse,
       );
 
@@ -232,5 +251,55 @@ void main() {
       expect(item.hasModifiers, isTrue);
       expect(item.modifierGroups.single.label, 'Tamaño: Grande');
     });
+
+    test('reads immutable category/image snapshots for an order line', () {
+      final item = PedidoItemModel.fromMap({
+        'product_id': 'p1',
+        'nombre': 'POLLO - CARNE',
+        'cantidad': 1,
+        'precio': 12000,
+        'categoria_nombre': 'Hamburguesas',
+        'imagen_url': 'https://cdn.example.test/pollo.jpg',
+      });
+
+      expect(item.productId, 'p1');
+      expect(item.categoryName, 'Hamburguesas');
+      expect(item.imageUrl, 'https://cdn.example.test/pollo.jpg');
+      expect(item.hasImageSnapshot, isTrue);
+      expect(item.hasCategorySnapshot, isTrue);
+    });
+
+    test(
+      'legacy items use catalog fallback only when snapshot keys are absent',
+      () {
+        final legacy = PedidoItemModel.fromMap({
+          'product_id': 'p1',
+          'nombre': 'POLLO - CARNE',
+          'cantidad': 1,
+          'precio': 12000,
+        });
+        final enriched = legacy.withCatalogFallback(
+          imageUrl: 'https://cdn.example.test/current.jpg',
+          categoryName: 'Hamburguesas',
+        );
+        expect(enriched.imageUrl, 'https://cdn.example.test/current.jpg');
+        expect(enriched.categoryName, 'Hamburguesas');
+
+        final snapshotWithoutImage =
+            PedidoItemModel.fromMap({
+              'product_id': 'p1',
+              'nombre': 'POLLO - CARNE',
+              'cantidad': 1,
+              'precio': 12000,
+              'imagen_url': null,
+              'categoria_nombre': null,
+            }).withCatalogFallback(
+              imageUrl: 'https://cdn.example.test/changed.jpg',
+              categoryName: 'Nueva categoría',
+            );
+        expect(snapshotWithoutImage.imageUrl, isNull);
+        expect(snapshotWithoutImage.categoryName, isNull);
+      },
+    );
   });
 }

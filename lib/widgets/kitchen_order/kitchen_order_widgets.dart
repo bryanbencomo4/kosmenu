@@ -275,6 +275,10 @@ class KitchenSummaryStrip extends StatelessWidget {
     required this.paymentSubtitle,
     required this.totalLabel,
     required this.customerName,
+    this.paymentReference,
+    this.hasPaymentProof = false,
+    this.isLoadingPaymentProof = false,
+    this.onViewPaymentProof,
     this.deliveryLabel,
     this.onWhatsapp,
     this.onCall,
@@ -285,6 +289,10 @@ class KitchenSummaryStrip extends StatelessWidget {
   final String paymentSubtitle;
   final String totalLabel;
   final String customerName;
+  final String? paymentReference;
+  final bool hasPaymentProof;
+  final bool isLoadingPaymentProof;
+  final VoidCallback? onViewPaymentProof;
   final String? deliveryLabel;
   final VoidCallback? onWhatsapp;
   final VoidCallback? onCall;
@@ -376,6 +384,48 @@ class KitchenSummaryStrip extends StatelessWidget {
               ),
             ],
           ),
+          if ((paymentReference ?? '').trim().isNotEmpty ||
+              hasPaymentProof) ...[
+            const SizedBox(height: 10),
+            if ((paymentReference ?? '').trim().isNotEmpty)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Referencia: ${paymentReference!.trim()}',
+                  softWrap: true,
+                  style: GoogleFonts.manrope(
+                    color: KitchenMockupColors.text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            if (hasPaymentProof) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: isLoadingPaymentProof ? null : onViewPaymentProof,
+                  icon: isLoadingPaymentProof
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.receipt_long_rounded, size: 18),
+                  label: Text(
+                    isLoadingPaymentProof
+                        ? 'Cargando comprobante...'
+                        : 'Ver comprobante',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                    foregroundColor: KitchenMockupColors.purple,
+                  ),
+                ),
+              ),
+            ],
+          ],
           const SizedBox(height: 12),
           const Divider(height: 1, color: KitchenMockupColors.border),
           const SizedBox(height: 10),
@@ -688,6 +738,18 @@ class KitchenPrepSection extends StatelessWidget {
                                 height: 1.1,
                               ),
                             ),
+                            if ((item.categoryName ?? '').trim().isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 3),
+                                child: Text(
+                                  item.categoryName!.trim(),
+                                  style: GoogleFonts.manrope(
+                                    color: KitchenMockupColors.muted,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
                             for (final group in item.modifierGroups)
                               Padding(
                                 padding: const EdgeInsets.only(top: 6),

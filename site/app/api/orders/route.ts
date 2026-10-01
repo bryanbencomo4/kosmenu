@@ -563,7 +563,7 @@ export async function POST(request: Request) {
       loadProducts: async (productIds) => {
         const { data, error } = await supabase
           .from('productos')
-          .select('id,categoria_id,nombre,precio,opciones_menu')
+          .select('id,categoria_id,nombre,imagen_url,precio,opciones_menu')
           .eq('comercio_id', resolvedComercioId)
           .in('id', productIds);
         if (error) throw new Error(error.message);

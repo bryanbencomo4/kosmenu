@@ -6,6 +6,7 @@ const hamburguesaRow: SnapshotProductRow = {
   id: 'p1',
   categoria_id: 'c1',
   nombre: 'Hamburguesa Clásica',
+  imagen_url: 'https://cdn.example.test/hamburguesa.jpg',
   precio: 5,
   opciones_menu: {
     activadas: true,
@@ -37,26 +38,49 @@ const hamburguesaRow: SnapshotProductRow = {
   },
 };
 
-function loaders(rows: SnapshotProductRow[] = [hamburguesaRow]) {
+function loaders(
+  rows: SnapshotProductRow[] = [hamburguesaRow],
+  categories = [{ id: 'c1', nombre: 'Hamburguesas' }],
+) {
   return {
     loadProducts: vi.fn(async (ids: string[]) => rows.filter((row) => ids.includes(row.id))),
-    loadCategories: vi.fn(async () => []),
+    loadCategories: vi.fn(async (ids: string[]) => categories.filter((row) => ids.includes(row.id))),
   };
 }
 
 describe('buildOrderItemSnapshots', () => {
-  it('stores legacy lines untouched and skips DB reads when no line has options', async () => {
+  it('stores image/category snapshots for simple lines without options', async () => {
     const deps = loaders();
     const result = await buildOrderItemSnapshots({
-      items: [{ product_id: 'p2', nombre: 'Pizza Pepperoni', cantidad: 2, precio: 6 }],
+      items: [{ product_id: 'p1', nombre: 'Hamburguesa Clásica', cantidad: 2, precio: 5 }],
       selections: [null],
       ...deps,
     });
     expect(result).toEqual({
       ok: true,
-      items: [{ product_id: 'p2', nombre: 'Pizza Pepperoni', cantidad: 2, precio: 6 }],
+      items: [{
+        product_id: 'p1',
+        nombre: 'Hamburguesa Clásica',
+        cantidad: 2,
+        precio: 5,
+        imagen_url: 'https://cdn.example.test/hamburguesa.jpg',
+        categoria_nombre: 'Hamburguesas',
+      }],
     });
-    expect(deps.loadProducts).not.toHaveBeenCalled();
+    expect(deps.loadProducts).toHaveBeenCalledWith(['p1']);
+    expect(deps.loadCategories).toHaveBeenCalledWith(['c1']);
+  });
+
+  it('keeps legacy item payloads when the catalog product is unavailable', async () => {
+    const result = await buildOrderItemSnapshots({
+      items: [{ product_id: 'old-product', nombre: 'Pizza Pepperoni', cantidad: 2, precio: 6 }],
+      selections: [null],
+      ...loaders([]),
+    });
+    expect(result).toEqual({
+      ok: true,
+      items: [{ product_id: 'old-product', nombre: 'Pizza Pepperoni', cantidad: 2, precio: 6 }],
+    });
   });
 
   it('freezes the options snapshot with DB names and prices', async () => {
@@ -75,6 +99,8 @@ describe('buildOrderItemSnapshots', () => {
           nombre: 'Hamburguesa Clásica · Grande · Tocineta',
           cantidad: 1,
           precio: 8.5,
+          imagen_url: 'https://cdn.example.test/hamburguesa.jpg',
+          categoria_nombre: 'Hamburguesas',
           producto: 'Hamburguesa Clásica',
           precio_base: 5,
           selecciones: [
@@ -100,7 +126,14 @@ describe('buildOrderItemSnapshots', () => {
     });
     expect(result).toEqual({
       ok: true,
-      items: [{ product_id: 'p1', nombre: 'Hamburguesa Clásica', cantidad: 1, precio: 5 }],
+      items: [{
+        product_id: 'p1',
+        nombre: 'Hamburguesa Clásica',
+        cantidad: 1,
+        precio: 5,
+        imagen_url: 'https://cdn.example.test/hamburguesa.jpg',
+        categoria_nombre: 'Hamburguesas',
+      }],
     });
   });
 
