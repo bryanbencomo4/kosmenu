@@ -537,7 +537,7 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   static const String _mobileOAuthRedirect = 'com.kosmenu.app://login-callback';
-  static const String _fullLogoAsset = 'assets/branding/full_logo.png';
+  static const String _fullLogoAsset = 'assets/branding/full_logo_auth.webp';
   static const String _termsUrl = '${AppLinks.productionUrl}/terminos';
   static const String _privacyUrl = '${AppLinks.productionUrl}/privacidad';
 
