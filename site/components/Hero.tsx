@@ -66,8 +66,8 @@ function HeroProductVisual() {
         alt="Portamenú inteligente de elmenuxfa junto a un smartphone en un restaurante"
         width={1122}
         height={1402}
+        sizes="(max-width: 351px) calc(100vw - 32px), (min-width: 1280px) 528px, (min-width: 1024px) 480px, (min-width: 640px) 384px, 320px"
         priority
-        unoptimized
         className="animate-float-slow relative z-10 block h-auto w-full select-none drop-shadow-[0_40px_100px_rgba(0,0,0,0.55)]"
       />
     </div>
