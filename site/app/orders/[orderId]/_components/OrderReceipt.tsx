@@ -33,9 +33,6 @@ type OrderReceiptProps = {
   pickupAddress: string;
   timeline: TimelineItem[];
   currentStep: number;
-  pendingExpired: boolean;
-  confirmTimeLeftLabel: string;
-  confirmProgress: number;
   items: ReceiptItem[];
   subtotalLabel: string;
   deliveryLabel: string | null;
@@ -322,27 +319,11 @@ export function OrderReceipt(props: OrderReceiptProps) {
           ) : null}
 
           {props.status === 'pendiente' ? (
-            <div
-              className="mt-4 rounded-[16px] px-3.5 py-3 text-sm"
-              style={{
-                backgroundColor: props.pendingExpired ? '#FEF2F2' : '#FFFBEB',
-                color: props.pendingExpired ? '#9F1239' : '#92400E',
-              }}
-            >
-              {props.pendingExpired ? (
-                <p>Se agotó el tiempo de confirmación. Estamos cerrando este pedido.</p>
-              ) : (
-                <>
-                  <p className="font-semibold">Esperando al comercio · {props.confirmTimeLeftLabel}</p>
-                  <p className="mt-0.5 text-[13px] opacity-80">Si no confirman en 15 minutos, el pedido se cancela solo.</p>
-                  <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-black/10">
-                    <div
-                      className="h-full rounded-full bg-amber-500 transition-[width] duration-1000"
-                      style={{ width: `${Math.min(100, Math.max(2, props.confirmProgress * 100))}%` }}
-                    />
-                  </div>
-                </>
-              )}
+            <div className="mt-4 rounded-[16px] bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
+              <p className="font-semibold">Esperando confirmación del comercio</p>
+              <p className="mt-0.5 text-[13px] opacity-80">
+                El comercio revisará tu pedido y confirmará su estado.
+              </p>
             </div>
           ) : null}
 
@@ -681,7 +662,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
         ) : null}
         {props.showPendingCancelHint ? (
           <p className="mt-3 text-center text-xs leading-5 text-slate-500">
-            Puedes cancelarlo mientras el comercio no lo haya aceptado. Si no confirma en 15 minutos, se cancela automáticamente.
+            Puedes cancelarlo mientras el comercio no lo haya aceptado.
           </p>
         ) : null}
         {props.cancelMessage ? <p className="mt-2 text-center text-sm text-slate-600">{props.cancelMessage}</p> : null}

@@ -58,7 +58,6 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
-  static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
   static const int _liveOrdersWindow = 150;
   static const Color _dashboardBg = Color(0xFFF8F7FC);
   static const Color _purple = Color(0xFF6D28D9);
@@ -81,8 +80,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   bool _didPrimeOrderAlert = false;
   Set<String> _seenOrderIds = <String>{};
-  List<PedidoModel> _latestOrders = const <PedidoModel>[];
-
   /// Orders for the selected sales range (plus today), fetched on demand so
   /// the realtime stream only has to carry the most recent orders.
   List<PedidoModel> _metricsOrders = const <PedidoModel>[];
@@ -93,12 +90,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   List<PedidoModel>? _clientOrders;
   bool _clientOrdersLoading = false;
   final Map<String, String> _optimisticStatusByOrderId = <String, String>{};
-  final Set<String> _autoCancelInFlight = <String>{};
-  final Set<String> _autoCanceledHandledIds = <String>{};
-
   MagicOnboardingResult? _recentCatalogResult;
   Timer? _recentCatalogTimer;
-  Timer? _pendingAutoCancelTicker;
   bool _isRecoveringOrdersAuth = false;
   bool _isRestartingOrdersStream = false;
   _SalesRange _selectedSalesRange = _SalesRange.today;
@@ -135,7 +128,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _ordersStream = _buildOrdersStream();
     _bindAuthStateRecovery();
     _subscribeToOrders();
-    _startPendingAutoCancelTicker();
     unawaited(_refreshBillingGate());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_openPendingMerchantOrder());
@@ -261,89 +253,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  void _startPendingAutoCancelTicker() {
-    _pendingAutoCancelTicker?.cancel();
-    _pendingAutoCancelTicker = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (!mounted) return;
-      unawaited(_autoCancelExpiredPendingOrders(_latestOrders));
-    });
-  }
-
-  bool _isPendingExpired(PedidoModel pedido) {
-    if (pedido.statusBucket != OrderStatusBucket.pending) return false;
-    final createdAt = pedido.createdAt;
-    if (createdAt == null) return false;
-    return DateTime.now().difference(createdAt) >= _pendingConfirmationWindow;
-  }
-
-  Future<void> _autoCancelExpiredPendingOrders(
-    Iterable<PedidoModel> orders,
-  ) async {
-    final expired = orders
-        .where((pedido) => !pedido.hasParseError)
-        .where((pedido) => pedido.statusBucket == OrderStatusBucket.pending)
-        .where((pedido) => !_autoCanceledHandledIds.contains(pedido.id))
-        .where(_isPendingExpired)
-        .where((pedido) => !_autoCancelInFlight.contains(pedido.id))
-        .toList(growable: false);
-
-    if (expired.isEmpty) return;
-
-    var canceledCount = 0;
-
-    for (final pedido in expired) {
-      _autoCancelInFlight.add(pedido.id);
-      try {
-        final detalles = Map<String, dynamic>.from(pedido.detalles);
-        detalles['cancellation'] = <String, dynamic>{
-          'source': 'timeout',
-          'reason': 'timeout_no_confirmacion',
-          'at': DateTime.now().toIso8601String(),
-        };
-
-        final updatedRows = await Supabase.instance.client
-            .from('pedidos')
-            .update({'estado': 'cancelado', 'detalles': detalles})
-            .eq('id', pedido.id)
-            .eq('estado', 'pendiente')
-            .select('id');
-
-        _autoCanceledHandledIds.add(pedido.id);
-
-        if ((updatedRows as List).isEmpty) {
-          continue;
-        }
-
-        canceledCount += 1;
-      } catch (error) {
-        debugPrint(
-          'No se pudo autocancelar pedido vencido ${pedido.id}: $error',
-        );
-      } finally {
-        _autoCancelInFlight.remove(pedido.id);
-      }
-    }
-
-    if (canceledCount > 0 && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text(
-            canceledCount == 1
-                ? 'Se canceló 1 pedido pendiente por tiempo agotado.'
-                : 'Se cancelaron $canceledCount pedidos pendientes por tiempo agotado.',
-          ),
-        ),
-      );
-    }
-  }
-
   @override
   void dispose() {
     _ordersSubscription?.cancel();
     _authStateSubscription?.cancel();
     _recentCatalogTimer?.cancel();
-    _pendingAutoCancelTicker?.cancel();
     _shellRevision.dispose();
     super.dispose();
   }
@@ -524,9 +438,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           }
         }
 
-        _latestOrders = orders;
         final validOrders = orders.where((order) => !order.hasParseError);
-        unawaited(_autoCancelExpiredPendingOrders(validOrders));
         final currentIds = validOrders.map((e) => e.id).toSet();
 
         if (!_didPrimeOrderAlert) {

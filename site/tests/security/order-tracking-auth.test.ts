@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 vi.mock('server-only', () => ({}));
 
@@ -146,6 +147,39 @@ describe('public order response scrubbing', () => {
     expect(receipt.permissions.canCancelAsCustomer).toBe(true);
   });
 
+  it('keeps old pending orders with payment proof and reference pending when read', () => {
+    const { row } = buildPedido();
+    row.created_at = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    Object.assign(row.detalles, {
+      referencia_pago: '1234',
+      comprobante_url: 'storage://comprobantes/comercio-demo/proof.png',
+    });
+
+    const receipt = toPublicOrderTrackingResponse(row, 'ORD-OLD', null);
+
+    expect(receipt.status).toBe('pendiente');
+    expect(row.estado).toBe('pendiente');
+  });
+
+  it('returns only the known reason for a historical timeout cancellation', () => {
+    const { row } = buildPedido({ estado: 'cancelado' });
+    Object.assign(row.detalles, {
+      cancellation: {
+        source: 'timeout',
+        reason: 'timeout_no_confirmacion',
+        customerReason: 'private text is not public',
+      },
+    });
+
+    const receipt = toPublicOrderTrackingResponse(row, 'ORD-HISTORIC', null);
+
+    expect(receipt.status).toBe('cancelado');
+    expect(receipt.cancellation).toEqual({
+      reason: 'timeout_no_confirmacion',
+    });
+    expect(JSON.stringify(receipt)).not.toContain('private text is not public');
+  });
+
   it('allows rating only for terminal orders without a previous customer rating', () => {
     const { row } = buildPedido({ estado: 'entregado' });
     const commerce = { nombre: 'Demo', moneda: 'COP' };
@@ -229,7 +263,7 @@ describe('customer PATCH schema / transitions', () => {
     expect(assertCustomerStatusTransition('pendiente', 'cancelado').ok).toBe(true);
   });
 
-  it('requires a reason for customer cancellation but not timeout cancellation', () => {
+  it('requires a reason for manual customer cancellation and rejects timeout actions', () => {
     expect(customerOrderActionSchema.safeParse({ action: 'cancel', source: 'cliente' }).success).toBe(false);
     expect(
       customerOrderActionSchema.safeParse({
@@ -238,13 +272,39 @@ describe('customer PATCH schema / transitions', () => {
         reason: 'Ya no lo necesito',
       }).success,
     ).toBe(true);
-    expect(customerOrderActionSchema.safeParse({ action: 'cancel', source: 'timeout' }).success).toBe(true);
+    expect(
+      customerOrderActionSchema.safeParse({ action: 'cancel', source: 'timeout' })
+        .success,
+    ).toBe(false);
   });
 
   it('accepts only integer customer service ratings from one to five', () => {
     expect(customerOrderActionSchema.safeParse({ action: 'submit_rating', rating: 5 }).success).toBe(true);
     expect(customerOrderActionSchema.safeParse({ action: 'submit_rating', rating: 0 }).success).toBe(false);
     expect(customerOrderActionSchema.safeParse({ action: 'submit_rating', rating: 5.5 }).success).toBe(false);
+  });
+});
+
+describe('pending tracking timeout removal', () => {
+  it('has no automatic timeout request/countdown and still renders historical timeout cancellations', () => {
+    const trackingPage = readFileSync(
+      new URL('../../app/orders/[orderId]/page.tsx', import.meta.url),
+      'utf8',
+    );
+    const receipt = readFileSync(
+      new URL('../../app/orders/[orderId]/_components/OrderReceipt.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(trackingPage).not.toContain('CONFIRMATION_TIMEOUT_MS');
+    expect(trackingPage).not.toContain("cancelOrder('timeout')");
+    expect(trackingPage).not.toContain('pendingExpired');
+    expect(trackingPage).toContain("source: 'cliente'");
+    expect(trackingPage).toContain("cancellationMeta?.reason === 'timeout_no_confirmacion'");
+    expect(receipt).not.toContain('confirmTimeLeftLabel');
+    expect(receipt).not.toContain('confirmProgress');
+    expect(receipt).not.toContain('se cancela automáticamente');
+    expect(receipt).toContain('Esperando confirmación del comercio');
   });
 });
 
@@ -419,9 +479,32 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
     expect(response.status).toBe(400);
   });
 
-  it('allows client cancel before timeout with a reason and dispatches the seller notification', async () => {
+  it('rejects the removed timeout cancellation action at the API boundary', async () => {
     const pedido = buildPedido();
-    pedido.row.created_at = new Date().toISOString();
+    const { PATCH } = await loadRouteWithMock(pedido);
+    const orderId = pedido.row.detalles.order_id as string;
+    const response = await PATCH(
+      new Request(
+        `http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cancel', source: 'timeout' }),
+        },
+      ),
+      { params: Promise.resolve({ orderId }) },
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it('allows manual client cancellation of an old pending order with payment proof and notifies the seller', async () => {
+    const pedido = buildPedido();
+    pedido.row.created_at = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    Object.assign(pedido.row.detalles, {
+      referencia_pago: '1234',
+      comprobante_url: 'storage://comprobantes/comercio-demo/proof.png',
+    });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ merchantWhatsapp: { ok: true, queued: true } }), { status: 200 }),
     );
@@ -430,7 +513,10 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
     const response = await PATCH(
       new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-order-customer-email': 'secret@example.com',
+        },
         body: JSON.stringify({ action: 'cancel', source: 'cliente', reason: 'Ya no necesito el pedido' }),
       }),
       { params: Promise.resolve({ orderId }) },
@@ -450,7 +536,10 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
     const response = await PATCH(
       new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-order-customer-email': 'secret@example.com',
+        },
         body: JSON.stringify({ action: 'cancel', source: 'cliente', reason: 'Ya no lo necesito' }),
       }),
       { params: Promise.resolve({ orderId }) },

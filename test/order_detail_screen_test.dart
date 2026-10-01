@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
 
 const List<double> _widths = <double>[
@@ -57,6 +60,45 @@ Widget _merchantOrderWidgets({
 }
 
 void main() {
+  test(
+    'old pending orders with payment evidence remain pending in the model',
+    () {
+      for (final age in <Duration>[
+        const Duration(minutes: 16),
+        const Duration(hours: 2),
+      ]) {
+        final order = PedidoModel.fromMap(<String, dynamic>{
+          'id': 'old-${age.inMinutes}',
+          'comercio_id': 'commerce-1',
+          'estado': 'pendiente',
+          'created_at': DateTime.now().subtract(age).toIso8601String(),
+          'detalles': <String, dynamic>{
+            'referencia_pago': '1234',
+            'comprobante_url': 'storage://comprobantes/commerce-1/proof.png',
+          },
+        });
+        expect(order.statusBucket, OrderStatusBucket.pending);
+        expect(order.hasComprobante, isTrue);
+        expect(order.paymentReference, '1234');
+      }
+    },
+  );
+
+  test('Flutter dashboard and detail contain no automatic timeout writer', () {
+    final dashboard = File(
+      'lib/screens/admin_dashboard_screen.dart',
+    ).readAsStringSync();
+    final detail = File(
+      'lib/screens/order_detail_screen.dart',
+    ).readAsStringSync();
+
+    expect(dashboard, isNot(contains('_autoCancelExpiredPendingOrders')));
+    expect(dashboard, isNot(contains('_pendingConfirmationWindow')));
+    expect(detail, isNot(contains('_autoCancelExpiredPendingOrder')));
+    expect(detail, isNot(contains('_isPendingExpired')));
+    expect(detail, isNot(contains('timeout_no_confirmacion')));
+  });
+
   for (final width in _widths) {
     testWidgets('merchant order summary fits at ${width.toInt()}px', (
       tester,
@@ -111,4 +153,34 @@ void main() {
     expect(find.text('Ver comprobante'), findsNothing);
     expect(find.text('Retiro'), findsOneWidget);
   });
+
+  for (final width in _widths) {
+    testWidgets('restaurant header relative time fits at ${width.toInt()}px', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 240);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: KitchenOrderHeader(
+              businessName: 'Pizzas el trueno',
+              orderId: 'EMXFA-000149',
+              statusLabel: 'Recibido',
+              statusColor: Colors.orange,
+              createdAt: DateTime.now().subtract(const Duration(days: 8)),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('desde el '), findsOneWidget);
+      expect(find.textContaining('EMXFA-000149'), findsOneWidget);
+    });
+  }
 }

@@ -7,7 +7,7 @@ export const customerOrderActionSchema = z
     z
       .object({
         action: z.literal('cancel'),
-        source: z.enum(['cliente', 'timeout']),
+        source: z.literal('cliente'),
         reason: z.string().trim().max(500).optional(),
       })
       .strict(),
@@ -30,7 +30,7 @@ export const customerOrderActionSchema = z
       .strict(),
   ])
   .superRefine((value, context) => {
-    if (value.action === 'cancel' && value.source === 'cliente' && (value.reason ?? '').length < 3) {
+    if (value.action === 'cancel' && (value.reason ?? '').length < 3) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['reason'],

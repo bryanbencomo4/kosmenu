@@ -17,6 +17,9 @@ export type PublicOrderTrackingResponse = {
   orderId: string;
   status: PublicOrderStatus;
   createdAt: string;
+  cancellation?: {
+    reason: 'timeout_no_confirmacion' | 'cancelado_por_cliente';
+  };
   items: Array<{
     name: string;
     quantity: number;
@@ -85,8 +88,6 @@ type RawComercio = {
   logo_url?: string | null;
   branding_ia?: Record<string, unknown> | null;
 };
-
-export const CONFIRMATION_TIMEOUT_MS = 15 * 60 * 1000;
 
 function firstPhone(value: unknown): string | null {
   if (typeof value === 'string' || typeof value === 'number') {
@@ -231,6 +232,16 @@ export function toPublicOrderTrackingResponse(
     ? rawCustomerRating
     : null;
   const isRateable = status === 'entregado' || status === 'cancelado';
+  const cancellation =
+    detalles.cancellation && typeof detalles.cancellation === 'object'
+      ? (detalles.cancellation as Record<string, unknown>)
+      : {};
+  const cancellationReason = cancellation.reason;
+  const publicCancellationReason =
+    cancellationReason === 'timeout_no_confirmacion' ||
+    cancellationReason === 'cancelado_por_cliente'
+      ? cancellationReason
+      : null;
 
   const customerCanConfirm =
     CONFIRM_RECEIVED_ALLOWED_STATUSES.has(status) && delegateStatus === 'arrived';
@@ -239,6 +250,7 @@ export function toPublicOrderTrackingResponse(
     orderId,
     status,
     createdAt,
+    ...(publicCancellationReason ? { cancellation: { reason: publicCancellationReason } } : {}),
     items,
     subtotal: Number.isFinite(Number(detalles.subtotal))
       ? convertToDisplayCurrency(Number(detalles.subtotal))

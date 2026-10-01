@@ -61,6 +61,30 @@ void main() {
     expect(find.text('Cancelar pedido'), findsOneWidget);
   });
 
+  testWidgets('restaurant can still cancel a pending order manually', (
+    tester,
+  ) async {
+    var canceled = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: KitchenMockupActionsBar(
+            estado: 'pendiente',
+            isDelivery: true,
+            isBusy: false,
+            busyStatus: null,
+            hidePrimaryAction: false,
+            onStatus: (_) {},
+            onCancel: () => canceled = true,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Cancelar pedido'));
+    expect(canceled, isTrue);
+  });
+
   testWidgets('delegation card explains courier takeover and recovery actions', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
