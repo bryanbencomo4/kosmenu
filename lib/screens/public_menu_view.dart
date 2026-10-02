@@ -1561,27 +1561,29 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                       paymentProofStorageRef: storageRef,
                                     );
 
-                                    final message = _buildWhatsAppMessage(
-                                      comercioNombre: data.comercioNombre,
-                                      orderId: created.orderId,
-                                      trackingUrl: created.trackingUrl,
-                                      items: cartItems,
-                                      totalUsd: totalUsd,
-                                      totalCop: totalCop,
-                                      tasaCambioPesos: data.tasaCambioPesos,
-                                      paymentMethod: selectedPaymentMethod,
-                                      deliveryMode: selectedDeliveryMode,
-                                      deliveryAddress: isDeliveryOrder
-                                          ? normalizedAddress
-                                          : '',
-                                      deliveryReference: isDeliveryOrder
-                                          ? normalizedReference
-                                          : '',
-                                      deliveryInstructions: isDeliveryOrder
-                                          ? normalizedInstructions
-                                          : '',
-                                      orderNotes: normalizedOrderNotes,
-                                    );
+                                    final message =
+                                        created.merchantWhatsappText ??
+                                        _buildWhatsAppMessage(
+                                          comercioNombre: data.comercioNombre,
+                                          orderId: created.orderId,
+                                          trackingUrl: created.trackingUrl,
+                                          items: cartItems,
+                                          totalUsd: totalUsd,
+                                          totalCop: totalCop,
+                                          tasaCambioPesos: data.tasaCambioPesos,
+                                          paymentMethod: selectedPaymentMethod,
+                                          deliveryMode: selectedDeliveryMode,
+                                          deliveryAddress: isDeliveryOrder
+                                              ? normalizedAddress
+                                              : '',
+                                          deliveryReference: isDeliveryOrder
+                                              ? normalizedReference
+                                              : '',
+                                          deliveryInstructions: isDeliveryOrder
+                                              ? normalizedInstructions
+                                              : '',
+                                          orderNotes: normalizedOrderNotes,
+                                        );
                                     final uri = Uri.parse(
                                       'https://wa.me/$whatsappNumber?text=${Uri.encodeComponent(message)}',
                                     );

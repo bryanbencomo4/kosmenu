@@ -40,6 +40,7 @@ class OrderDetailScreen extends StatefulWidget {
 
   final String orderId;
   final bool readOnlyView;
+
   /// When opening from the merchant dashboard, pass the already-loaded pedido
   /// so kitchen UI paints before the network round-trip.
   final PedidoModel? initialPedido;
@@ -53,7 +54,6 @@ class OrderDetailScreen extends StatefulWidget {
 class _OrderDetailScreenState extends State<OrderDetailScreen>
     with SingleTickerProviderStateMixin {
   static const Duration _rememberDeviceTtl = Duration(hours: 24);
-  static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
   static const String _fallbackBusinessLogoAsset =
       'assets/branding/logotipo.png';
   static const Color _businessMarkerHeadColor = Color(0xFF8B5CF6);
@@ -84,10 +84,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   BitmapDescriptor? _deliveryMarkerIcon;
   bool _isMapInteractionEnabled = false;
   Timer? _orderStatusSyncTimer;
-  Timer? _countdownTicker;
-  DateTime _now = DateTime.now();
   bool _isSyncingOrderStatus = false;
-  bool _isAutoCancelingExpiredPending = false;
   String? _lastKnownStatus;
   _OrderViewData? _cachedOrderData;
   final Map<String, String> _delegatedCourierAliasCache = <String, String>{};
@@ -131,24 +128,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if (!mounted) return;
       _startOrderStatusSync();
     });
-    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || widget.readOnlyView) return;
-      final pedido = _cachedOrderData?.pedido;
-      final status = _normalizeStatusValue(pedido?.estado);
-      if (status != 'pendiente' || pedido?.createdAt == null) return;
-      // Customer AppBar clock only; kitchen uses KitchenElapsedTicker.
-      if (!_showTopBar) return;
-      setState(() {
-        _now = DateTime.now();
-      });
-    });
-  }
-
-  String _formatCountdown(Duration value) {
-    final totalSeconds = value.inSeconds < 0 ? 0 : value.inSeconds;
-    final minutes = totalSeconds ~/ 60;
-    final seconds = totalSeconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
   void _startOrderStatusSync() {
@@ -158,36 +137,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       unawaited(_syncOrderStatusFromServer());
     });
     unawaited(_syncOrderStatusFromServer());
-  }
-
-  bool _isPendingExpired(PedidoModel pedido) {
-    final status = _normalizeStatusValue(pedido.estado);
-    if (status != 'pendiente') return false;
-    final createdAt = pedido.createdAt;
-    if (createdAt == null) return false;
-    return DateTime.now().difference(createdAt) >= _pendingConfirmationWindow;
-  }
-
-  Future<void> _autoCancelExpiredPendingOrder(PedidoModel pedido) async {
-    if (_isAutoCancelingExpiredPending) return;
-    _isAutoCancelingExpiredPending = true;
-    try {
-      final detalles = Map<String, dynamic>.from(pedido.detalles);
-      detalles['cancellation'] = <String, dynamic>{
-        'source': 'timeout',
-        'reason': 'timeout_no_confirmacion',
-        'at': DateTime.now().toIso8601String(),
-      };
-
-      await Supabase.instance.client
-          .from('pedidos')
-          .update({'estado': 'cancelado', 'detalles': detalles})
-          .eq('id', pedido.id)
-          .eq('estado', 'pendiente');
-
-    } finally {
-      _isAutoCancelingExpiredPending = false;
-    }
   }
 
   Future<void> _syncOrderStatusFromServer() async {
@@ -204,21 +153,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           ? null
           : _orderSyncSignature(_cachedOrderData!.pedido);
       final latestSyncSignature = _orderSyncSignature(latest.pedido);
-
-      if (latestStatus == 'pendiente' && _isPendingExpired(latest.pedido)) {
-        await _autoCancelExpiredPendingOrder(latest.pedido);
-        final refreshed = await _fetchOrder();
-        if (mounted && refreshed != null) {
-          final refreshedStatus = _normalizeStatusValue(
-            refreshed.pedido.estado,
-          );
-          _lastKnownStatus = refreshedStatus;
-          setState(() {
-            _cachedOrderData = refreshed;
-          });
-        }
-        return;
-      }
 
       _lastKnownStatus = latestStatus;
 
@@ -274,7 +208,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   @override
   void dispose() {
     _orderStatusSyncTimer?.cancel();
-    _countdownTicker?.cancel();
     _emailController.dispose();
     _successController.dispose();
     _comprobanteSignedUrlSession.clear();
@@ -410,8 +343,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           await query.order('created_at', ascending: false).limit(40)
               as List<dynamic>;
       for (final row in rows) {
-        final pedido =
-            PedidoModel.fromMap(Map<String, dynamic>.from(row as Map));
+        final pedido = PedidoModel.fromMap(
+          Map<String, dynamic>.from(row as Map),
+        );
         if ((pedido.orderId ?? '').trim() == orderId) {
           foundPedido = pedido;
           break;
@@ -484,7 +418,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         'detalles->>codigo_orden',
       ]) {
         try {
-          dynamic query = client.from('pedidos').select('*').eq(column, orderId);
+          dynamic query = client
+              .from('pedidos')
+              .select('*')
+              .eq(column, orderId);
           if (comercioId.isNotEmpty) {
             query = query.eq('comercio_id', comercioId);
           }
@@ -962,7 +899,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           _cachedOrderData?.comercioNombre ?? 'el comercio',
           message: _buildStatusWhatsappMessage(
             status: normalizedStatus,
-            trackingUrl: (updatedOrder.detalles['tracking_url'] ?? '').toString(),
+            trackingUrl: (updatedOrder.detalles['tracking_url'] ?? '')
+                .toString(),
           ),
         );
       }
@@ -1040,41 +978,42 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     final isPickup = _cachedOrderData?.pedido.deliveryMode != 'delivery';
     final statusContent = switch (status) {
       'confirmado' => (
-          emoji: '👨‍🍳',
-          title: 'PEDIDO RECIBIDO',
-          body: '✅ Tu pedido fue recibido. En breve empezaremos a prepararlo.',
-          label: 'Recibido',
-        ),
+        emoji: '👨‍🍳',
+        title: 'PEDIDO RECIBIDO',
+        body: '✅ Tu pedido fue recibido. En breve empezaremos a prepararlo.',
+        label: 'Recibido',
+      ),
       'en_camino' => (
-          emoji: '🛵',
-          title: 'PEDIDO EN CAMINO',
-          body: '🚚 ¡Tu pedido ya salió y va rumbo a ti!',
-          label: 'En camino',
-        ),
+        emoji: '🛵',
+        title: 'PEDIDO EN CAMINO',
+        body: '🚚 ¡Tu pedido ya salió y va rumbo a ti!',
+        label: 'En camino',
+      ),
       'entregado' when isPickup => (
-          emoji: '📦',
-          title: 'PEDIDO LISTO',
-          body: '✅ Tu pedido está listo para retirar.',
-          label: 'Listo para retirar',
-        ),
+        emoji: '📦',
+        title: 'PEDIDO LISTO',
+        body: '✅ Tu pedido está listo para retirar.',
+        label: 'Listo para retirar',
+      ),
       'entregado' => (
-          emoji: '🎉',
-          title: 'PEDIDO ENTREGADO',
-          body: '✅ ¡Tu pedido fue entregado correctamente!\n\n🙏 Gracias por elegirnos. Esperamos verte pronto.',
-          label: 'Entregado',
-        ),
+        emoji: '🎉',
+        title: 'PEDIDO ENTREGADO',
+        body:
+            '✅ ¡Tu pedido fue entregado correctamente!\n\n🙏 Gracias por elegirnos. Esperamos verte pronto.',
+        label: 'Entregado',
+      ),
       'cancelado' => (
-          emoji: '🚫',
-          title: 'PEDIDO CANCELADO',
-          body: '❌ Tu pedido fue cancelado.',
-          label: 'Cancelado',
-        ),
+        emoji: '🚫',
+        title: 'PEDIDO CANCELADO',
+        body: '❌ Tu pedido fue cancelado.',
+        label: 'Cancelado',
+      ),
       _ => (
-          emoji: '🆕',
-          title: 'NUEVO PEDIDO',
-          body: 'Tu pedido fue recibido.',
-          label: 'Pendiente',
-        ),
+        emoji: '🆕',
+        title: 'NUEVO PEDIDO',
+        body: 'Tu pedido fue recibido.',
+        label: 'Pendiente',
+      ),
     };
     final lines = <String>[
       '${statusContent.emoji} *${statusContent.title} #${widget.orderId}*',
@@ -1084,11 +1023,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       '📦 Estado: *${statusContent.label}*',
     ];
     if (resolvedTrackingUrl.isNotEmpty) {
-      lines.addAll([
-        '',
-        '🔗 Ver pedido:',
-        resolvedTrackingUrl,
-      ]);
+      lines.addAll(['', '🔗 Ver pedido:', resolvedTrackingUrl]);
     }
     return lines.join('\n');
   }
@@ -1316,7 +1251,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             behavior: SnackBarBehavior.floating,
-            content: Text('No se pudo preparar el pedido para el repartidor: $error'),
+            content: Text(
+              'No se pudo preparar el pedido para el repartidor: $error',
+            ),
           ),
         );
       }
@@ -1385,7 +1322,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             token: invite.token,
             courierAlias: selection.alias,
           );
-      final whatsappUrl = directWhatsappUrl ??
+      final whatsappUrl =
+          directWhatsappUrl ??
           'https://wa.me/$waDigits?text=${Uri.encodeComponent(invite.url)}';
       final opened = await launchUrl(
         Uri.parse(whatsappUrl),
@@ -1547,7 +1485,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     );
   }
 
-  Future<void> _takeOverDeliveryManually({required String currentStatus}) async {
+  Future<void> _takeOverDeliveryManually({
+    required String currentStatus,
+  }) async {
     if (_isManagingDeliveryInvite) return;
 
     final confirmed = await _confirmDeliveryInviteDialog(
@@ -1866,9 +1806,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         '&travelmode=driving',
       );
     } else {
-      uri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=$dest',
-      );
+      uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$dest');
     }
 
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -2342,8 +2280,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if ((deliveryInstructions ?? '').trim().isNotEmpty)
         deliveryInstructions!.trim(),
     ];
-    final coordsLabel = hasDeliveryCoords &&
-            deliveryPoint != null
+    final coordsLabel = hasDeliveryCoords && deliveryPoint != null
         ? '${deliveryPoint.latitude.toStringAsFixed(6)}, ${deliveryPoint.longitude.toStringAsFixed(6)}'
         : '';
 
@@ -2364,7 +2301,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           ),
         ),
         child: GoogleMap(
-          initialCameraPosition: CameraPosition(target: deliveryPoint, zoom: 14),
+          initialCameraPosition: CameraPosition(
+            target: deliveryPoint,
+            zoom: 14,
+          ),
           markers: markers,
           polylines: polylines,
           myLocationButtonEnabled: false,
@@ -2373,7 +2313,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
           compassEnabled: false,
           liteModeEnabled: !kIsWeb && !Platform.isIOS,
           gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-            Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+            Factory<OneSequenceGestureRecognizer>(
+              () => EagerGestureRecognizer(),
+            ),
           },
           onMapCreated: (controller) {
             if (cameraPoints.length >= 2) {
@@ -2442,16 +2384,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   onWhatsapp: phone.isEmpty || !whatsappNotificationsEnabled
                       ? null
                       : () => unawaited(
-                            _openCustomerWhatsapp(phone, data.comercioNombre),
-                          ),
+                          _openCustomerWhatsapp(phone, data.comercioNombre),
+                        ),
                   onCall: phone.isEmpty
                       ? null
                       : () => unawaited(_openCustomerCall(phone)),
                 ),
-                KitchenPrepSection(
-                  items: pedido.items,
-                  orderNotes: orderNotes,
-                ),
+                KitchenPrepSection(items: pedido.items, orderNotes: orderNotes),
                 KitchenStatusTimeline(
                   pedido: pedido,
                   isDelivery: isDeliveryOrder,
@@ -2525,11 +2464,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   mapPreview: mapPreview,
                   onOpenMap: hasDeliveryCoords && deliveryPoint != null
                       ? () => unawaited(
-                            _openExternalGoogleMapsNavigation(
-                              origin: businessPoint,
-                              destination: deliveryPoint,
-                            ),
-                          )
+                          _openExternalGoogleMapsNavigation(
+                            origin: businessPoint,
+                            destination: deliveryPoint,
+                          ),
+                        )
                       : null,
                 ),
               ],
@@ -2551,22 +2490,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     final muted = colorScheme.onSurfaceVariant;
     final accent = colorScheme.primary;
     const success = Color(0xFF16A34A);
-    final appBarPedido = _cachedOrderData?.pedido;
-    final appBarStatus = _normalizeStatusValue(appBarPedido?.estado);
-    final appBarCreatedAt = appBarPedido?.createdAt;
-    final showPendingClock =
-        appBarStatus == 'pendiente' && appBarCreatedAt != null;
-    final appBarPendingLeftRaw = showPendingClock
-        ? _pendingConfirmationWindow - _now.difference(appBarCreatedAt)
-        : Duration.zero;
-    final appBarPendingLeft = appBarPendingLeftRaw.isNegative
-        ? Duration.zero
-        : appBarPendingLeftRaw;
-    final totalSeconds = _pendingConfirmationWindow.inSeconds;
-    final remainingSeconds = appBarPendingLeft.inSeconds.clamp(0, totalSeconds);
-    final appBarProgress = totalSeconds == 0
-        ? 1.0
-        : (totalSeconds - remainingSeconds) / totalSeconds;
 
     final overlayAnimation = CurvedAnimation(
       parent: _successController,
@@ -2595,17 +2518,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                         ).pushNamedAndRemoveUntil('/', (route) => false);
                       },
                     ),
-              actions: showPendingClock
-                  ? [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: _AppBarPendingCountdownBadge(
-                          label: _formatCountdown(appBarPendingLeft),
-                          progress: appBarProgress,
-                        ),
-                      ),
-                    ]
-                  : null,
             )
           : null,
       body: Stack(
@@ -2742,10 +2654,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     ?.trim();
                 final deliveryLat = pedido.deliveryLatitude;
                 final deliveryLng = pedido.deliveryLongitude;
-                final orderNotes = (widget.readOnlyView
-                    ? pedido.orderNotes
-                    : pedido.merchantOrderNotes)
-                  ?.trim();
+                final orderNotes =
+                    (widget.readOnlyView
+                            ? pedido.orderNotes
+                            : pedido.merchantOrderNotes)
+                        ?.trim();
                 final businessLogoUrl = data.businessLogoUrl?.trim();
                 if (widget.readOnlyView || _deferredVisualsReady) {
                   _prepareMarkerIconsIfNeeded(businessLogoUrl: businessLogoUrl);
@@ -3079,7 +2992,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     pendingDelegationAcceptance: isAwaitingDelegateConfirmation,
                     deliveryDelegateAlias: deliveryDelegateAlias,
                     deliveryDelegatePhoneDisplay: deliveryDelegatePhoneDisplay,
-                    deliveryDelegateStatusSummary: deliveryDelegateStatusSummary,
+                    deliveryDelegateStatusSummary:
+                        deliveryDelegateStatusSummary,
                     isManagingDeliveryInvite: _isManagingDeliveryInvite,
                     deliveryInviteFeedback: _deliveryInviteFeedback,
                     isDelegatedDelivery: isDelegatedDelivery,
@@ -3514,8 +3428,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                             color: Color(0xFFE9EEF5),
                                           ),
                                           child: IgnorePointer(
-                                            ignoring:
-                                                !_isMapInteractionEnabled,
+                                            ignoring: !_isMapInteractionEnabled,
                                             child: GoogleMap(
                                               initialCameraPosition:
                                                   CameraPosition(
@@ -3529,23 +3442,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                         ? 13.8
                                                         : 15.2,
                                                   ),
-                                              onMapCreated:
-                                                  (controller) async {
-                                                    if (cameraPoints.length <
-                                                        2) {
-                                                      return;
-                                                    }
-                                                    await controller
-                                                        .animateCamera(
-                                                          CameraUpdate
-                                                              .newLatLngBounds(
-                                                                _buildBounds(
-                                                                  cameraPoints,
-                                                                ),
-                                                                60,
-                                                              ),
-                                                        );
-                                                  },
+                                              onMapCreated: (controller) async {
+                                                if (cameraPoints.length < 2) {
+                                                  return;
+                                                }
+                                                await controller.animateCamera(
+                                                  CameraUpdate.newLatLngBounds(
+                                                    _buildBounds(cameraPoints),
+                                                    60,
+                                                  ),
+                                                );
+                                              },
                                               myLocationEnabled: false,
                                               myLocationButtonEnabled: false,
                                               zoomControlsEnabled: false,
@@ -4562,8 +4469,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   'x${item.cantidad} ${item.displayName}',
                                                   style: GoogleFonts.manrope(
                                                     color: text,
-                                                    fontWeight:
-                                                        FontWeight.w700,
+                                                    fontWeight: FontWeight.w700,
                                                   ),
                                                 ),
                                                 for (final group
@@ -4573,11 +4479,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                       '${group.grupo}:',
                                                       style:
                                                           GoogleFonts.manrope(
-                                                        color: muted,
-                                                        fontSize: 12.5,
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                      ),
+                                                            color: muted,
+                                                            fontSize: 12.5,
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                          ),
                                                     ),
                                                   for (final option
                                                       in group.opciones)
@@ -4585,11 +4491,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                       option.nombre,
                                                       style:
                                                           GoogleFonts.manrope(
-                                                        color: muted,
-                                                        fontSize: 12.5,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                      ),
+                                                            color: muted,
+                                                            fontSize: 12.5,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                          ),
                                                     ),
                                                 ],
                                               ],
@@ -4800,11 +4706,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                       width: double.infinity,
                                       padding: const EdgeInsets.all(10),
                                       decoration: BoxDecoration(
-                                        color: surfaceAlt.withValues(alpha: 0.58),
+                                        color: surfaceAlt.withValues(
+                                          alpha: 0.58,
+                                        ),
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             'Referencia',
@@ -4833,11 +4742,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                       width: double.infinity,
                                       padding: const EdgeInsets.all(10),
                                       decoration: BoxDecoration(
-                                        color: surfaceAlt.withValues(alpha: 0.58),
+                                        color: surfaceAlt.withValues(
+                                          alpha: 0.58,
+                                        ),
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             'Anotaciones',
@@ -5348,65 +5260,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 ),
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AppBarPendingCountdownBadge extends StatelessWidget {
-  const _AppBarPendingCountdownBadge({
-    required this.label,
-    required this.progress,
-  });
-
-  final String label;
-  final double progress;
-
-  Color get _ringColor {
-    if (progress >= 1) return const Color(0xFFDC2626);
-    if (progress >= 0.67) return const Color(0xFFD97706);
-    return const Color(0xFF475569);
-  }
-
-  Color get _backgroundColor {
-    if (progress >= 1) return const Color(0xFFFEF2F2);
-    if (progress >= 0.67) return const Color(0xFFFFFBEB);
-    return const Color(0xFFF8FAFC);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 44,
-      height: 44,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CircularProgressIndicator(
-            value: progress.clamp(0.0, 1.0),
-            strokeWidth: 2.8,
-            backgroundColor: _backgroundColor,
-            valueColor: AlwaysStoppedAnimation<Color>(_ringColor),
-          ),
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: _backgroundColor,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              label,
-              style: GoogleFonts.robotoMono(
-                fontSize: 8,
-                fontWeight: FontWeight.w700,
-                color: _ringColor,
-                letterSpacing: 0.1,
-              ),
-            ),
-          ),
         ],
       ),
     );

@@ -13,6 +13,7 @@ import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/merchant_orders_repository.dart';
+import 'package:kosmenu_app/services/merchant_browser_notifications.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
@@ -58,8 +59,8 @@ class AdminDashboardScreen extends StatefulWidget {
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
-class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
-  static const Duration _pendingConfirmationWindow = Duration(minutes: 15);
+class _AdminDashboardScreenState extends State<AdminDashboardScreen>
+    with WidgetsBindingObserver {
   static const int _liveOrdersWindow = 150;
   static const Color _dashboardBg = Color(0xFFF8F7FC);
   static const Color _purple = Color(0xFF6D28D9);
@@ -94,12 +95,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   List<PedidoModel>? _clientOrders;
   bool _clientOrdersLoading = false;
   final Map<String, String> _optimisticStatusByOrderId = <String, String>{};
-  final Set<String> _autoCancelInFlight = <String>{};
-  final Set<String> _autoCanceledHandledIds = <String>{};
 
   MagicOnboardingResult? _recentCatalogResult;
   Timer? _recentCatalogTimer;
-  Timer? _pendingAutoCancelTicker;
+  Timer? _ordersPublishTimer;
+  Timer? _ordersReconnectTimer;
+  Timer? _ordersReconcileTimer;
+  bool _isReconcilingOrders = false;
+  int _ordersReconnectAttempts = 0;
   bool _isRecoveringOrdersAuth = false;
   bool _isRestartingOrdersStream = false;
   _SalesRange _selectedSalesRange = _SalesRange.today;
@@ -131,12 +134,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _contentNavObserver = _DashboardContentNavObserver(_syncShellStack);
     _snapshotFuture = _fetchSnapshot();
     _ordersStream = _buildOrdersStream();
     _bindAuthStateRecovery();
     _subscribeToOrders();
-    _startPendingAutoCancelTicker();
+    _ordersReconcileTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      unawaited(_reconcileRecentOrders());
+    });
     unawaited(_refreshBillingGate());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_openPendingMerchantOrder());
@@ -262,89 +268,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  void _startPendingAutoCancelTicker() {
-    _pendingAutoCancelTicker?.cancel();
-    _pendingAutoCancelTicker = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (!mounted) return;
-      unawaited(_autoCancelExpiredPendingOrders(_latestOrders));
-    });
-  }
-
-  bool _isPendingExpired(PedidoModel pedido) {
-    if (pedido.statusBucket != OrderStatusBucket.pending) return false;
-    final createdAt = pedido.createdAt;
-    if (createdAt == null) return false;
-    return DateTime.now().difference(createdAt) >= _pendingConfirmationWindow;
-  }
-
-  Future<void> _autoCancelExpiredPendingOrders(
-    Iterable<PedidoModel> orders,
-  ) async {
-    final expired = orders
-        .where((pedido) => !pedido.hasParseError)
-        .where((pedido) => pedido.statusBucket == OrderStatusBucket.pending)
-        .where((pedido) => !_autoCanceledHandledIds.contains(pedido.id))
-        .where(_isPendingExpired)
-        .where((pedido) => !_autoCancelInFlight.contains(pedido.id))
-        .toList(growable: false);
-
-    if (expired.isEmpty) return;
-
-    var canceledCount = 0;
-
-    for (final pedido in expired) {
-      _autoCancelInFlight.add(pedido.id);
-      try {
-        final detalles = Map<String, dynamic>.from(pedido.detalles);
-        detalles['cancellation'] = <String, dynamic>{
-          'source': 'timeout',
-          'reason': 'timeout_no_confirmacion',
-          'at': DateTime.now().toIso8601String(),
-        };
-
-        final updatedRows = await Supabase.instance.client
-            .from('pedidos')
-            .update({'estado': 'cancelado', 'detalles': detalles})
-            .eq('id', pedido.id)
-            .eq('estado', 'pendiente')
-            .select('id');
-
-        _autoCanceledHandledIds.add(pedido.id);
-
-        if ((updatedRows as List).isEmpty) {
-          continue;
-        }
-
-        canceledCount += 1;
-      } catch (error) {
-        debugPrint(
-          'No se pudo autocancelar pedido vencido ${pedido.id}: $error',
-        );
-      } finally {
-        _autoCancelInFlight.remove(pedido.id);
-      }
-    }
-
-    if (canceledCount > 0 && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text(
-            canceledCount == 1
-                ? 'Se canceló 1 pedido pendiente por tiempo agotado.'
-                : 'Se cancelaron $canceledCount pedidos pendientes por tiempo agotado.',
-          ),
-        ),
-      );
-    }
-  }
-
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ordersSubscription?.cancel();
     _authStateSubscription?.cancel();
     _recentCatalogTimer?.cancel();
-    _pendingAutoCancelTicker?.cancel();
+    _ordersPublishTimer?.cancel();
+    _ordersReconnectTimer?.cancel();
+    _ordersReconcileTimer?.cancel();
     _shellRevision.dispose();
     super.dispose();
   }
@@ -505,63 +437,127 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         );
   }
 
+  void _handleOrdersUpdate(List<PedidoModel> orders) {
+    if (!mounted) return;
+    if (_optimisticStatusByOrderId.isNotEmpty) {
+      for (final pedido in orders) {
+        final optimistic = _optimisticStatusByOrderId[pedido.id];
+        if (optimistic == null) continue;
+
+        final serverStatus = _normalizeStatusString(pedido.estado);
+        final optimisticStatus = _normalizeStatusString(optimistic);
+        if (serverStatus == optimisticStatus) {
+          _optimisticStatusByOrderId.remove(pedido.id);
+        }
+      }
+    }
+
+    _latestOrders = orders;
+    _ordersPublishTimer ??= Timer(const Duration(milliseconds: 250), () {
+      _ordersPublishTimer = null;
+      if (!mounted) return;
+      final range = _resolveSalesRangeWindow(const <PedidoModel>[]);
+      final todayStart = _startOfDay(DateTime.now());
+      final tomorrow = _endOfDayExclusive(DateTime.now());
+      _metricsOrders = MerchantOrdersRepository.mergeMetricsOrders(
+        fetched: _metricsOrders,
+        live: _latestOrders,
+        startInclusive: range.startInclusive,
+        endExclusive: range.endExclusive,
+        todayStart: todayStart,
+        tomorrow: tomorrow,
+      );
+      _bumpShell();
+    });
+    final validOrders = orders.where((order) => !order.hasParseError);
+    final currentIds = validOrders.map((e) => e.id).toSet();
+
+    if (!_didPrimeOrderAlert) {
+      _seenOrderIds = currentIds;
+      _didPrimeOrderAlert = true;
+      return;
+    }
+
+    final newOrders = validOrders.where((e) => !_seenOrderIds.contains(e.id));
+    _seenOrderIds = currentIds;
+
+    if (newOrders.isEmpty || !mounted) return;
+
+    final newest = newOrders.first;
+    final orderLabel = newest.orderId ?? newest.id;
+    for (final pedido in newOrders) {
+      showMerchantBrowserNotification(
+        pedido.orderId ?? pedido.id,
+        pedido.orderId ?? pedido.id,
+      );
+    }
+    final statusBucket = newest.statusBucket;
+    SystemSound.play(SystemSoundType.alert);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text(
+          'Nuevo pedido recibido: $orderLabel · ${statusBucket.label}',
+        ),
+      ),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_reconcileRecentOrders());
+    }
+  }
+
+  Future<void> _reconcileRecentOrders() async {
+    if (!mounted || !_hasComercioId || _isReconcilingOrders) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    _isReconcilingOrders = true;
+    final comercioId = SupabaseConfig.currentComercioId;
+    try {
+      final rows = await Supabase.instance.client
+          .from('pedidos')
+          .select('*')
+          .eq('comercio_id', comercioId)
+          .order('created_at', ascending: false)
+          .limit(_liveOrdersWindow);
+      if (!mounted || comercioId != SupabaseConfig.currentComercioId) return;
+      _handleOrdersUpdate(
+        rows.map(PedidoModel.fromMap).toList(growable: false),
+      );
+    } catch (error) {
+      unawaited(_recoverOrdersAuthIfNeeded(error));
+    } finally {
+      _isReconcilingOrders = false;
+    }
+  }
+
   void _subscribeToOrders() {
     _ordersSubscription?.cancel();
-    _seenOrderIds = <String>{};
-    _didPrimeOrderAlert = false;
-
     _ordersSubscription = _ordersStream.listen(
       (orders) {
-        if (_optimisticStatusByOrderId.isNotEmpty) {
-          for (final pedido in orders) {
-            final optimistic = _optimisticStatusByOrderId[pedido.id];
-            if (optimistic == null) continue;
-
-            final serverStatus = _normalizeStatusString(pedido.estado);
-            final optimisticStatus = _normalizeStatusString(optimistic);
-            if (serverStatus == optimisticStatus) {
-              _optimisticStatusByOrderId.remove(pedido.id);
-            }
-          }
-        }
-
-        _latestOrders = orders;
-        final validOrders = orders.where((order) => !order.hasParseError);
-        unawaited(_autoCancelExpiredPendingOrders(validOrders));
-        final currentIds = validOrders.map((e) => e.id).toSet();
-
-        if (!_didPrimeOrderAlert) {
-          _seenOrderIds = currentIds;
-          _didPrimeOrderAlert = true;
-          return;
-        }
-
-        final newOrders = validOrders.where(
-          (e) => !_seenOrderIds.contains(e.id),
-        );
-        _seenOrderIds = currentIds;
-
-        if (newOrders.isEmpty || !mounted) return;
-
-        final newest = newOrders.first;
-        final orderLabel = newest.orderId ?? newest.id;
-        final statusBucket = newest.statusBucket;
-        SystemSound.play(SystemSoundType.alert);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            behavior: SnackBarBehavior.floating,
-            content: Text(
-              'Nuevo pedido recibido: $orderLabel · ${statusBucket.label}',
-            ),
-          ),
-        );
+        _ordersReconnectAttempts = 0;
+        _ordersReconnectTimer?.cancel();
+        _ordersReconnectTimer = null;
+        _handleOrdersUpdate(orders);
       },
       onError: (Object error, StackTrace stackTrace) {
         debugPrint('Orders stream error: $error');
         unawaited(_recoverOrdersAuthIfNeeded(error));
         if (_isRealtimeTransientError(error) &&
             !_isRealtimeJwtExpiredError(error)) {
-          unawaited(_restartOrdersRealtime());
+          final delaySeconds = switch (_ordersReconnectAttempts++) {
+            0 => 5,
+            1 => 10,
+            2 => 20,
+            _ => 60,
+          };
+          _ordersReconnectTimer ??= Timer(Duration(seconds: delaySeconds), () {
+            _ordersReconnectTimer = null;
+            if (mounted) unawaited(_restartOrdersRealtime());
+          });
         }
       },
     );
@@ -586,8 +582,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final generation = ++_metricsGeneration;
     try {
       if (_selectedSalesRange == _SalesRange.allTime) {
-        _earliestOrderAt ??= await MerchantOrdersRepository
-            .fetchEarliestCreatedAt(comercioId: comercioId);
+        _earliestOrderAt ??=
+            await MerchantOrdersRepository.fetchEarliestCreatedAt(
+              comercioId: comercioId,
+            );
       }
       final now = DateTime.now();
       final todayStart = _startOfDay(now);
@@ -615,7 +613,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         for (final batch in batches)
           for (final pedido in batch) pedido.id: pedido,
       };
-      setState(() => _metricsOrders = byId.values.toList(growable: false));
+      setState(() {
+        _metricsOrders = MerchantOrdersRepository.mergeMetricsOrders(
+          fetched: byId.values,
+          live: _latestOrders,
+          startInclusive: range.startInclusive,
+          endExclusive: range.endExclusive,
+          todayStart: todayStart,
+          tomorrow: tomorrow,
+        );
+      });
       _bumpShell();
     } catch (error) {
       debugPrint('Metrics orders load failed: $error');
@@ -968,6 +975,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _openNotificationsSheet() async {
+    final notificationStatus = await enableMerchantBrowserNotifications();
+    if (!mounted) return;
+    if (notificationStatus == 'install-required') {
+      _showInfo(
+        'En iPhone, agrega esta app a la pantalla de inicio para activar notificaciones (iOS 16.4 o posterior).',
+      );
+    } else if (notificationStatus == 'foreground-only') {
+      _showInfo(
+        'Alertas activas con el panel abierto. Push en segundo plano requiere configurar Firebase web y VAPID.',
+      );
+    } else if (notificationStatus == 'denied') {
+      _showInfo(
+        'Las notificaciones estan bloqueadas. Habilitalas en los ajustes del navegador.',
+      );
+    } else if (notificationStatus == 'enabled') {
+      _showInfo('Notificaciones del navegador activadas.');
+    } else if (notificationStatus == 'error') {
+      _showInfo(
+        'No se pudieron activar las notificaciones. Puedes reintentar desde la campana.',
+      );
+    }
     if (!_hasComercioId) {
       _showInfo('No hay comercio configurado.');
       return;
@@ -2061,8 +2089,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                           builder: (context, ordersSnapshot) {
                                             final allOrders =
                                                 _applyOptimisticStatuses(
-                                                  ordersSnapshot.data ??
-                                                      const <PedidoModel>[],
+                                                  _latestOrders,
                                                 );
                                             final malformedOrders = allOrders
                                                 .where(
@@ -2418,7 +2445,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                                               displayUrl: displayUrl,
                                                                               visits: data.analytics.visits,
                                                                               scans: data.analytics.scans,
-                                                                              menuOrders: _menuOrdersCount(validOrders),
+                                                                              menuOrders: _menuOrdersCount(
+                                                                                validOrders,
+                                                                              ),
                                                                               onCopy: _copyPublicMenuUrl,
                                                                               onDownloadQr: _openQrGenerator,
                                                                               onOpenUrl: _openPublicMenu,

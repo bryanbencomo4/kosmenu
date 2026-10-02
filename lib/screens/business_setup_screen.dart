@@ -34,6 +34,7 @@ import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/exchange_adjustment_panel.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
 import 'package:kosmenu_app/widgets/logo_crop_editor.dart';
+import 'package:kosmenu_app/widgets/whatsapp_order_format_selector.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -313,6 +314,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedFooter = 'Simple';
   bool _allowDelivery = false;
   bool _receiveOrdersOnWhatsapp = true;
+  String _whatsappOrderFormat = 'summary';
   bool _isVirtualBusiness = false;
 
   /// Hidden until the public business directory ships on the landing page.
@@ -356,10 +358,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool get _isStandaloneSettings => widget.settingsSection != null;
   bool get _isSettingsEditor =>
       _isStandaloneSettings || widget.businessConfigOnly;
-    bool get _needsCheckoutServices =>
+  bool get _needsCheckoutServices =>
       !_isStandaloneSettings ||
       widget.settingsSection == MerchantBusinessSettingsSection.payments;
-    bool get _needsSectorOptions =>
+  bool get _needsSectorOptions =>
       !_isStandaloneSettings ||
       widget.settingsSection == MerchantBusinessSettingsSection.profile;
 
@@ -608,8 +610,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           !_isExchangeRateConfigured()) {
         unawaited(_suggestExchangeRate());
       }
-      if (_needsCheckoutServices &&
-          _step.index >= _SetupStep.checkout.index) {
+      if (_needsCheckoutServices && _step.index >= _SetupStep.checkout.index) {
         unawaited(_loadMarketRates(applyToCurrentAutoRate: true));
       }
       if (_needsCheckoutServices) unawaited(_loadProviderStatuses());
@@ -714,11 +715,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _selectedPhoneCountryIso = parsedPhone.countryIso;
     _whatsappController.text = parsedPhone.nationalNumber;
     final seedBranding = _toStringDynamicMap(raw?['branding_ia']);
-    final seedBusinessConfig = _toStringDynamicMap(seedBranding['config_negocio']);
-    final seedSocialLinks = _toStringDynamicMap(seedBusinessConfig['social_links']);
-    _instagramController.text = seedSocialLinks['instagram']?.toString().trim() ?? '';
-    _facebookController.text = seedSocialLinks['facebook']?.toString().trim() ?? '';
-    _youtubeController.text = seedSocialLinks['youtube']?.toString().trim() ?? '';
+    final seedBusinessConfig = _toStringDynamicMap(
+      seedBranding['config_negocio'],
+    );
+    _whatsappOrderFormat =
+        seedBusinessConfig['whatsapp_order_format'] == 'detailed'
+        ? 'detailed'
+        : 'summary';
+    final seedSocialLinks = _toStringDynamicMap(
+      seedBusinessConfig['social_links'],
+    );
+    _instagramController.text =
+        seedSocialLinks['instagram']?.toString().trim() ?? '';
+    _facebookController.text =
+        seedSocialLinks['facebook']?.toString().trim() ?? '';
+    _youtubeController.text =
+        seedSocialLinks['youtube']?.toString().trim() ?? '';
     _tiktokController.text = seedSocialLinks['tiktok']?.toString().trim() ?? '';
     final seedAddress = (raw?['direccion']?.toString() ?? '').trim();
     _isVirtualBusiness = raw?['negocio_virtual'] == true;
@@ -4356,7 +4368,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (_saving) return;
     if (!MerchantSession.canManageSettings) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(MerchantSession.deniedMessage('editar la configuración'))),
+        SnackBar(
+          content: Text(
+            MerchantSession.deniedMessage('editar la configuración'),
+          ),
+        ),
       );
       return;
     }
@@ -4364,7 +4380,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final comercioId = (_editingComercioId ?? '').trim();
     if (comercioId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se encontró el negocio que quieres editar.')),
+        const SnackBar(
+          content: Text('No se encontró el negocio que quieres editar.'),
+        ),
       );
       return;
     }
@@ -4376,16 +4394,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           final name = _nameController.text.trim();
           final slug = _normalizeSlug(_slugController.text);
           if (name.length < 3 || slug.length < 3 || !_isSlugFormatValid(slug)) {
-            throw const FormatException('Revisa el nombre y el enlace público.');
+            throw const FormatException(
+              'Revisa el nombre y el enlace público.',
+            );
           }
           await _checkSlugAvailability(slug);
           if (!mounted) return;
           if (!_isSlugAvailable) {
-            throw const FormatException('Ese enlace ya está en uso. Prueba otro.');
+            throw const FormatException(
+              'Ese enlace ya está en uso. Prueba otro.',
+            );
           }
           final user = Supabase.instance.client.auth.currentUser;
           if (user == null) {
-            throw const FormatException('Tu sesión expiró. Inicia sesión de nuevo.');
+            throw const FormatException(
+              'Tu sesión expiró. Inicia sesión de nuevo.',
+            );
           }
           final logoUrl = await _uploadLogoIfNeeded(user);
           await _writeComercioFields(
@@ -4424,13 +4448,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         case MerchantBusinessSettingsSection.payments:
           _syncActiveCurrencyDataFromController();
           if (_selectedCurrencies.isEmpty || !_hasPrimaryCurrencySelected) {
-            throw const FormatException('Selecciona una moneda de cobro principal.');
+            throw const FormatException(
+              'Selecciona una moneda de cobro principal.',
+            );
           }
           if (!_isExchangeRateConfigured()) {
-            throw const FormatException('Configura una tasa de cambio antes de guardar.');
+            throw const FormatException(
+              'Configura una tasa de cambio antes de guardar.',
+            );
           }
           if (!_hasPaymentDetailsForSelectedMethods()) {
-            throw const FormatException('Completa los datos de cada método de pago.');
+            throw const FormatException(
+              'Completa los datos de cada método de pago.',
+            );
           }
           final methods = _selectedCurrencies
               .expand(_selectedPaymentsForCurrency)
@@ -4445,8 +4475,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           await _writeComercioFields(
             <String, dynamic>{
               'moneda': _baseCurrency,
-              'tasa_cambio_pesos':
-                  _baseCurrency == 'COP' && quotedRate > 0 ? quotedRate : null,
+              'tasa_cambio_pesos': _baseCurrency == 'COP' && quotedRate > 0
+                  ? quotedRate
+                  : null,
               'metodo_pago_predeterminado': defaultMethod,
               'metodos_pago': methods.toList(),
             },
@@ -4485,15 +4516,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'permite_delivery',
             },
           );
+          await _saveWhatsappOrderFormat(comercioId);
           break;
       }
 
       if (mounted) await _openCompletionActions();
     } on FormatException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
       }
     } on PostgrestException catch (error) {
       if (mounted) {
@@ -4504,7 +4536,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se pudo guardar esta sección. Inténtalo de nuevo.')),
+          const SnackBar(
+            content: Text(
+              'No se pudo guardar esta sección. Inténtalo de nuevo.',
+            ),
+          ),
         );
       }
     } finally {
@@ -4896,9 +4932,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               .toDouble();
       return switch (currency) {
         'USD' => 1.0,
-        'VES' => source == _exchangeSourceBcvEur
-            ? liveRate * usdEur
-            : liveRate.toDouble(),
+        'VES' =>
+          source == _exchangeSourceBcvEur
+              ? liveRate * usdEur
+              : liveRate.toDouble(),
         'COP' => usdCop,
         'EUR' => usdEur,
         _ => 0.0,
@@ -5887,7 +5924,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (mode != _exchangeModeAuto || !_hasAutoSourcesForCurrency(currency)) {
       return false;
     }
-    final source = _exchangeRateSourceByCurrency[currency] ?? _exchangeRateSource;
+    final source =
+        _exchangeRateSourceByCurrency[currency] ?? _exchangeRateSource;
     return isAdjustableExchangeSource(source);
   }
 
@@ -7946,9 +7984,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final type = (existing['tipo'] ?? '').toString().trim().toLowerCase();
       final id = (existing['id'] ?? '').toString().trim();
       if (type.isEmpty || id.isEmpty) continue;
-      existingByType.putIfAbsent(type, () => <Map<String, dynamic>>[]).add(
-        existing,
-      );
+      existingByType
+          .putIfAbsent(type, () => <Map<String, dynamic>>[])
+          .add(existing);
     }
 
     final retainedIds = <String>{};
@@ -8052,6 +8090,53 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         'text_on_primary': text,
       },
     };
+  }
+
+  Future<void> _saveWhatsappOrderFormat(String comercioId) async {
+    if (!MerchantSession.canManageSettings ||
+        comercioId != _editingComercioId) {
+      throw const FormatException(
+        'No tienes permiso para editar este negocio.',
+      );
+    }
+    final client = Supabase.instance.client;
+    final current = await client
+        .from('comercios')
+        .select('branding_ia')
+        .eq('id', comercioId)
+        .maybeSingle();
+    if (current == null) {
+      throw const FormatException(
+        'No se pudo cargar la configuración del negocio.',
+      );
+    }
+    final branding = Map<String, dynamic>.from(
+      _toStringDynamicMap(current['branding_ia']),
+    );
+    final config = Map<String, dynamic>.from(
+      _toStringDynamicMap(branding['config_negocio']),
+    );
+    config['whatsapp_order_format'] = _whatsappOrderFormat == 'detailed'
+        ? 'detailed'
+        : 'summary';
+    branding['config_negocio'] = config;
+    final saved = await client
+        .from('comercios')
+        .update({'branding_ia': branding})
+        .eq('id', comercioId)
+        .select('id')
+        .maybeSingle();
+    if (saved == null) {
+      throw const FormatException('No se pudo guardar el formato de WhatsApp.');
+    }
+    _seedBrandingIa = branding;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Formato de pedidos por WhatsApp guardado.'),
+        ),
+      );
+    }
   }
 
   Map<String, dynamic> _buildBrandingIaPayload() {
@@ -8772,7 +8857,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                       value: progress,
                       minHeight: 4,
                       backgroundColor: const Color(0xFF281D49),
-                      valueColor: AlwaysStoppedAnimation<Color>(_palette.primary),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        _palette.primary,
+                      ),
                     ),
                   Expanded(
                     child: useDesktopContentWidth
@@ -9210,6 +9297,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       onReferenceChanged: _onAdjustmentReferenceChanged,
     );
   }
+
   Widget _buildCheckoutStep() {
     if (_selectedCurrencies.isEmpty) {
       _selectedCurrencies.add('USD');
@@ -10478,6 +10566,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             return null;
           },
         ),
+        if (widget.settingsSection ==
+            MerchantBusinessSettingsSection.operations) ...[
+          const SizedBox(height: 20),
+          WhatsappOrderFormatSelector(
+            value: _whatsappOrderFormat,
+            titleColor: _setupTextHigh,
+            descriptionColor: _setupTextMedium,
+            activeColor: _palette.primary,
+            onChanged: _saving || !MerchantSession.canManageSettings
+                ? null
+                : (value) => setState(() => _whatsappOrderFormat = value),
+          ),
+        ],
         const SizedBox(height: 8),
         SwitchListTile.adaptive(
           value: _isVirtualBusiness,

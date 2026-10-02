@@ -154,6 +154,7 @@ class PublicOrderCreateResult {
     required this.estado,
     this.total,
     this.confirmationMessage,
+    this.merchantWhatsappText,
   });
 
   final String orderId;
@@ -161,6 +162,7 @@ class PublicOrderCreateResult {
   final String estado;
   final double? total;
   final String? confirmationMessage;
+  final String? merchantWhatsappText;
 }
 
 class PublicOrderApiException implements Exception {
@@ -369,8 +371,9 @@ class PublicOrderApiService {
       final body = _decodeJson(response.body);
       final data = body['data'];
       final map = data is Map ? Map<String, dynamic>.from(data) : body;
-      final storageRef =
-          (map['storageRef'] ?? map['paymentProofUrl'] ?? '').toString().trim();
+      final storageRef = (map['storageRef'] ?? map['paymentProofUrl'] ?? '')
+          .toString()
+          .trim();
       if (storageRef.isEmpty || !storageRef.startsWith('storage://')) {
         throw const PublicOrderApiException(
           message: 'Respuesta de comprobante invalida.',
@@ -484,6 +487,11 @@ class PublicOrderApiService {
         estado: estado.isEmpty ? 'pendiente' : estado,
         total: total,
         confirmationMessage: 'Pedido confirmado',
+        merchantWhatsappText:
+            map['merchantWhatsappText'] is String &&
+                (map['merchantWhatsappText'] as String).trim().isNotEmpty
+            ? map['merchantWhatsappText'] as String
+            : null,
       );
     }
 

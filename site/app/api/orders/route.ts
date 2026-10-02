@@ -36,6 +36,7 @@ import {
   type SnapshotProductRow,
 } from '../_lib/order-item-snapshots';
 import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
+import { optionalMerchantComanda } from '../../_lib/whatsapp-order-format';
 import { extractDeliveryConfigSource, parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
   createCustomerRatingKey,
@@ -742,6 +743,18 @@ export async function POST(request: Request) {
       });
     }
 
+    const appSiteUrl = (process.env.NEXT_PUBLIC_APP_SITE_URL ?? 'https://app.elmenuxfa.com').replace(/\/$/, '');
+    const appOrderUrl = publicShortCode
+      ? `${appSiteUrl}/orders/view/${encodeURIComponent(orderId)}?shortCode=${encodeURIComponent(publicShortCode)}`
+      : `${appSiteUrl}/orders/view/${encodeURIComponent(orderId)}?fallback=${encodeURIComponent(publicOrderUrl)}`;
+    const merchantWhatsappText = optionalMerchantComanda(comercioRow, {
+      orderId,
+      appOrderUrl,
+      customerName: clientName,
+      customerWhatsapp: clientWhatsapp,
+      details: detalles,
+    });
+
     const responseBody = {
       ok: true as const,
       data: {
@@ -753,6 +766,7 @@ export async function POST(request: Request) {
         costoDelivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
         total,
         trackingUrl: publicOrderUrl,
+        ...(merchantWhatsappText ? { merchantWhatsappText } : {}),
         emailStatus,
         whatsappStatus,
       },

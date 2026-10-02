@@ -160,7 +160,41 @@ void main() {
         'https://preview.example/v/demo/orders/ORD-1?t=abc123',
       );
       expect(result.estado, 'pendiente');
+      expect(result.merchantWhatsappText, isNull);
     });
+
+    test(
+      'accepts optional server comanda without changing tracking or state',
+      () async {
+        final client = MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'ok': true,
+              'data': {
+                'orderId': 'ORD-1',
+                'trackingUrl': 'https://preview.example/o/AbCdEf1234',
+                'estado': 'pendiente',
+                'merchantWhatsappText':
+                    'Comanda Preview\nGestionar pedido: enlace existente',
+              },
+            }),
+            201,
+            headers: {'content-type': 'application/json'},
+          ),
+        );
+        final result = await PublicOrderApiService(client: client).createOrder(
+          idempotencyKey: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+          request: _sampleRequest(),
+        );
+        expect(result.orderId, 'ORD-1');
+        expect(result.estado, 'pendiente');
+        expect(result.trackingUrl, 'https://preview.example/o/AbCdEf1234');
+        expect(
+          result.merchantWhatsappText,
+          'Comanda Preview\nGestionar pedido: enlace existente',
+        );
+      },
+    );
 
     test('maps status codes to user-safe exceptions', () async {
       Future<void> expectStatus(int status) async {
@@ -257,12 +291,13 @@ void main() {
           headers: {'content-type': 'application/json'},
         );
       });
-      final ok = await PublicOrderApiService(client: okClient).uploadComprobante(
-        comercioId: 'c1',
-        fileName: 'file.jpg',
-        mimeType: 'image/jpeg',
-        bytes: Uint8List.fromList(<int>[1, 2, 3]),
-      );
+      final ok = await PublicOrderApiService(client: okClient)
+          .uploadComprobante(
+            comercioId: 'c1',
+            fileName: 'file.jpg',
+            mimeType: 'image/jpeg',
+            bytes: Uint8List.fromList(<int>[1, 2, 3]),
+          );
       expect(ok.storageRef, startsWith('storage://comprobantes/'));
 
       final badClient = MockClient((request) async {
@@ -305,7 +340,10 @@ void main() {
         client: MockClient((_) async => http.Response('{}', 200)),
       );
       expect(
-        () => service.fetchComprobanteSignedUrl(orderId: 'ORD-1', accessToken: ''),
+        () => service.fetchComprobanteSignedUrl(
+          orderId: 'ORD-1',
+          accessToken: '',
+        ),
         throwsA(
           isA<PublicOrderApiException>().having(
             (e) => e.statusCode,
@@ -316,42 +354,44 @@ void main() {
       );
     });
 
-    test('sends bearer and returns expiresInSec without logging secrets', () async {
-      String? auth;
-      final client = MockClient((request) async {
-        auth = request.headers['authorization'];
-        expect(request.url.path, contains('/api/business/orders/'));
-        return http.Response(
-          jsonEncode({
-            'ok': true,
-            'data': {
-              'url': 'https://signed.example/tmp',
-              'expiresInSec': 300,
-            },
-          }),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
-      });
-      final result = await PublicOrderApiService(client: client)
-          .fetchComprobanteSignedUrl(
-            orderId: 'ORD-1',
-            accessToken: 'session-token',
+    test(
+      'sends bearer and returns expiresInSec without logging secrets',
+      () async {
+        String? auth;
+        final client = MockClient((request) async {
+          auth = request.headers['authorization'];
+          expect(request.url.path, contains('/api/business/orders/'));
+          return http.Response(
+            jsonEncode({
+              'ok': true,
+              'data': {
+                'url': 'https://signed.example/tmp',
+                'expiresInSec': 300,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
           );
-      expect(auth, 'Bearer session-token');
-      expect(result.expiresInSec, 300);
-      expect(result.url, 'https://signed.example/tmp');
-    });
+        });
+        final result = await PublicOrderApiService(client: client)
+            .fetchComprobanteSignedUrl(
+              orderId: 'ORD-1',
+              accessToken: 'session-token',
+            );
+        expect(auth, 'Bearer session-token');
+        expect(result.expiresInSec, 300);
+        expect(result.url, 'https://signed.example/tmp');
+      },
+    );
 
     test('foreign ownership is generic 404/403', () async {
       final client = MockClient(
         (_) async => http.Response('{"error":"No disponible."}', 404),
       );
       try {
-        await PublicOrderApiService(client: client).fetchComprobanteSignedUrl(
-          orderId: 'ORD-B',
-          accessToken: 'token-a',
-        );
+        await PublicOrderApiService(
+          client: client,
+        ).fetchComprobanteSignedUrl(orderId: 'ORD-B', accessToken: 'token-a');
         fail('expected exception');
       } on PublicOrderApiException catch (error) {
         expect(error.message, 'Comprobante no disponible.');

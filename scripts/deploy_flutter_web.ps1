@@ -33,6 +33,8 @@ function Read-DotEnvValue {
 $apiBaseUrl = if ($env:API_BASE_URL) { $env:API_BASE_URL.Trim() } else { 'https://elmenuxfa.com' }
 $supabaseUrl = if ($env:SUPABASE_URL) { $env:SUPABASE_URL.Trim() } else { Read-DotEnvValue $siteEnvPath 'NEXT_PUBLIC_SUPABASE_URL' }
 $supabaseAnonKey = if ($env:SUPABASE_ANON_KEY) { $env:SUPABASE_ANON_KEY.Trim() } else { Read-DotEnvValue $siteEnvPath 'NEXT_PUBLIC_SUPABASE_ANON_KEY' }
+$firebaseWebConfig = if ($env:FIREBASE_WEB_CONFIG) { $env:FIREBASE_WEB_CONFIG.Trim() } else { Read-DotEnvValue $siteEnvPath 'FIREBASE_WEB_CONFIG' }
+$firebaseWebVapidKey = if ($env:FIREBASE_WEB_VAPID_KEY) { $env:FIREBASE_WEB_VAPID_KEY.Trim() } else { Read-DotEnvValue $siteEnvPath 'FIREBASE_WEB_VAPID_KEY' }
 
 if ([string]::IsNullOrWhiteSpace($supabaseUrl) -or $supabaseUrl -notmatch '^https://') {
   throw 'Missing SUPABASE_URL (env) or NEXT_PUBLIC_SUPABASE_URL in site/.env.local'
@@ -45,11 +47,17 @@ $vercelConfig = @'
 {
   "rewrites": [
     {
-      "source": "/((?!assets/|canvaskit/|icons/|main\\.dart\\.js|flutter[^/]*\\.js|manifest\\.json|version\\.json|favicon\\.png|merchant-presence\\.html|.*\\.(?:png|jpg|jpeg|svg|webp|wasm|otf|ttf|woff2?)$).*)",
+      "source": "/((?!assets/|canvaskit/|icons/|main\\.dart\\.js|flutter[^/]*\\.js|manifest\\.json|version\\.json|favicon\\.png|merchant-presence\\.html|merchant-notifications(?:-sw)?\\.js|.*\\.(?:png|jpg|jpeg|svg|webp|wasm|otf|ttf|woff2?)$).*)",
       "destination": "/index.html"
     }
   ],
   "headers": [
+    {
+      "source": "/merchant-notifications-sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
     {
       "source": "/merchant-presence.html",
       "headers": [
@@ -142,7 +150,9 @@ try {
   & $flutter build web --release --no-wasm-dry-run `
     "--dart-define=API_BASE_URL=$apiBaseUrl" `
     "--dart-define=SUPABASE_URL=$supabaseUrl" `
-    "--dart-define=SUPABASE_ANON_KEY=$supabaseAnonKey"
+    "--dart-define=SUPABASE_ANON_KEY=$supabaseAnonKey" `
+    "--dart-define=FIREBASE_WEB_CONFIG=$firebaseWebConfig" `
+    "--dart-define=FIREBASE_WEB_VAPID_KEY=$firebaseWebVapidKey"
 
   if ($LASTEXITCODE -ne 0) {
     throw "flutter build web failed with exit code $LASTEXITCODE"

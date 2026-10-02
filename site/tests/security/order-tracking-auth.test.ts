@@ -229,7 +229,7 @@ describe('customer PATCH schema / transitions', () => {
     expect(assertCustomerStatusTransition('pendiente', 'cancelado').ok).toBe(true);
   });
 
-  it('requires a reason for customer cancellation but not timeout cancellation', () => {
+  it('requires a reason for manual cancellation and rejects automatic timeout cancellation', () => {
     expect(customerOrderActionSchema.safeParse({ action: 'cancel', source: 'cliente' }).success).toBe(false);
     expect(
       customerOrderActionSchema.safeParse({
@@ -238,7 +238,7 @@ describe('customer PATCH schema / transitions', () => {
         reason: 'Ya no lo necesito',
       }).success,
     ).toBe(true);
-    expect(customerOrderActionSchema.safeParse({ action: 'cancel', source: 'timeout' }).success).toBe(true);
+    expect(customerOrderActionSchema.safeParse({ action: 'cancel', source: 'timeout' }).success).toBe(false);
   });
 
   it('accepts only integer customer service ratings from one to five', () => {

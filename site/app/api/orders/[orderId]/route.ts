@@ -9,7 +9,6 @@ import { extractComercioId } from '../../_lib/order-utils';
 import { hashPublicTrackingToken } from '../../_lib/order-tracking-token';
 import {
   CONFIRM_RECEIVED_ALLOWED_STATUSES,
-  CONFIRMATION_TIMEOUT_MS,
   normalizePublicStatus,
   toPublicOrderTrackingResponse,
 } from '../../_lib/public-order';
@@ -502,12 +501,6 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: transition.error }, { status: 409 });
     }
 
-    const createdAtMs = Date.parse((order.created_at ?? '').toString());
-    const pendingExpired =
-      currentStatus === 'pendiente' &&
-      Number.isFinite(createdAtMs) &&
-      Date.now() - createdAtMs >= CONFIRMATION_TIMEOUT_MS;
-
     if (source === 'cliente') {
       if (currentStatus !== 'pendiente') {
         return NextResponse.json(
@@ -517,20 +510,12 @@ export async function PATCH(request: Request, { params }: Params) {
       }
     }
 
-    if (source === 'timeout' && !pendingExpired) {
-      return NextResponse.json(
-        { error: 'El tiempo de confirmacion de 15 minutos aun no ha vencido.' },
-        { status: 409 },
-      );
-    }
-
-    const reason = source === 'timeout' ? 'timeout_no_confirmacion' : 'cancelado_por_cliente';
     const nextDetalles = {
       ...(order.detalles ?? {}),
       cancellation: {
         source,
-        reason,
-        ...(source === 'cliente' ? { customerReason: action.reason } : {}),
+        reason: 'cancelado_por_cliente',
+        customerReason: action.reason,
         at: new Date().toISOString(),
       },
     };

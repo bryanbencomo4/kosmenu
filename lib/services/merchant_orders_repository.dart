@@ -22,7 +22,39 @@ class MerchantOrdersRepository {
       'd_total:detalles->>total,'
       'd_delegate_status:detalles->delivery_delegate->>status';
 
+  static const String _metricsSummaryColumns =
+      '$_clientSummaryColumns,costo_delivery,'
+      'd_items:detalles->items,'
+      'd_base_currency:detalles->>moneda_base,'
+      'd_checkout_currency:detalles->>moneda_checkout,'
+      'd_exchange_rate:detalles->>tasa_cambio_snapshot,'
+      'd_checkout_total:detalles->>total_moneda_checkout,'
+      'd_checkout_subtotal:detalles->>subtotal_moneda_checkout,'
+      'd_checkout_delivery:detalles->>costo_delivery_moneda_checkout';
+
   static SupabaseClient get _client => Supabase.instance.client;
+
+  static List<PedidoModel> mergeMetricsOrders({
+    required Iterable<PedidoModel> fetched,
+    required Iterable<PedidoModel> live,
+    required DateTime startInclusive,
+    required DateTime endExclusive,
+    required DateTime todayStart,
+    required DateTime tomorrow,
+  }) {
+    final byId = <String, PedidoModel>{};
+    for (final pedido in fetched.followedBy(live)) {
+      final createdAt = pedido.createdAt;
+      if (pedido.hasParseError || createdAt == null) continue;
+      final inRange =
+          !createdAt.isBefore(startInclusive) &&
+          createdAt.isBefore(endExclusive);
+      final inToday =
+          !createdAt.isBefore(todayStart) && createdAt.isBefore(tomorrow);
+      if (inRange || inToday) byId[pedido.id] = pedido;
+    }
+    return byId.values.toList(growable: false);
+  }
 
   static Future<List<PedidoModel>> fetchBetween({
     required String comercioId,
@@ -32,7 +64,7 @@ class MerchantOrdersRepository {
     final rows = await _fetchAllPages(
       (from, to) => _client
           .from('pedidos')
-          .select('*')
+          .select(_metricsSummaryColumns)
           .eq('comercio_id', comercioId)
           .gte('created_at', startInclusive.toUtc().toIso8601String())
           .lt('created_at', endExclusive.toUtc().toIso8601String())
@@ -40,7 +72,7 @@ class MerchantOrdersRepository {
           .order('id', ascending: false)
           .range(from, to),
     );
-    return _parse(rows);
+    return _parse(rows.map(_expandMetricsSummary));
   }
 
   static Future<List<PedidoModel>> fetchClientSummaries({
@@ -119,6 +151,24 @@ class MerchantOrdersRepository {
         'total': ?row['d_total'],
         if (delegateStatus != null)
           'delivery_delegate': <String, dynamic>{'status': delegateStatus},
+      },
+    };
+  }
+
+  static Map<String, dynamic> _expandMetricsSummary(Map<String, dynamic> row) {
+    final summary = _expandClientSummary(row);
+    return <String, dynamic>{
+      ...summary,
+      'costo_delivery': row['costo_delivery'],
+      'detalles': <String, dynamic>{
+        ...Map<String, dynamic>.from(summary['detalles'] as Map),
+        'items': row['d_items'],
+        'moneda_base': row['d_base_currency'],
+        'moneda_checkout': row['d_checkout_currency'],
+        'tasa_cambio_snapshot': row['d_exchange_rate'],
+        'total_moneda_checkout': row['d_checkout_total'],
+        'subtotal_moneda_checkout': row['d_checkout_subtotal'],
+        'costo_delivery_moneda_checkout': row['d_checkout_delivery'],
       },
     };
   }

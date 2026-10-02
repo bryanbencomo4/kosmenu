@@ -67,6 +67,7 @@ import {
   type CartLineSelection,
 } from '../../_lib/menu-product-options';
 import { consumeRepeatOrder } from '../../_lib/repeat-order';
+import { buildClientOrderSummary } from '../../_lib/whatsapp-order-format';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
 import { trackMenuFunnelEvent, trackPublicMenuVisit } from './_lib/track-menu-analytics';
 import {
@@ -4263,22 +4264,18 @@ export default function PublicMenuPage() {
       // Keep the full fallback URL when the tracking URL is not absolute.
     }
 
-    const message = [
-      `🆕 *NUEVO PEDIDO #${orderId}*`,
-      '',
-      `👤 Cliente: ${customerName}`,
-      `📞 ${customerWhatsapp}`,
-      '',
-      `📦 Entrega: ${delivery.mode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}`,
-      `💳 Pago: ${paymentLabel}`,
-      '',
-      `💰 Total: ${formatAmountByCurrency(totalConverted, paymentMeta.currency)}`,
-      '',
-      '⏳ Estado: *Pendiente*',
-      '',
-      '🔗 Ver pedido:',
-      smartOrderUrl,
-    ].join('\n');
+    const detailedMessage = responsePayload?.data?.merchantWhatsappText;
+    const message = typeof detailedMessage === 'string' && detailedMessage.trim()
+      ? detailedMessage
+      : buildClientOrderSummary({
+          orderId,
+          customerName,
+          customerWhatsapp,
+          deliveryMode: delivery.mode,
+          paymentLabel,
+          totalLabel: formatAmountByCurrency(totalConverted, paymentMeta.currency),
+          appOrderUrl: smartOrderUrl,
+        });
 
     return {
       orderId,

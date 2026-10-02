@@ -8,6 +8,7 @@ import { OrderReceipt, OrderReceiptFrame } from './_components/OrderReceipt';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
 import { writeRepeatOrder, type RepeatOrderLine } from '../../_lib/repeat-order';
 import { nextPollDelayMs } from '../../_lib/poll-backoff';
+import { formatRelativeOrderTime } from '../../_lib/relative-order-time';
 
 type OrderStatus =
   | 'pendiente'
@@ -16,8 +17,6 @@ type OrderStatus =
   | 'en_camino'
   | 'cancelado'
   | 'entregado';
-
-const CONFIRMATION_TIMEOUT_MS = 15 * 60 * 1000;
 
 type DeliveryPayload = {
   mode?: 'pickup' | 'delivery';
@@ -188,6 +187,9 @@ type PublicTrackingPayload = {
   orderId: string;
   status: OrderStatus | string;
   createdAt: string;
+  cancellation?: {
+    reason?: 'timeout_no_confirmacion' | 'cancelado_por_cliente' | null;
+  } | null;
   items: Array<{
     name: string;
     quantity: number;
@@ -269,6 +271,7 @@ function mapPublicTracking(pub: PublicTrackingPayload): {
         delivery_delegate: {
           status: pub.deliveryProgress?.delegateStatus ?? undefined,
         },
+        cancellation: pub.cancellation ?? undefined,
         customer_service_rating: pub.serviceRating?.customer ?? null,
       },
     },
@@ -302,14 +305,6 @@ function statusIndex(status: OrderStatus) {
 
 function statusLabel(status: OrderStatus) {
   return ORDER_FLOW.find((item) => item.key === status)?.label ?? 'Estado desconocido';
-}
-
-function formatCountdown(ms: number) {
-  const safeMs = Math.max(0, ms);
-  const totalSeconds = Math.ceil(safeMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function formatCop(value: number | null | undefined) {
@@ -422,7 +417,6 @@ function OrderTrackingPageInner() {
   const [locationHint, setLocationHint] = useState('');
   const [tokenRecoveryChecked, setTokenRecoveryChecked] = useState(false);
   const lastStatusRef = useRef<OrderStatus | null>(null);
-  const autoCancelAttemptedRef = useRef(false);
   const trackingFetchInFlightRef = useRef(false);
 
   const resolvedStatus = useMemo(() => normalizeStatus(order?.estado), [order?.estado]);
@@ -445,7 +439,7 @@ function OrderTrackingPageInner() {
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setNowTs(Date.now());
-    }, 1000);
+    }, 60_000);
 
     return () => {
       window.clearInterval(intervalId);
@@ -491,7 +485,7 @@ function OrderTrackingPageInner() {
     setTokenRecoveryChecked(true);
   }, [orderId, pathname, router, trackingCredential]);
 
-  async function cancelOrder(source: 'cliente' | 'timeout', reason?: string) {
+  async function cancelOrder(reason: string) {
     if (!orderId || !trackingCredential || cancelLoading) return;
 
     setCancelLoading(true);
@@ -506,8 +500,8 @@ function OrderTrackingPageInner() {
         },
         body: JSON.stringify({
           action: 'cancel',
-          source,
-          ...(source === 'cliente' ? { reason } : {}),
+          source: 'cliente',
+          reason,
         }),
       });
 
@@ -526,9 +520,7 @@ function OrderTrackingPageInner() {
       }
 
       setCancelMessage(
-        source === 'timeout'
-          ? 'El pedido fue cancelado por falta de confirmacion en 15 minutos.'
-          : payload?.merchantNotified === false
+        payload?.merchantNotified === false
             ? 'El pedido quedó cancelado, pero no pudimos confirmar el aviso por WhatsApp. Comunícate directamente con el comercio.'
             : 'Tu pedido fue cancelado y avisamos al comercio por WhatsApp.',
       );
@@ -956,13 +948,6 @@ function OrderTrackingPageInner() {
   }, [pathname]);
 
   const displayStatus: OrderStatus = resolvedStatus;
-  const orderCreatedAtMs = order?.created_at ? Date.parse(order.created_at) : NaN;
-  const hasCreatedAt = Number.isFinite(orderCreatedAtMs);
-  const pendingElapsedMs = (displayStatus === 'pendiente' && hasCreatedAt)
-    ? Math.max(0, nowTs - orderCreatedAtMs)
-    : 0;
-  const confirmTimeLeftMs = Math.max(0, CONFIRMATION_TIMEOUT_MS - pendingElapsedMs);
-  const pendingExpired = displayStatus === 'pendiente' && hasCreatedAt && pendingElapsedMs >= CONFIRMATION_TIMEOUT_MS;
   const canCustomerCancel = displayStatus === 'pendiente';
   const canCustomerConfirmDelegatedDelivery =
     isDelivery &&
@@ -970,18 +955,6 @@ function OrderTrackingPageInner() {
     displayStatus !== 'cancelado' &&
     displayStatus !== 'entregado';
   const cancellationMeta = order?.detalles?.cancellation ?? null;
-
-  useEffect(() => {
-    if (!pendingExpired || autoCancelAttemptedRef.current) return;
-    autoCancelAttemptedRef.current = true;
-    void cancelOrder('timeout');
-  }, [pendingExpired]);
-
-  useEffect(() => {
-    if (displayStatus !== 'pendiente') {
-      autoCancelAttemptedRef.current = false;
-    }
-  }, [displayStatus]);
 
   if (loading) {
     return (
@@ -1055,14 +1028,7 @@ function OrderTrackingPageInner() {
     );
   }
 
-  const createdAtLabel = order?.created_at
-    ? new Intl.DateTimeFormat('es-CO', {
-        day: 'numeric',
-        month: 'short',
-        hour: 'numeric',
-        minute: '2-digit',
-      }).format(new Date(order.created_at))
-    : '';
+  const createdAtLabel = formatRelativeOrderTime(order?.created_at, new Date(nowTs));
   const timelineItemsBase = [
     { key: 'pendiente', label: 'Enviando' },
     { key: 'confirmado', label: 'Aceptado' },
@@ -1141,9 +1107,6 @@ function OrderTrackingPageInner() {
       pickupAddress={!isDelivery ? businessAddress : ''}
       timeline={timelineItems.map((item) => ({ key: item.key, label: item.label }))}
       currentStep={currentStep}
-      pendingExpired={pendingExpired}
-      confirmTimeLeftLabel={formatCountdown(confirmTimeLeftMs)}
-      confirmProgress={CONFIRMATION_TIMEOUT_MS > 0 ? Math.min(1, pendingElapsedMs / CONFIRMATION_TIMEOUT_MS) : 0}
       items={orderItems.map((item) => ({
         name: item.nombre,
         categoryName: item.categoria_nombre ?? '',
@@ -1202,8 +1165,8 @@ function OrderTrackingPageInner() {
       canCustomerCancel={canCustomerCancel}
       cancelLoading={cancelLoading}
       cancelMessage={displayStatus === 'cancelado' ? '' : cancelMessage}
-      onCancelOrder={(reason) => void cancelOrder('cliente', reason)}
-      showPendingCancelHint={displayStatus === 'pendiente' && !pendingExpired}
+      onCancelOrder={(reason) => void cancelOrder(reason)}
+      showPendingCancelHint={displayStatus === 'pendiente'}
       canCustomerRateService={
         (displayStatus === 'entregado' || displayStatus === 'cancelado') &&
         order?.detalles?.customer_service_rating == null

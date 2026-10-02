@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/services/merchant_orders_repository.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 
 void main() {
@@ -8,6 +10,61 @@ void main() {
 
   setUpAll(() {
     GoogleFonts.config.allowRuntimeFetching = false;
+  });
+
+  test('metrics retain thousands of orders outside the live window', () {
+    final today = DateTime(2026, 10, 2);
+    final tomorrow = today.add(const Duration(days: 1));
+    final history = List.generate(
+      5000,
+      (index) => PedidoModel(
+        id: 'order-$index',
+        comercioId: 'merchant',
+        createdAt: today.add(Duration(seconds: index)),
+        estado: 'pendiente',
+      ),
+    );
+    final updated = PedidoModel(
+      id: 'order-4999',
+      comercioId: 'merchant',
+      createdAt: history.last.createdAt,
+      estado: 'entregado',
+    );
+    final merged = MerchantOrdersRepository.mergeMetricsOrders(
+      fetched: history,
+      live: [updated, ...history.skip(4850)],
+      startInclusive: today,
+      endExclusive: tomorrow,
+      todayStart: today,
+      tomorrow: tomorrow,
+    );
+    expect(merged.length, 5000);
+    expect(merged.first.id, 'order-0');
+    final corrected = MerchantOrdersRepository.mergeMetricsOrders(
+      fetched: merged,
+      live: [updated],
+      startInclusive: today,
+      endExclusive: tomorrow,
+      todayStart: today,
+      tomorrow: tomorrow,
+    );
+    expect(corrected.last.estado, 'entregado');
+  });
+
+  test('metrics exclude expired ranges and include current-day changes', () {
+    final today = DateTime(2026, 10, 2);
+    final previous = today.subtract(const Duration(days: 1));
+    final merged = MerchantOrdersRepository.mergeMetricsOrders(
+      fetched: [
+        PedidoModel(id: 'old', comercioId: 'merchant', createdAt: previous),
+      ],
+      live: [PedidoModel(id: 'new', comercioId: 'merchant', createdAt: today)],
+      startInclusive: today,
+      endExclusive: today.add(const Duration(days: 1)),
+      todayStart: today,
+      tomorrow: today.add(const Duration(days: 1)),
+    );
+    expect(merged.map((pedido) => pedido.id), ['new']);
   });
 
   test('greeting changes by time of day', () {
@@ -122,4 +179,3 @@ void main() {
 
 void _noop() {}
 void _noopBool(bool value) {}
-

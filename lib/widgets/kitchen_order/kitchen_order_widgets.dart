@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/core/relative_order_time.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 
@@ -26,8 +29,8 @@ abstract final class KitchenMockupColors {
   static const border = Color(0xFFE5E7EB);
 }
 
-class KitchenElapsedTicker extends StatefulWidget {
-  const KitchenElapsedTicker({
+class KitchenRelativeTimeTicker extends StatefulWidget {
+  const KitchenRelativeTimeTicker({
     super.key,
     required this.createdAt,
     required this.builder,
@@ -37,51 +40,43 @@ class KitchenElapsedTicker extends StatefulWidget {
   final Widget Function(BuildContext context, String label) builder;
 
   @override
-  State<KitchenElapsedTicker> createState() => _KitchenElapsedTickerState();
+  State<KitchenRelativeTimeTicker> createState() =>
+      _KitchenRelativeTimeTickerState();
 }
 
-class _KitchenElapsedTickerState extends State<KitchenElapsedTicker> {
+class _KitchenRelativeTimeTickerState extends State<KitchenRelativeTimeTicker> {
   late final ValueNotifier<String> _label;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    _label = ValueNotifier<String>(_format(widget.createdAt));
+    _label = ValueNotifier<String>(formatRelativeOrderTime(widget.createdAt));
     if (widget.createdAt != null) {
-      Future<void>.delayed(const Duration(seconds: 1), _tick);
+      _timer = Timer.periodic(const Duration(minutes: 1), (_) => _refresh());
     }
   }
 
   @override
-  void didUpdateWidget(covariant KitchenElapsedTicker oldWidget) {
+  void didUpdateWidget(covariant KitchenRelativeTimeTicker oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.createdAt != widget.createdAt) {
-      _label.value = _format(widget.createdAt);
+      _label.value = formatRelativeOrderTime(widget.createdAt);
+      _timer?.cancel();
+      _timer = widget.createdAt == null
+          ? null
+          : Timer.periodic(const Duration(minutes: 1), (_) => _refresh());
     }
   }
 
-  void _tick() {
-    if (!mounted || widget.createdAt == null) return;
-    _label.value = _format(widget.createdAt);
-    Future<void>.delayed(const Duration(seconds: 1), _tick);
-  }
-
-  static String _format(DateTime? createdAt) {
-    if (createdAt == null) return '--:--';
-    final elapsed = DateTime.now().difference(createdAt);
-    final total = elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
-    final minutes = total ~/ 60;
-    final seconds = total % 60;
-    if (minutes >= 60) {
-      final hours = minutes ~/ 60;
-      final rem = minutes % 60;
-      return '${hours}h ${rem.toString().padLeft(2, '0')}m';
-    }
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  void _refresh() {
+    if (!mounted) return;
+    _label.value = formatRelativeOrderTime(widget.createdAt);
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _label.dispose();
     super.dispose();
   }
@@ -156,6 +151,23 @@ class KitchenOrderHeader extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+                      if (createdAt != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: KitchenRelativeTimeTicker(
+                            createdAt: createdAt,
+                            builder: (context, label) => Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.manrope(
+                                color: KitchenMockupColors.muted,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -167,7 +179,10 @@ class KitchenOrderHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: statusColor.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(999),
@@ -183,26 +198,6 @@ class KitchenOrderHeader extends StatelessWidget {
                         color: statusColor,
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 6),
-              KitchenElapsedTicker(
-                createdAt: createdAt,
-                builder: (context, label) => Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.schedule_rounded, size: 14, color: statusColor),
-                    const SizedBox(width: 4),
-                    Text(
-                      label,
-                      style: GoogleFonts.manrope(
-                        color: statusColor,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],
@@ -478,7 +473,8 @@ class KitchenSummaryStrip extends StatelessWidget {
                   icon: Icons.call_rounded,
                   onTap: onCall!,
                 ),
-              if (onCall != null && onWhatsapp != null) const SizedBox(width: 8),
+              if (onCall != null && onWhatsapp != null)
+                const SizedBox(width: 8),
               if (onWhatsapp != null)
                 _CircleAction(
                   background: const Color(0xFFDCFCE7),
@@ -602,11 +598,7 @@ class _CircleAction extends StatelessWidget {
 }
 
 class KitchenPrepSection extends StatelessWidget {
-  const KitchenPrepSection({
-    super.key,
-    required this.items,
-    this.orderNotes,
-  });
+  const KitchenPrepSection({super.key, required this.items, this.orderNotes});
 
   final List<PedidoItemModel> items;
   final String? orderNotes;
@@ -655,7 +647,10 @@ class KitchenPrepSection extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: KitchenMockupColors.qtySoft,
                   borderRadius: BorderRadius.circular(999),
@@ -931,8 +926,9 @@ class KitchenStatusTimeline extends StatelessWidget {
                           ? KitchenMockupColors.text
                           : KitchenMockupColors.muted,
                       fontSize: 11,
-                      fontWeight:
-                          active == i ? FontWeight.w800 : FontWeight.w600,
+                      fontWeight: active == i
+                          ? FontWeight.w800
+                          : FontWeight.w600,
                       height: 1.15,
                     ),
                   ),
@@ -981,10 +977,7 @@ class KitchenMockupActionsBar extends StatelessWidget {
   final bool hidePrimaryAction;
 
   static ({String status, String label, IconData icon, Color color})?
-      nextAction({
-    required String estado,
-    required bool isDelivery,
-  }) {
+  nextAction({required String estado, required bool isDelivery}) {
     final raw = OrderManagerService.normalizedRawStatus(estado);
     if (raw == 'pendiente') {
       return (
@@ -1112,11 +1105,7 @@ class _BigActionButton extends StatelessWidget {
                 ),
               )
             : Icon(icon, size: compact ? 20 : 22),
-        label: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
   }
@@ -1223,7 +1212,8 @@ class KitchenDelegationCard extends StatelessWidget {
               height: 1.35,
             ),
           ),
-          if (courierName.trim().isNotEmpty || courierPhone.trim().isNotEmpty) ...[
+          if (courierName.trim().isNotEmpty ||
+              courierPhone.trim().isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
@@ -1236,7 +1226,9 @@ class KitchenDelegationCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    courierName.trim().isEmpty ? 'Repartidor' : courierName.trim(),
+                    courierName.trim().isEmpty
+                        ? 'Repartidor'
+                        : courierName.trim(),
                     style: GoogleFonts.manrope(
                       fontWeight: FontWeight.w800,
                       fontSize: 14,
@@ -1413,9 +1405,7 @@ class KitchenDeliveryCard extends StatelessWidget {
                     _InfoRow(
                       icon: Icons.place_outlined,
                       title: address.isEmpty
-                          ? (isDelivery
-                                ? 'Sin dirección'
-                                : 'Retiro en tienda')
+                          ? (isDelivery ? 'Sin dirección' : 'Retiro en tienda')
                           : address,
                     ),
                     if (coordinatesLabel.isNotEmpty)
@@ -1442,11 +1432,7 @@ class KitchenDeliveryCard extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.icon,
-    required this.title,
-    this.subtitle,
-  });
+  const _InfoRow({required this.icon, required this.title, this.subtitle});
 
   final IconData icon;
   final String title;
