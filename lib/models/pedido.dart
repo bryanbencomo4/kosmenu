@@ -243,9 +243,37 @@ class PedidoModel {
           : double.tryParse('${map['confianza_ia']}'),
       metodoPago: paymentMethod,
       deliveryMode: _asTrimmedString(deliveryMap['mode']),
-      deliveryAddress: _asTrimmedString(deliveryMap['address']),
-      deliveryReference: _asTrimmedString(deliveryMap['reference']),
-      deliveryInstructions: _asTrimmedString(deliveryMap['instructions']),
+      deliveryAddress: _firstNonEmpty([
+        deliveryMap['address'],
+        deliveryMap['delivery_address'],
+        detallesMap['delivery_address'],
+        detallesMap['direccion_delivery'],
+        detallesMap['direccion_entrega'],
+        map['delivery_address'],
+      ]),
+      deliveryReference: _firstNonEmpty([
+        deliveryMap['reference'],
+        deliveryMap['ref'],
+        deliveryMap['delivery_reference'],
+        deliveryMap['reference_note'],
+        detallesMap['delivery_reference'],
+        detallesMap['delivery_reference_note'],
+        detallesMap['referencia_delivery'],
+        detallesMap['referencia_entrega'],
+        map['delivery_reference'],
+      ]),
+      deliveryInstructions: _firstNonEmpty([
+        deliveryMap['instructions'],
+        deliveryMap['instruction'],
+        deliveryMap['delivery_instructions'],
+        deliveryMap['notes'],
+        deliveryMap['note'],
+        detallesMap['delivery_instructions'],
+        detallesMap['delivery_notes'],
+        detallesMap['indicaciones_delivery'],
+        detallesMap['instrucciones_entrega'],
+        map['delivery_instructions'],
+      ]),
       deliveryLatitude: deliveryLatitude,
       deliveryLongitude: deliveryLongitude,
       orderNotes: _asTrimmedString(detallesMap['order_notes']),
@@ -363,6 +391,14 @@ class PedidoModel {
     if (value == null) return null;
     final trimmed = value.toString().trim();
     return trimmed.isEmpty ? null : trimmed;
+  }
+
+  static String? _firstNonEmpty(Iterable<dynamic> values) {
+    for (final value in values) {
+      final trimmed = _asTrimmedString(value);
+      if (trimmed != null) return trimmed;
+    }
+    return null;
   }
 
   static String? _resolveOrderNotes(dynamic value) {

@@ -2,7 +2,7 @@
 
 import { Manrope } from 'next/font/google';
 import Link from 'next/link';
-import { ArrowLeft, Check, CheckCircle2, MapPin, RotateCcw, Star, Truck, Utensils } from 'lucide-react';
+import { ArrowLeft, Check, CheckCircle2, Clock3, MapPin, Package, RotateCcw, Star, Truck } from 'lucide-react';
 import { useState, type CSSProperties, type ReactNode } from 'react';
 
 const headingFont = Manrope({
@@ -18,6 +18,7 @@ type TimelineItem = {
 type ReceiptItem = {
   name: string;
   quantity: number;
+  categoryName?: string;
   amountLabel: string;
 };
 
@@ -29,6 +30,7 @@ type OrderReceiptProps = {
   createdAtLabel: string;
   status: 'pendiente' | 'confirmado' | 'preparando' | 'en_camino' | 'cancelado' | 'entregado';
   isDelivery: boolean;
+  estimatedDeliveryLabel: string | null;
   locationHint: string;
   pickupAddress: string;
   timeline: TimelineItem[];
@@ -131,6 +133,14 @@ function cardStyle(surface: string): CSSProperties {
   };
 }
 
+function splitReceiptItemName(value: string) {
+  const parts = value.split(/\s+·\s+/).map((part) => part.trim()).filter(Boolean);
+  return {
+    product: parts[0] || value,
+    options: parts.slice(1).join(' · '),
+  };
+}
+
 function BusinessMark({
   name,
   logoUrl,
@@ -197,12 +207,18 @@ export function OrderReceipt(props: OrderReceiptProps) {
   const copy = STATUS_COPY[props.status];
   const isCancelled = props.status === 'cancelado';
   const isDelivered = props.status === 'entregado';
+  const hasQuickActions = Boolean(
+    props.canRepeatOrder ||
+      props.repeatClosedReason ||
+      props.showWhatsapp ||
+      props.canCustomerConfirmDelegatedDelivery,
+  );
   const stepCount = Math.max(props.timeline.length - 1, 1);
   const progressRatio = isCancelled ? 0 : Math.min(1, Math.max(0, props.currentStep) / stepCount);
 
   return (
     <main
-      className="relative min-h-[100dvh] overflow-x-hidden px-4 pb-10 pt-6 text-slate-900 sm:px-6"
+      className={`relative min-h-[100dvh] overflow-x-hidden px-4 ${props.canCustomerConfirmDelegatedDelivery ? 'pb-[calc(132px+env(safe-area-inset-bottom))]' : 'pb-[calc(80px+env(safe-area-inset-bottom))]'} pt-6 text-slate-900 sm:px-6 md:pb-10`}
       style={{
         background: `linear-gradient(180deg, color-mix(in srgb, ${props.colors.primary} 10%, ${props.colors.background}) 0%, ${props.colors.background} 42%)`,
         fontFamily: props.colors.bodyFont,
@@ -220,15 +236,13 @@ export function OrderReceipt(props: OrderReceiptProps) {
 
       <div className="relative mx-auto w-full max-w-[440px]">
         {props.menuHref ? (
-          <div className="mb-4">
-            <Link
-              href={props.menuHref}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600"
-            >
-              <ArrowLeft className="h-4 w-4" strokeWidth={2.2} />
-              Volver al menú
-            </Link>
-          </div>
+          <Link
+            href={props.menuHref}
+            className="mb-4 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white/90 px-3 text-xs font-bold text-slate-700 shadow-sm"
+          >
+            <ArrowLeft className="h-4 w-4" strokeWidth={2.2} />
+            Volver al menú
+          </Link>
         ) : null}
 
         <header className="flex flex-col items-center text-center">
@@ -319,6 +333,15 @@ export function OrderReceipt(props: OrderReceiptProps) {
                 })}
               </ol>
             </div>
+          ) : null}
+
+          {props.estimatedDeliveryLabel ? (
+            <p className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <Clock3 className="h-4 w-4 shrink-0" style={{ color: props.colors.primary }} />
+              <span>
+                Tiempo estimado: <strong>{props.estimatedDeliveryLabel}</strong>
+              </span>
+            </p>
           ) : null}
 
           {props.status === 'pendiente' ? (
@@ -441,15 +464,33 @@ export function OrderReceipt(props: OrderReceiptProps) {
           </section>
         ) : null}
 
-        <Section title="Tu pedido" surface={props.colors.surface}>
-          <ul className="space-y-2.5">
+        <section className="mt-4 rounded-[22px] p-4 sm:p-5" style={cardStyle(props.colors.surface)}>
+          <div className="flex items-center gap-2">
+            <Package className="h-5 w-5 text-slate-700" />
+            <h2 className="text-base font-extrabold text-slate-900">Resumen del pedido</h2>
+          </div>
+          <ul className="mt-3 space-y-2.5">
             {props.items.map((item, index) => (
-              <li key={`${item.name}-${index}`} className="flex items-start justify-between gap-3 text-sm">
-                <span className="min-w-0 font-medium text-slate-800">
-                  <span className="mr-1.5 font-bold text-slate-500">{item.quantity}×</span>
-                  {item.name}
+              <li key={`${item.name}-${index}`} className="flex items-start gap-2.5 rounded-2xl bg-slate-50 px-3 py-2.5 text-sm">
+                <span className="grid min-h-8 min-w-10 shrink-0 place-items-center rounded-lg bg-white px-2 text-xs font-black text-slate-700">
+                  {item.quantity}x
                 </span>
-                <span className="shrink-0 font-semibold tabular-nums text-slate-900">{item.amountLabel}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words font-bold leading-5 text-slate-900">
+                    {splitReceiptItemName(item.name).product}
+                  </span>
+                  {item.categoryName?.trim() ? (
+                    <span className="mt-0.5 block text-[10px] font-extrabold uppercase tracking-[0.08em] text-slate-500">
+                      {item.categoryName.trim()}
+                    </span>
+                  ) : null}
+                  {splitReceiptItemName(item.name).options ? (
+                    <span className="mt-0.5 block break-words text-xs leading-4 text-slate-500">
+                      {splitReceiptItemName(item.name).options}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 pt-1 text-xs font-bold tabular-nums text-slate-900">{item.amountLabel}</span>
               </li>
             ))}
           </ul>
@@ -486,7 +527,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
               {props.paymentDetails ? <span className="block text-[13px]">{props.paymentDetails}</span> : null}
             </p>
           ) : null}
-        </Section>
+        </section>
 
         {props.orderNotes ? (
           <Section title="Notas" surface={props.colors.surface}>
@@ -517,93 +558,8 @@ export function OrderReceipt(props: OrderReceiptProps) {
           </Section>
         ) : null}
 
-        {props.menuHref ? (
-          <Link
-            href={props.menuHref}
-            className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[16px] text-sm font-bold"
-            style={{ backgroundColor: props.colors.primary, color: props.colors.onPrimary }}
-          >
-            <Utensils className="h-4 w-4" strokeWidth={2.2} />
-            Volver al menú
-          </Link>
-        ) : null}
-
-        {props.canRepeatOrder || props.repeatClosedReason ? (
-          <button
-            type="button"
-            disabled={!props.canRepeatOrder}
-            onClick={props.onRepeatOrder}
-            className="mt-2 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[16px] border text-sm font-bold"
-            style={{
-              borderColor: props.canRepeatOrder ? props.colors.primary : '#E2E8F0',
-              color: props.canRepeatOrder ? props.colors.primary : '#94A3B8',
-              backgroundColor: props.canRepeatOrder ? 'white' : '#F8FAFC',
-            }}
-          >
-            <RotateCcw className="h-4 w-4" strokeWidth={2.2} />
-            Repetir este pedido
-          </button>
-        ) : null}
-        {props.repeatClosedReason ? (
-          <p className="mt-1.5 text-center text-xs text-slate-500">{props.repeatClosedReason}</p>
-        ) : null}
-
-        {props.showWhatsapp ? (
-          props.whatsappReady && props.whatsappHref ? (
-            <a
-              href={props.whatsappHref}
-              target="_blank"
-              rel="noopener noreferrer nofollow"
-              referrerPolicy="no-referrer"
-              className="mt-2 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[16px] text-sm font-bold text-white"
-              style={{ backgroundColor: WHATSAPP_GREEN }}
-            >
-              <WhatsAppMark className="h-5 w-5" />
-              Escribir por WhatsApp
-            </a>
-          ) : (
-            <div className="mt-2">
-              <button
-                type="button"
-                disabled
-                className="inline-flex min-h-12 w-full cursor-not-allowed items-center justify-center gap-2 rounded-[16px] text-sm font-bold text-white"
-                style={{ backgroundColor: WHATSAPP_GREEN, opacity: 0.42 }}
-              >
-                <WhatsAppMark className="h-5 w-5" />
-                Escribir por WhatsApp
-              </button>
-              <p className="mt-1.5 text-center text-xs text-slate-500">
-                {isCancelled
-                  ? 'Este pedido ya no está activo'
-                  : 'Disponible cuando el comercio acepte tu pedido'}
-              </p>
-            </div>
-          )
-        ) : null}
-
-        {props.canCustomerConfirmDelegatedDelivery ? (
-          <button
-            type="button"
-            disabled={props.deliveryConfirmationLoading}
-            onClick={props.onConfirmDelivery}
-            className="mt-4 inline-flex min-h-[68px] w-full items-center justify-start gap-3 rounded-2xl bg-emerald-700 px-5 py-3 text-left text-base font-extrabold text-white shadow-[0_12px_26px_rgba(4,120,87,0.25)] transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70"
-          >
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15">
-              {props.deliveryConfirmationLoading ? (
-                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-              ) : (
-                <CheckCircle2 className="h-6 w-6" strokeWidth={2.5} />
-              )}
-            </span>
-            <span className="min-w-0">
-              <span className="block leading-tight">
-                {props.deliveryConfirmationLoading ? 'Confirmando recepción...' : 'Confirmar que recibí mi pedido'}
-              </span>
-              <span className="mt-1 block text-xs font-semibold text-emerald-50">
-                Pulsa cuando ya tengas el pedido
-              </span>
-            </span>
-          </button>
+        {props.deliveryConfirmationMessage ? (
+          <p className="mt-2 text-center text-sm text-slate-600">{props.deliveryConfirmationMessage}</p>
         ) : null}
         {props.deliveryConfirmationMessage ? (
           <p className="mt-2 text-center text-sm text-slate-600">{props.deliveryConfirmationMessage}</p>
@@ -686,10 +642,88 @@ export function OrderReceipt(props: OrderReceiptProps) {
         ) : null}
         {props.cancelMessage ? <p className="mt-2 text-center text-sm text-slate-600">{props.cancelMessage}</p> : null}
 
-        <p className="mt-6 text-center text-[11px] font-medium tracking-wide text-slate-400">
+        <p className="mt-6 pb-4 text-center text-[11px] font-medium tracking-wide text-slate-400 md:pb-0">
           Powered by elmenuxfa.com
         </p>
       </div>
+
+      {hasQuickActions ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/80 bg-white/95 px-4 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-2 shadow-[0_-8px_28px_rgba(15,23,42,0.10)] backdrop-blur md:static md:mt-5 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0 md:shadow-none md:backdrop-blur-none">
+          <div className="mx-auto w-full max-w-[440px]">
+            {props.canCustomerConfirmDelegatedDelivery ? (
+              <button
+                type="button"
+                disabled={props.deliveryConfirmationLoading}
+                onClick={props.onConfirmDelivery}
+                className="mb-2 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-3 py-2 text-center text-sm font-extrabold text-white shadow-[0_8px_20px_rgba(4,120,87,0.20)] transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70 md:min-h-[68px] md:justify-start md:gap-3 md:px-5 md:py-3 md:text-left md:text-base"
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/15 md:h-10 md:w-10 md:rounded-xl">
+                  {props.deliveryConfirmationLoading ? (
+                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : (
+                    <CheckCircle2 className="h-5 w-5 md:h-6 md:w-6" strokeWidth={2.5} />
+                  )}
+                </span>
+                <span className="min-w-0">
+                  <span className="block leading-tight">
+                    {props.deliveryConfirmationLoading ? 'Confirmando recepción...' : 'Confirmar que recibí mi pedido'}
+                  </span>
+                  <span className="hidden pt-0.5 text-xs font-semibold text-emerald-50 md:block">
+                    Pulsa cuando ya tengas el pedido
+                  </span>
+                </span>
+              </button>
+            ) : null}
+
+            <div className="flex gap-2">
+              {props.canRepeatOrder || props.repeatClosedReason ? (
+                <button
+                  type="button"
+                  disabled={!props.canRepeatOrder}
+                  onClick={props.onRepeatOrder}
+                  title={props.repeatClosedReason || 'Repetir este pedido'}
+                  className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1 rounded-xl border px-2 text-[11px] font-bold md:min-h-12 md:gap-2 md:rounded-[16px] md:text-sm"
+                  style={{
+                    borderColor: props.canRepeatOrder ? props.colors.primary : '#E2E8F0',
+                    color: props.canRepeatOrder ? props.colors.primary : '#94A3B8',
+                    backgroundColor: props.canRepeatOrder ? 'white' : '#F8FAFC',
+                  }}
+                >
+                  <RotateCcw className="h-4 w-4 shrink-0" strokeWidth={2.2} />
+                  <span className="truncate">Repetir</span>
+                </button>
+              ) : null}
+
+              {props.showWhatsapp ? (
+                props.whatsappReady && props.whatsappHref ? (
+                  <a
+                    href={props.whatsappHref}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    referrerPolicy="no-referrer"
+                    className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-bold text-white md:min-h-12 md:gap-2 md:rounded-[16px] md:text-sm"
+                    style={{ backgroundColor: WHATSAPP_GREEN }}
+                  >
+                    <WhatsAppMark className="h-4.5 w-4.5 shrink-0 md:h-5 md:w-5" />
+                    <span className="truncate">WhatsApp</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    title={isCancelled ? 'Este pedido ya no está activo' : 'Disponible cuando el comercio acepte tu pedido'}
+                    className="inline-flex min-h-11 min-w-0 flex-1 cursor-not-allowed items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-bold text-white opacity-45 md:min-h-12 md:gap-2 md:rounded-[16px] md:text-sm"
+                    style={{ backgroundColor: WHATSAPP_GREEN }}
+                  >
+                    <WhatsAppMark className="h-4.5 w-4.5 shrink-0 md:h-5 md:w-5" />
+                    <span className="truncate">WhatsApp</span>
+                  </button>
+                )
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

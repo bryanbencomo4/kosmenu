@@ -350,6 +350,10 @@ async function buildPayload(
           (pedido?.telefono_cliente ?? detalles?.telefono_cliente ?? '').toString().trim(),
         trackingUrl,
         total: Number(detalles?.total_moneda_checkout ?? detalles?.total ?? 0) || 0,
+        deliveryCost:
+          Number(
+            detalles?.costo_delivery_moneda_checkout ?? detalles?.costo_delivery ?? 0,
+          ) || 0,
         currency: (detalles?.moneda_checkout ?? 'COP').toString().trim().toUpperCase(),
         items: Array.isArray(detalles?.items) ? detalles.items : [],
         notes: (detalles?.order_notes ?? '').toString().trim(),

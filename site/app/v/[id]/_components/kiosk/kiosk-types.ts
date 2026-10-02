@@ -24,6 +24,7 @@ export type KioskProduct = {
 export type KioskVoucherData = {
   orderId: string;
   orderUrl: string;
+  whatsappUrl?: string;
   fulfillment: KioskFulfillment;
   totalLabel: string;
   items: Array<{ name: string; quantity: number; priceLabel: string }>;

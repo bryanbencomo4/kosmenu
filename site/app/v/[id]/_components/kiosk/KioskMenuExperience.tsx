@@ -120,6 +120,29 @@ export function KioskMenuExperience({
     setScreen((current) => (current === 'home' ? 'categories' : current));
   }, [fulfillment]);
 
+  useEffect(() => {
+    const whatsappUrl = voucher?.whatsappUrl?.trim();
+    if (!whatsappUrl || !voucher?.orderId || typeof window === 'undefined') return;
+
+    const openedKey = `elmenuxfa:order-wa-auto-opened:${voucher.orderId}`;
+    try {
+      if (window.sessionStorage.getItem(openedKey) === '1') return;
+    } catch {
+      // Continue with the one-time automatic attempt if storage is unavailable.
+    }
+
+    const timer = window.setTimeout(() => {
+      try {
+        window.sessionStorage.setItem(openedKey, '1');
+      } catch {
+        // The voucher remains available even when storage is unavailable.
+      }
+      window.location.assign(whatsappUrl);
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [voucher?.orderId, voucher?.whatsappUrl]);
+
   const activeCategory = categories.find((category) => category.id === activeCategoryId) ?? null;
   const activeProducts = activeCategoryId ? productsByCategory[activeCategoryId] ?? [] : [];
 

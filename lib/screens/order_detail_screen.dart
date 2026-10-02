@@ -4795,23 +4795,67 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                   ),
                                 if ((deliveryReference ?? '').isNotEmpty)
                                   Padding(
-                                    padding: const EdgeInsets.only(top: 6),
-                                    child: Text(
-                                      'Referencia: $deliveryReference',
-                                      style: GoogleFonts.manrope(
-                                        color: muted,
-                                        fontWeight: FontWeight.w600,
+                                    padding: const EdgeInsets.only(top: 10),
+                                    child: Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: surfaceAlt.withValues(alpha: 0.58),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Referencia',
+                                            style: GoogleFonts.manrope(
+                                              color: muted,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            deliveryReference!,
+                                            style: GoogleFonts.manrope(
+                                              color: text,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
                                 if ((deliveryInstructions ?? '').isNotEmpty)
                                   Padding(
-                                    padding: const EdgeInsets.only(top: 6),
-                                    child: Text(
-                                      'Indicaciones: $deliveryInstructions',
-                                      style: GoogleFonts.manrope(
-                                        color: muted,
-                                        fontWeight: FontWeight.w600,
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: surfaceAlt.withValues(alpha: 0.58),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Anotaciones',
+                                            style: GoogleFonts.manrope(
+                                              color: muted,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            deliveryInstructions!,
+                                            style: GoogleFonts.manrope(
+                                              color: text,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),

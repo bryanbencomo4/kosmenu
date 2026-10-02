@@ -19,6 +19,14 @@ type KioskVoucherProps = {
   onNewOrder: () => void;
 };
 
+function WhatsAppMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M16.02 3.2c-7.05 0-12.8 5.7-12.8 12.73 0 2.24.59 4.42 1.7 6.35L3.2 28.8l6.72-1.76a12.86 12.86 0 0 0 6.1 1.56h.01c7.05 0 12.8-5.7 12.8-12.73S23.07 3.2 16.02 3.2Zm7.45 18.05c-.31.86-1.8 1.64-2.5 1.74-.64.1-1.45.14-2.34-.14-.54-.18-1.23-.4-2.12-.79-3.73-1.61-6.16-5.36-6.35-5.61-.18-.25-1.51-2-1.51-3.82s.93-2.68 1.29-3.06c.31-.33.82-.48 1.31-.48.16 0 .3 0 .43.01.38.02.57.04.82.63.31.74 1.06 2.58 1.15 2.77.10.18.16.4.03.64-.12.25-.19.4-.37.62-.18.21-.35.38-.53.58-.19.21-.4.43-.17.82.22.4 1 1.64 2.14 2.66 1.48 1.31 2.68 1.72 3.1 1.9.31.14.64.12.86-.1.27-.27.93-1.08 1.18-1.45.25-.37.5-.3.82-.18.33.12 2.08.98 2.43 1.16.36.18.59.27.68.42.08.15.08.86-.23 1.72Z" />
+    </svg>
+  );
+}
+
 export function KioskVoucher({
   voucher,
   businessName,
@@ -93,12 +101,23 @@ export function KioskVoucher({
           >
             Ver seguimiento
           </button>
+          {voucher.whatsappUrl ? (
+            <a
+              href={voucher.whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[16px] bg-[#25D366] text-sm font-bold text-white"
+            >
+              <WhatsAppMark className="h-5 w-5" />
+              Escribir al restaurante
+            </a>
+          ) : null}
           <button
             type="button"
             onClick={onNewOrder}
             className="min-h-12 rounded-[16px] bg-[var(--menu-surface)] text-sm font-bold text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
           >
-            Nuevo pedido
+            Ir al menú
           </button>
         </div>
       </div>

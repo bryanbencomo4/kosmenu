@@ -7,7 +7,6 @@ import {
   Clock3,
   Copy,
   MapPinned,
-  MessageCircle,
   Navigation,
   Package,
   Phone,
@@ -16,7 +15,7 @@ import {
   User,
 } from 'lucide-react';
 import { useParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { nextPollDelayMs } from '../../../_lib/poll-backoff';
 
@@ -38,8 +37,14 @@ type InvitePayload = {
     clientPhone?: string;
     trackingUrl?: string;
     total?: number;
+    deliveryCost?: number;
     currency?: string;
-    items?: Array<{ nombre?: string; cantidad?: number; precio?: number }>;
+    items?: Array<{
+      nombre?: string;
+      cantidad?: number;
+      precio?: number;
+      categoria_nombre?: string | null;
+    }>;
     notes?: string;
     createdAt?: string | null;
   };
@@ -174,6 +179,28 @@ function safeNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function deliveryMapPoint(latitudeValue: unknown, longitudeValue: unknown) {
+  const lat = safeNumber(latitudeValue);
+  const lng = safeNumber(longitudeValue);
+  return lat === null || lng === null ? null : { lat, lng };
+}
+
+function splitDeliveryItemLabel(value: string) {
+  const parts = value.split(/\s+·\s+/).map((part) => part.trim()).filter(Boolean);
+  return {
+    name: parts[0] || 'Articulo del pedido',
+    options: parts.slice(1).join(' · '),
+  };
+}
+
+function WhatsAppIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.198-.347.223-.644.075-.297-.149-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.297-.497.1-.198.05-.371-.025-.52-.074-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.273.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.693.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.999-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.002-5.45 4.436-9.884 9.888-9.884 2.64.001 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.002 5.45-4.436 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.893c0 2.096.547 4.142 1.588 5.946L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.684 1.447h.005c6.554 0 11.89-5.335 11.893-11.893a11.817 11.817 0 0 0-3.48-8.412z" />
+    </svg>
+  );
+}
+
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const rad = (v: number) => (v * Math.PI) / 180;
   const dLat = rad(lat2 - lat1);
@@ -221,6 +248,181 @@ const timelineSteps: TimelineStep[] = [
   { key: 'arrived', label: 'Llegue al punto', Icon: MapPinned },
   { key: 'completed', label: 'Entregado', Icon: Package },
 ];
+
+type DeliveryMapPoint = { lat: number; lng: number };
+type GoogleMapsBounds = { extend(point: DeliveryMapPoint): void };
+type GoogleMapsApi = {
+  Map: new (
+    element: HTMLElement,
+    options: {
+      center: DeliveryMapPoint;
+      zoom: number;
+      mapTypeControl: boolean;
+      streetViewControl: boolean;
+      fullscreenControl: boolean;
+      gestureHandling: 'greedy';
+    },
+  ) => { fitBounds(bounds: GoogleMapsBounds, padding?: number): void };
+  Marker: new (options: { position: DeliveryMapPoint; map: object; title: string }) => unknown;
+  Polyline: new (options: {
+    path: DeliveryMapPoint[];
+    map: object;
+    strokeColor: string;
+    strokeOpacity: number;
+    strokeWeight: number;
+  }) => unknown;
+  LatLngBounds: new () => GoogleMapsBounds;
+};
+type GoogleMapsRuntime = GoogleMapsApi & { places?: object; Geocoder?: object };
+type GoogleMapsWindow = Window & { google?: { maps?: GoogleMapsRuntime } };
+
+const deliveryMapApiKey =
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ||
+  'AIzaSyB9WNMyQma0-n4sMXN_lWJwYNxxkWDEmyQ';
+let deliveryMapsPromise: Promise<GoogleMapsApi> | null = null;
+
+function loadDeliveryGoogleMaps() {
+  const currentMaps = (window as GoogleMapsWindow).google?.maps;
+  if (currentMaps?.places && currentMaps.Geocoder) return Promise.resolve(currentMaps);
+  if (deliveryMapsPromise) return deliveryMapsPromise;
+
+  const attempt = new Promise<GoogleMapsApi>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      'script[src*="maps.googleapis.com/maps/api/js"]',
+    );
+    const script = existingScript ?? document.createElement('script');
+    const startedAt = Date.now();
+    let settled = false;
+    const checkReady = () => {
+      if (settled) return;
+      const maps = (window as GoogleMapsWindow).google?.maps;
+      if (maps?.places && maps.Geocoder) {
+        settled = true;
+        resolve(maps);
+        return;
+      }
+      if (Date.now() - startedAt >= 15_000) {
+        settled = true;
+        reject(new Error('Google Maps API did not initialize.'));
+        return;
+      }
+      window.setTimeout(checkReady, 40);
+    };
+
+    script.addEventListener('error', () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Google Maps API failed to load.'));
+    }, { once: true });
+    if (!existingScript) {
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(deliveryMapApiKey)}&libraries=places&loading=async`;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+    window.setTimeout(checkReady, 40);
+  });
+
+  deliveryMapsPromise = attempt.catch((error: unknown) => {
+    deliveryMapsPromise = null;
+    throw error;
+  });
+  return deliveryMapsPromise;
+}
+
+function GoogleDeliveryMap({
+  origin,
+  destination,
+  navigationUrl,
+}: {
+  origin: DeliveryMapPoint | null;
+  destination: DeliveryMapPoint | null;
+  navigationUrl: string;
+}) {
+  const mapElement = useRef<HTMLDivElement>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
+  const originLat = origin?.lat;
+  const originLng = origin?.lng;
+  const destinationLat = destination?.lat;
+  const destinationLng = destination?.lng;
+
+  useEffect(() => {
+    if (destinationLat == null || destinationLng == null) return;
+    let active = true;
+    setMapReady(false);
+    setMapFailed(false);
+
+    void loadDeliveryGoogleMaps()
+      .then((maps) => {
+        if (!active || !mapElement.current) return;
+        const destinationPoint = { lat: destinationLat, lng: destinationLng };
+        const map = new maps.Map(mapElement.current, {
+          center: destinationPoint,
+          zoom: 14,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          gestureHandling: 'greedy',
+        });
+        new maps.Marker({ position: destinationPoint, map, title: 'Direccion de entrega' });
+
+        if (originLat != null && originLng != null) {
+          const originPoint = { lat: originLat, lng: originLng };
+          new maps.Marker({ position: originPoint, map, title: 'Comercio' });
+          new maps.Polyline({
+            path: [originPoint, destinationPoint],
+            map,
+            strokeColor: '#2563EB',
+            strokeOpacity: 0.9,
+            strokeWeight: 4,
+          });
+          const bounds = new maps.LatLngBounds();
+          bounds.extend(originPoint);
+          bounds.extend(destinationPoint);
+          map.fitBounds(bounds, 36);
+        }
+        setMapReady(true);
+      })
+      .catch(() => {
+        if (active) setMapFailed(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [destinationLat, destinationLng, originLat, originLng]);
+
+  return (
+    <div className="relative h-40 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 sm:h-52">
+      {destinationLat != null && destinationLng != null ? (
+        <div ref={mapElement} className="h-full w-full" aria-label="Mapa de entrega con Google Maps" />
+      ) : (
+        <div className="grid h-full place-items-center px-6 text-center">
+          <p className="text-sm font-semibold text-slate-600">No hay coordenadas para mostrar el mapa.</p>
+        </div>
+      )}
+      {destinationLat != null && destinationLng != null && !mapReady ? (
+        <div className="absolute inset-0 grid place-items-center bg-slate-100/90 px-6 text-center">
+          <p className="text-sm font-semibold text-slate-600">
+            {mapFailed ? 'Google Maps no esta disponible.' : 'Cargando Google Maps...'}
+          </p>
+        </div>
+      ) : null}
+      {navigationUrl ? (
+        <a
+          href={navigationUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute bottom-3 right-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-slate-900 px-3.5 py-2.5 text-xs font-black text-white shadow-lg"
+        >
+          <Navigation className="h-4 w-4" />
+          Abrir en Maps
+        </a>
+      ) : null}
+    </div>
+  );
+}
 
 function stepState(index: number, activeIndex: number) {
   if (index < activeIndex) return 'done';
@@ -426,7 +628,7 @@ export default function DeliveryInvitePage() {
     ? clientArrivalWhatsappHref
     : clientEnRouteWhatsappHref;
   const shouldShowBottomBar =
-    canAccept || showArrivedButton || showArrivalNotice || Boolean(clientWhatsappHref && !canAccept);
+    canAccept || showArrivedButton || showArrivalNotice;
 
   const navigationUrl = useMemo(() => {
     const coords = payload?.delivery?.coordinates;
@@ -444,26 +646,11 @@ export default function DeliveryInvitePage() {
     return '';
   }, [payload?.comercio?.lat, payload?.comercio?.lng, payload?.delivery?.address, payload?.delivery?.coordinates]);
 
-  const mapEmbedUrl = useMemo(() => {
-    const dst = payload?.delivery?.coordinates;
-    const srcLat = safeNumber(payload?.comercio?.lat);
-    const srcLng = safeNumber(payload?.comercio?.lng);
-    const dstLat = safeNumber(dst?.lat);
-    const dstLng = safeNumber(dst?.lng);
-
-    if (dstLat != null && dstLng != null) {
-      const points = [{ lat: dstLat, lng: dstLng }];
-      if (srcLat != null && srcLng != null) points.push({ lat: srcLat, lng: srcLng });
-      const padding = 0.008;
-      const minLat = Math.min(...points.map((point) => point.lat)) - padding;
-      const maxLat = Math.max(...points.map((point) => point.lat)) + padding;
-      const minLng = Math.min(...points.map((point) => point.lng)) - padding;
-      const maxLng = Math.max(...points.map((point) => point.lng)) + padding;
-      const bounds = `${minLng},${minLat},${maxLng},${maxLat}`;
-      return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bounds)}&layer=mapnik&marker=${encodeURIComponent(`${dstLat},${dstLng}`)}`;
-    }
-    return '';
-  }, [payload?.comercio?.lat, payload?.comercio?.lng, payload?.delivery?.address, payload?.delivery?.coordinates]);
+  const mapOrigin = deliveryMapPoint(payload?.comercio?.lat, payload?.comercio?.lng);
+  const mapDestination = deliveryMapPoint(
+    payload?.delivery?.coordinates?.lat,
+    payload?.delivery?.coordinates?.lng,
+  );
 
   const routeMeta = useMemo(() => {
     const dstLat = safeNumber(payload?.delivery?.coordinates?.lat);
@@ -574,34 +761,34 @@ export default function DeliveryInvitePage() {
 
   return (
     <main className="min-h-screen bg-[#F3F6FB] px-4 py-5 text-slate-900 sm:px-6">
-      <section className="mx-auto w-full max-w-xl space-y-4 pb-40">
-        <article className="overflow-hidden rounded-[28px] bg-[linear-gradient(145deg,#050a16_0%,#0f172a_55%,#1f2f4a_100%)] p-5 text-white shadow-[0_26px_52px_rgba(2,6,23,0.45)]">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-300">Mision de delivery</p>
-              <h1 className="mt-2 text-2xl font-black leading-tight">Pedido #{orderId || 'N/A'}</h1>
-              <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-300">
-                <Clock3 className="h-3.5 w-3.5" />
-                {compactDateTime(invitationCreatedAt) || 'Fecha no disponible'}
-              </p>
-            </div>
-            <div className="flex flex-col items-end gap-2">
+      <section className="mx-auto flex w-full max-w-xl flex-col gap-3 pb-40">
+        <article className="order-1 overflow-hidden rounded-[28px] bg-[linear-gradient(145deg,#050a16_0%,#0f172a_55%,#1f2f4a_100%)] p-4 text-white shadow-[0_26px_52px_rgba(2,6,23,0.45)] sm:p-5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-300 sm:text-[11px]">Mision de delivery</p>
               <span
-                className={`rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-[0.08em] ${statusBadgeClass(invitationStatus)}`}
+                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.06em] sm:text-[10px] ${statusBadgeClass(invitationStatus)}`}
               >
                 {invitationStatusLabel}
               </span>
-              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/20">
-                <Bike className="h-5 w-5" />
-              </div>
+            </div>
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/10 ring-1 ring-white/20 sm:h-10 sm:w-10 sm:rounded-2xl">
+              <Bike className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
             </div>
           </div>
-          <p className="mt-4 text-xs font-semibold text-slate-300">
+          <h1 className="mt-3 whitespace-nowrap text-xl font-black leading-tight sm:text-2xl">
+            Pedido #{orderId || 'N/A'}
+          </h1>
+          <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-300">
+            <Clock3 className="h-3.5 w-3.5 shrink-0" />
+            {compactDateTime(invitationCreatedAt) || 'Fecha no disponible'}
+          </p>
+          <p className="mt-3 text-xs font-semibold text-slate-300">
             Estado pedido: <span className="font-black text-white">{orderStatusLabel(orderStatus)}</span>
           </p>
         </article>
 
-        <article className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
+        <article className="order-6 rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
           <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Progreso de entrega</p>
           <div className="mt-4 flex items-start justify-between gap-1.5">
             {timelineSteps.map((step, index) => {
@@ -633,142 +820,96 @@ export default function DeliveryInvitePage() {
           </div>
         </article>
 
-        <InfoCard
-          title="Comercio"
-          icon={<Store className="h-4.5 w-4.5" />}
-          action={
-            <div className="flex items-center gap-2">
-              {commerceWhatsappHref ? (
-                <a
-                  href={commerceWhatsappHref}
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 text-emerald-700 transition hover:bg-emerald-50"
-                  aria-label="WhatsApp comercio"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                </a>
-              ) : null}
-              {commercePhoneHref ? (
-                <a
-                  href={commercePhoneHref}
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
-                  aria-label="Llamar comercio"
-                >
-                  <Phone className="h-4 w-4" />
-                </a>
-              ) : null}
+        <article className="order-4 rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
+          <h2 className="text-base font-black text-slate-900">Detalles de contacto</h2>
+          <div className="mt-3 divide-y divide-slate-100">
+            <div className="flex items-center gap-3 py-3 first:pt-0">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-700">
+                <Store className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-slate-500">Comercio</p>
+                <p className="truncate text-sm font-black text-slate-900">{payload.comercio?.name || 'Comercio'}</p>
+                <p className="text-xs font-semibold text-slate-500">{payload.comercio?.phone || 'Telefono no disponible'}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {commerceWhatsappHref ? (
+                  <a href={commerceWhatsappHref} className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-500 text-white transition hover:bg-emerald-600" aria-label="WhatsApp comercio">
+                    <WhatsAppIcon className="h-5 w-5" />
+                  </a>
+                ) : null}
+                {commercePhoneHref ? (
+                  <a href={commercePhoneHref} className="grid h-10 w-10 place-items-center rounded-xl bg-fuchsia-700 text-white transition hover:bg-fuchsia-800" aria-label="Llamar comercio">
+                    <Phone className="h-4.5 w-4.5" />
+                  </a>
+                ) : null}
+              </div>
             </div>
-          }
-        >
-          <p className="text-base font-black text-slate-900">{payload.comercio?.name || 'Comercio'}</p>
-          <p className="mt-1 text-sm font-semibold text-slate-500">{payload.comercio?.phone || 'Telefono no disponible'}</p>
-        </InfoCard>
-
-        <InfoCard
-          title="Cliente"
-          icon={<User className="h-4.5 w-4.5" />}
-          action={
-            <div className="flex items-center gap-2">
-              {clientWhatsappHref ? (
-                <a
-                  href={clientWhatsappHref}
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 text-emerald-700 transition hover:bg-emerald-50"
-                  aria-label="WhatsApp cliente"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                </a>
-              ) : null}
-              {clientPhoneHref ? (
-                <a
-                  href={clientPhoneHref}
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
-                  aria-label="Llamar cliente"
-                >
-                  <Phone className="h-4 w-4" />
-                </a>
-              ) : null}
+            <div className="flex items-center gap-3 py-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-700">
+                <User className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-slate-500">Cliente</p>
+                <p className="truncate text-sm font-black text-slate-900">{payload.order?.clientName || 'Cliente'}</p>
+                <p className="text-xs font-semibold text-slate-500">{payload.order?.clientPhone || 'Telefono no disponible'}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {clientWhatsappHref ? (
+                  <a href={clientWhatsappHref} className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-500 text-white transition hover:bg-emerald-600" aria-label="WhatsApp cliente">
+                    <WhatsAppIcon className="h-5 w-5" />
+                  </a>
+                ) : null}
+                {clientPhoneHref ? (
+                  <a href={clientPhoneHref} className="grid h-10 w-10 place-items-center rounded-xl bg-fuchsia-700 text-white transition hover:bg-fuchsia-800" aria-label="Llamar cliente">
+                    <Phone className="h-4.5 w-4.5" />
+                  </a>
+                ) : null}
+              </div>
             </div>
-          }
-        >
-          <p className="text-base font-black text-slate-900">{payload.order?.clientName || 'Cliente'}</p>
-          <p className="mt-1 text-sm font-semibold text-slate-500">{payload.order?.clientPhone || 'Telefono no disponible'}</p>
-        </InfoCard>
-
-        <InfoCard
-          title="Direccion"
-          icon={<MapPinned className="h-4.5 w-4.5" />}
-          action={
-            <button
-              type="button"
-              onClick={() => void copyAddress()}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
-            >
-              <Copy className="h-3.5 w-3.5" />
-              Copiar
-            </button>
-          }
-        >
-          <p className="text-base font-black leading-snug text-slate-900">
-            {payload.delivery?.address || 'Direccion no disponible'}
-          </p>
-          {copyFeedback ? <p className="mt-2 text-xs font-bold text-emerald-700">{copyFeedback}</p> : null}
-        </InfoCard>
+            <div className="flex items-start gap-3 border-t border-slate-100 py-3 pb-0">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-700">
+                <MapPinned className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-slate-500">Direccion</p>
+                <p className="text-sm font-bold leading-snug text-slate-900">{payload.delivery?.address || 'Direccion no disponible'}</p>
+                {copyFeedback ? <p className="mt-1 text-xs font-bold text-emerald-700">{copyFeedback}</p> : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => void copyAddress()}
+                className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl px-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+              >
+                <Copy className="h-4 w-4" />
+                Copiar
+              </button>
+            </div>
+          </div>
+        </article>
 
         {payload.delivery?.reference ? (
+          <div className="order-5">
           <InfoCard title="Referencia" icon={<ChevronRight className="h-4.5 w-4.5" />}>
             <p className="text-sm font-semibold leading-relaxed text-slate-700">{payload.delivery.reference}</p>
           </InfoCard>
+          </div>
         ) : null}
 
         {payload.delivery?.instructions ? (
+          <div className="order-5">
           <InfoCard title="Instrucciones" icon={<ChevronRight className="h-4.5 w-4.5" />}>
             <p className="text-sm font-semibold leading-relaxed text-slate-700">{payload.delivery.instructions}</p>
           </InfoCard>
+          </div>
         ) : null}
 
-        <article className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
-          <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
-            {mapEmbedUrl ? (
-              <iframe
-                title="Mapa de entrega"
-                src={mapEmbedUrl}
-                className="h-64 w-full border-0"
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-              />
-            ) : payload.delivery?.address ? (
-              <div className="grid h-64 place-items-center px-6 text-center">
-                <div>
-                  <MapPinned className="mx-auto h-8 w-8 text-slate-500" />
-                  <p className="mt-2 text-sm font-semibold text-slate-700">
-                    No hay coordenadas para mostrar el mapa aquí.
-                  </p>
-                  <a
-                    href={navigationUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-900 px-4 text-sm font-bold text-white"
-                  >
-                    Abrir dirección en Maps
-                  </a>
-                </div>
-              </div>
-            ) : (
-              <div className="grid h-64 place-items-center">
-                <p className="text-sm font-semibold text-slate-500">No hay mapa disponible</p>
-              </div>
-            )}
-            {navigationUrl ? (
-              <a
-                href={navigationUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="absolute bottom-3 right-3 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3.5 py-2.5 text-xs font-black text-white shadow-lg"
-              >
-                <Navigation className="h-4 w-4" />
-                Abrir en Maps
-              </a>
-            ) : null}
-          </div>
+        <article className="order-2 relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
+          <GoogleDeliveryMap
+            origin={mapOrigin}
+            destination={mapDestination}
+            navigationUrl={navigationUrl}
+          />
           <div className="mt-3 grid grid-cols-2 gap-2">
             <div className="rounded-2xl bg-slate-50 px-3 py-2.5">
               <p className="text-[11px] font-black uppercase tracking-[0.08em] text-slate-500">Tiempo estimado</p>
@@ -781,32 +922,69 @@ export default function DeliveryInvitePage() {
           </div>
         </article>
 
-        <InfoCard title="Resumen del pedido" icon={<Package className="h-4.5 w-4.5" />}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-500">Items</p>
-              <p className="text-lg font-black text-slate-900">
-                {Array.isArray(payload.order?.items) ? payload.order?.items.length : 0}
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-sm font-semibold text-slate-500">Total</p>
-              <p className="text-lg font-black text-slate-900">
-                {formatAmount(Number(payload.order?.total ?? 0), payload.order?.currency || 'COP')}
-              </p>
-            </div>
+        <article className="order-3 rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
+          <div className="mb-3 flex items-center gap-2">
+            <Package className="h-4.5 w-4.5 text-slate-600" />
+            <h2 className="text-base font-black text-slate-900">Resumen del pedido</h2>
           </div>
-        </InfoCard>
+          {Array.isArray(payload.order?.items) && payload.order.items.length > 0 ? (
+            <ul className="space-y-2">
+              {payload.order.items.map((item, index) => {
+                const itemLabel = splitDeliveryItemLabel(item.nombre || 'Articulo del pedido');
+                const quantity = item.cantidad ?? 1;
+                return (
+                  <li
+                    key={`${item.nombre || 'item'}-${index}`}
+                    className="flex items-start gap-3 rounded-2xl bg-slate-50 px-3 py-2.5"
+                  >
+                    <span className="grid min-h-7 min-w-9 place-items-center rounded-lg bg-white px-2 text-xs font-black text-slate-700">
+                      {quantity}x
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="break-words text-sm font-black leading-5 text-slate-900">{itemLabel.name}</p>
+                      {item.categoria_nombre?.trim() ? (
+                        <p className="mt-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-500">
+                          {item.categoria_nombre.trim()}
+                        </p>
+                      ) : null}
+                      {itemLabel.options ? (
+                        <p className="mt-0.5 break-words text-xs font-medium leading-4 text-slate-500">
+                          {itemLabel.options}
+                        </p>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="text-sm font-semibold text-slate-500">No hay productos detallados.</p>
+          )}
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3 text-sm">
+            <p className="font-semibold text-slate-500">Delivery</p>
+            <p className="shrink-0 font-bold tabular-nums text-slate-700">
+              {Number(payload.order?.deliveryCost ?? 0) > 0
+                ? formatAmount(Number(payload.order?.deliveryCost), payload.order?.currency || 'COP')
+                : 'Gratis'}
+            </p>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
+            <p className="text-sm font-semibold text-slate-500">Total</p>
+            <p className="shrink-0 text-lg font-black tabular-nums text-slate-900">
+              {formatAmount(Number(payload.order?.total ?? 0), payload.order?.currency || 'COP')}
+            </p>
+          </div>
+        </article>
 
         {payload.invitation?.acceptedAt ? (
-          <p className="px-1 text-xs font-semibold text-slate-500">Aceptado: {timeLabel(payload.invitation.acceptedAt)}</p>
+          <p className="order-7 px-1 text-xs font-semibold text-slate-500">Aceptado: {timeLabel(payload.invitation.acceptedAt)}</p>
         ) : null}
         {payload.invitation?.arrivedAt ? (
-          <p className="px-1 text-xs font-semibold text-slate-500">Llegada registrada: {timeLabel(payload.invitation.arrivedAt)}</p>
+          <p className="order-7 px-1 text-xs font-semibold text-slate-500">Llegada registrada: {timeLabel(payload.invitation.arrivedAt)}</p>
         ) : null}
 
         {canAccept ? (
-          <article className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
+          <article className="order-7 rounded-3xl border border-slate-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
             <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Identificacion del repartidor</p>
             <input
               value={courierName}
@@ -826,16 +1004,16 @@ export default function DeliveryInvitePage() {
         ) : null}
 
         {notice ? (
-          <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800">
+          <p className="order-8 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800">
             {notice}
           </p>
         ) : null}
 
         {error ? (
-          <p className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">{error}</p>
+          <p className="order-8 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">{error}</p>
         ) : null}
 
-        <p className="px-1 text-center text-xs font-semibold text-slate-500">Este enlace es unico y seguro.</p>
+        <p className="order-8 px-1 text-center text-xs font-semibold text-slate-500">Este enlace es unico y seguro.</p>
       </section>
 
       {shouldShowBottomBar ? (
@@ -851,15 +1029,6 @@ export default function DeliveryInvitePage() {
                 >
                   {submitting ? 'Confirmando...' : 'Confirmar, voy en camino'}
                 </button>
-              ) : null}
-
-              {clientWhatsappHref && !canAccept ? (
-                <a
-                  href={clientWhatsappHref}
-                  className="inline-flex w-full items-center justify-center rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm font-black text-white"
-                >
-                  Avisar al cliente por WhatsApp
-                </a>
               ) : null}
 
               {showArrivedButton ? (

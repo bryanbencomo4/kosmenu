@@ -636,6 +636,13 @@ export async function POST(request: Request) {
       subtotal_moneda_checkout: subtotalCheckout,
       costo_delivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
       costo_delivery_moneda_checkout: costoDeliveryCheckout,
+      ...(delivery.mode === 'delivery'
+        ? {
+            delivery_estimate_minutes:
+              deliveryConfig.estimatedTimes.preparationMinutes +
+              deliveryConfig.estimatedTimes.deliveryMinutes,
+          }
+        : {}),
       items: storedItems,
       total,
       total_moneda_checkout: totalCheckout,

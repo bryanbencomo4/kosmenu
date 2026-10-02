@@ -20,6 +20,7 @@ export type PublicOrderTrackingResponse = {
   items: Array<{
     name: string;
     quantity: number;
+    categoryName?: string;
     unitPrice?: number;
     productId?: string;
     selection?: {
@@ -33,6 +34,7 @@ export type PublicOrderTrackingResponse = {
   subtotal?: number;
   deliveryCost?: number;
   total?: number;
+  deliveryEstimateMinutes?: number;
   currency?: string;
   deliveryType?: 'pickup' | 'delivery';
   /** Coarse location hint only — never street address / coords. */
@@ -178,6 +180,28 @@ export function toPublicOrderTrackingResponse(
   const convertToDisplayCurrency = (amount: number) =>
     convertOrderAmount(amount, baseCurrency, currency, rawExchangeRate) ?? amount;
   const itemsRaw = Array.isArray(detalles.items) ? detalles.items : [];
+  const deliveryConfigSnapshot =
+    detalles.delivery_config_snapshot && typeof detalles.delivery_config_snapshot === 'object'
+      ? detalles.delivery_config_snapshot as Record<string, unknown>
+      : {};
+  const estimatedTimes =
+    deliveryConfigSnapshot.estimated_times && typeof deliveryConfigSnapshot.estimated_times === 'object'
+      ? deliveryConfigSnapshot.estimated_times as Record<string, unknown>
+      : {};
+  const preparationMinutes = Number(
+    estimatedTimes.preparation_minutes ?? estimatedTimes.preparationMinutes,
+  );
+  const deliveryMinutes = Number(
+    estimatedTimes.delivery_minutes ?? estimatedTimes.deliveryMinutes,
+  );
+  const deliveryEstimateMinutes =
+    Number.isFinite(preparationMinutes) &&
+    Number.isFinite(deliveryMinutes) &&
+    preparationMinutes >= 0 &&
+    deliveryMinutes >= 0 &&
+    preparationMinutes + deliveryMinutes > 0
+      ? preparationMinutes + deliveryMinutes
+      : undefined;
   const items = itemsRaw
     .map((item) => {
       const row = (item ?? {}) as Record<string, unknown>;
@@ -186,6 +210,7 @@ export function toPublicOrderTrackingResponse(
       const unitPriceBase = Number(row.precio ?? row.price);
       if (!Number.isFinite(quantity) || quantity <= 0) return null;
       const productId = (row.product_id ?? row.productId ?? '').toString().trim();
+      const categoryName = (row.categoria_nombre ?? row.categoryName ?? '').toString().trim();
       // New orders store the raw ids in `seleccion` and the frozen snapshot
       // array in `opciones`; older orders stored the ids in `opciones`.
       const legacySelection = Array.isArray(row.opciones) ? undefined : row.opciones;
@@ -193,6 +218,7 @@ export function toPublicOrderTrackingResponse(
       return {
         name,
         quantity,
+        ...(categoryName ? { categoryName } : {}),
         unitPrice: Number.isFinite(unitPriceBase) && unitPriceBase >= 0
           ? convertToDisplayCurrency(unitPriceBase)
           : undefined,
@@ -249,6 +275,9 @@ export function toPublicOrderTrackingResponse(
     total: Number.isFinite(Number(detalles.total ?? order.total))
       ? convertToDisplayCurrency(Number(detalles.total ?? order.total))
       : undefined,
+    ...(deliveryType === 'delivery' && deliveryEstimateMinutes
+      ? { deliveryEstimateMinutes }
+      : {}),
     currency,
     deliveryType,
     locationHint: buildLocationHint(deliveryType, status, delegateStatus),

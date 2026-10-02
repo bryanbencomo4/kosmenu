@@ -163,4 +163,21 @@ void main() {
       expect(pickup.currencyForDisplay(), 'COP');
     },
   );
+
+  test('delivery annotations parse from legacy detail aliases', () {
+    final order = _order(
+      detalles: <String, dynamic>{
+        'delivery': <String, dynamic>{
+          'mode': 'delivery',
+          'address': 'RQWQ+C97, Táriba',
+        },
+        'referencia_delivery': 'Apartamento',
+        'delivery_notes': 'Tocar el timbre',
+      },
+    );
+
+    expect(order.deliveryAddress, 'RQWQ+C97, Táriba');
+    expect(order.deliveryReference, 'Apartamento');
+    expect(order.deliveryInstructions, 'Tocar el timbre');
+  });
 }

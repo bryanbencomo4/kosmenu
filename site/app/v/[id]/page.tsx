@@ -302,6 +302,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const publicBaseUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(/\/$/, '');
 const appBaseUrl = (process.env.NEXT_PUBLIC_APP_SITE_URL ?? 'https://app.elmenuxfa.com').replace(/\/$/, '');
 const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
+const kioskVoucherStorageKeyPrefix = 'elmenuxfa:order-success:';
 const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
 const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';
 const kioskFulfillmentStoragePrefix = 'elmenuxfa-kiosk-fulfillment:';
@@ -1708,6 +1709,7 @@ export default function PublicMenuPage() {
   const mapPickerAutocompleteRef = useRef<GoogleAutocomplete | null>(null);
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
   const shouldReturnToMenuOnEmptyCartRef = useRef(false);
+  const orderSubmitLockRef = useRef(false);
   const checkoutAttemptRef = useRef<CheckoutAttempt | null>(null);
   const [infoSections, setInfoSections] = useState({
     location: true,
@@ -1741,6 +1743,47 @@ export default function PublicMenuPage() {
     if (!isKioskFulfillment(saved)) return;
     setKioskFulfillment(saved);
     setDeliveryMode(saved === 'delivery' ? 'delivery' : 'pickup');
+  }, [commerceIdentifier]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !commerceIdentifier) return;
+    const storageKey = `${kioskVoucherStorageKeyPrefix}${commerceIdentifier}`;
+    let raw: string | null = null;
+    try {
+      raw = window.sessionStorage.getItem(storageKey);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<KioskVoucherData>;
+      if (
+        typeof parsed.orderId !== 'string' ||
+        !parsed.orderId.trim() ||
+        typeof parsed.orderUrl !== 'string' ||
+        !parsed.orderUrl.trim() ||
+        !isKioskFulfillment(parsed.fulfillment) ||
+        typeof parsed.totalLabel !== 'string' ||
+        !Array.isArray(parsed.items)
+      ) {
+        window.sessionStorage.removeItem(storageKey);
+        return;
+      }
+
+      setKioskVoucher({
+        orderId: parsed.orderId,
+        orderUrl: parsed.orderUrl,
+        whatsappUrl: typeof parsed.whatsappUrl === 'string' ? parsed.whatsappUrl : '',
+        fulfillment: parsed.fulfillment,
+        totalLabel: parsed.totalLabel,
+        items: parsed.items,
+      });
+      setKioskFulfillment(parsed.fulfillment);
+      setDeliveryMode(parsed.fulfillment === 'delivery' ? 'delivery' : 'pickup');
+    } catch {
+      window.sessionStorage.removeItem(storageKey);
+    }
   }, [commerceIdentifier]);
 
   useEffect(() => {
@@ -4237,7 +4280,6 @@ export default function PublicMenuPage() {
       smartOrderUrl,
     ].join('\n');
 
-    checkoutAttemptRef.current = null;
     return {
       orderId,
       orderUrl,
@@ -4257,6 +4299,7 @@ export default function PublicMenuPage() {
   }
 
   function openCheckoutSheet() {
+    if (kioskVoucher) return;
     if (isOwnerPreview) {
       window.alert(
         'Vista previa. Los pedidos estaran disponibles cuando el menu este publicado.',
@@ -4302,6 +4345,8 @@ export default function PublicMenuPage() {
     if (
       cartItems.length === 0 ||
       isSubmittingOrder ||
+      orderSubmitLockRef.current ||
+      kioskVoucher !== null ||
       !isClientNameValid ||
       !isClientWhatsappValid ||
       !isClientEmailValid ||
@@ -4325,6 +4370,7 @@ export default function PublicMenuPage() {
       coordinates: DeliveryPoint | null;
     };
 
+    orderSubmitLockRef.current = true;
     setIsSubmittingOrder(true);
     setCheckoutError(null);
     try {
@@ -4359,22 +4405,26 @@ export default function PublicMenuPage() {
       upsellAttributionRef.current.clear();
 
       if (typeof window !== 'undefined') {
-        if (persisted.waUrl) {
-          window.sessionStorage.setItem(`order-wa:${persisted.orderId}`, persisted.waUrl);
+        try {
+          if (persisted.waUrl) {
+            window.sessionStorage.setItem(`order-wa:${persisted.orderId}`, persisted.waUrl);
+          }
+          window.sessionStorage.setItem(`order-tracking:${persisted.orderId}`, persisted.orderUrl);
+        } catch {
+          // The submitted voucher is kept in memory even if browser storage is blocked.
         }
-        window.sessionStorage.setItem(`order-tracking:${persisted.orderId}`, persisted.orderUrl);
-        window.localStorage.setItem(
-          checkoutDraftStorageKey,
-          JSON.stringify({
-            clientName: normalizedClientName,
-            clientWhatsapp: normalizedClientWhatsapp,
-            clientEmail: normalizedClientEmail,
-            selectedCurrency: selectedCurrencyCode,
-          }),
-        );
-        if (persisted.waUrl) {
-          window.location.assign(persisted.waUrl);
-          return;
+        try {
+          window.localStorage.setItem(
+            checkoutDraftStorageKey,
+            JSON.stringify({
+              clientName: normalizedClientName,
+              clientWhatsapp: normalizedClientWhatsapp,
+              clientEmail: normalizedClientEmail,
+              selectedCurrency: selectedCurrencyCode,
+            }),
+          );
+        } catch {
+          // Draft recovery is optional after an order has been submitted.
         }
       }
 
@@ -4391,6 +4441,24 @@ export default function PublicMenuPage() {
           selectedCurrencyCode,
         ),
       }));
+      const voucher: KioskVoucherData = {
+        orderId: persisted.orderId,
+        orderUrl: persisted.orderUrl,
+        whatsappUrl: persisted.waUrl,
+        fulfillment: kioskFulfillment ?? 'takeaway',
+        totalLabel: formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode),
+        items: voucherItems,
+      };
+      if (typeof window !== 'undefined') {
+        try {
+          window.sessionStorage.setItem(
+            `${kioskVoucherStorageKeyPrefix}${commerceIdentifier}`,
+            JSON.stringify(voucher),
+          );
+        } catch {
+          // The in-memory voucher still prevents a duplicate submit until navigation.
+        }
+      }
       setCart({});
       const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
       void trackMenuFunnelEvent(comercioKey, 'order_completed', {}, persisted.orderId);
@@ -4409,15 +4477,10 @@ export default function PublicMenuPage() {
       setCheckoutStep(0);
       setIsConfirmOpen(false);
       setKioskAddedPrompt(null);
-      setKioskVoucher({
-        orderId: persisted.orderId,
-        orderUrl: persisted.orderUrl,
-        fulfillment: kioskFulfillment ?? 'takeaway',
-        totalLabel: formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode),
-        items: voucherItems,
-      });
+      setKioskVoucher(voucher);
       return;
     } catch (persistError) {
+      orderSubmitLockRef.current = false;
       const message =
         persistError instanceof Error
           ? persistError.message
@@ -4933,6 +4996,15 @@ export default function PublicMenuPage() {
             window.location.assign(kioskVoucher.orderUrl);
           }}
           onNewOrder={() => {
+            try {
+              window.sessionStorage.removeItem(
+                `${kioskVoucherStorageKeyPrefix}${commerceIdentifier}`,
+              );
+            } catch {
+              // Continue to a fresh cart even when session storage is unavailable.
+            }
+            checkoutAttemptRef.current = null;
+            orderSubmitLockRef.current = false;
             setKioskVoucher(null);
             resetKioskFulfillment();
             setCart({});

@@ -54,6 +54,15 @@ type PedidoRow = {
     subtotal_moneda_checkout?: number;
     costo_delivery?: number;
     costo_delivery_moneda_checkout?: number;
+    delivery_estimate_minutes?: number;
+    delivery_config_snapshot?: {
+      estimated_times?: {
+        preparation_minutes?: number | string;
+        delivery_minutes?: number | string;
+        preparationMinutes?: number | string;
+        deliveryMinutes?: number | string;
+      };
+    } | null;
     total?: number;
     total_moneda_checkout?: number;
     referencia_pago?: string;
@@ -100,6 +109,7 @@ type PedidoRow = {
     customer_service_rating?: number | null;
     items?: Array<{
       nombre?: string;
+      categoria_nombre?: string | null;
       cantidad?: number;
       precio?: number;
       product_id?: string;
@@ -181,6 +191,7 @@ type PublicTrackingPayload = {
   items: Array<{
     name: string;
     quantity: number;
+    categoryName?: string;
     unitPrice?: number;
     productId?: string;
     selection?: {
@@ -194,6 +205,7 @@ type PublicTrackingPayload = {
   subtotal?: number;
   deliveryCost?: number;
   total?: number;
+  deliveryEstimateMinutes?: number;
   currency?: string;
   deliveryType?: 'pickup' | 'delivery';
   locationHint?: string | null;
@@ -239,10 +251,12 @@ function mapPublicTracking(pub: PublicTrackingPayload): {
         order_id: pub.orderId,
         moneda_checkout: pub.currency,
         subtotal: pub.subtotal,
+        delivery_estimate_minutes: pub.deliveryEstimateMinutes,
         total: pub.total,
         costo_delivery: pub.deliveryCost,
         items: (pub.items ?? []).map((item) => ({
           nombre: item.name,
+          categoria_nombre: item.categoryName,
           cantidad: item.quantity,
           precio: item.unitPrice,
           product_id: item.productId,
@@ -766,6 +780,17 @@ function OrderTrackingPageInner() {
 
   const delivery = order?.detalles?.delivery ?? null;
   const isDelivery = (delivery?.mode ?? 'pickup') === 'delivery';
+  const estimatedTimes = order?.detalles?.delivery_config_snapshot?.estimated_times;
+  const preparationMinutes =
+    toNumberOrNull(estimatedTimes?.preparation_minutes ?? estimatedTimes?.preparationMinutes) ?? 0;
+  const transitMinutes =
+    toNumberOrNull(estimatedTimes?.delivery_minutes ?? estimatedTimes?.deliveryMinutes) ?? 0;
+  const deliveryEstimateMinutes =
+    (toNumberOrNull(order?.detalles?.delivery_estimate_minutes) ?? preparationMinutes + transitMinutes) || null;
+  const estimatedDeliveryLabel =
+    isDelivery && deliveryEstimateMinutes
+      ? `${deliveryEstimateMinutes} min aprox.`
+      : null;
 
   const subtotal = toNumberOrNull(order?.detalles?.subtotal) ?? toNumberOrNull(order?.total) ?? 0;
   const costoDelivery = toNumberOrNull(order?.costo_delivery) ?? toNumberOrNull(order?.detalles?.costo_delivery) ?? 0;
@@ -816,6 +841,7 @@ function OrderTrackingPageInner() {
     const subtotalCheckoutValue = convertFromCop(subtotalCop, checkoutCurrency, exchangeRate);
     return {
       nombre: (item?.nombre ?? 'Producto').toString().trim() || 'Producto',
+      categoria_nombre: (item?.categoria_nombre ?? '').toString().trim() || undefined,
       cantidad: quantity,
       precioUnitario: unitPriceCheckout,
       subtotal: subtotalCheckoutValue,
@@ -1110,6 +1136,7 @@ function OrderTrackingPageInner() {
       createdAtLabel={createdAtLabel}
       status={displayStatus}
       isDelivery={isDelivery}
+      estimatedDeliveryLabel={estimatedDeliveryLabel}
       locationHint={locationHint}
       pickupAddress={!isDelivery ? businessAddress : ''}
       timeline={timelineItems.map((item) => ({ key: item.key, label: item.label }))}
@@ -1119,6 +1146,7 @@ function OrderTrackingPageInner() {
       confirmProgress={CONFIRMATION_TIMEOUT_MS > 0 ? Math.min(1, pendingElapsedMs / CONFIRMATION_TIMEOUT_MS) : 0}
       items={orderItems.map((item) => ({
         name: item.nombre,
+        categoryName: item.categoria_nombre ?? '',
         quantity: item.cantidad,
         amountLabel: formatAmountByCurrency(item.subtotal, checkoutCurrency),
       }))}
