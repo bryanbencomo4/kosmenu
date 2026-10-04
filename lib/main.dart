@@ -230,6 +230,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
         MerchantDeepLink.rememberOrder(
           orderId,
           fallbackUri: _fallbackOrderUri(uri, orderId),
+          openPaymentProof: uri.queryParameters['comprobante'] == '1',
         );
         // Enter through AuthGate/dashboard. Flutter would otherwise split
         // `/orders/view/{id}` into `/orders/view` and treat "view" as an order.
@@ -242,6 +243,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
   }
 
   Uri? _fallbackOrderUri(Uri uri, String orderId) {
+    if (uri.queryParameters['comprobante'] == '1') return null;
     final fullFallback = uri.queryParameters['fallback'] ?? '';
     if (fullFallback.trim().isNotEmpty) {
       return Uri.tryParse(fullFallback);
@@ -260,9 +262,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
 
     final shortCode = uri.queryParameters['shortCode']?.trim() ?? '';
     if (shortCode.isEmpty) return null;
-    return Uri.parse(
-      AppLinks.shortOrderByCode(shortCode),
-    );
+    return Uri.parse(AppLinks.shortOrderByCode(shortCode));
   }
 
   Future<void> _bindIncomingOrderLinks() async {
@@ -299,6 +299,12 @@ class _KosmenuAppState extends State<KosmenuApp> {
     final routeName = '/orders/${Uri.encodeComponent(orderId)}';
     final navigator = _navigatorKey.currentState;
     if (navigator == null) {
+      return;
+    }
+
+    if (uri.queryParameters['comprobante'] == '1') {
+      MerchantDeepLink.rememberOrder(orderId, openPaymentProof: true);
+      navigator.pushNamedAndRemoveUntil('/', (_) => false);
       return;
     }
 
@@ -368,7 +374,10 @@ class _KosmenuAppState extends State<KosmenuApp> {
       final orderId = uri.pathSegments[2];
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => OrderDetailScreen(orderId: orderId),
+        builder: (_) => OrderDetailScreen(
+          orderId: orderId,
+          openPaymentProof: uri.queryParameters['comprobante'] == '1',
+        ),
       );
     }
 

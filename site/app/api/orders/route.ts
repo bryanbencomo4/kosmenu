@@ -754,6 +754,9 @@ export async function POST(request: Request) {
       appOrderUrl,
       customerName: clientName,
       customerWhatsapp: clientWhatsapp,
+      paymentProofUrl: publicShortCode
+        ? `${publicSiteUrl}/p/${encodeURIComponent(publicShortCode)}`
+        : undefined,
       details: detalles,
     });
 

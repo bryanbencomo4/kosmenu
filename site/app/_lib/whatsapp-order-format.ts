@@ -56,6 +56,7 @@ export type MerchantComandaInput = {
   appOrderUrl: string;
   customerName: string;
   customerWhatsapp: string;
+  paymentProofUrl?: string;
   details: unknown;
 };
 
@@ -89,37 +90,51 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
   const heading = `🧾 *PEDIDO #${input.orderId}*`;
   const separator = '━━━━━━━━━━━━━━━━━━';
   const items = Array.isArray(details.items) ? details.items : [];
-  const productLines: string[] = [];
+  const categories = new Map<string, Record<string, unknown>[]>();
   for (const rawItem of items) {
     const item = record(rawItem);
     const quantity = Number(item.cantidad);
     if (!Number.isFinite(quantity) || quantity <= 0) continue;
-    const name = text(item.producto) || text(item.nombre) || 'Producto';
-    productLines.push(`*${quantity}x ${name}*`);
-    const price = convert(item.precio_final ?? item.precio);
-    if (price != null) productLines.push(`${amount(price, currency)}${quantity > 1 ? ' c/u' : ''}`);
-    const snapshot = Array.isArray(item.selecciones)
-      ? item.selecciones
-      : Array.isArray(item.opciones) ? item.opciones : [];
-    const optionLines = snapshot.map((rawOption) => {
-      const option = record(rawOption);
-      const label = text(option.opcion);
-      const group = text(option.grupo);
-      return label ? `• ${group ? `${group}: ` : ''}${label}` : '';
-    }).filter(Boolean);
-    if (optionLines.length) {
-      productLines.push(...optionLines);
-    } else {
-      const selection = record(item.seleccion ?? item.opciones);
-      const size = text(selection.tamanoLabel);
-      if (size && !name.includes(size)) productLines.push(`• Tamaño: ${size}`);
+    const category = text(item.categoria_nombre) || text(item.category_name) || 'Sin categoría';
+    const group = categories.get(category) ?? [];
+    group.push(item);
+    categories.set(category, group);
+  }
+  const productLines: string[] = [];
+  for (const [category, categoryItems] of categories) {
+    productLines.push(`*${category}*`, '');
+    for (const item of categoryItems) {
+      const quantity = Number(item.cantidad);
+      const name = text(item.producto) || text(item.nombre) || 'Producto';
+      productLines.push(`*${quantity}x ${name}*`);
+      const price = convert(item.precio_final ?? item.precio);
+      if (price != null) productLines.push(`${amount(price, currency)}${quantity > 1 ? ' c/u' : ''}`);
+      const snapshot = Array.isArray(item.selecciones)
+        ? item.selecciones
+        : Array.isArray(item.opciones) ? item.opciones : [];
+      const optionLines = snapshot.map((rawOption) => {
+        const option = record(rawOption);
+        const label = text(option.opcion);
+        const group = text(option.grupo);
+        return label ? `• ${group ? `${group}: ` : ''}${label}` : '';
+      }).filter(Boolean);
+      if (optionLines.length) {
+        productLines.push(...optionLines);
+      } else {
+        const selection = record(item.seleccion ?? item.opciones);
+        const size = text(selection.tamanoLabel);
+        if (size && !name.includes(size)) productLines.push(`• Tamaño: ${size}`);
+      }
+      productLines.push('');
     }
-    productLines.push('');
   }
 
   const delivery = record(details.delivery);
   const payment = record(details.metodo_pago);
   const paymentLabel = text(payment.nombre) || text(details.metodo_pago);
+  const proofLink = text(details.comprobante_url) &&
+    paymentLabel && !/efectivo|cash/i.test(paymentLabel)
+    ? text(input.paymentProofUrl) : '';
   const lines = [heading, separator, '', '🍽️ *DETALLE DEL PEDIDO*', '', ...productLines];
   const notes = cleanNotes(details.order_notes);
   if (notes) lines.push('📝 *OBSERVACIONES*', notes, '');
@@ -146,6 +161,7 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
     lines.push('📦 *RETIRO EN TIENDA*');
   }
   if (paymentLabel) lines.push(`💳 Pago: ${paymentLabel}`);
+  if (proofLink) lines.push(`📎 Comprobante: ${proofLink}`);
   const paymentReference = text(details.referencia_pago);
   if (/^\d{4}$/.test(paymentReference)) lines.push(`Referencia de pago: ****${paymentReference}`);
   if (paymentLabel.toLowerCase().includes('efectivo')) {
@@ -164,6 +180,7 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
   return [
     heading,
     totalLabel ? `💰 *TOTAL: ${totalLabel}*` : '',
+    ...(proofLink ? [`📎 Comprobante: ${proofLink}`] : []),
     `⚠️ Pedido extenso (${items.length} productos). La comanda completa supera el límite de este mensaje. Revisa productos, opciones y observaciones en el enlace antes de preparar.`,
     ...(manual ? ['📲 Gestión: Por WhatsApp'] : []),
     '', manual ? '🔗 *Ver pedido completo*' : '🔗 *Gestionar pedido completo*', input.appOrderUrl,

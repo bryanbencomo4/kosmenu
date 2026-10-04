@@ -223,7 +223,7 @@ class _AuthGateState extends State<AuthGate> {
             if (session == null) {
               final pendingOrder = MerchantDeepLink.peekOrder();
               final fallbackUri = MerchantDeepLink.peekFallbackUri();
-              if (pendingOrder != null) {
+              if (pendingOrder != null && !MerchantDeepLink.openPaymentProof) {
                 return PendingOrderLinkScreen(
                   orderId: pendingOrder,
                   fallbackUri: fallbackUri,

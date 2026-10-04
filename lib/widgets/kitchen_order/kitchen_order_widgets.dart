@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:kosmenu_app/core/relative_order_time.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
@@ -1490,6 +1491,232 @@ class KitchenStaticMapPreview extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class PaymentProofContent extends StatelessWidget {
+  const PaymentProofContent({
+    super.key,
+    required this.image,
+    this.reference,
+    this.pedido,
+  });
+
+  final Widget image;
+  final String? reference;
+  final PedidoModel? pedido;
+
+  static double? _paymentAmount(Object? value) {
+    if (value == null) return null;
+    final amount = value is num ? value.toDouble() : double.tryParse('$value');
+    return amount != null && amount.isFinite && amount >= 0 ? amount : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lastFour = reference;
+    final order = pedido;
+    final currency = order?.currencyForDisplay();
+    final total = currency == null ? null : order?.totalForDisplay(currency);
+    final method = order?.metodoPago?.trim() ?? '';
+    final cash = RegExp(
+      r'efectivo|cash',
+      caseSensitive: false,
+    ).hasMatch(method);
+    final paidWith = _paymentAmount(order?.detalles['pago_con']);
+    final change = _paymentAmount(order?.detalles['cambio_de']);
+    final formatter = NumberFormat.decimalPatternDigits(
+      locale: 'es_CO',
+      decimalDigits: currency == 'COP' ? 0 : 2,
+    );
+    final details = <({String label, String value, IconData icon})>[
+      if (method.isNotEmpty)
+        (
+          label: 'Método',
+          value: method,
+          icon: cash ? Icons.payments_outlined : Icons.account_balance_outlined,
+        ),
+      if (currency != null)
+        (
+          label: 'Moneda',
+          value: currency,
+          icon: Icons.currency_exchange_rounded,
+        ),
+      if (lastFour != null && RegExp(r'^\d{4}$').hasMatch(lastFour))
+        (label: 'Referencia', value: '****$lastFour', icon: Icons.tag_rounded),
+      if (cash && paidWith != null && paidWith > 0)
+        (
+          label: 'Paga con',
+          value: '$currency ${formatter.format(paidWith)}',
+          icon: Icons.payments_outlined,
+        ),
+      if (cash)
+        (
+          label: 'Cambio',
+          value: change == null
+              ? 'No registrado'
+              : change == 0
+              ? 'Sin cambio'
+              : '$currency ${formatter.format(change)}',
+          icon: Icons.swap_horiz_rounded,
+        ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: constraints.maxHeight * 0.52,
+            ),
+            child: SingleChildScrollView(
+              child: Container(
+                width: double.infinity,
+                color: KitchenMockupColors.card,
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (order != null) ...[
+                      Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE7F5EE),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.receipt_long_outlined,
+                              color: Color(0xFF16724A),
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Detalle del pago',
+                                  style: GoogleFonts.manrope(
+                                    color: KitchenMockupColors.text,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                if ((order.orderId ?? '').isNotEmpty)
+                                  Text(
+                                    order.orderId!,
+                                    style: GoogleFonts.manrope(
+                                      color: KitchenMockupColors.muted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'Monto del pedido',
+                        style: GoogleFonts.manrope(
+                          color: KitchenMockupColors.muted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            total == null
+                                ? 'No registrado'
+                                : formatter.format(total),
+                            style: GoogleFonts.manrope(
+                              color: KitchenMockupColors.text,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Divider(
+                          height: 1,
+                          color: KitchenMockupColors.border,
+                        ),
+                      ),
+                    ],
+                    LayoutBuilder(
+                      builder: (context, width) => Wrap(
+                        spacing: 16,
+                        runSpacing: 16,
+                        children: [
+                          for (final detail in details)
+                            SizedBox(
+                              width: (width.maxWidth - 16) / 2,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        detail.icon,
+                                        size: 14,
+                                        color: KitchenMockupColors.muted,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Flexible(
+                                        child: Text(
+                                          detail.label,
+                                          style: GoogleFonts.manrope(
+                                            color: KitchenMockupColors.muted,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    detail.value,
+                                    style: GoogleFonts.manrope(
+                                      color: KitchenMockupColors.text,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: InteractiveViewer(
+                minScale: 1,
+                maxScale: 5,
+                child: SizedBox.expand(child: image),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -8,7 +8,10 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
+import 'package:kosmenu_app/screens/auth_screen.dart';
+import 'package:kosmenu_app/screens/pending_order_link_screen.dart';
 import 'package:kosmenu_app/models/pedido.dart';
+import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/services/merchant_orders_repository.dart';
 import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
@@ -60,6 +63,21 @@ void main() {
   });
   tearDownAll(() async => Supabase.instance.dispose());
 
+  testWidgets(
+    'signed-out proof link requires login instead of public tracking',
+    (tester) async {
+      MerchantDeepLink.rememberOrder('ORD-MANUAL', openPaymentProof: true);
+      addTearDown(MerchantDeepLink.clear);
+      await tester.pumpWidget(const MaterialApp(home: AuthGate()));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(AuthScreen), findsOneWidget);
+      expect(find.byType(PendingOrderLinkScreen), findsNothing);
+      expect(MerchantDeepLink.peekOrder(), 'ORD-MANUAL');
+      expect(MerchantDeepLink.openPaymentProof, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('full merchant order screen is read-only for manual snapshot', (
     tester,
   ) async {
@@ -87,6 +105,32 @@ void main() {
     );
     expect(find.text('Aceptar pedido'), findsNothing);
     expect(find.text('Marcar en camino'), findsNothing);
+    expect(find.byType(KitchenMockupActionsBar), findsNothing);
+    expect(find.byType(KitchenStatusTimeline), findsNothing);
+    expect(find.text('Comprobante no disponible.'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('proof link renders only the proof screen, not order tracking', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OrderDetailScreen(
+          orderId: 'ORD-MANUAL',
+          openPaymentProof: true,
+          initialPedido: order(mode: 'whatsapp_manual'),
+          initialComercioNombre: 'Restaurante Preview',
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump();
+    expect(find.text('Comprobante no disponible.'), findsOneWidget);
+    expect(find.text('Comprobante de pago'), findsOneWidget);
+    expect(find.byType(KitchenPrepSection), findsNothing);
+    expect(find.byType(KitchenOrderHeader), findsNothing);
     expect(find.byType(KitchenMockupActionsBar), findsNothing);
     expect(find.byType(KitchenStatusTimeline), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());

@@ -57,6 +57,8 @@ vi.mock('../app/api/_lib/supabase-server', () => ({
 }));
 
 import { GET } from '../app/o/[code]/route';
+import { GET as openProof } from '../app/p/[code]/route';
+import { middleware } from '../middleware';
 
 const TOKEN = 'courierTokenAbcdefghijklmnopqrstuvwxyz_0123';
 
@@ -115,5 +117,34 @@ describe('GET /o/[code]', () => {
   it('returns 404 for unknown or malformed codes', async () => {
     expect((await open('ZZZZZZZZZZ')).status).toBe(404);
     expect((await open('%E0%A4%A')).status).toBe(404);
+  });
+});
+
+describe('GET /p/[code]', () => {
+  it('does not rewrite proof links to public menus', () => {
+    const response = middleware(new NextRequest('https://elmenuxfa.com/p/AbCdEf1234'));
+    expect(response.headers.get('location')).toBeNull();
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+  });
+  it('redirects to the authenticated merchant viewer without exposing a proof URL', async () => {
+    const response = await openProof(new Request('https://elmenuxfa.com/p/AbCdEf1234'), {
+      params: Promise.resolve({ code: 'AbCdEf1234' }),
+    });
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get('location')!);
+    expect(destination.pathname).toBe('/orders/view/EMXFA-000027');
+    expect(destination.searchParams.get('comprobante')).toBe('1');
+    expect(destination.searchParams.get('shortCode')).toBe('AbCdEf1234');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(destination.toString()).not.toContain('storage');
+    expect(response.headers.get('set-cookie')).toBeNull();
+  });
+  it('rejects unknown and malformed codes', async () => {
+    for (const code of ['ZZZZZZZZZZ', 'bad', '%E0%A4%A']) {
+      expect((await openProof(new Request('https://elmenuxfa.com/p/bad'), {
+        params: Promise.resolve({ code }),
+      })).status).toBe(404);
+    }
   });
 });

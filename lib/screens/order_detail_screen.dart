@@ -33,6 +33,7 @@ class OrderDetailScreen extends StatefulWidget {
     super.key,
     required this.orderId,
     this.readOnlyView = false,
+    this.openPaymentProof = false,
     this.initialPedido,
     this.initialComercioNombre,
     this.initialBusinessLogoUrl,
@@ -40,6 +41,7 @@ class OrderDetailScreen extends StatefulWidget {
 
   final String orderId;
   final bool readOnlyView;
+  final bool openPaymentProof;
 
   /// When opening from the merchant dashboard, pass the already-loaded pedido
   /// so kitchen UI paints before the network round-trip.
@@ -94,6 +96,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   bool _deferredVisualsReady = false;
   final ComprobanteSignedUrlSession _comprobanteSignedUrlSession =
       ComprobanteSignedUrlSession();
+  Future<({String url, String? reference, bool isPdf})>? _paymentProofFuture;
 
   @override
   void initState() {
@@ -115,6 +118,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       vsync: this,
       duration: const Duration(milliseconds: 700),
     );
+    if (widget.openPaymentProof && !widget.readOnlyView) {
+      _paymentProofFuture = _loadPaymentProof();
+      return;
+    }
     // The map (Maps JS + canvas marker icons) is the heaviest widget on web;
     // mount it once the kitchen content is already on screen.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -320,6 +327,115 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
+  Future<({String url, String? reference, bool isPdf})>
+  _loadPaymentProof() async {
+    final data = await _orderFuture;
+    if (data == null || !data.pedido.hasComprobante) {
+      throw const PublicOrderApiException(
+        message: 'Comprobante no disponible.',
+      );
+    }
+    final accessToken =
+        Supabase.instance.client.auth.currentSession?.accessToken.trim() ?? '';
+    if (accessToken.isEmpty) {
+      throw const PublicOrderApiException(
+        message:
+            'Inicia sesión con la cuenta del restaurante para ver el comprobante.',
+        statusCode: 401,
+      );
+    }
+    final signed = await PublicOrderApiService().fetchComprobanteSignedUrl(
+      orderId: (data.pedido.orderId ?? widget.orderId).trim(),
+      accessToken: accessToken,
+    );
+    final reference = data.pedido.paymentReference;
+    final file = (data.pedido.comprobanteRef ?? '').toLowerCase();
+    return (
+      url: signed.url,
+      reference: reference != null && RegExp(r'^\d{4}$').hasMatch(reference)
+          ? reference
+          : null,
+      isPdf: file.endsWith('.pdf') || file.contains('.pdf?'),
+    );
+  }
+
+  Widget _buildPaymentProofScreen() {
+    return Scaffold(
+      backgroundColor: KitchenMockupColors.background,
+      appBar: AppBar(
+        backgroundColor: KitchenMockupColors.card,
+        title: Text(
+          'Comprobante de pago',
+          style: GoogleFonts.manrope(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Recargar comprobante',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: () => setState(() {
+              _orderFuture = _fetchOrder();
+              _paymentProofFuture = _loadPaymentProof();
+            }),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: FutureBuilder<({String url, String? reference, bool isPdf})>(
+          future: _paymentProofFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final proof = snapshot.data;
+            if (snapshot.hasError || proof == null) {
+              final error = snapshot.error;
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    error is PublicOrderApiException
+                        ? error.message
+                        : 'Comprobante no disponible.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.manrope(),
+                  ),
+                ),
+              );
+            }
+            return PaymentProofContent(
+              reference: proof.reference,
+              pedido: _cachedOrderData?.pedido,
+              image: proof.isPdf
+                  ? Center(
+                      child: FilledButton.icon(
+                        onPressed: () => unawaited(
+                          launchUrl(
+                            Uri.parse(proof.url),
+                            mode: LaunchMode.externalApplication,
+                          ),
+                        ),
+                        icon: const Icon(Icons.picture_as_pdf_outlined),
+                        label: const Text('Abrir PDF'),
+                      ),
+                    )
+                  : Image.network(
+                      proof.url,
+                      fit: BoxFit.contain,
+                      loadingBuilder: (context, child, progress) =>
+                          progress == null
+                          ? child
+                          : const Center(child: CircularProgressIndicator()),
+                      errorBuilder: (_, _, _) => const Center(
+                        child: Text('No se pudo mostrar la imagen.'),
+                      ),
+                    ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Future<_OrderViewData?> _fetchOrder() async {
     final client = Supabase.instance.client;
     final orderId = widget.orderId.trim();
@@ -374,7 +490,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       _cachedOrderData = critical;
     }
 
-    if (!_secondaryEnrichmentStarted) {
+    if (!_secondaryEnrichmentStarted && !widget.openPaymentProof) {
       _secondaryEnrichmentStarted = true;
       unawaited(_enrichOrderSecondary(foundPedido));
     }
@@ -2475,6 +2591,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (widget.openPaymentProof && !widget.readOnlyView) {
+      return _buildPaymentProofScreen();
+    }
     final theme = Theme.of(context);
     final colorScheme = Theme.of(context).colorScheme;
     final bg = theme.scaffoldBackgroundColor;

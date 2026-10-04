@@ -171,4 +171,17 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     expect(data).not.toHaveProperty('merchantWhatsappText');
     expect(state.inserts).toHaveLength(1);
   });
+
+  it('uses the existing ten-character code for a digital proof link', async () => {
+    state.managementMode = 'whatsapp_manual';
+    const data = await submit({
+      paymentMethod: { nombre: 'Pago móvil' },
+      paymentProofUrl: `storage://comprobantes/${state.commerceId}/proof.png`,
+    });
+    expect(data.merchantWhatsappText).toMatch(/Comprobante: https:\/\/[^\s]+\/p\/AbCdEf1234/);
+    expect(data.merchantWhatsappText).not.toContain('storage://');
+    expect(data.merchantWhatsappText).not.toContain('proof.png');
+    expect((state.inserts[0].detalles as Record<string, unknown>).comprobante_url)
+      .toBe(`storage://comprobantes/${state.commerceId}/proof.png`);
+  });
 });

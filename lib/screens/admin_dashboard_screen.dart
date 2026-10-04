@@ -816,13 +816,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     }
     if (!mounted) return;
 
+    final openPaymentProof = MerchantDeepLink.openPaymentProof;
     MerchantDeepLink.consumeOrder();
     await _pushInShell(
       OrderDetailScreen(
         orderId: orderId,
+        openPaymentProof: openPaymentProof,
         initialComercioNombre: _cachedComercio?.nombre,
         initialBusinessLogoUrl: _cachedComercio?.logoUrl,
       ),
+      standalone: openPaymentProof,
     );
   }
 
@@ -1858,7 +1861,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     _bumpShell();
   }
 
-  Future<T?> _pushInShell<T>(Widget page) {
+  Future<T?> _pushInShell<T>(Widget page, {bool standalone = false}) {
+    if (standalone) {
+      return Navigator.of(
+        context,
+        rootNavigator: true,
+      ).push<T>(merchantShellRoute(page));
+    }
     final nav = _contentNavKey.currentState;
     if (nav != null) {
       return nav.push<T>(merchantShellRoute(page));

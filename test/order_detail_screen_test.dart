@@ -60,6 +60,139 @@ Widget _merchantOrderWidgets({
 }
 
 void main() {
+  testWidgets('proof summary uses checkout currency and saved cash/change', (
+    tester,
+  ) async {
+    final pedido = PedidoModel.fromMap({
+      'id': 'proof',
+      'comercio_id': 'merchant',
+      'total': 20,
+      'detalles': {
+        'order_id': 'EMXFA-000156',
+        'moneda_base': 'USD',
+        'moneda_checkout': 'VES',
+        'total_moneda_checkout': 1200.5,
+        'metodo_pago': {'nombre': 'Efectivo'},
+        'pago_con': 2000,
+        'cambio_de': 799.5,
+      },
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PaymentProofContent(
+            pedido: pedido,
+            reference: '1234',
+            image: const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+    for (final value in [
+      'Efectivo',
+      'VES',
+      '1.200,50',
+      'Paga con',
+      'VES 2.000,00',
+      'Cambio',
+      'VES 799,50',
+      '****1234',
+    ]) {
+      expect(find.text(value), findsOneWidget);
+    }
+    expect(find.text('USD'), findsNothing);
+  });
+
+  testWidgets(
+    'digital payments omit cash fields and never claim verified payment',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: PaymentProofContent(
+              pedido: PedidoModel(
+                id: 'digital',
+                comercioId: 'merchant',
+                metodoPago: 'Pago móvil',
+                total: 100,
+                detalles: {'moneda_base': 'VES'},
+              ),
+              image: SizedBox.shrink(),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Pago móvil'), findsOneWidget);
+      expect(find.text('Cambio'), findsNothing);
+      expect(find.text('No aplica'), findsNothing);
+      expect(find.text('Paga con'), findsNothing);
+      expect(find.textContaining('verificado'), findsNothing);
+    },
+  );
+
+  testWidgets('proof view does not expose longer payment references', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: PaymentProofContent(
+            reference: '123456789',
+            image: SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+    expect(find.textContaining('123456789'), findsNothing);
+    expect(find.textContaining('Referencia:'), findsNothing);
+  });
+
+  for (final width in [320.0, 390.0, 768.0]) {
+    testWidgets('proof image and last four reference fit at $width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: PaymentProofContent(
+              reference: '1234',
+              pedido: PedidoModel(
+                id: 'proof',
+                comercioId: 'merchant',
+                orderId: 'EMXFA-000156',
+                metodoPago: 'Transferencia bancaria internacional',
+                total: 123456789.5,
+                detalles: {'moneda_base': 'VES'},
+              ),
+              image: ColoredBox(
+                key: ValueKey('payment-proof-image'),
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Referencia'), findsOneWidget);
+      expect(find.text('****1234'), findsOneWidget);
+      expect(find.text('Transferencia bancaria internacional'), findsOneWidget);
+      expect(find.text('VES'), findsOneWidget);
+      expect(find.byKey(const ValueKey('payment-proof-image')), findsOneWidget);
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('payment-proof-image')))
+            .height,
+        greaterThan(250),
+      );
+      expect(find.byType(InteractiveViewer), findsOneWidget);
+      expect(find.byType(KitchenStatusTimeline), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('products are grouped under one category heading', (
     tester,
   ) async {

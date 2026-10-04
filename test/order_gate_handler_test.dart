@@ -1,8 +1,20 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/services/order_gate_handler.dart';
 
 void main() {
+  test('proof intent survives login handoff but is consumed once', () {
+    MerchantDeepLink.clear();
+    MerchantDeepLink.rememberOrder('EMXFA-000156', openPaymentProof: true);
+    expect(MerchantDeepLink.peekOrder(), 'EMXFA-000156');
+    expect(MerchantDeepLink.openPaymentProof, isTrue);
+    expect(MerchantDeepLink.consumeOrder(), 'EMXFA-000156');
+    expect(MerchantDeepLink.openPaymentProof, isFalse);
+    MerchantDeepLink.rememberOrder('EMXFA-000157');
+    expect(MerchantDeepLink.openPaymentProof, isFalse);
+    MerchantDeepLink.clear();
+  });
   test('merchantOrderById opens the panel order screen', () {
     expect(
       AppLinks.merchantOrderById('A1B2'),

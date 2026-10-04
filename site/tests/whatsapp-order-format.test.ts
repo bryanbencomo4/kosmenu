@@ -58,6 +58,36 @@ describe('strict per-commerce WhatsApp opt-in', () => {
 });
 
 describe('merchant comanda from stored snapshots', () => {
+  it('groups interleaved products by their stored category', () => {
+    const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details,
+      items: [
+        { nombre: 'Napolitana', cantidad: 1, categoria_nombre: 'Pizzas' },
+        { nombre: 'Agua', cantidad: 1, categoria_nombre: 'Bebidas' },
+        { nombre: 'Campesina', cantidad: 2, categoria_nombre: 'Pizzas' },
+        { nombre: 'Refresco', cantidad: 1, category_name: 'Bebidas' },
+        { nombre: 'Otro', cantidad: 1 },
+      ],
+    } });
+    expect(message.split('*Pizzas*')).toHaveLength(2);
+    expect(message.split('*Bebidas*')).toHaveLength(2);
+    expect(message.indexOf('Campesina')).toBeLessThan(message.indexOf('*Bebidas*'));
+    expect(message.indexOf('Agua')).toBeLessThan(message.indexOf('Refresco'));
+    expect(message).toContain('*Sin categoría*');
+  });
+  it('includes only a supplied short proof link for digital payment with a proof', () => {
+    const paymentProofUrl = 'https://elmenuxfa.com/p/AbCdEf1234';
+    const digital = { ...order, paymentProofUrl, details: { ...order.details,
+      metodo_pago: { nombre: 'Pago móvil' }, comprobante_url: 'storage://comprobantes/private.png',
+    } };
+    expect(buildDetailedMerchantWhatsappText(digital)).toContain(`Comprobante: ${paymentProofUrl}`);
+    expect(buildDetailedMerchantWhatsappText(digital)).not.toContain('storage://');
+    expect(buildDetailedMerchantWhatsappText({ ...digital, details: { ...digital.details, comprobante_url: null } })).not.toContain('Comprobante:');
+    expect(buildDetailedMerchantWhatsappText({ ...digital, details: { ...digital.details, metodo_pago: { nombre: 'Efectivo' } } })).not.toContain('Comprobante:');
+    expect(buildDetailedMerchantWhatsappText({ ...digital, paymentProofUrl: undefined })).not.toContain('Comprobante:');
+    expect(buildDetailedMerchantWhatsappText({ ...digital, details: { ...digital.details,
+      items: Array.from({ length: 500 }, () => order.details.items[0]),
+    } })).toContain(`Comprobante: ${paymentProofUrl}`);
+  });
   it('manual footer is read-only and preserves the exact secure link', () => {
     const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details, management_mode: 'whatsapp_manual' } });
     expect(message).toContain('📲 Gestión: Por WhatsApp');
