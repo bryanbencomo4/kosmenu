@@ -20,7 +20,8 @@ class MerchantOrdersRepository {
       'd_nombre_cliente:detalles->>nombre_cliente,'
       'd_telefono_cliente:detalles->>telefono_cliente,'
       'd_total:detalles->>total,'
-      'd_delegate_status:detalles->delivery_delegate->>status';
+      'd_delegate_status:detalles->delivery_delegate->>status,'
+      'd_management_mode:detalles->>management_mode';
 
   static const String _metricsSummaryColumns =
       '$_clientSummaryColumns,costo_delivery,'
@@ -144,6 +145,7 @@ class MerchantOrdersRepository {
       'telefono_cliente': row['telefono_cliente'],
       'cliente_email': row['cliente_email'],
       'detalles': <String, dynamic>{
+        'management_mode': row['d_management_mode'],
         'order_id': ?row['d_order_id'],
         'codigo_orden': ?row['d_codigo_orden'],
         'nombre_cliente': ?row['d_nombre_cliente'],

@@ -62,7 +62,8 @@ class _OrdersPageWindow {
     for (final pedido in page) {
       if (ids.add(pedido.id)) rows.add(pedido);
       final createdAt = pedido.createdAt;
-      if (createdAt != null && (cursor == null || createdAt.isBefore(cursor!))) {
+      if (createdAt != null &&
+          (cursor == null || createdAt.isBefore(cursor!))) {
         cursor = createdAt;
       }
     }
@@ -81,8 +82,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
   final _OrdersPageWindow _browse = _OrdersPageWindow();
   final _OrdersPageWindow _search = _OrdersPageWindow();
 
-  _OrdersPageWindow get _window =>
-      _activeSearch.isEmpty ? _browse : _search;
+  _OrdersPageWindow get _window => _activeSearch.isEmpty ? _browse : _search;
 
   @override
   void initState() {
@@ -141,7 +141,17 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
 
   String _sanitizeSearch(String value) {
     // PostgREST `or` filter syntax reserves these characters.
-    return value.trim().replaceAll(RegExp(r'[,()*%\\"' "'" r':]'), ' ').trim();
+    return value
+        .trim()
+        .replaceAll(
+          RegExp(
+            r'[,()*%\\"'
+            "'"
+            r':]',
+          ),
+          ' ',
+        )
+        .trim();
   }
 
   Future<void> _refresh() async {
@@ -196,7 +206,9 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
       if (!mounted || generation != window.generation) return;
 
       final page = rows
-          .map((row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)))
+          .map(
+            (row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)),
+          )
           .where((pedido) => !pedido.hasParseError)
           .toList(growable: false);
       setState(() {
@@ -239,8 +251,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
       if (merged.containsKey(pedido.id)) continue;
       final createdAt = pedido.createdAt;
       final insideWindow =
-          cursor == null ||
-          (createdAt != null && !createdAt.isBefore(cursor));
+          cursor == null || (createdAt != null && !createdAt.isBefore(cursor));
       if (!insideWindow && window.hasMore) continue;
       if (_activeSearch.isNotEmpty && !_matchesQuery(pedido, q)) continue;
       merged[pedido.id] = pedido;
@@ -267,8 +278,10 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
     if (window.isLoading || !window.hasMore || window.error != null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final underfilled = _filter != null && visibleCount < _minVisibleWhenFiltered;
-      final cannotScroll = !_scrollController.hasClients ||
+      final underfilled =
+          _filter != null && visibleCount < _minVisibleWhenFiltered;
+      final cannotScroll =
+          !_scrollController.hasClients ||
           _scrollController.position.maxScrollExtent <= 0;
       if (underfilled || cannotScroll) unawaited(_loadMore());
     });
@@ -355,10 +368,19 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
                   selected: _filter == null,
                   onTap: () => setState(() => _filter = null),
                 ),
+                if (widget.orders.any((pedido) => pedido.isWhatsappManual))
+                  _FilterChip(
+                    label: 'WhatsApp',
+                    selected: _filter == OrderStatusBucket.whatsappManual,
+                    onTap: () => setState(
+                      () => _filter = OrderStatusBucket.whatsappManual,
+                    ),
+                  ),
                 _FilterChip(
                   label: 'Nuevo',
                   selected: _filter == OrderStatusBucket.pending,
-                  onTap: () => setState(() => _filter = OrderStatusBucket.pending),
+                  onTap: () =>
+                      setState(() => _filter = OrderStatusBucket.pending),
                 ),
                 _FilterChip(
                   label: 'En preparación',
@@ -392,32 +414,32 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
                     onAction: widget.onRetry,
                   )
                 : isInitialLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : filtered.isEmpty && !window.hasMore
-                    ? MerchantEmptyPanel(
-                        title: _activeSearch.isNotEmpty || _filter != null
-                            ? 'Sin resultados'
-                            : 'Sin pedidos',
-                        subtitle: _activeSearch.isNotEmpty || _filter != null
-                            ? 'No hay pedidos que coincidan con este filtro.'
-                            : 'Cuando entren pedidos aparecerán aquí con su estado.',
-                        icon: Icons.receipt_long_outlined,
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _refresh,
-                        child: ListView.separated(
-                          controller: _scrollController,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          itemCount: filtered.length + 1,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            if (index == filtered.length) {
-                              return _buildFooter(window);
-                            }
-                            return widget.itemBuilder(filtered[index]);
-                          },
-                        ),
-                      ),
+                ? const Center(child: CircularProgressIndicator())
+                : filtered.isEmpty && !window.hasMore
+                ? MerchantEmptyPanel(
+                    title: _activeSearch.isNotEmpty || _filter != null
+                        ? 'Sin resultados'
+                        : 'Sin pedidos',
+                    subtitle: _activeSearch.isNotEmpty || _filter != null
+                        ? 'No hay pedidos que coincidan con este filtro.'
+                        : 'Cuando entren pedidos aparecerán aquí con su estado.',
+                    icon: Icons.receipt_long_outlined,
+                  )
+                : RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: ListView.separated(
+                      controller: _scrollController,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      itemCount: filtered.length + 1,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        if (index == filtered.length) {
+                          return _buildFooter(window);
+                        }
+                        return widget.itemBuilder(filtered[index]);
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
@@ -499,7 +521,10 @@ class MerchantClientsWorkspace extends StatelessWidget {
                 children: [
                   const CircleAvatar(
                     backgroundColor: Color(0xFFF3E8FF),
-                    child: Icon(Icons.person_outline_rounded, color: Color(0xFF6D28D9)),
+                    child: Icon(
+                      Icons.person_outline_rounded,
+                      color: Color(0xFF6D28D9),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -588,7 +613,10 @@ class MerchantDigitalMenuWorkspace extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'Es el menú público real, embebido aquí.',
-          style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF6B6F92)),
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            color: const Color(0xFF6B6F92),
+          ),
         ),
         const SizedBox(height: 10),
         ClipRRect(
@@ -757,7 +785,10 @@ class MerchantStatsWorkspace extends StatelessWidget {
         children: [
           Text(
             'Conversión del menú',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: 15),
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
           ),
           const SizedBox(height: 12),
           _funnelRow('Visitas menú', analytics.visits),
@@ -795,7 +826,10 @@ class MerchantStatsWorkspace extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               'Visitas y pedidos (7 días)',
-              style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF6B6F92)),
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                color: const Color(0xFF6B6F92),
+              ),
             ),
             const SizedBox(height: 8),
             SizedBox(
@@ -839,14 +873,20 @@ class MerchantStatsWorkspace extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Barras claras: visitas. Barras moradas: pedidos.',
-              style: GoogleFonts.poppins(fontSize: 11, color: const Color(0xFF9CA3AF)),
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                color: const Color(0xFF9CA3AF),
+              ),
             ),
           ],
           if (analytics.topViewed.isNotEmpty) ...[
             const SizedBox(height: 16),
             Text(
               'Productos más vistos',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: 14),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 8),
             for (final item in analytics.topViewed.take(5))
@@ -859,7 +899,10 @@ class MerchantStatsWorkspace extends StatelessWidget {
                         item.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     Text(
@@ -881,7 +924,13 @@ class MerchantStatsWorkspace extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(label, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+            child: Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           Text(
             value == 0 ? '—' : '$value',
@@ -895,8 +944,17 @@ class MerchantStatsWorkspace extends StatelessWidget {
   Widget _stat(String value, String label) {
     return Column(
       children: [
-        Text(value, style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: 18)),
-        Text(label, style: GoogleFonts.poppins(fontSize: 11, color: const Color(0xFF6B6F92))),
+        Text(
+          value,
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: 18),
+        ),
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            color: const Color(0xFF6B6F92),
+          ),
+        ),
       ],
     );
   }
@@ -934,69 +992,65 @@ class MerchantSettingsHub extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cards = <({
-      IconData icon,
-      String title,
-      String subtitle,
-      VoidCallback onTap,
-    })>[
-      (
-        icon: Icons.storefront_outlined,
-        title: 'Información del negocio',
-        subtitle: comercio.nombre,
-        onTap: onOpenBusiness,
-      ),
-      (
-        icon: Icons.schedule_rounded,
-        title: 'Horarios',
-        subtitle: hoursSubtitle,
-        onTap: onOpenHours,
-      ),
-      (
-        icon: Icons.palette_outlined,
-        title: 'Logo y apariencia',
-        subtitle: 'Colores, tipografía y diseño del menú',
-        onTap: onOpenAppearance,
-      ),
-      (
-        icon: Icons.home_outlined,
-        title: 'Pantalla de inicio',
-        subtitle: 'Menú, comer aquí, para llevar, delivery y calificación',
-        onTap: onOpenKioskHome,
-      ),
-      (
-        icon: Icons.delivery_dining_outlined,
-        title: 'Delivery',
-        subtitle: 'Tarifas, zonas y delivery gratis',
-        onTap: onOpenDelivery,
-      ),
-      (
-        icon: Icons.payments_outlined,
-        title: 'Cobros y tasa',
-        subtitle: 'Monedas y métodos de pago',
-        onTap: onOpenPayments,
-      ),
-      (
-        icon: Icons.tune_rounded,
-        title: 'Operación y WhatsApp',
-        subtitle: (comercio.whatsapp ?? '').trim().isEmpty
-            ? 'Dirección, entrega y contacto'
-            : comercio.whatsapp!.trim(),
-        onTap: onOpenOperations,
-      ),
-      (
-        icon: Icons.group_outlined,
-        title: 'Usuarios',
-        subtitle: 'Invita caja, cocina o marketing',
-        onTap: onOpenUsers,
-      ),
-      (
-        icon: Icons.workspace_premium_outlined,
-        title: 'Plan actual',
-        subtitle: planName,
-        onTap: onOpenPlan,
-      ),
-    ];
+    final cards =
+        <({IconData icon, String title, String subtitle, VoidCallback onTap})>[
+          (
+            icon: Icons.storefront_outlined,
+            title: 'Información del negocio',
+            subtitle: comercio.nombre,
+            onTap: onOpenBusiness,
+          ),
+          (
+            icon: Icons.schedule_rounded,
+            title: 'Horarios',
+            subtitle: hoursSubtitle,
+            onTap: onOpenHours,
+          ),
+          (
+            icon: Icons.palette_outlined,
+            title: 'Logo y apariencia',
+            subtitle: 'Colores, tipografía y diseño del menú',
+            onTap: onOpenAppearance,
+          ),
+          (
+            icon: Icons.home_outlined,
+            title: 'Pantalla de inicio',
+            subtitle: 'Menú, comer aquí, para llevar, delivery y calificación',
+            onTap: onOpenKioskHome,
+          ),
+          (
+            icon: Icons.delivery_dining_outlined,
+            title: 'Delivery',
+            subtitle: 'Tarifas, zonas y delivery gratis',
+            onTap: onOpenDelivery,
+          ),
+          (
+            icon: Icons.payments_outlined,
+            title: 'Cobros y tasa',
+            subtitle: 'Monedas y métodos de pago',
+            onTap: onOpenPayments,
+          ),
+          (
+            icon: Icons.tune_rounded,
+            title: 'Operación y WhatsApp',
+            subtitle: (comercio.whatsapp ?? '').trim().isEmpty
+                ? 'Dirección, entrega y contacto'
+                : comercio.whatsapp!.trim(),
+            onTap: onOpenOperations,
+          ),
+          (
+            icon: Icons.group_outlined,
+            title: 'Usuarios',
+            subtitle: 'Invita caja, cocina o marketing',
+            onTap: onOpenUsers,
+          ),
+          (
+            icon: Icons.workspace_premium_outlined,
+            title: 'Plan actual',
+            subtitle: planName,
+            onTap: onOpenPlan,
+          ),
+        ];
 
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -1047,7 +1101,10 @@ class MerchantSettingsHub extends StatelessWidget {
                       ],
                     ),
                   ),
-                          const Icon(Icons.chevron_right_rounded, color: Color(0xFF9CA3AF)),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Color(0xFF9CA3AF),
+                  ),
                 ],
               ),
             ),
@@ -1066,7 +1123,8 @@ class MerchantMarketingWorkspace extends StatefulWidget {
       _MerchantMarketingWorkspaceState();
 }
 
-class _MerchantMarketingWorkspaceState extends State<MerchantMarketingWorkspace> {
+class _MerchantMarketingWorkspaceState
+    extends State<MerchantMarketingWorkspace> {
   bool _loading = true;
   String? _error;
   List<CategoryModel> _categories = const [];
@@ -1090,17 +1148,28 @@ class _MerchantMarketingWorkspaceState extends State<MerchantMarketingWorkspace>
       final results = await Future.wait<dynamic>([
         client.from('categorias').select().eq('comercio_id', comercioId),
         client.from('productos').select().eq('comercio_id', comercioId),
-        client.from('comercios').select('moneda').eq('id', comercioId).maybeSingle(),
+        client
+            .from('comercios')
+            .select('moneda')
+            .eq('id', comercioId)
+            .maybeSingle(),
       ]);
       if (!mounted) return;
       setState(() {
         _categories = (results[0] as List<dynamic>)
-            .map((row) => CategoryModel.fromMap(Map<String, dynamic>.from(row as Map)))
+            .map(
+              (row) =>
+                  CategoryModel.fromMap(Map<String, dynamic>.from(row as Map)),
+            )
             .toList(growable: false);
         _products = (results[1] as List<dynamic>)
-            .map((row) => ProductModel.fromMap(Map<String, dynamic>.from(row as Map)))
+            .map(
+              (row) =>
+                  ProductModel.fromMap(Map<String, dynamic>.from(row as Map)),
+            )
             .toList(growable: false);
-        final currency = (results[2] as Map?)?['moneda']?.toString().trim() ?? 'USD';
+        final currency =
+            (results[2] as Map?)?['moneda']?.toString().trim() ?? 'USD';
         _currency = currency.isEmpty ? 'USD' : currency;
         _loading = false;
       });

@@ -30,6 +30,7 @@ function buildPedido(overrides?: {
   phone?: string;
   address?: string;
   estado?: string;
+  managementMode?: string;
 }) {
   const orderId = overrides?.orderId ?? 'comercio-demo-1710000000000';
   const token = overrides?.token ?? generatePublicTrackingToken();
@@ -48,6 +49,7 @@ function buildPedido(overrides?: {
       cliente_email: overrides?.email ?? 'secret@example.com',
       telefono_cliente: overrides?.phone ?? '+573001112233',
       detalles: {
+        management_mode: overrides?.managementMode,
         order_id: orderId,
         public_tracking_token_hash: hash,
         cliente_email: overrides?.email ?? 'secret@example.com',
@@ -344,6 +346,28 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
 
     return import('../../app/api/orders/[orderId]/route');
   }
+
+  it('manual orders allow authorized consultation but reject workflow changes', async () => {
+    const pedido = buildPedido({ managementMode: 'whatsapp_manual' });
+    const { GET, PATCH } = await loadRouteWithMock(pedido);
+    const orderId = pedido.row.detalles.order_id;
+    const headers = { 'x-order-customer-email': 'secret@example.com', 'Content-Type': 'application/json' };
+    const response = await GET(new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, { headers }), {
+      params: Promise.resolve({ orderId }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.managementMode).toBe('whatsapp_manual');
+    for (const action of [
+      { action: 'cancel', source: 'cliente', reason: 'Cambio de planes' },
+      { action: 'confirm_received' },
+      { action: 'submit_rating', rating: 5 },
+    ]) {
+      const mutation = await PATCH(new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
+        method: 'PATCH', headers, body: JSON.stringify(action),
+      }), { params: Promise.resolve({ orderId }) });
+      expect(mutation.status).toBe(409);
+    }
+  });
 
   it('rejects GET without token', async () => {
     const pedido = buildPedido();

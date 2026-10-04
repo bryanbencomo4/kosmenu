@@ -62,7 +62,10 @@ class DeliveryCourierService {
     return value.replaceAll(RegExp(r'\D'), '');
   }
 
-  static String normalizeToE164({required String digits, required String dialCode}) {
+  static String normalizeToE164({
+    required String digits,
+    required String dialCode,
+  }) {
     final onlyDigits = normalizeDigits(digits);
     final onlyDial = normalizeDigits(dialCode);
     if (onlyDigits.isEmpty || onlyDial.isEmpty) return '';
@@ -95,7 +98,10 @@ class DeliveryCourierService {
 
       if (response is! List) return const <DeliveryCourier>[];
       return response
-          .map((item) => DeliveryCourier.fromMap(Map<String, dynamic>.from(item as Map)))
+          .map(
+            (item) =>
+                DeliveryCourier.fromMap(Map<String, dynamic>.from(item as Map)),
+          )
           .where((courier) => courier.id.isNotEmpty)
           .toList(growable: false);
     } catch (_) {
@@ -123,7 +129,9 @@ class DeliveryCourierService {
     if (response is! List || response.isEmpty) {
       throw StateError('No se recibio confirmacion al guardar el repartidor.');
     }
-    return DeliveryCourier.fromMap(Map<String, dynamic>.from(response.first as Map));
+    return DeliveryCourier.fromMap(
+      Map<String, dynamic>.from(response.first as Map),
+    );
   }
 
   static Future<void> touchLastUsed(String courierId) async {

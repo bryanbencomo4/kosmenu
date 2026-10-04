@@ -18,6 +18,49 @@ Widget selector({String? value, ValueChanged<String>? onChanged}) =>
     );
 
 void main() {
+  testWidgets(
+    'management selection remains independent and preserves format on return',
+    (tester) async {
+      var mode = 'platform';
+      var format = 'summary';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: StatefulBuilder(
+                builder: (context, update) => WhatsappOrderFormatSelector(
+                  value: format,
+                  managementMode: mode,
+                  showManagementMode: true,
+                  titleColor: Colors.black,
+                  descriptionColor: Colors.grey,
+                  activeColor: Colors.green,
+                  onChanged: (next) => update(() => format = next),
+                  onManagementModeChanged: (next) => update(() {
+                    mode = next;
+                    if (next == 'whatsapp_manual') format = 'detailed';
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Comanda por WhatsApp'));
+      await tester.pump();
+      expect(format, 'detailed');
+      expect(mode, 'platform');
+      await tester.tap(find.text('Gestionar manualmente por WhatsApp'));
+      await tester.pump();
+      expect(mode, 'whatsapp_manual');
+      expect(format, 'detailed');
+      await tester.tap(find.text('Gestionar desde ElMenúXFA'));
+      await tester.pump();
+      expect(mode, 'platform');
+      expect(format, 'detailed');
+    },
+  );
+
   for (final width in [320.0, 390.0, 768.0]) {
     testWidgets('selector defaults to summary and fits at $width pixels', (
       tester,

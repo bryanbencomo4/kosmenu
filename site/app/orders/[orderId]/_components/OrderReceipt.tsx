@@ -30,6 +30,7 @@ type OrderReceiptProps = {
   createdAtLabel: string;
   status: 'pendiente' | 'confirmado' | 'preparando' | 'en_camino' | 'cancelado' | 'entregado';
   isDelivery: boolean;
+  managementMode?: 'platform' | 'whatsapp_manual';
   estimatedDeliveryLabel: string | null;
   locationHint: string;
   pickupAddress: string;
@@ -201,9 +202,13 @@ export function OrderReceipt(props: OrderReceiptProps) {
   const [cancelReason, setCancelReason] = useState('');
   const [selectedServiceRating, setSelectedServiceRating] = useState(0);
 
-  const copy = STATUS_COPY[props.status];
-  const isCancelled = props.status === 'cancelado';
-  const isDelivered = props.status === 'entregado';
+  const manualManagement = props.managementMode === 'whatsapp_manual';
+  const copy = manualManagement ? {
+    title: '📲 Gestionado por WhatsApp',
+    headline: 'El comercio continuará la coordinación de este pedido directamente contigo.',
+  } : STATUS_COPY[props.status];
+  const isCancelled = !manualManagement && props.status === 'cancelado';
+  const isDelivered = !manualManagement && props.status === 'entregado';
   const hasQuickActions = Boolean(
     props.canRepeatOrder ||
       props.repeatClosedReason ||
@@ -286,13 +291,13 @@ export function OrderReceipt(props: OrderReceiptProps) {
             {copy.title}
           </span>
           <p
-            className={`${headingFont.className} mt-2 text-[22px] font-extrabold leading-7 tracking-[-0.04em] text-[#111827]`}
+            className={`${headingFont.className} mt-2 ${manualManagement ? 'text-base leading-6 tracking-normal' : 'text-[22px] leading-7 tracking-[-0.04em]'} font-extrabold text-[#111827]`}
             style={{ fontFamily: props.colors.titleFont }}
           >
             {copy.headline}
           </p>
 
-          {!isCancelled ? (
+          {!manualManagement && !isCancelled ? (
             <div className="mt-4">
               <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
@@ -341,7 +346,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
             </p>
           ) : null}
 
-          {props.status === 'pendiente' ? (
+          {!manualManagement && props.status === 'pendiente' ? (
             <div className="mt-4 rounded-[16px] bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
               <p className="font-semibold">Esperando confirmación del comercio</p>
               <p className="mt-0.5 text-[13px] opacity-80">
@@ -372,7 +377,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
           ) : null}
         </section>
 
-        {props.canCustomerRateService || props.customerServiceRating !== null ? (
+        {!manualManagement && (props.canCustomerRateService || props.customerServiceRating !== null) ? (
           <section className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50 p-4 sm:p-5">
             <div className="flex items-start gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-amber-600 shadow-sm">
@@ -516,7 +521,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
           </Section>
         ) : null}
 
-        {props.deliveryDelegateLabel ? (
+        {!manualManagement && props.deliveryDelegateLabel ? (
           <Section title="Repartidor" surface={props.colors.surface}>
             <p className="text-sm font-medium text-slate-800">{props.deliveryDelegateLabel}</p>
             {props.deliveryDelegateAcceptedAt ? (
@@ -546,7 +551,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
           <p className="mt-2 text-center text-sm text-slate-600">{props.deliveryConfirmationMessage}</p>
         ) : null}
 
-        {props.canCustomerCancel ? (
+        {!manualManagement && props.canCustomerCancel ? (
           <button
             type="button"
             disabled={props.cancelLoading}
@@ -616,7 +621,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
             </form>
           </div>
         ) : null}
-        {props.showPendingCancelHint ? (
+        {!manualManagement && props.showPendingCancelHint ? (
           <p className="mt-3 text-center text-xs leading-5 text-slate-500">
             Puedes cancelarlo mientras el comercio no lo haya aceptado.
           </p>
@@ -631,7 +636,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
       {hasQuickActions ? (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/80 bg-white/95 px-4 pb-[calc(env(safe-area-inset-bottom)+8px)] pt-2 shadow-[0_-8px_28px_rgba(15,23,42,0.10)] backdrop-blur md:static md:mt-5 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0 md:shadow-none md:backdrop-blur-none">
           <div className="mx-auto w-full max-w-[440px]">
-            {props.canCustomerConfirmDelegatedDelivery ? (
+            {!manualManagement && props.canCustomerConfirmDelegatedDelivery ? (
               <button
                 type="button"
                 disabled={props.deliveryConfirmationLoading}

@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { CurrentAdmin } from './admin-auth';
 import { getAdminSupabaseClient } from './admin-supabase';
+import { isWhatsappManualOrder, normalizeOrderManagementMode } from '../../_lib/order-management-mode';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEKDAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'] as const;
@@ -11,6 +12,7 @@ type KpiTone = 'violet' | 'indigo' | 'emerald' | 'amber' | 'rose' | 'slate';
 type ActivityTone = 'success' | 'warning' | 'danger' | 'info';
 
 type DashboardOrderMetricRow = {
+  management_mode?: string | null;
   id: string;
   comercio_id?: string | null;
   estado?: string | null;
@@ -442,7 +444,7 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       .gte('completed_at', toIso(current7Start)),
     supabase
       .from('pedidos')
-      .select('id,comercio_id,estado,total,created_at')
+      .select('id,comercio_id,estado,total,created_at,management_mode:detalles->>management_mode')
       .gte('created_at', toIso(previous7Start))
       .order('created_at', { ascending: false }),
     supabase
@@ -475,6 +477,7 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
     ...row,
     createdAtMs: toTimestamp(row.created_at),
     normalizedStatus: normalizeOrderStatus(row.estado),
+    manualManagement: normalizeOrderManagementMode(row.management_mode) === 'whatsapp_manual',
     totalAmount: toNumber(row.total),
   }));
   const recentOrderRows = rowsOrThrow<DashboardRecentOrderRow>('recent orders', recentOrdersResult);
@@ -555,8 +558,8 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
   const revenueYesterday = yesterdayOrders.reduce((sum, row) => sum + row.totalAmount, 0);
   const averageTicketToday = todayOrders.length > 0 ? revenueToday / todayOrders.length : 0;
   const averageTicketYesterday = yesterdayOrders.length > 0 ? revenueYesterday / yesterdayOrders.length : 0;
-  const deliveredOrders7d = current7Orders.filter((row) => row.normalizedStatus === 'entregado').length;
-  const pendingOrdersToday = todayOrders.filter((row) => ORDER_OPEN_STATUSES.has(row.normalizedStatus)).length;
+  const deliveredOrders7d = current7Orders.filter((row) => !row.manualManagement && row.normalizedStatus === 'entregado').length;
+  const pendingOrdersToday = todayOrders.filter((row) => !row.manualManagement && ORDER_OPEN_STATUSES.has(row.normalizedStatus)).length;
   const deliveryOpenCount = pendingInvitesCount + inRouteInvitesCount;
   const deliveryCompletionRate = percentage(completedInvites7dCount, createdInvites7dCount);
   const averageTicket7d = current7Orders.length > 0
@@ -638,7 +641,7 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       business: businessName,
       customer: row.nombre_cliente?.trim() || 'Cliente',
       amount: toNumber(row.total),
-      status: formatOrderStatus(normalizedStatus),
+      status: isWhatsappManualOrder(row.detalles) ? 'Gestionado por WhatsApp' : formatOrderStatus(normalizedStatus),
       statusTone: orderTone(normalizedStatus),
       createdLabel: formatRelativeTime(row.created_at, now),
     };
@@ -650,7 +653,7 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       const businessName = row.comercio_id ? commerceNameById.get(row.comercio_id) ?? 'Comercio' : 'Comercio';
 
       return {
-        title: `Pedido ${formatOrderStatus(normalizedStatus)}`,
+        title: isWhatsappManualOrder(row.detalles) ? 'Pedido gestionado por WhatsApp' : `Pedido ${formatOrderStatus(normalizedStatus)}`,
         description: `${businessName} · ${row.nombre_cliente?.trim() || 'Cliente'} · ${currencyFormatter.format(toNumber(row.total))}`,
         time: formatRelativeTime(row.created_at, now),
         tone: orderTone(normalizedStatus),
@@ -756,13 +759,13 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       {
         id: 'orders-pending',
         label: 'Pedidos pendientes',
-        value: current7Orders.filter((row) => row.normalizedStatus === 'pendiente').length.toString(),
+        value: current7Orders.filter((row) => !row.manualManagement && row.normalizedStatus === 'pendiente').length.toString(),
         description: 'Ordenes pendientes detectadas en la ventana operativa reciente.',
       },
       {
         id: 'orders-transit',
         label: 'En camino',
-        value: current7Orders.filter((row) => row.normalizedStatus === 'en_camino').length.toString(),
+        value: current7Orders.filter((row) => !row.manualManagement && row.normalizedStatus === 'en_camino').length.toString(),
         description: 'Pedidos actualmente marcados como en camino.',
       },
       {

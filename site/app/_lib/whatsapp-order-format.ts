@@ -1,4 +1,5 @@
 import { convertOrderAmount, normalizeOrderCurrency } from '../api/_lib/order-currency';
+import { isWhatsappManualOrder } from './order-management-mode';
 
 export type WhatsappOrderFormat = 'summary' | 'detailed';
 
@@ -10,6 +11,7 @@ export function buildClientOrderSummary(input: {
   paymentLabel: string;
   totalLabel: string;
   appOrderUrl: string;
+  managementMode?: 'platform' | 'whatsapp_manual';
 }) {
   return [
     `🆕 *NUEVO PEDIDO #${input.orderId}*`,
@@ -22,7 +24,7 @@ export function buildClientOrderSummary(input: {
     '',
     `💰 Total: ${input.totalLabel}`,
     '',
-    '⏳ Estado: *Pendiente*',
+    input.managementMode === 'whatsapp_manual' ? '📲 Gestión: Por WhatsApp' : '⏳ Estado: *Pendiente*',
     '',
     '🔗 Ver pedido:',
     input.appOrderUrl,
@@ -71,6 +73,7 @@ function cleanNotes(value: unknown) {
 
 export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): string {
   const details = record(input.details);
+  const manual = isWhatsappManualOrder(details);
   const currency = normalizeOrderCurrency(details.moneda_checkout);
   const baseCurrency = normalizeOrderCurrency(details.moneda_base, currency);
   const exchangeRate = Number(details.tasa_cambio_snapshot);
@@ -151,7 +154,10 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
     if (Number.isFinite(paidWith) && paidWith > 0) lines.push(`Paga con: ${amount(paidWith, currency)}`);
     if (Number.isFinite(change) && change > 0) lines.push(`Cambio: ${amount(change, currency)}`);
   }
-  lines.push('', '⏳ Estado: Pendiente', '', '🔗 *Gestionar pedido*', input.appOrderUrl);
+  lines.push(
+    '', manual ? '📲 Gestión: Por WhatsApp' : '⏳ Estado: Pendiente',
+    '', manual ? '🔗 *Ver pedido*' : '🔗 *Gestionar pedido*', input.appOrderUrl,
+  );
   const message = lines.join('\n');
   if (message.length <= 8000 && encodeURIComponent(message).length <= 18000) return message;
 
@@ -159,12 +165,13 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
     heading,
     totalLabel ? `💰 *TOTAL: ${totalLabel}*` : '',
     `⚠️ Pedido extenso (${items.length} productos). La comanda completa supera el límite de este mensaje. Revisa productos, opciones y observaciones en el enlace antes de preparar.`,
-    '', '🔗 *Gestionar pedido completo*', input.appOrderUrl,
+    ...(manual ? ['📲 Gestión: Por WhatsApp'] : []),
+    '', manual ? '🔗 *Ver pedido completo*' : '🔗 *Gestionar pedido completo*', input.appOrderUrl,
   ].filter((line, index, entries) => line || entries[index + 1]).join('\n');
 }
 
 export function optionalMerchantComanda(commerce: unknown, input: MerchantComandaInput): string | undefined {
-  if (resolveWhatsappOrderFormat(commerce) !== 'detailed') return undefined;
+  if (!isWhatsappManualOrder(input.details) && resolveWhatsappOrderFormat(commerce) !== 'detailed') return undefined;
   try {
     return buildDetailedMerchantWhatsappText(input);
   } catch {

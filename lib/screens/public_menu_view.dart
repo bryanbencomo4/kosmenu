@@ -509,6 +509,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     required String deliveryReference,
     required String deliveryInstructions,
     required String orderNotes,
+    bool manualManagement = false,
   }) {
     final buffer = StringBuffer(
       'Pedido $orderId\nHola $comercioNombre, quiero pedir:\n',
@@ -541,7 +542,12 @@ class _PublicMenuViewState extends State<PublicMenuView> {
     }
     buffer.writeln('Metodo de pago: $paymentMethod');
     buffer.writeln('Total: ${_formatUsd(totalUsd)}$copSection');
-    buffer.write('Seguimiento: $trackingUrl');
+    if (manualManagement) {
+      buffer.writeln('Gestión: Por WhatsApp');
+      buffer.write('Ver pedido: $trackingUrl');
+    } else {
+      buffer.write('Seguimiento: $trackingUrl');
+    }
 
     return buffer.toString();
   }
@@ -1567,6 +1573,9 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                           comercioNombre: data.comercioNombre,
                                           orderId: created.orderId,
                                           trackingUrl: created.trackingUrl,
+                                          manualManagement:
+                                              created.managementMode ==
+                                              'whatsapp_manual',
                                           items: cartItems,
                                           totalUsd: totalUsd,
                                           totalCop: totalCop,

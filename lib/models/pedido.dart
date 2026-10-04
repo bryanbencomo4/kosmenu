@@ -35,6 +35,12 @@ class PedidoModel {
 
   bool get hasComprobante => comprobanteRef != null;
 
+  String get managementMode => detalles['management_mode'] == 'whatsapp_manual'
+      ? 'whatsapp_manual'
+      : 'platform';
+
+  bool get isWhatsappManual => managementMode == 'whatsapp_manual';
+
   String? get paymentReference => _asTrimmedString(detalles['referencia_pago']);
 
   String? get merchantOrderNotes => _resolveOrderNotes(orderNotes);

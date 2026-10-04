@@ -61,7 +61,7 @@ export function KioskVoucher({
             }}
           >
             <Check className="h-3.5 w-3.5" strokeWidth={2.6} />
-            Pedido recibido
+            {voucher.managementMode === 'whatsapp_manual' ? 'Gestionado por WhatsApp' : 'Pedido recibido'}
           </span>
           <h1 className={`${titleFont.className} mt-3 text-[32px] font-extrabold tracking-[-0.05em] text-[var(--menu-text)]`}>
             {voucher.orderId}

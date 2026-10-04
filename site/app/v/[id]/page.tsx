@@ -68,6 +68,7 @@ import {
 } from '../../_lib/menu-product-options';
 import { consumeRepeatOrder } from '../../_lib/repeat-order';
 import { buildClientOrderSummary } from '../../_lib/whatsapp-order-format';
+import { normalizeOrderManagementMode } from '../../_lib/order-management-mode';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
 import { trackMenuFunnelEvent, trackPublicMenuVisit } from './_lib/track-menu-analytics';
 import {
@@ -1773,6 +1774,7 @@ export default function PublicMenuPage() {
       }
 
       setKioskVoucher({
+        managementMode: normalizeOrderManagementMode(parsed.managementMode),
         orderId: parsed.orderId,
         orderUrl: parsed.orderUrl,
         whatsappUrl: typeof parsed.whatsappUrl === 'string' ? parsed.whatsappUrl : '',
@@ -4275,11 +4277,13 @@ export default function PublicMenuPage() {
           paymentLabel,
           totalLabel: formatAmountByCurrency(totalConverted, paymentMeta.currency),
           appOrderUrl: smartOrderUrl,
+          managementMode: normalizeOrderManagementMode(responsePayload?.data?.managementMode),
         });
 
     return {
       orderId,
       orderUrl,
+      managementMode: normalizeOrderManagementMode(responsePayload?.data?.managementMode),
       waUrl: whatsappNumber
         ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
         : '',
@@ -4439,6 +4443,7 @@ export default function PublicMenuPage() {
         ),
       }));
       const voucher: KioskVoucherData = {
+        managementMode: persisted.managementMode,
         orderId: persisted.orderId,
         orderUrl: persisted.orderUrl,
         whatsappUrl: persisted.waUrl,

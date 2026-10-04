@@ -22,6 +22,7 @@ export type KioskProduct = {
 };
 
 export type KioskVoucherData = {
+  managementMode?: 'platform' | 'whatsapp_manual';
   orderId: string;
   orderUrl: string;
   whatsappUrl?: string;

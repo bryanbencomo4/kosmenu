@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { NextResponse } from 'next/server';
+import { isWhatsappManualOrder } from '../../../../_lib/order-management-mode';
 
 import { courierOrderCookie } from '../../../_lib/courier-order-link';
 import {
@@ -309,9 +310,10 @@ async function buildPayload(
   const orderBlocked = orderStatus === 'cancelado' || orderStatus === 'entregado';
   const isDeliveryOrder = delivery.mode === 'delivery';
 
-  const canAccept = invitationStatus === 'pending' && !isExpired && !orderBlocked && isDeliveryOrder;
+  const manualManagement = isWhatsappManualOrder(detalles);
+  const canAccept = !manualManagement && invitationStatus === 'pending' && !isExpired && !orderBlocked && isDeliveryOrder;
   const canMarkArrived =
-    (invitationStatus === 'accepted' || invitationStatus === 'arrived') &&
+    !manualManagement && (invitationStatus === 'accepted' || invitationStatus === 'arrived') &&
     !orderBlocked &&
     isDeliveryOrder;
 
@@ -494,6 +496,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     }
 
     const invitation = context.invitation;
+    if (isWhatsappManualOrder(context.pedido.detalles)) {
+      return NextResponse.json(
+        { ok: false, code: 'ORDER_MANAGED_BY_WHATSAPP', error: 'Este pedido se gestiona manualmente por WhatsApp.' },
+        { status: 409 },
+      );
+    }
     const orderStatus = normalizeOrderStatus(context.pedido.estado);
     const delivery = parseDelivery(context.pedido.detalles ?? {});
     const nowIso = new Date().toISOString();

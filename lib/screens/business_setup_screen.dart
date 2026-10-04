@@ -315,6 +315,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   bool _allowDelivery = false;
   bool _receiveOrdersOnWhatsapp = true;
   String _whatsappOrderFormat = 'summary';
+  String _orderManagementMode = 'platform';
   bool _isVirtualBusiness = false;
 
   /// Hidden until the public business directory ships on the landing page.
@@ -718,6 +719,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final seedBusinessConfig = _toStringDynamicMap(
       seedBranding['config_negocio'],
     );
+    _orderManagementMode =
+        seedBusinessConfig['order_management_mode'] == 'whatsapp_manual'
+        ? 'whatsapp_manual'
+        : 'platform';
     _whatsappOrderFormat =
         seedBusinessConfig['whatsapp_order_format'] == 'detailed'
         ? 'detailed'
@@ -4494,6 +4499,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         case MerchantBusinessSettingsSection.operations:
           final message = _operationValidationMessage();
           if (message != null) throw FormatException(message);
+          if (_orderManagementMode == 'whatsapp_manual' &&
+              !_receiveOrdersOnWhatsapp) {
+            throw const FormatException(
+              'Activa la recepción por WhatsApp y configura un número válido para usar gestión manual.',
+            );
+          }
           await _writeComercioFields(
             <String, dynamic>{
               'whatsapp': _whatsappE164.isEmpty ? null : _whatsappE164,
@@ -8116,7 +8127,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final config = Map<String, dynamic>.from(
       _toStringDynamicMap(branding['config_negocio']),
     );
-    config['whatsapp_order_format'] = _whatsappOrderFormat == 'detailed'
+    config['order_management_mode'] = _orderManagementMode == 'whatsapp_manual'
+        ? 'whatsapp_manual'
+        : 'platform';
+    config['whatsapp_order_format'] =
+        _orderManagementMode == 'whatsapp_manual' ||
+            _whatsappOrderFormat == 'detailed'
         ? 'detailed'
         : 'summary';
     branding['config_negocio'] = config;
@@ -10571,6 +10587,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           const SizedBox(height: 20),
           WhatsappOrderFormatSelector(
             value: _whatsappOrderFormat,
+            showManagementMode: true,
+            managementMode: _orderManagementMode,
+            onManagementModeChanged:
+                _saving || !MerchantSession.canManageSettings
+                ? null
+                : (value) => setState(() {
+                    _orderManagementMode = value;
+                    if (value == 'whatsapp_manual') {
+                      _whatsappOrderFormat = 'detailed';
+                      _receiveOrdersOnWhatsapp = true;
+                    }
+                  }),
             titleColor: _setupTextHigh,
             descriptionColor: _setupTextMedium,
             activeColor: _palette.primary,

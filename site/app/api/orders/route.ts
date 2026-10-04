@@ -37,6 +37,7 @@ import {
 } from '../_lib/order-item-snapshots';
 import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
 import { optionalMerchantComanda } from '../../_lib/whatsapp-order-format';
+import { resolveCommerceManagementMode } from '../../_lib/order-management-mode';
 import { extractDeliveryConfigSource, parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
   createCustomerRatingKey,
@@ -611,6 +612,7 @@ export async function POST(request: Request) {
     const trackingUrl = `${trackingPath}?t=${encodeURIComponent(publicTrackingToken)}`;
 
     const detalles = {
+      management_mode: resolveCommerceManagementMode(comercioRow),
       order_id: orderId,
       tracking_url: trackingUrl,
       public_tracking_token_hash: publicTrackingTokenHash,
@@ -761,6 +763,7 @@ export async function POST(request: Request) {
         orderId,
         comercioId: resolvedComercioId,
         estado: 'pendiente' as const,
+        managementMode: detalles.management_mode,
         confirmation: 'Pedido confirmado' as const,
         subtotal,
         costoDelivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,

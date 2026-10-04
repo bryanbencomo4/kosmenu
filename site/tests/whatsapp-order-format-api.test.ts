@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   commerceId: '11111111-1111-4111-8111-111111111111',
   format: undefined as string | undefined,
+  managementMode: undefined as string | undefined,
   failConfigReads: false,
   inserts: [] as Record<string, unknown>[],
   commerceReads: [] as string[],
@@ -38,7 +39,7 @@ vi.mock('../app/api/_lib/supabase-server', () => ({
           if (state.failConfigReads && configRequested) return { data: null, error: { message: 'config read failed' } };
           const row = {
             id: state.commerceId, slug: 'preview', moneda: 'COP', en_linea: true,
-            ...(configRequested ? { config_negocio: { whatsapp_order_format: state.format } } : {}),
+            ...(configRequested ? { config_negocio: { whatsapp_order_format: state.format, order_management_mode: state.managementMode } } : {}),
           };
           return { data: singleton ? row : [row], error: null };
         }
@@ -90,6 +91,7 @@ async function submit(extra: Record<string, unknown> = {}) {
 describe('per-commerce authoritative WhatsApp format at creation', () => {
   beforeEach(() => {
     state.format = undefined;
+    state.managementMode = undefined;
     state.failConfigReads = false;
     state.commerceId = '11111111-1111-4111-8111-111111111111';
     state.inserts = [];
@@ -97,7 +99,9 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
   });
 
   it('default response remains summary even when the request tries to opt in', async () => {
-    const data = await submit({ whatsapp_order_format: 'detailed', detalles: { config_negocio: { whatsapp_order_format: 'detailed' } } });
+    const data = await submit({ whatsapp_order_format: 'detailed', detalles: { management_mode: 'whatsapp_manual', config_negocio: { whatsapp_order_format: 'detailed', order_management_mode: 'whatsapp_manual' } } });
+    expect(data.managementMode).toBe('platform');
+    expect((state.inserts[0].detalles as Record<string, unknown>).management_mode).toBe('platform');
     expect(data).not.toHaveProperty('merchantWhatsappText');
     expect(state.commerceReads).toHaveLength(1);
     expect(state.inserts).toHaveLength(1);
@@ -123,6 +127,41 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
       '22222222-2222-4222-8222-222222222222',
       '11111111-1111-4111-8111-111111111111',
     ]);
+  });
+
+  it('management snapshots survive both setting changes and never leak to tenant B', async () => {
+    state.managementMode = 'whatsapp_manual';
+    const manual = await submit();
+    expect(manual.managementMode).toBe('whatsapp_manual');
+    expect(manual.merchantWhatsappText).toContain('Gestión: Por WhatsApp');
+    expect(manual.merchantWhatsappText).not.toContain('Estado: Pendiente');
+    const oldManual = state.inserts[0].detalles as Record<string, unknown>;
+    state.managementMode = 'platform';
+    const platform = await submit();
+    expect(platform.managementMode).toBe('platform');
+    expect(oldManual.management_mode).toBe('whatsapp_manual');
+    const oldPlatform = state.inserts[1].detalles as Record<string, unknown>;
+    state.managementMode = 'whatsapp_manual';
+    await submit();
+    expect(oldPlatform.management_mode).toBe('platform');
+    state.commerceId = '22222222-2222-4222-8222-222222222222';
+    state.managementMode = undefined;
+    expect((await submit()).managementMode).toBe('platform');
+    expect(state.inserts).toHaveLength(4);
+  });
+  it('manual delivery exists without acceptance or an automatic courier mission', async () => {
+    state.managementMode = 'whatsapp_manual';
+    const result = await submit({
+      costoDelivery: 2000,
+      delivery: { mode: 'delivery', address: 'Calle Preview 1', reference: 'Puerta azul', coordinates: { lat: 7.8, lng: -72.2 } },
+    });
+    expect(result.managementMode).toBe('whatsapp_manual');
+    expect(result.estado).toBe('pendiente');
+    expect(result.merchantWhatsappText).toContain('DELIVERY');
+    expect(result.merchantWhatsappText).toContain('Calle Preview 1');
+    const details = state.inserts[0].detalles as Record<string, unknown>;
+    expect(details).not.toHaveProperty('delivery_delegate');
+    expect(state.inserts).toHaveLength(1);
   });
 
   it('failed optional configuration reads do not block creation or force detailed', async () => {

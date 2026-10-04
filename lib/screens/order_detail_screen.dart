@@ -829,6 +829,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
 
     final latestStatus = _normalizeStatusValue(latest.pedido.estado);
+    if (latest.pedido.isWhatsappManual) {
+      setState(() => _cachedOrderData = latest);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Este pedido se gestiona directamente por WhatsApp. Solo permite consulta.',
+          ),
+        ),
+      );
+      return;
+    }
     _lastKnownStatus = latestStatus;
 
     if (latestStatus == 'cancelado') {
@@ -1041,7 +1052,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       );
       return;
     }
-
     final text = Uri.encodeComponent(
       message ??
           'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.',
@@ -1197,6 +1207,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     String? invitedPhone,
     String? invitedAlias,
   }) async {
+    if (_cachedOrderData?.pedido.isWhatsappManual == true) return null;
     final response = await Supabase.instance.client.rpc(
       'create_delivery_invitation',
       params: {
@@ -1222,7 +1233,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
   Future<bool> _ensureDeliveryModeForInvitation() async {
     final current = _cachedOrderData?.pedido;
-    if (current == null) return false;
+    if (current == null || current.isWhatsappManual) return false;
     if ((current.deliveryMode ?? '').trim().toLowerCase() == 'delivery') {
       return true;
     }
@@ -1292,7 +1303,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       );
       return;
     }
-
     setState(() {
       _isManagingDeliveryInvite = true;
       _deliveryInviteFeedback = null;
@@ -2255,9 +2265,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     required bool hasDeliveryCoords,
     required LatLng? deliveryPoint,
     required LatLng? businessPoint,
-    required Set<Marker> markers,
-    required Set<Polyline> polylines,
-    required List<LatLng> cameraPoints,
     required bool shouldShowNextStepCard,
     required bool whatsappNotificationsEnabled,
     required bool isOrderFinalized,
@@ -2286,47 +2293,55 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
     Widget? mapPreview;
     if (hasDeliveryCoords && deliveryPoint != null && !_deferredVisualsReady) {
-      mapPreview = const ColoredBox(
+      const placeholder = ColoredBox(
         color: Color(0xFFE9EEF5),
         child: Center(
           child: Icon(Icons.map_outlined, color: Color(0xFF94A3B8), size: 30),
         ),
       );
+      mapPreview = placeholder;
     } else if (hasDeliveryCoords && deliveryPoint != null) {
-      mapPreview = GoogleMapsSdkGate(
-        loading: const ColoredBox(
-          color: Color(0xFFE9EEF5),
-          child: Center(
-            child: Icon(Icons.map_outlined, color: Color(0xFF94A3B8), size: 30),
-          ),
-        ),
-        child: GoogleMap(
-          initialCameraPosition: CameraPosition(
-            target: deliveryPoint,
-            zoom: 14,
-          ),
-          markers: markers,
-          polylines: polylines,
-          myLocationButtonEnabled: false,
-          zoomControlsEnabled: false,
-          mapToolbarEnabled: false,
-          compassEnabled: false,
-          liteModeEnabled: !kIsWeb && !Platform.isIOS,
-          gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-            Factory<OneSequenceGestureRecognizer>(
-              () => EagerGestureRecognizer(),
-            ),
-          },
-          onMapCreated: (controller) {
-            if (cameraPoints.length >= 2) {
-              controller.moveCamera(
-                CameraUpdate.newLatLngBounds(_buildBounds(cameraPoints), 28),
-              );
-            }
-          },
-        ),
+      mapPreview = KitchenStaticMapPreview(
+        deliveryLatitude: deliveryPoint.latitude,
+        deliveryLongitude: deliveryPoint.longitude,
+        businessLatitude: businessPoint?.latitude,
+        businessLongitude: businessPoint?.longitude,
       );
     }
+
+    final stickyActions = shouldShowNextStepCard
+        ? KitchenMockupActionsBar(
+            estado: pedido.estado ?? 'pendiente',
+            isDelivery: isDeliveryOrder,
+            isBusy: _isUpdatingStatus,
+            busyStatus: _pendingStatus,
+            hidePrimaryAction: isDelegatedDelivery,
+            onStatus: (status) {
+              unawaited(
+                _runKitchenStatusAction(
+                  status: status,
+                  pedido: pedido,
+                  isDeliveryOrder: isDeliveryOrder,
+                  isDelegatedDelivery: isDelegatedDelivery,
+                  comercioNombre: data.comercioNombre,
+                  deliveryDelegateInvitedPhone: deliveryDelegateInvitedPhone,
+                ),
+              );
+            },
+            onCancel: () {
+              unawaited(
+                _runKitchenStatusAction(
+                  status: 'cancelado',
+                  pedido: pedido,
+                  isDeliveryOrder: isDeliveryOrder,
+                  isDelegatedDelivery: isDelegatedDelivery,
+                  comercioNombre: data.comercioNombre,
+                  deliveryDelegateInvitedPhone: deliveryDelegateInvitedPhone,
+                ),
+              );
+            },
+          )
+        : null;
 
     return ColoredBox(
       color: KitchenMockupColors.background,
@@ -2337,6 +2352,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               padding: const EdgeInsets.only(bottom: 20),
               children: [
                 KitchenOrderHeader(
+                  manualManagement: pedido.isWhatsappManual,
                   businessName: data.comercioNombre,
                   orderId: orderLabel,
                   statusLabel: visualStatusLabel,
@@ -2391,11 +2407,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       : () => unawaited(_openCustomerCall(phone)),
                 ),
                 KitchenPrepSection(items: pedido.items, orderNotes: orderNotes),
-                KitchenStatusTimeline(
-                  pedido: pedido,
-                  isDelivery: isDeliveryOrder,
-                ),
-                if (isDelegatedDelivery && !isOrderFinalized)
+                if (pedido.isWhatsappManual)
+                  const KitchenWhatsappManualNotice()
+                else
+                  KitchenStatusTimeline(
+                    pedido: pedido,
+                    isDelivery: isDeliveryOrder,
+                  ),
+                if (!pedido.isWhatsappManual &&
+                    isDelegatedDelivery &&
+                    !isOrderFinalized)
                   KitchenDelegationCard(
                     courierName: deliveryDelegateAlias,
                     courierPhone: deliveryDelegatePhoneDisplay,
@@ -2415,43 +2436,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                       _takeOverDeliveryManually(
                         currentStatus: pedido.estado ?? 'pendiente',
                       ),
-                    ),
-                  ),
-                if (shouldShowNextStepCard)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: KitchenMockupActionsBar(
-                      estado: pedido.estado ?? 'pendiente',
-                      isDelivery: isDeliveryOrder,
-                      isBusy: _isUpdatingStatus,
-                      busyStatus: _pendingStatus,
-                      hidePrimaryAction: isDelegatedDelivery,
-                      onStatus: (status) {
-                        unawaited(
-                          _runKitchenStatusAction(
-                            status: status,
-                            pedido: pedido,
-                            isDeliveryOrder: isDeliveryOrder,
-                            isDelegatedDelivery: isDelegatedDelivery,
-                            comercioNombre: data.comercioNombre,
-                            deliveryDelegateInvitedPhone:
-                                deliveryDelegateInvitedPhone,
-                          ),
-                        );
-                      },
-                      onCancel: () {
-                        unawaited(
-                          _runKitchenStatusAction(
-                            status: 'cancelado',
-                            pedido: pedido,
-                            isDeliveryOrder: isDeliveryOrder,
-                            isDelegatedDelivery: isDelegatedDelivery,
-                            comercioNombre: data.comercioNombre,
-                            deliveryDelegateInvitedPhone:
-                                deliveryDelegateInvitedPhone,
-                          ),
-                        );
-                      },
                     ),
                   ),
                 KitchenDeliveryCard(
@@ -2474,6 +2458,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               ],
             ),
           ),
+          if (stickyActions != null)
+            SafeArea(
+              top: false,
+              child: Material(
+                color: KitchenMockupColors.card,
+                elevation: 10,
+                shadowColor: Colors.black.withValues(alpha: 0.08),
+                child: stickyActions,
+              ),
+            ),
         ],
       ),
     );
@@ -2751,6 +2745,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     visualStatusCode == 'cancelado' ||
                     deliveryDelegateStatusNormalized == 'completed';
                 final shouldShowNextStepCard =
+                    !pedido.isWhatsappManual &&
                     !isReadOnly &&
                     !isOrderFinalized &&
                     statusActionsForBar.isNotEmpty;
@@ -2964,7 +2959,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   );
                 }
 
-                if (!isReadOnly) {
+                if (!isReadOnly || pedido.isWhatsappManual) {
                   return _buildKitchenMerchantBody(
                     data: data,
                     pedido: pedido,
@@ -2983,9 +2978,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     hasDeliveryCoords: hasDeliveryCoords,
                     deliveryPoint: deliveryPoint,
                     businessPoint: businessPoint,
-                    markers: deliveryMarkers,
-                    polylines: deliveryPolylines,
-                    cameraPoints: cameraPoints,
                     shouldShowNextStepCard: shouldShowNextStepCard,
                     whatsappNotificationsEnabled: whatsappNotificationsEnabled,
                     isOrderFinalized: isOrderFinalized,

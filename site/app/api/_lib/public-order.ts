@@ -1,5 +1,6 @@
 import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
 import { convertOrderAmount, normalizeOrderCurrency } from './order-currency';
+import { resolveOrderManagementMode } from '../../_lib/order-management-mode';
 
 export type PublicOrderStatus =
   | 'pendiente'
@@ -16,6 +17,7 @@ export type PublicOrderStatus =
 export type PublicOrderTrackingResponse = {
   orderId: string;
   status: PublicOrderStatus;
+  managementMode: 'platform' | 'whatsapp_manual';
   createdAt: string;
   cancellation?: {
     reason: 'timeout_no_confirmacion' | 'cancelado_por_cliente';
@@ -174,6 +176,8 @@ export function toPublicOrderTrackingResponse(
 ): PublicOrderTrackingResponse {
   const detalles = order.detalles && typeof order.detalles === 'object' ? order.detalles : {};
   const baseCurrency = normalizeOrderCurrency(detalles.moneda_base ?? comercio?.moneda);
+  const managementMode = resolveOrderManagementMode(detalles);
+  const manual = managementMode === 'whatsapp_manual';
   const requestedCurrency = normalizeOrderCurrency(detalles.moneda_checkout, baseCurrency);
   const rawExchangeRate = Number(detalles.tasa_cambio_snapshot);
   const hasUsableExchangeRate = Number.isFinite(rawExchangeRate) && rawExchangeRate > 0;
@@ -251,7 +255,7 @@ export function toPublicOrderTrackingResponse(
   const delegateStatus = (delegate.status ?? '').toString().trim().toLowerCase() || null;
 
   const persistedStatus = normalizePublicStatus(order.estado);
-  const status = persistedStatus === 'cancelado' || delegateStatus !== 'completed'
+  const status = manual || persistedStatus === 'cancelado' || delegateStatus !== 'completed'
     ? persistedStatus
     : 'entregado';
   const createdAt = (order.created_at ?? new Date().toISOString()).toString();
@@ -271,11 +275,12 @@ export function toPublicOrderTrackingResponse(
       : null;
 
   const customerCanConfirm =
-    CONFIRM_RECEIVED_ALLOWED_STATUSES.has(status) && delegateStatus === 'arrived';
+    !manual && CONFIRM_RECEIVED_ALLOWED_STATUSES.has(status) && delegateStatus === 'arrived';
 
   return {
     orderId,
     status,
+    managementMode,
     createdAt,
     ...(publicCancellationReason ? { cancellation: { reason: publicCancellationReason } } : {}),
     items,
@@ -293,16 +298,16 @@ export function toPublicOrderTrackingResponse(
       : {}),
     currency,
     deliveryType,
-    locationHint: buildLocationHint(deliveryType, status, delegateStatus),
+    locationHint: manual ? null : buildLocationHint(deliveryType, status, delegateStatus),
     deliveryProgress: {
-      delegateStatus,
+      delegateStatus: manual ? null : delegateStatus,
       customerCanConfirm,
     },
     notifications: { whatsappEnabled },
     permissions: {
-      canCancelAsCustomer: status === 'pendiente',
+      canCancelAsCustomer: !manual && status === 'pendiente',
       canConfirmReceived: customerCanConfirm,
-      canRateService: isRateable && customerServiceRating === null,
+      canRateService: !manual && isRateable && customerServiceRating === null,
     },
     serviceRating: { customer: customerServiceRating },
     comercio: {

@@ -17,6 +17,16 @@ const order = {
 const detailed = { branding_ia: { config_negocio: { whatsapp_order_format: 'detailed' } } };
 
 describe('legacy client summary byte-for-byte regression', () => {
+  it('manual fallback never promises platform tracking', () => {
+    const message = buildClientOrderSummary({
+      orderId: order.orderId, customerName: order.customerName,
+      customerWhatsapp: order.customerWhatsapp, deliveryMode: 'pickup',
+      paymentLabel: 'Efectivo', totalLabel: '$ 40.500', appOrderUrl: url,
+      managementMode: 'whatsapp_manual',
+    });
+    expect(message).toContain('📲 Gestión: Por WhatsApp');
+    expect(message).not.toContain('Estado:');
+  });
   it('preserves the existing title, whitespace, payment and secure URL', () => {
     expect(buildClientOrderSummary({
       orderId: order.orderId, customerName: order.customerName,
@@ -48,6 +58,14 @@ describe('strict per-commerce WhatsApp opt-in', () => {
 });
 
 describe('merchant comanda from stored snapshots', () => {
+  it('manual footer is read-only and preserves the exact secure link', () => {
+    const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details, management_mode: 'whatsapp_manual' } });
+    expect(message).toContain('📲 Gestión: Por WhatsApp');
+    expect(message).toContain('🔗 *Ver pedido*');
+    expect(message).not.toContain('Estado: Pendiente');
+    expect(message).not.toContain('Gestionar pedido');
+    expect(message).toContain(url);
+  });
   it('omits missing prices and never prints private payment metadata', () => {
     const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details,
       items: [{ nombre: 'Agua', cantidad: 1, precio: null }],

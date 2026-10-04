@@ -155,6 +155,7 @@ class PublicOrderCreateResult {
     this.total,
     this.confirmationMessage,
     this.merchantWhatsappText,
+    this.managementMode = 'platform',
   });
 
   final String orderId;
@@ -163,6 +164,7 @@ class PublicOrderCreateResult {
   final double? total;
   final String? confirmationMessage;
   final String? merchantWhatsappText;
+  final String managementMode;
 }
 
 class PublicOrderApiException implements Exception {
@@ -487,6 +489,9 @@ class PublicOrderApiService {
         estado: estado.isEmpty ? 'pendiente' : estado,
         total: total,
         confirmationMessage: 'Pedido confirmado',
+        managementMode: map['managementMode'] == 'whatsapp_manual'
+            ? 'whatsapp_manual'
+            : 'platform',
         merchantWhatsappText:
             map['merchantWhatsappText'] is String &&
                 (map['merchantWhatsappText'] as String).trim().isNotEmpty

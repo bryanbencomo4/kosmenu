@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { isWhatsappManualOrder } from '../../../_lib/order-management-mode';
 
 import {
   assertCustomerStatusTransition,
@@ -237,6 +238,12 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     const action = parsed.data;
+    if (isWhatsappManualOrder(order.detalles) && action.action !== 'set_whatsapp_notifications') {
+      return NextResponse.json(
+        { error: 'Este pedido se gestiona por WhatsApp y solo permite consulta de su estado.' },
+        { status: 409 },
+      );
+    }
 
     if (action.action === 'submit_rating') {
       const deliveryDelegate = order.detalles?.delivery_delegate;

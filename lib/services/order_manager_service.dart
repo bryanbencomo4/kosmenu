@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 
-enum OrderStatusBucket { pending, inProgress, completed, canceled }
+enum OrderStatusBucket {
+  pending,
+  inProgress,
+  completed,
+  canceled,
+  whatsappManual,
+}
 
 class OrderManagerService {
   const OrderManagerService._();
 
   static OrderStatusBucket bucketFor(PedidoModel pedido) {
+    if (pedido.isWhatsappManual) return OrderStatusBucket.whatsappManual;
     return bucketForRawStatus(effectiveRawStatusForPedido(pedido));
   }
 
@@ -46,17 +53,20 @@ class OrderManagerService {
   }
 
   static bool hasActiveDelegationForPedido(PedidoModel pedido) {
+    if (pedido.isWhatsappManual) return false;
     final status = delegateStatusForPedido(pedido);
     return isDelegationActiveStatus(status);
   }
 
   static bool isDelegationControlTransferredForPedido(PedidoModel pedido) {
+    if (pedido.isWhatsappManual) return false;
     final status = delegateStatusForPedido(pedido);
     return status == 'accepted' || status == 'arrived';
   }
 
   static String effectiveRawStatusForPedido(PedidoModel pedido) {
     final rawStatus = normalizedRawStatus(pedido.estado);
+    if (pedido.isWhatsappManual) return rawStatus;
     final delegateStatus = delegateStatusForPedido(pedido);
 
     if (delegateStatus == 'completed') {
@@ -73,6 +83,7 @@ class OrderManagerService {
   }
 
   static String visualStatusCodeForPedido(PedidoModel pedido) {
+    if (pedido.isWhatsappManual) return 'whatsapp_manual';
     final rawStatus = normalizedRawStatus(pedido.estado);
     final delegateStatus = delegateStatusForPedido(pedido);
 
@@ -97,6 +108,8 @@ class OrderManagerService {
 
   static String visualStatusLabelForPedido(PedidoModel pedido) {
     switch (visualStatusCodeForPedido(pedido)) {
+      case 'whatsapp_manual':
+        return 'Gestionado por WhatsApp';
       case 'confirmado':
         return 'Aceptado';
       case 'preparando':
@@ -116,6 +129,8 @@ class OrderManagerService {
 
   static Color visualStatusColorForPedido(PedidoModel pedido) {
     switch (visualStatusCodeForPedido(pedido)) {
+      case 'whatsapp_manual':
+        return const Color(0xFF16A34A);
       case 'confirmado':
         return const Color(0xFF2563EB);
       case 'preparando':
@@ -135,6 +150,8 @@ class OrderManagerService {
 
   static IconData visualStatusIconForPedido(PedidoModel pedido) {
     switch (visualStatusCodeForPedido(pedido)) {
+      case 'whatsapp_manual':
+        return Icons.chat_rounded;
       case 'confirmado':
         return Icons.thumb_up_alt_outlined;
       case 'preparando':
@@ -153,6 +170,7 @@ class OrderManagerService {
   }
 
   static String deliveryDelegateLabelForPedido(PedidoModel pedido) {
+    if (pedido.isWhatsappManual) return '';
     final status = delegateStatusForPedido(pedido);
     if (status == 'pending') return 'Pedido delegado: esperando aceptacion';
     if (status == 'accepted') return 'Repartidor acepto delivery';
@@ -216,6 +234,8 @@ extension PedidoOrderManagerX on PedidoModel {
 extension OrderStatusBucketPresentationX on OrderStatusBucket {
   String get label {
     switch (this) {
+      case OrderStatusBucket.whatsappManual:
+        return 'Gestionado por WhatsApp';
       case OrderStatusBucket.pending:
         return 'Pendiente';
       case OrderStatusBucket.inProgress:
@@ -229,6 +249,8 @@ extension OrderStatusBucketPresentationX on OrderStatusBucket {
 
   IconData get icon {
     switch (this) {
+      case OrderStatusBucket.whatsappManual:
+        return Icons.chat_rounded;
       case OrderStatusBucket.pending:
         return Icons.timelapse_rounded;
       case OrderStatusBucket.inProgress:
@@ -242,6 +264,8 @@ extension OrderStatusBucketPresentationX on OrderStatusBucket {
 
   Color get color {
     switch (this) {
+      case OrderStatusBucket.whatsappManual:
+        return const Color(0xFF16A34A);
       case OrderStatusBucket.pending:
         return const Color(0xFFF59E0B);
       case OrderStatusBucket.inProgress:

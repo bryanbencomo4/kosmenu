@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/relative_order_time.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
+import 'package:latlong2/latlong.dart' as ll;
+import 'package:url_launcher/url_launcher.dart';
 
 /// Colors taken from the kitchen KDS mockup.
 abstract final class KitchenMockupColors {
@@ -100,6 +103,7 @@ class KitchenOrderHeader extends StatelessWidget {
     required this.createdAt,
     this.logoUrl,
     this.onBack,
+    this.manualManagement = false,
   });
 
   final String businessName;
@@ -109,6 +113,7 @@ class KitchenOrderHeader extends StatelessWidget {
   final DateTime? createdAt;
   final String? logoUrl;
   final VoidCallback? onBack;
+  final bool manualManagement;
 
   @override
   Widget build(BuildContext context) {
@@ -190,10 +195,16 @@ class KitchenOrderHeader extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.flag_rounded, size: 14, color: statusColor),
+                    Icon(
+                      manualManagement
+                          ? Icons.chat_rounded
+                          : Icons.flag_rounded,
+                      size: 14,
+                      color: statusColor,
+                    ),
                     const SizedBox(width: 4),
                     Text(
-                      statusLabel,
+                      manualManagement ? 'WhatsApp' : statusLabel,
                       style: GoogleFonts.manrope(
                         color: statusColor,
                         fontSize: 12,
@@ -620,6 +631,14 @@ class KitchenPrepSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final notes = (orderNotes ?? '').trim();
     final count = items.fold<int>(0, (sum, item) => sum + item.cantidad);
+    final itemsByCategory = <String, List<PedidoItemModel>>{};
+    for (final item in items) {
+      final category = item.categoryName?.trim();
+      final categoryName = category == null || category.isEmpty
+          ? 'Sin categoría'
+          : category;
+      itemsByCategory.putIfAbsent(categoryName, () => []).add(item);
+    }
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -676,113 +695,129 @@ class KitchenPrepSection extends StatelessWidget {
               ),
             )
           else
-            ...items.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF1F3),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      _ProductThumb(imageUrl: item.imageUrl),
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: KitchenMockupColors.qtySoft,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: KitchenMockupColors.qty.withValues(
-                              alpha: 0.45,
-                            ),
-                          ),
-                        ),
-                        child: Text(
-                          'x${item.cantidad}',
-                          style: GoogleFonts.manrope(
-                            color: KitchenMockupColors.qty,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
-                          ),
+            for (final category in itemsByCategory.entries) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        category.key,
+                        style: GoogleFonts.manrope(
+                          color: KitchenMockupColors.text,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 12),
-                        width: 1,
-                        height: 28,
-                        color: KitchenMockupColors.border,
+                    ),
+                    Text(
+                      '${category.value.length} ${category.value.length == 1 ? 'producto' : 'productos'}',
+                      style: GoogleFonts.manrope(
+                        color: KitchenMockupColors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.displayName.trim().isEmpty
-                                  ? 'Producto'
-                                  : item.displayName.trim(),
-                              style: GoogleFonts.manrope(
-                                color: KitchenMockupColors.text,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                height: 1.1,
+                    ),
+                  ],
+                ),
+              ),
+              ...category.value.map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF1F3),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        _ProductThumb(imageUrl: item.imageUrl),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: KitchenMockupColors.qtySoft,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: KitchenMockupColors.qty.withValues(
+                                alpha: 0.45,
                               ),
                             ),
-                            if ((item.categoryName ?? '').trim().isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 3),
-                                child: Text(
-                                  item.categoryName!.trim(),
-                                  style: GoogleFonts.manrope(
-                                    color: KitchenMockupColors.muted,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
+                          ),
+                          child: Text(
+                            'x${item.cantidad}',
+                            style: GoogleFonts.manrope(
+                              color: KitchenMockupColors.qty,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 12),
+                          width: 1,
+                          height: 28,
+                          color: KitchenMockupColors.border,
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.displayName.trim().isEmpty
+                                    ? 'Producto'
+                                    : item.displayName.trim(),
+                                style: GoogleFonts.manrope(
+                                  color: KitchenMockupColors.text,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1.1,
+                                ),
+                              ),
+                              for (final group in item.modifierGroups)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (group.grupo.isNotEmpty)
+                                        Text(
+                                          '${group.grupo}:',
+                                          style: GoogleFonts.manrope(
+                                            color: KitchenMockupColors.muted,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            height: 1.2,
+                                          ),
+                                        ),
+                                      for (final option in group.opciones)
+                                        Text(
+                                          option.nombre,
+                                          style: GoogleFonts.manrope(
+                                            color: KitchenMockupColors.text,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w800,
+                                            height: 1.25,
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
-                              ),
-                            for (final group in item.modifierGroups)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 6),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (group.grupo.isNotEmpty)
-                                      Text(
-                                        '${group.grupo}:',
-                                        style: GoogleFonts.manrope(
-                                          color: KitchenMockupColors.muted,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w800,
-                                          height: 1.2,
-                                        ),
-                                      ),
-                                    for (final option in group.opciones)
-                                      Text(
-                                        option.nombre,
-                                        style: GoogleFonts.manrope(
-                                          color: KitchenMockupColors.text,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w800,
-                                          height: 1.25,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -854,6 +889,48 @@ class _ProductThumb extends StatelessWidget {
   }
 }
 
+class KitchenWhatsappManualNotice extends StatelessWidget {
+  const KitchenWhatsappManualNotice({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: _cardDecoration(),
+      child: Row(
+        children: [
+          const Icon(Icons.chat_rounded, color: Color(0xFF16A34A)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Gestionado por WhatsApp',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w800,
+                    color: KitchenMockupColors.text,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Este pedido se gestiona directamente por WhatsApp.',
+                  style: GoogleFonts.manrope(
+                    color: KitchenMockupColors.muted,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class KitchenStatusTimeline extends StatelessWidget {
   const KitchenStatusTimeline({
     super.key,
@@ -865,6 +942,7 @@ class KitchenStatusTimeline extends StatelessWidget {
   final bool isDelivery;
 
   static int activeStepIndex(PedidoModel pedido, {required bool isDelivery}) {
+    if (pedido.isWhatsappManual) return -1;
     final code = OrderManagerService.visualStatusCodeForPedido(pedido);
     if (code == 'cancelado') return -1;
     if (code == 'entregado') return 3;
@@ -883,6 +961,7 @@ class KitchenStatusTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = activeStepIndex(pedido, isDelivery: isDelivery);
+    if (pedido.isWhatsappManual) return const SizedBox.shrink();
     const steps = <({String label, IconData icon})>[
       (label: 'Recibido', icon: Icons.description_outlined),
       (label: 'Aceptado', icon: Icons.check_circle_outline_rounded),
@@ -1317,6 +1396,104 @@ class KitchenDelegationCard extends StatelessWidget {
   }
 }
 
+class KitchenStaticMapPreview extends StatelessWidget {
+  const KitchenStaticMapPreview({
+    super.key,
+    required this.deliveryLatitude,
+    required this.deliveryLongitude,
+    this.businessLatitude,
+    this.businessLongitude,
+  });
+
+  final double deliveryLatitude;
+  final double deliveryLongitude;
+  final double? businessLatitude;
+  final double? businessLongitude;
+
+  @override
+  Widget build(BuildContext context) {
+    final delivery = ll.LatLng(deliveryLatitude, deliveryLongitude);
+    final business = businessLatitude != null && businessLongitude != null
+        ? ll.LatLng(businessLatitude!, businessLongitude!)
+        : null;
+    final locations = <ll.LatLng>[?business, delivery];
+
+    return fm.FlutterMap(
+      options: fm.MapOptions(
+        initialCenter: delivery,
+        initialZoom: 14,
+        initialCameraFit: business == null
+            ? null
+            : fm.CameraFit.coordinates(
+                coordinates: locations,
+                padding: const EdgeInsets.all(40),
+              ),
+        interactionOptions: const fm.InteractionOptions(
+          flags: fm.InteractiveFlag.none,
+        ),
+        backgroundColor: const Color(0xFFE9EEF5),
+      ),
+      children: [
+        fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.kosmenu.app',
+          keepBuffer: 0,
+          maxNativeZoom: 19,
+        ),
+        if (business != null)
+          fm.PolylineLayer(
+            polylines: [
+              fm.Polyline(
+                points: locations,
+                color: const Color(0xFF0EA5E9),
+                strokeWidth: 4,
+              ),
+            ],
+          ),
+        fm.MarkerLayer(
+          markers: [
+            if (business != null)
+              fm.Marker(
+                point: business,
+                width: 36,
+                height: 36,
+                child: const Icon(
+                  Icons.store_rounded,
+                  color: KitchenMockupColors.prep,
+                  size: 28,
+                ),
+              ),
+            fm.Marker(
+              point: delivery,
+              width: 40,
+              height: 40,
+              child: const Icon(
+                Icons.location_on_rounded,
+                color: KitchenMockupColors.qty,
+                size: 36,
+              ),
+            ),
+          ],
+        ),
+        fm.RichAttributionWidget(
+          alignment: fm.AttributionAlignment.bottomLeft,
+          attributions: [
+            fm.TextSourceAttribution(
+              '© OpenStreetMap contributors',
+              onTap: () => unawaited(
+                launchUrl(
+                  Uri.parse('https://www.openstreetmap.org/copyright'),
+                  mode: LaunchMode.externalApplication,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class KitchenDeliveryCard extends StatelessWidget {
   const KitchenDeliveryCard({
     super.key,
@@ -1366,61 +1543,81 @@ class KitchenDeliveryCard extends StatelessWidget {
                   ),
                 ),
               ),
-              if (onOpenMap != null)
-                TextButton.icon(
-                  onPressed: onOpenMap,
-                  style: TextButton.styleFrom(
-                    foregroundColor: KitchenMockupColors.purple,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  icon: const Icon(Icons.map_outlined, size: 16),
-                  label: Text(
-                    'Ver en mapa',
-                    style: GoogleFonts.manrope(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
             ],
           ),
           const SizedBox(height: 12),
-          Row(
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    _InfoRow(
-                      icon: Icons.person_outline_rounded,
-                      title: customerName.isEmpty ? 'Sin nombre' : customerName,
-                      subtitle: customerEmail.isEmpty ? null : customerEmail,
-                    ),
-                    if (customerPhone.isNotEmpty)
-                      _InfoRow(
-                        icon: Icons.phone_outlined,
-                        title: customerPhone,
-                      ),
-                    _InfoRow(
-                      icon: Icons.place_outlined,
-                      title: address.isEmpty
-                          ? (isDelivery ? 'Sin dirección' : 'Retiro en tienda')
-                          : address,
-                    ),
-                    if (coordinatesLabel.isNotEmpty)
-                      _InfoRow(
-                        icon: Icons.near_me_outlined,
-                        title: coordinatesLabel,
-                      ),
-                  ],
-                ),
+              _InfoRow(
+                icon: Icons.person_outline_rounded,
+                title: customerName.isEmpty ? 'Sin nombre' : customerName,
+                subtitle: customerEmail.isEmpty ? null : customerEmail,
               ),
+              if (customerPhone.isNotEmpty)
+                _InfoRow(icon: Icons.phone_outlined, title: customerPhone),
+              _InfoRow(
+                icon: Icons.place_outlined,
+                title: address.isEmpty
+                    ? (isDelivery ? 'Sin dirección' : 'Retiro en tienda')
+                    : address,
+              ),
+              if (coordinatesLabel.isNotEmpty)
+                _InfoRow(icon: Icons.near_me_outlined, title: coordinatesLabel),
               if (mapPreview != null) ...[
-                const SizedBox(width: 12),
+                const SizedBox(height: 8),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(14),
-                  child: SizedBox(width: 118, height: 118, child: mapPreview),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: MediaQuery.sizeOf(context).width >= 600 ? 280 : 230,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        mapPreview!,
+                        if (onOpenMap != null)
+                          Positioned(
+                            top: 12,
+                            right: 12,
+                            child: Material(
+                              color: Colors.white.withValues(alpha: 0.88),
+                              elevation: 3,
+                              shadowColor: Colors.black.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(12),
+                              child: InkWell(
+                                onTap: onOpenMap,
+                                borderRadius: BorderRadius.circular(12),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 9,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.near_me_rounded,
+                                        size: 16,
+                                        color: KitchenMockupColors.prep,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Ver mapa',
+                                        style: GoogleFonts.manrope(
+                                          color: KitchenMockupColors.text,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ],

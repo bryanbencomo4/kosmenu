@@ -161,6 +161,7 @@ void main() {
       );
       expect(result.estado, 'pendiente');
       expect(result.merchantWhatsappText, isNull);
+      expect(result.managementMode, 'platform');
     });
 
     test(
@@ -176,6 +177,7 @@ void main() {
                 'estado': 'pendiente',
                 'merchantWhatsappText':
                     'Comanda Preview\nGestionar pedido: enlace existente',
+                'managementMode': 'whatsapp_manual',
               },
             }),
             201,
@@ -188,6 +190,7 @@ void main() {
         );
         expect(result.orderId, 'ORD-1');
         expect(result.estado, 'pendiente');
+        expect(result.managementMode, 'whatsapp_manual');
         expect(result.trackingUrl, 'https://preview.example/o/AbCdEf1234');
         expect(
           result.merchantWhatsappText,

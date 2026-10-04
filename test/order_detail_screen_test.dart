@@ -60,6 +60,91 @@ Widget _merchantOrderWidgets({
 }
 
 void main() {
+  testWidgets('products are grouped under one category heading', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: KitchenPrepSection(
+              items: const [
+                PedidoItemModel(
+                  nombre: 'Pizza de queso',
+                  cantidad: 1,
+                  precio: 10,
+                  categoryName: 'Pizzas',
+                ),
+                PedidoItemModel(
+                  nombre: 'Pizza campesina',
+                  cantidad: 2,
+                  precio: 12,
+                  categoryName: 'Pizzas',
+                ),
+                PedidoItemModel(
+                  nombre: 'Refresco',
+                  cantidad: 1,
+                  precio: 3,
+                  categoryName: 'Bebidas',
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Pizzas'), findsOneWidget);
+    expect(find.text('Bebidas'), findsOneWidget);
+    expect(find.text('Pizza de queso'), findsOneWidget);
+    expect(find.text('Pizza campesina'), findsOneWidget);
+    expect(find.text('Refresco'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Pizzas')).dy,
+      lessThan(tester.getTopLeft(find.text('Pizza de queso')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('Pizza campesina')).dy,
+      lessThan(tester.getTopLeft(find.text('Bebidas')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('Bebidas')).dy,
+      lessThan(tester.getTopLeft(find.text('Refresco')).dy),
+    );
+  });
+
+  testWidgets('map action overlays preview and opens navigation', (
+    tester,
+  ) async {
+    var opened = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: KitchenDeliveryCard(
+              isDelivery: true,
+              customerName: 'Cliente',
+              customerEmail: '',
+              customerPhone: '',
+              address: 'Calle 1',
+              coordinatesLabel: '10.5, -66.9',
+              mapPreview: const ColoredBox(color: Colors.blueGrey),
+              onOpenMap: () => opened = true,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final button = find.text('Ver mapa');
+    expect(button, findsOneWidget);
+    expect(
+      find.ancestor(of: button, matching: find.byType(Stack)),
+      findsOneWidget,
+    );
+    await tester.tap(button);
+    expect(opened, isTrue);
+  });
+
   test('old pending orders with payment evidence stay pending', () {
     for (final age in [const Duration(minutes: 16), const Duration(hours: 2)]) {
       final order = PedidoModel.fromMap({

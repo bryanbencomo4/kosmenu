@@ -9,6 +9,7 @@ import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
 import { writeRepeatOrder, type RepeatOrderLine } from '../../_lib/repeat-order';
 import { nextPollDelayMs } from '../../_lib/poll-backoff';
 import { formatRelativeOrderTime } from '../../_lib/relative-order-time';
+import { normalizeOrderManagementMode, resolveOrderManagementMode, type OrderManagementMode } from '../../_lib/order-management-mode';
 
 type OrderStatus =
   | 'pendiente'
@@ -43,6 +44,7 @@ type PedidoRow = {
   cliente_email?: string | null;
   created_at?: string | null;
   detalles?: {
+    management_mode?: OrderManagementMode;
     order_id?: string;
     cliente_nombre?: string;
     cliente_email?: string;
@@ -184,6 +186,7 @@ function normalizeStatus(value: unknown): OrderStatus {
 }
 
 type PublicTrackingPayload = {
+  managementMode?: OrderManagementMode;
   orderId: string;
   status: OrderStatus | string;
   createdAt: string;
@@ -250,6 +253,7 @@ function mapPublicTracking(pub: PublicTrackingPayload): {
       total: pub.total ?? null,
       costo_delivery: pub.deliveryCost ?? null,
       detalles: {
+        management_mode: normalizeOrderManagementMode(pub.managementMode),
         order_id: pub.orderId,
         moneda_checkout: pub.currency,
         subtotal: pub.subtotal,
@@ -371,6 +375,7 @@ function buildWhatsAppLink(
   status: OrderStatus,
   comercio: ComercioRow | null,
   fallbackPhone?: string,
+  managementMode: OrderManagementMode = 'platform',
 ) {
   if (comercio?.recibe_pedidos_whatsapp === false) return '';
   const phone = normalizePhone(comercio?.whatsapp ?? fallbackPhone);
@@ -378,7 +383,9 @@ function buildWhatsAppLink(
 
   const message =
     `Hola, quiero consultar mi pedido ${orderId}.\n` +
-    `Estado actual: ${statusLabel(status)}.`;
+    (managementMode === 'whatsapp_manual'
+      ? 'Gestión: Por WhatsApp.'
+      : `Estado actual: ${statusLabel(status)}.`);
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
@@ -772,6 +779,8 @@ function OrderTrackingPageInner() {
 
   const delivery = order?.detalles?.delivery ?? null;
   const isDelivery = (delivery?.mode ?? 'pickup') === 'delivery';
+  const orderManagementMode = resolveOrderManagementMode(order?.detalles);
+  const manualManagement = orderManagementMode === 'whatsapp_manual';
   const estimatedTimes = order?.detalles?.delivery_config_snapshot?.estimated_times;
   const preparationMinutes =
     toNumberOrNull(estimatedTimes?.preparation_minutes ?? estimatedTimes?.preparationMinutes) ?? 0;
@@ -881,8 +890,8 @@ function OrderTrackingPageInner() {
   ).toString().trim();
 
   const fallbackWaLink = useMemo(
-    () => buildWhatsAppLink(orderId, resolvedStatus, resolvedComercio, orderBusinessWhatsapp),
-    [orderBusinessWhatsapp, orderId, resolvedComercio, resolvedStatus],
+    () => buildWhatsAppLink(orderId, resolvedStatus, resolvedComercio, orderBusinessWhatsapp, orderManagementMode),
+    [orderBusinessWhatsapp, orderId, resolvedComercio, resolvedStatus, orderManagementMode],
   );
   const allowsWhatsapp = resolvedComercio.recibe_pedidos_whatsapp !== false;
   const finalWaLink = allowsWhatsapp ? fallbackWaLink || waReceiptUrl : '';
@@ -948,9 +957,9 @@ function OrderTrackingPageInner() {
   }, [pathname]);
 
   const displayStatus: OrderStatus = resolvedStatus;
-  const canCustomerCancel = displayStatus === 'pendiente';
+  const canCustomerCancel = !manualManagement && displayStatus === 'pendiente';
   const canCustomerConfirmDelegatedDelivery =
-    isDelivery &&
+    !manualManagement && isDelivery &&
     deliveryDelegateStatus === 'arrived' &&
     displayStatus !== 'cancelado' &&
     displayStatus !== 'entregado';
@@ -1101,6 +1110,7 @@ function OrderTrackingPageInner() {
       orderShortId={orderId ? `#${orderId.slice(-8).toUpperCase()}` : '#N/A'}
       createdAtLabel={createdAtLabel}
       status={displayStatus}
+      managementMode={orderManagementMode}
       isDelivery={isDelivery}
       estimatedDeliveryLabel={estimatedDeliveryLabel}
       locationHint={locationHint}
@@ -1139,7 +1149,7 @@ function OrderTrackingPageInner() {
           ? (cancelMessage || 'Si necesitas ayuda, escríbeles por WhatsApp.')
           : '')
       }
-      deliveryDelegateLabel={deliveryDelegateLabel}
+      deliveryDelegateLabel={manualManagement ? '' : deliveryDelegateLabel}
       deliveryDelegateAcceptedAt={formatStamp(deliveryDelegateAcceptedAt)}
       deliveryDelegateArrivedAt={formatStamp(deliveryDelegateArrivedAt)}
       deliveryDelegateCompletedAt={formatStamp(deliveryDelegateCompletedAt)}
@@ -1148,7 +1158,7 @@ function OrderTrackingPageInner() {
       contactEmail={contactEmail}
       whatsappHref={finalWaLink}
       showWhatsapp={allowsWhatsapp}
-      whatsappReady={displayStatus !== 'pendiente' && displayStatus !== 'cancelado'}
+      whatsappReady={manualManagement || (displayStatus !== 'pendiente' && displayStatus !== 'cancelado')}
       canRepeatOrder={canRepeatOrder}
       repeatClosedReason={repeatClosedReason}
       onRepeatOrder={handleRepeatOrder}
@@ -1166,9 +1176,9 @@ function OrderTrackingPageInner() {
       cancelLoading={cancelLoading}
       cancelMessage={displayStatus === 'cancelado' ? '' : cancelMessage}
       onCancelOrder={(reason) => void cancelOrder(reason)}
-      showPendingCancelHint={displayStatus === 'pendiente'}
+      showPendingCancelHint={!manualManagement && displayStatus === 'pendiente'}
       canCustomerRateService={
-        (displayStatus === 'entregado' || displayStatus === 'cancelado') &&
+        !manualManagement && (displayStatus === 'entregado' || displayStatus === 'cancelado') &&
         order?.detalles?.customer_service_rating == null
       }
       customerServiceRating={order?.detalles?.customer_service_rating ?? null}
