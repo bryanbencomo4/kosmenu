@@ -1,4 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/widgets/product_options_editor.dart';
 import 'package:kosmenu_app/models/pedido.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/models/product_option_group.dart';
@@ -15,6 +18,354 @@ const _tamano = ProductOptionGroup(
 );
 
 void main() {
+  setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
+  testWidgets(
+    'personalization defaults off and explicit removals serialize independently',
+    (tester) async {
+      final key = GlobalKey<ProductOptionsEditorState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Form(
+                child: ProductOptionsEditor(
+                  key: key,
+                  initialGroups: const [],
+                  currencyCode: 'COP',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(key.currentState!.personalizationChanged, isFalse);
+      expect(
+        key.currentState!.personalization['combinacion']['activada'],
+        isFalse,
+      );
+      expect(
+        key.currentState!.personalization['exclusiones']['activadas'],
+        isFalse,
+      );
+      expect(find.text('Agregar ingrediente'), findsNothing);
+      expect(find.text('Usar el precio más alto'), findsNothing);
+      await tester.tap(find.text('Permitir quitar ingredientes'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('Agregar ingrediente'));
+      await tester.tap(find.text('Agregar ingrediente'));
+      await tester.pump();
+      final ingredientField = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Ingrediente removible',
+      );
+      await tester.enterText(ingredientField, 'Ingrediente A');
+      expect(key.currentState!.personalizationChanged, isTrue);
+      expect(
+        key.currentState!.personalization['combinacion']['activada'],
+        isFalse,
+      );
+      expect(
+        key.currentState!.personalization['exclusiones']['activadas'],
+        isTrue,
+      );
+      expect(
+        key
+            .currentState!
+            .personalization['exclusiones']['ingredientes']
+            .single['nombre'],
+        'Ingrediente A',
+      );
+    },
+  );
+
+  test('compatible products are grouped by category in menu order', () {
+    final groups = groupCompatibleProducts(
+      products: [
+        {'id': 'p3', 'nombre': 'Refresco', 'categoria_id': 'c2', 'orden': 0},
+        {'id': 'p2', 'nombre': 'Tropical', 'categoria_id': 'c1', 'orden': 1},
+        {'id': 'p1', 'nombre': 'Vegetariana', 'categoria_id': 'c1', 'orden': 0},
+        {'id': 'p4', 'nombre': 'Suelto', 'categoria_id': null},
+        {'id': 'p5', 'nombre': 'Huérfano', 'categoria_id': 'gone'},
+      ],
+      categories: [
+        {'id': 'c2', 'nombre': 'Bebidas', 'orden': 2},
+        {'id': 'c1', 'nombre': 'Pizzas', 'orden': 1},
+        {'id': 'c3', 'nombre': 'Vacía', 'orden': 3},
+      ],
+    );
+    expect(groups.map((g) => g.nombre), ['Pizzas', 'Bebidas', 'Sin categoría']);
+    expect(groups.first.products.map((p) => p.nombre), [
+      'Vegetariana',
+      'Tropical',
+    ]);
+    expect(groups.last.products.map((p) => p.id), ['p5', 'p4']);
+    final noCategories = groupCompatibleProducts(
+      products: [
+        {'id': 'p1', 'nombre': 'A'},
+      ],
+      categories: const [],
+    );
+    expect(noCategories.single.nombre, 'Productos');
+  });
+
+  testWidgets('a whole category can be selected for combinations', (
+    tester,
+  ) async {
+    final key = GlobalKey<ProductOptionsEditorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: Form(
+              child: ProductOptionsEditor(
+                key: key,
+                initialGroups: const [],
+                currencyCode: 'COP',
+                initialMenuOptions: const {
+                  'personalizacion': {
+                    'version': 1,
+                    'combinacion': {
+                      'activada': true,
+                      'titulo': 'Combina con',
+                      'productos_compatibles': ['p2'],
+                      'regla_precio': 'max',
+                    },
+                  },
+                },
+                compatibleProductsLoader: () async => const [
+                  CompatibleProductCategory(
+                    id: 'c1',
+                    nombre: 'Pizzas',
+                    products: [
+                      (id: 'p1', nombre: 'Vegetariana'),
+                      (id: 'p2', nombre: 'Tropical'),
+                    ],
+                  ),
+                  CompatibleProductCategory(
+                    id: 'c2',
+                    nombre: 'Bebidas',
+                    products: [(id: 'p3', nombre: 'Refresco')],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    List<String> selected() => List<String>.from(
+      key.currentState!.personalization['combinacion']['productos_compatibles']
+          as List,
+    )..sort();
+
+    expect(find.text('Pizzas'), findsOneWidget);
+    expect(find.text('1 de 2 seleccionados'), findsOneWidget);
+    // Categories with a selection start open; the others start closed.
+    expect(find.text('Tropical'), findsOneWidget);
+    expect(find.text('Refresco'), findsNothing);
+
+    final pizzaCheckbox = find.descendant(
+      of: find.widgetWithText(InkWell, 'Pizzas'),
+      matching: find.byType(Checkbox),
+    );
+    expect(tester.widget<Checkbox>(pizzaCheckbox).value, isNull);
+    await tester.tap(pizzaCheckbox);
+    await tester.pump();
+    expect(selected(), ['p1', 'p2']);
+    expect(find.text('2 de 2 seleccionados'), findsOneWidget);
+    await tester.tap(pizzaCheckbox);
+    await tester.pump();
+    expect(selected(), isEmpty);
+
+    await tester.tap(find.text('Bebidas'));
+    await tester.pump();
+    expect(find.text('Refresco'), findsOneWidget);
+    await tester.tap(find.text('Refresco'));
+    await tester.pump();
+    expect(selected(), ['p3']);
+    expect(key.currentState!.personalizationChanged, isTrue);
+  });
+
+  test('ingredientsFromDescription splits a comma list', () {
+    expect(ingredientsFromDescription('Jamón, Queso, Anchoas, Maíz'), [
+      'Jamón',
+      'Queso',
+      'Anchoas',
+      'Maíz',
+    ]);
+    expect(
+      ingredientsFromDescription(' queso cheddar ,, Maiz,  maíz , tomate. '),
+      ['Queso cheddar', 'Maiz', 'Tomate'],
+    );
+    expect(ingredientsFromDescription(''), isEmpty);
+    expect(ingredientsFromDescription(' . , ;'), isEmpty);
+    expect(
+      ingredientsFromDescription('a' * 100).single.length,
+      removableIngredientMaxLength,
+    );
+  });
+
+  group('removable ingredients from the description', () {
+    Future<GlobalKey<ProductOptionsEditorState>> pumpEditor(
+      WidgetTester tester,
+      TextEditingController description, {
+      Map<String, dynamic>? menuOptions,
+    }) async {
+      final key = GlobalKey<ProductOptionsEditorState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Form(
+                child: ProductOptionsEditor(
+                  key: key,
+                  initialGroups: const [],
+                  currencyCode: 'COP',
+                  initialMenuOptions: menuOptions,
+                  descriptionController: description,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      return key;
+    }
+
+    List<String> names(GlobalKey<ProductOptionsEditorState> key) => [
+      for (final entry
+          in key.currentState!.personalization['exclusiones']['ingredientes']
+              as List)
+        entry['nombre'] as String,
+    ];
+
+    testWidgets('turns on by itself and follows the description', (
+      tester,
+    ) async {
+      final description = TextEditingController(text: 'Jamón, Queso, Maíz');
+      addTearDown(description.dispose);
+      final key = await pumpEditor(tester, description);
+      await tester.tap(find.text('Permitir quitar ingredientes'));
+      await tester.pump();
+      expect(names(key), ['Jamón', 'Queso', 'Maíz']);
+      expect(
+        key.currentState!.personalization['exclusiones']['desde_descripcion'],
+        isTrue,
+      );
+      expect(find.widgetWithText(Chip, 'Queso'), findsOneWidget);
+      expect(find.text('Agregar ingrediente'), findsNothing);
+      final ids = key.currentState!.personalization['exclusiones']
+          ['ingredientes'] as List;
+      final quesoId = ids[1]['id'];
+
+      description.text = 'Queso, Anchoas';
+      await tester.pump();
+      expect(names(key), ['Queso', 'Anchoas']);
+      final updated = key.currentState!.personalization['exclusiones']
+          ['ingredientes'] as List;
+      expect(updated.first['id'], quesoId);
+
+      description.text = 'Pizza artesanal';
+      await tester.pump();
+      expect(names(key), ['Pizza artesanal']);
+      description.text = '';
+      await tester.pump();
+      expect(key.currentState!.personalizationError, isNotNull);
+    });
+
+    testWidgets('a plain description keeps the manual list', (tester) async {
+      final description = TextEditingController(text: 'Pizza de la casa');
+      addTearDown(description.dispose);
+      final key = await pumpEditor(tester, description);
+      await tester.tap(find.text('Permitir quitar ingredientes'));
+      await tester.pump();
+      expect(names(key), isEmpty);
+      expect(
+        key.currentState!.personalization['exclusiones'].containsKey(
+          'desde_descripcion',
+        ),
+        isFalse,
+      );
+      expect(find.text('Agregar ingrediente'), findsOneWidget);
+    });
+
+    testWidgets('switching on offers undo for manual ingredients', (
+      tester,
+    ) async {
+      final description = TextEditingController(text: 'Jamón, Queso');
+      addTearDown(description.dispose);
+      final key = await pumpEditor(
+        tester,
+        description,
+        menuOptions: {
+          'personalizacion': {
+            'version': 1,
+            'exclusiones': {
+              'activadas': true,
+              'titulo': '¿Quieres quitar algo?',
+              'ingredientes': [
+                {'id': 'r_queso', 'nombre': 'queso'},
+                {'id': 'r_aceitunas', 'nombre': 'Aceitunas'},
+              ],
+            },
+          },
+        },
+      );
+      expect(key.currentState!.personalizationChanged, isFalse);
+      await tester.ensureVisible(find.text('Tomar de la descripción'));
+      await tester.tap(find.text('Tomar de la descripción'));
+      await tester.pump();
+      expect(names(key), ['Jamón', 'Queso']);
+      final ids = key.currentState!.personalization['exclusiones']
+          ['ingredientes'] as List;
+      expect(ids[1]['id'], 'r_queso');
+      expect(find.textContaining('Se reemplazó 1 ingrediente'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.text('Deshacer'));
+      await tester.pump();
+      expect(names(key), ['queso', 'Aceitunas']);
+      expect(
+        key.currentState!.personalization['exclusiones'].containsKey(
+          'desde_descripcion',
+        ),
+        isFalse,
+      );
+      expect(find.text('Agregar ingrediente'), findsOneWidget);
+    });
+
+    testWidgets('a saved product picks up description edits made elsewhere', (
+      tester,
+    ) async {
+      final description = TextEditingController(text: 'Jamón, Piña');
+      addTearDown(description.dispose);
+      final key = await pumpEditor(
+        tester,
+        description,
+        menuOptions: {
+          'personalizacion': {
+            'version': 1,
+            'exclusiones': {
+              'activadas': true,
+              'titulo': '¿Quieres quitar algo?',
+              'desde_descripcion': true,
+              'ingredientes': [
+                {'id': 'r_jamon', 'nombre': 'Jamón'},
+              ],
+            },
+          },
+        },
+      );
+      expect(names(key), ['Jamón', 'Piña']);
+      expect(key.currentState!.personalizationChanged, isTrue);
+      final ids = key.currentState!.personalization['exclusiones']
+          ['ingredientes'] as List;
+      expect(ids.first['id'], 'r_jamon');
+    });
+  });
+
   group('ProductOptionGroup', () {
     test('product without opciones_menu is a simple product', () {
       final product = ProductModel.fromMap({'id': 'p1', 'precio': 5000});
@@ -193,6 +544,64 @@ void main() {
       expect(parsed!.predeterminada, isTrue);
       expect(parsed.textoLibre, isTrue);
     });
+
+    test('question gate is opt-in, optional-only and round-trips', () {
+      const choice = ProductOptionChoice(id: 'o_queso', nombre: 'Queso');
+      final plain = const ProductOptionGroup(
+        id: 'g_extras',
+        nombre: 'Extras',
+        opciones: [choice],
+      ).toMap();
+      expect(plain.containsKey('pregunta_activada'), isFalse);
+      expect(plain.containsKey('pregunta'), isFalse);
+
+      final gated = const ProductOptionGroup(
+        id: 'g_extras',
+        nombre: 'Extras',
+        opciones: [choice],
+        preguntaActivada: true,
+        pregunta: '  ¿Quieres   agregar un extra?  ',
+      ).toMap();
+      expect(gated['pregunta_activada'], isTrue);
+      expect(gated['pregunta'], '¿Quieres agregar un extra?');
+      final parsed = ProductOptionGroup.fromMap(gated)!;
+      expect(parsed.preguntaActivada, isTrue);
+      expect(parsed.pregunta, '¿Quieres agregar un extra?');
+
+      final required = ProductOptionGroup.fromMap({
+        ...gated,
+        'obligatorio': true,
+        'min': 1,
+      })!;
+      expect(required.preguntaActivada, isFalse);
+      expect(required.toMap().containsKey('pregunta_activada'), isFalse);
+
+      expect(gated.containsKey('pregunta_directa'), isFalse);
+      final notFreeText = ProductOptionGroup.fromMap({
+        ...gated,
+        'pregunta_directa': true,
+      })!;
+      expect(notFreeText.preguntaDirecta, isFalse);
+      final direct = ProductOptionGroup.fromMap({
+        ...gated,
+        'pregunta_directa': true,
+        'opciones': [
+          const ProductOptionChoice(
+            id: 'o_extra',
+            nombre: 'Añadir extra',
+            textoLibre: true,
+          ).toMap(),
+        ],
+      })!;
+      expect(direct.preguntaDirecta, isTrue);
+      expect(direct.toMap()['pregunta_directa'], isTrue);
+      final withoutQuestion = ProductOptionGroup.fromMap({
+        ...gated,
+        'pregunta_activada': false,
+        'pregunta_directa': true,
+      })!;
+      expect(withoutQuestion.toMap().containsKey('pregunta_directa'), isFalse);
+    });
   });
 
   group('PedidoItemModel modifiers', () {
@@ -250,6 +659,73 @@ void main() {
       });
       expect(item.hasModifiers, isTrue);
       expect(item.modifierGroups.single.label, 'Tamaño: Grande');
+    });
+
+    test('combined lines read as one natural list', () {
+      final item = PedidoItemModel.fromMap({
+        'nombre': 'Campesina + Queso y Bocadillo',
+        'cantidad': 1,
+        'precio': 55587,
+        'selecciones': [
+          {'grupo': 'Combina con', 'opcion': 'Campesina + Queso y Bocadillo'},
+          {'grupo': 'Campesina · Tamaño', 'opcion': 'Grande'},
+          {'grupo': 'Campesina', 'opcion': 'Sin Maiz'},
+        ],
+        'personalizacion': {
+          'version': 1,
+          'componentes': [
+            {
+              'nombre': 'Campesina',
+              'selecciones': [
+                {'grupo': 'Tamaño', 'opcion': 'Grande', 'precio': 0},
+                {'grupo': 'Ingrediente Extra', 'opcion': 'Extra de pollo'},
+              ],
+              'exclusiones': [
+                {'id': 'r1', 'nombre': 'Maiz'},
+                {'id': 'r2', 'nombre': 'Cebolla'},
+              ],
+            },
+            {
+              'nombre': 'Queso y Bocadillo',
+              'selecciones': [],
+              'exclusiones': [],
+            },
+          ],
+        },
+      });
+      expect(item.displayName, '(Combinación) Campesina + Queso y Bocadillo');
+      final group = item.modifierGroups.single;
+      expect(group.bulleted, isTrue);
+      expect(group.opciones.map((option) => option.nombre), [
+        'Tamaño: Grande',
+        'Ingrediente Extra: Extra de pollo',
+        'Sin: Maiz, Cebolla',
+      ]);
+      final roundTrip = PedidoItemModel.fromMap(item.toMap());
+      expect(roundTrip.modifierGroups.single.opciones.length, 3);
+
+      final single = PedidoItemModel.fromMap({
+        'nombre': 'Campesina',
+        'cantidad': 1,
+        'precio': 22000,
+        'selecciones': [
+          {'grupo': '', 'opcion': 'Sin Maiz'},
+        ],
+        'personalizacion': {
+          'version': 1,
+          'componentes': [
+            {
+              'nombre': 'Campesina',
+              'exclusiones': [
+                {'nombre': 'Maiz'},
+              ],
+            },
+          ],
+        },
+      });
+      expect(single.displayName, 'Campesina');
+      expect(single.modifierGroups.single.bulleted, isFalse);
+      expect(single.modifierGroups.single.opciones.single.nombre, 'Sin Maiz');
     });
 
     test('reads immutable category/image snapshots for an order line', () {

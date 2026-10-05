@@ -143,6 +143,17 @@ class ProductOptionGroup {
   final int max;
   final List<ProductOptionChoice> opciones;
 
+  /// Optional groups only: the public menu hides the options behind this
+  /// checkbox question until the customer ticks it.
+  final bool preguntaActivada;
+  final String pregunta;
+
+  /// Question groups with a single free-text option: ticking the question
+  /// selects it and shows its text field and price right away.
+  final bool preguntaDirecta;
+
+  static const int preguntaMaxLength = 80;
+
   const ProductOptionGroup({
     required this.id,
     required this.nombre,
@@ -151,9 +162,15 @@ class ProductOptionGroup {
     this.min = 0,
     this.max = 1,
     this.opciones = const [],
+    this.preguntaActivada = false,
+    this.pregunta = '',
+    this.preguntaDirecta = false,
   });
 
   bool get isSingle => tipo == ProductOptionGroupType.unica;
+
+  static String defaultQuestion(String groupName) =>
+      '¿Quieres agregar ${groupName.trim().toLowerCase()}?';
 
   /// Keeps inactive options so the admin can re-enable them later; the public
   /// menu hides them.
@@ -180,6 +197,9 @@ class ProductOptionGroup {
       min: _toInt(raw['min']) ?? 0,
       max: _toInt(raw['max']) ?? 1,
       opciones: opciones,
+      preguntaActivada: raw['pregunta_activada'] == true,
+      pregunta: raw['pregunta']?.toString().trim() ?? '',
+      preguntaDirecta: raw['pregunta_directa'] == true,
     ).normalized();
   }
 
@@ -191,6 +211,7 @@ class ProductOptionGroup {
     var nextMax = isSingle ? 1 : max.clamp(1, upper);
     var nextMin = obligatorio ? (min < 1 ? 1 : min) : 0;
     if (nextMin > nextMax) nextMin = nextMax;
+    final question = pregunta.replaceAll(RegExp(r'\s+'), ' ').trim();
     return ProductOptionGroup(
       id: id,
       nombre: nombre,
@@ -199,6 +220,16 @@ class ProductOptionGroup {
       min: nextMin,
       max: nextMax,
       opciones: opciones,
+      preguntaActivada: preguntaActivada && nextMin == 0,
+      pregunta: question.length > preguntaMaxLength
+          ? question.substring(0, preguntaMaxLength)
+          : question,
+      preguntaDirecta:
+          preguntaDirecta &&
+          preguntaActivada &&
+          nextMin == 0 &&
+          opciones.length == 1 &&
+          opciones.first.textoLibre,
     );
   }
 
@@ -212,6 +243,9 @@ class ProductOptionGroup {
       'min': value.min,
       'max': value.max,
       'opciones': value.opciones.map((option) => option.toMap()).toList(),
+      if (value.preguntaActivada) 'pregunta_activada': true,
+      if (value.pregunta.isNotEmpty) 'pregunta': value.pregunta,
+      if (value.preguntaDirecta) 'pregunta_directa': true,
     };
   }
 
@@ -222,6 +256,9 @@ class ProductOptionGroup {
     int? min,
     int? max,
     List<ProductOptionChoice>? opciones,
+    bool? preguntaActivada,
+    String? pregunta,
+    bool? preguntaDirecta,
   }) {
     return ProductOptionGroup(
       id: id,
@@ -231,6 +268,9 @@ class ProductOptionGroup {
       min: min ?? this.min,
       max: max ?? this.max,
       opciones: opciones ?? this.opciones,
+      preguntaActivada: preguntaActivada ?? this.preguntaActivada,
+      pregunta: pregunta ?? this.pregunta,
+      preguntaDirecta: preguntaDirecta ?? this.preguntaDirecta,
     );
   }
 

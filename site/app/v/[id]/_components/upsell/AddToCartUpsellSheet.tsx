@@ -2,6 +2,8 @@
 
 import { X } from 'lucide-react';
 
+import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
+
 export type AddToCartSuggestion = {
   productId: string;
   ruleId: string;
@@ -23,6 +25,7 @@ type AddToCartUpsellSheetProps = {
  * adding one never opens another sheet (no chained upsell nagging).
  */
 export function AddToCartUpsellSheet({ open, suggestions, formatPrice, onAdd, onDismiss }: AddToCartUpsellSheetProps) {
+  useLockBodyScroll(open && suggestions.length > 0);
   if (!open || suggestions.length === 0) return null;
 
   return (

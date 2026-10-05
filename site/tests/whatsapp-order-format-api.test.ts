@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   failConfigReads: false,
   inserts: [] as Record<string, unknown>[],
   commerceReads: [] as string[],
+  products: [] as Record<string, unknown>[],
 }));
 
 vi.mock('server-only', () => ({}));
@@ -32,6 +33,7 @@ vi.mock('../app/api/_lib/supabase-server', () => ({
       let singleton = false;
       let operation = 'select';
       let values: Record<string, unknown> = {};
+      let productIds: string[] = [];
       const result = () => {
         if (table === 'comercios') {
           state.commerceReads.push(state.commerceId);
@@ -47,16 +49,17 @@ vi.mock('../app/api/_lib/supabase-server', () => ({
           state.inserts.push(values);
           return { data: { ...values, id: 'mock-pedido' }, error: null };
         }
-        if (table === 'productos') return { data: [], error: null };
+        if (table === 'productos') return { data: state.products.filter((row) => row.comercio_id === state.commerceId && productIds.includes(row.id as string)), error: null };
         return { data: singleton ? null : [], error: null };
       };
       const query = {
         select(value: string) { columns = value; return query; },
         eq(key: string, value: string) {
           if (table === 'comercios' && key === 'id') expect(value).toBe(state.commerceId);
+          if (table === 'productos' && key === 'comercio_id') expect(value).toBe(state.commerceId);
           return query;
         },
-        in() { return query; }, order() { return query; }, limit() { return query; },
+        in(_key: string, ids: string[]) { productIds = ids; return query; }, order() { return query; }, limit() { return query; },
         insert(value: Record<string, unknown>) { operation = 'insert'; values = value; return query; },
         update() { operation = 'update'; return query; },
         maybeSingle() { singleton = true; return Promise.resolve(result()); },
@@ -96,6 +99,7 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     state.commerceId = '11111111-1111-4111-8111-111111111111';
     state.inserts = [];
     state.commerceReads = [];
+    state.products = [];
   });
 
   it('default response remains summary even when the request tries to opt in', async () => {
@@ -183,5 +187,32 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     expect(data.merchantWhatsappText).not.toContain('proof.png');
     expect((state.inserts[0].detalles as Record<string, unknown>).comprobante_url)
       .toBe(`storage://comprobantes/${state.commerceId}/proof.png`);
+  });
+  it('creates a combination from authoritative catalog prices, not forged request totals', async () => {
+    state.managementMode = 'whatsapp_manual';
+    state.products = [
+      { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', comercio_id: state.commerceId, disponible: true, nombre: 'Producto A', precio: 30000,
+        opciones_menu: { personalizacion: { version: 1, combinacion: { activada: true, titulo: 'Combina con', productos_compatibles: ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'], regla_precio: 'max' } } } },
+      { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', comercio_id: state.commerceId, disponible: true, nombre: 'Producto B', precio: 40000 },
+    ];
+    const data = await submit({ items: [{ product_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', nombre: 'FORGED', cantidad: 2, precio: 1, opciones: { combinacion: { productId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', seleccion: {} } } }] });
+    expect(data.subtotal).toBe(80000);
+    expect(data.total).toBe(80000);
+    expect(data.customizationTotalCheckout).toBe(80000);
+    expect(state.inserts[0].total).toBe(80000);
+    const item = (state.inserts[0].detalles as { items: Record<string, unknown>[] }).items[0];
+    expect(item.precio).toBe(40000);
+    expect(data.merchantWhatsappText).toContain('Producto A + Producto B');
+    expect(data.merchantWhatsappText).not.toContain('FORGED');
+  });
+  it('rejects malformed compatible product ids before catalog queries', async () => {
+    const response = await POST(new Request('https://preview.example/api/orders', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comercioId: state.commerceId, clientName: 'QA', clientWhatsapp: '+584121234567', currency: 'COP', exchangeRate: 1, costoDelivery: 0,
+        delivery: { mode: 'pickup' }, items: [{ product_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', nombre: 'QA', cantidad: 1, precio: 1, opciones: { combinacion: { productId: 'not-a-uuid', seleccion: {} } } }] }),
+    }));
+    expect(response.status).toBe(400);
+    expect(state.commerceReads).toHaveLength(0);
+    expect(state.inserts).toHaveLength(0);
   });
 });

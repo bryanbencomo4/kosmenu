@@ -40,6 +40,7 @@ type OrderReceiptProps = {
   subtotalLabel: string;
   deliveryLabel: string | null;
   deliveryFeeNote: string | null;
+  cashPaidLabel: string | null;
   cashChangeLabel: string | null;
   totalLabel: string;
   paymentLabel: string | null;
@@ -494,6 +495,12 @@ export function OrderReceipt(props: OrderReceiptProps) {
             {props.deliveryFeeNote ? (
               <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900">
                 {props.deliveryFeeNote}
+              </p>
+            ) : null}
+            {props.cashPaidLabel ? (
+              <p className="flex items-center justify-between">
+                <span>Paga con</span>
+                <span className="tabular-nums text-slate-700">{props.cashPaidLabel}</span>
               </p>
             ) : null}
             {props.cashChangeLabel ? (

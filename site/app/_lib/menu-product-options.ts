@@ -38,13 +38,80 @@ export type MenuOptionGroup = {
   max: number;
   /** Active options only; inactive ones are dropped while parsing. */
   opciones: MenuOptionGroupChoice[];
+  /** Opt-in, optional groups only: options stay hidden until the shopper checks this question. */
+  pregunta?: string;
+  /** Opt-in, single free-text option question groups: checking the question selects it and shows its field. */
+  preguntaDirecta?: boolean;
 };
+
+export const OPTION_GROUP_QUESTION_MAX_LENGTH = 80;
+
+export function defaultOptionGroupQuestion(groupName: string) {
+  return `¿Quieres agregar ${groupName.trim().toLowerCase()}?`;
+}
 
 export type ProductMenuOptions = {
   tamanos?: MenuSizeOption[];
   ajustes?: MenuAdjustmentOption[];
   grupos?: MenuOptionGroup[];
+  personalizacion?: ProductPersonalization;
 };
+
+export type ProductPersonalization = {
+  /** `pregunta` (opt-in) hides the section behind a checkbox question, like option groups. */
+  combinacion?: { titulo: string; productosCompatibles: string[]; reglaPrecio: 'max'; pregunta?: string };
+  exclusiones?: { titulo: string; ingredientes: Array<{ id: string; nombre: string }>; pregunta?: string };
+};
+
+export const DEFAULT_COMBINATION_QUESTION = '¿Quieres combinar con otro producto?';
+export const DEFAULT_REMOVAL_QUESTION = '¿Quieres quitar algún ingrediente?';
+
+function parseSectionQuestion(row: Record<string, unknown>, fallback: string) {
+  if (row.pregunta_activada !== true) return {};
+  const text = (row.pregunta ?? '').toString().replace(/\s+/g, ' ').trim().slice(0, OPTION_GROUP_QUESTION_MAX_LENGTH);
+  return { pregunta: text || fallback };
+}
+
+export function parseProductPersonalization(raw: unknown): ProductPersonalization | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const config = (raw as Record<string, unknown>).personalizacion;
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return null;
+  const value = config as Record<string, unknown>;
+  if (value.version !== 1) return null;
+  const result: ProductPersonalization = {};
+  const combo = value.combinacion as Record<string, unknown> | undefined;
+  if (combo?.activada === true && combo.regla_precio === 'max' && typeof combo.titulo === 'string' && combo.titulo.trim()) {
+    const ids = Array.isArray(combo.productos_compatibles)
+      ? [...new Set(combo.productos_compatibles.filter((id): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id)))].slice(0, 100)
+      : [];
+    if (ids.length) {
+      result.combinacion = {
+        titulo: combo.titulo.trim().slice(0, 120), productosCompatibles: ids, reglaPrecio: 'max',
+        ...parseSectionQuestion(combo, DEFAULT_COMBINATION_QUESTION),
+      };
+    }
+  }
+  const removals = value.exclusiones as Record<string, unknown> | undefined;
+  if (removals?.activadas === true && typeof removals.titulo === 'string' && removals.titulo.trim() && Array.isArray(removals.ingredientes)) {
+    const seen = new Set<string>();
+    const ingredientes: Array<{ id: string; nombre: string }> = [];
+    for (const rawIngredient of removals.ingredientes.slice(0, 50)) {
+      if (!rawIngredient || typeof rawIngredient !== 'object') continue;
+      const ingredient = rawIngredient as Record<string, unknown>;
+      if (typeof ingredient.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(ingredient.id) || seen.has(ingredient.id)) continue;
+      if (typeof ingredient.nombre !== 'string' || !ingredient.nombre.trim()) continue;
+      seen.add(ingredient.id);
+      ingredientes.push({ id: ingredient.id, nombre: ingredient.nombre.trim().slice(0, 80) });
+    }
+    if (ingredientes.length) {
+      result.exclusiones = {
+        titulo: removals.titulo.trim().slice(0, 120), ingredientes,
+        ...parseSectionQuestion(removals, DEFAULT_REMOVAL_QUESTION),
+      };
+    }
+  }
+  return Object.keys(result).length ? result : null;
+}
 
 /** Immutable per-line snapshot stored in pedidos.detalles.items[].selecciones. */
 export type OrderLineOptionSnapshot = {
@@ -69,6 +136,8 @@ export type CartLineSelection = {
   grupos?: Record<string, string[]>;
   /** Free-text extras: group id -> option id -> written text. */
   textos?: Record<string, Record<string, string>>;
+  exclusionesIds?: string[];
+  combinacion?: { productId: string; seleccion: CartLineSelection };
 };
 
 type ProductLike = {
@@ -124,8 +193,9 @@ export function parseProductMenuOptions(raw: unknown): ProductMenuOptions | null
 
   // Opt-in per product: groups are ignored unless the merchant switched them on.
   const grupos = record.activadas === true ? parseOptionGroups(record.grupos) : [];
+  const personalizacion = parseProductPersonalization(raw);
 
-  if (tamanos.length === 0 && ajustes.length === 0 && grupos.length === 0) {
+  if (tamanos.length === 0 && ajustes.length === 0 && grupos.length === 0 && !personalizacion) {
     return null;
   }
 
@@ -133,6 +203,7 @@ export function parseProductMenuOptions(raw: unknown): ProductMenuOptions | null
     ...(tamanos.length > 0 ? { tamanos } : {}),
     ...(ajustes.length > 0 ? { ajustes } : {}),
     ...(grupos.length > 0 ? { grupos } : {}),
+    ...(personalizacion ? { personalizacion } : {}),
   };
 }
 
@@ -205,7 +276,18 @@ function parseOptionGroups(raw: unknown): MenuOptionGroup[] {
     min = Math.min(min, max);
 
     seenGroupIds.add(id);
-    groups.push({ id, nombre, tipo, obligatorio: min > 0, min, max, opciones });
+    const preguntaText = (row.pregunta ?? '').toString().replace(/\s+/g, ' ').trim()
+      .slice(0, OPTION_GROUP_QUESTION_MAX_LENGTH);
+    const pregunta = min === 0 && row.pregunta_activada === true
+      ? preguntaText || defaultOptionGroupQuestion(nombre)
+      : undefined;
+    const preguntaDirecta = Boolean(pregunta) && opciones.length === 1 && opciones[0].textoLibre === true &&
+      row.pregunta_directa === true;
+    groups.push({
+      id, nombre, tipo, obligatorio: min > 0, min, max, opciones,
+      ...(pregunta ? { pregunta } : {}),
+      ...(preguntaDirecta ? { preguntaDirecta: true } : {}),
+    });
   }
 
   return groups;
@@ -255,13 +337,16 @@ export function describeDependentPriceReason(
 ) {
   if (!option.reglasPrecio?.length) return null;
   const picked = selection.grupos ?? {};
-  for (const rule of option.reglasPrecio) {
-    if (!(picked[rule.grupo] ?? []).includes(rule.opcion)) continue;
-    const parentGroup = groups.find((group) => group.id === rule.grupo);
-    const parentOption = parentGroup?.opciones.find((entry) => entry.id === rule.opcion);
-    if (parentOption) return `según ${parentOption.nombre}`;
-  }
-  return 'según tu selección';
+  const matched = option.reglasPrecio.find((rule) => (picked[rule.grupo] ?? []).includes(rule.opcion));
+  const parentGroup = groups.find((group) => group.id === (matched ?? option.reglasPrecio[0]).grupo);
+  return parentGroup ? `según ${lowerFirst(parentGroup.nombre)}` : 'según tu selección';
+}
+
+/** "Tamaño" -> "tamaño", but keeps acronyms such as "BBQ" as typed. */
+function lowerFirst(value: string) {
+  const text = value.trim();
+  if (text.length > 1 && text[1] === text[1].toLocaleUpperCase('es') && text[1] !== text[1].toLocaleLowerCase('es')) return text;
+  return text.charAt(0).toLocaleLowerCase('es') + text.slice(1);
 }
 
 function optionPriceRange(option: MenuOptionGroupChoice) {
@@ -499,7 +584,7 @@ export function slimPublicProductOptions(raw: unknown): unknown {
   return record;
 }
 
-export function sanitizeCartLineSelection(raw: unknown): CartLineSelection {
+export function sanitizeCartLineSelection(raw: unknown, allowCombination = true): CartLineSelection {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const row = raw as Record<string, unknown>;
   const tamanoId = (row.tamanoId ?? '').toString().trim().slice(0, 64);
@@ -519,6 +604,14 @@ export function sanitizeCartLineSelection(raw: unknown): CartLineSelection {
     }
   }
   const textos = sanitizeFreeTexts(row.textos, grupos);
+  const exclusionesIds = Array.isArray(row.exclusionesIds)
+    ? [...new Set(row.exclusionesIds.filter((id): id is string => typeof id === 'string' && OPTION_ID_PATTERN.test(id)))].slice(0, 50)
+    : [];
+  const combination = row.combinacion && typeof row.combinacion === 'object'
+    ? row.combinacion as Record<string, unknown> : null;
+  const combinacion = allowCombination && typeof combination?.productId === 'string' && OPTION_ID_PATTERN.test(combination.productId)
+    ? { productId: combination.productId, seleccion: sanitizeCartLineSelection(combination.seleccion, false) }
+    : undefined;
   return {
     ...(tamanoId ? { tamanoId } : {}),
     ...(tamanoLabel ? { tamanoLabel } : {}),
@@ -526,6 +619,8 @@ export function sanitizeCartLineSelection(raw: unknown): CartLineSelection {
     ...(ajusteIds.length > 0 ? { ajusteIds } : {}),
     ...(Object.keys(grupos).length > 0 ? { grupos } : {}),
     ...(textos ? { textos } : {}),
+    ...(exclusionesIds.length ? { exclusionesIds } : {}),
+    ...(combinacion ? { combinacion } : {}),
   };
 }
 
@@ -642,14 +737,15 @@ export function parseCategoryMenuOptions(raw: unknown): CategoryMenuOptions | nu
   };
 }
 
-export function productRequiresConfiguration(product: ProductLike, category?: CategoryLike | null) {
+export function productRequiresConfiguration(product: ProductLike, category?: CategoryLike | null, includeCombination = true, includeRemovals = true) {
   const options = parseProductMenuOptions(product.opciones_menu);
   const categoryOptions = parseCategoryMenuOptions(category?.opciones_menu ?? null);
   const hasSizes = (options?.tamanos?.length ?? 0) > 0;
   const hasAdjustments = (options?.ajustes?.length ?? 0) > 0;
   const hasGroups = (options?.grupos?.length ?? 0) > 0;
   const hasCategoryAddon = Boolean(categoryOptions?.servicio_adicional?.precios_por_tamano);
-  return hasSizes || hasAdjustments || hasGroups || hasCategoryAddon;
+  return hasSizes || hasAdjustments || hasGroups || hasCategoryAddon || (includeRemovals && Boolean(options?.personalizacion?.exclusiones)) ||
+    (includeCombination && Boolean(options?.personalizacion?.combinacion));
 }
 
 function sumCheapest(prices: number[], count: number) {
@@ -724,6 +820,11 @@ export function buildCartLineKey(productId: string, selection: CartLineSelection
   const base = `${productId}::${tamanoId}::${servicio}::${ajusteIds}`;
   const grupos = encodeGroupSelection(selection.grupos);
   const textos = encodeFreeTexts(selection.textos);
+  if (selection.combinacion || selection.exclusionesIds?.length) {
+    const clean = sanitizeCartLineSelection(selection);
+    const extra = { exclusionesIds: clean.exclusionesIds?.slice().sort(), combinacion: clean.combinacion };
+    return `${base}::${grupos}::${textos}::${encodeURIComponent(JSON.stringify(extra))}`;
+  }
   if (textos) return `${base}::${grupos}::${textos}`;
   // Keys without groups keep the legacy 4-segment shape.
   return grupos ? `${base}::${grupos}` : base;
@@ -734,8 +835,12 @@ export function parseCartLineKey(key: string): { productId: string; selection: C
     return { productId: key, selection: {} };
   }
 
-  const [productId = '', tamanoId = '', servicio = '0', ajusteIdsRaw = '', gruposRaw = '', textosRaw = ''] =
+  const [productId = '', tamanoId = '', servicio = '0', ajusteIdsRaw = '', gruposRaw = '', textosRaw = '', customRaw = ''] =
     key.split('::');
+  let customization: CartLineSelection = {};
+  if (customRaw) {
+    try { customization = sanitizeCartLineSelection(JSON.parse(decodeURIComponent(customRaw))); } catch { customization = {}; }
+  }
   const ajusteIds = ajusteIdsRaw
     .split(',')
     .map((entry) => entry.trim())
@@ -751,6 +856,7 @@ export function parseCartLineKey(key: string): { productId: string; selection: C
       ...(ajusteIds.length > 0 ? { ajusteIds } : {}),
       ...(grupos ? { grupos } : {}),
       ...(textos ? { textos } : {}),
+      ...customization,
     },
   };
 }
@@ -797,6 +903,73 @@ export function resolveCartLineUnitPrice(
   return roundMoney(unitPrice);
 }
 
+export function validateCustomizationSelection(product: ProductLike, selection: CartLineSelection) {
+  const errors = validateOptionGroupSelection(product, selection).map((issue) => issue.message);
+  const options = parseProductMenuOptions(product.opciones_menu);
+  if (selection.tamanoId && !options?.tamanos?.some((size) => size.id === selection.tamanoId)) errors.push('El tamaño seleccionado no está disponible.');
+  if (options?.tamanos?.length && !selection.tamanoId) errors.push('Selecciona un tamaño.');
+  if ((selection.ajusteIds ?? []).some((id) => !options?.ajustes?.some((adjustment) => adjustment.id === id))) errors.push('Un ajuste ya no está disponible.');
+  const allowed = new Set(options?.personalizacion?.exclusiones?.ingredientes.map((ingredient) => ingredient.id) ?? []);
+  if ((selection.exclusionesIds ?? []).some((id) => !allowed.has(id))) errors.push('Un ingrediente no se puede quitar.');
+  return errors;
+}
+
+function sameLabel(a: string, b: string) {
+  return normalizeLabel(a) === normalizeLabel(b);
+}
+
+function normalizeLabel(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
+
+/**
+ * Selection for the second product of a combination, which the shopper does not configure: each
+ * required choice mirrors the option with the same name picked for the first product (Grande →
+ * Grande), else its default, else its first option. Optional groups, extras and removals stay empty.
+ */
+export function autoPartnerSelection(product: ProductLike, selection: CartLineSelection, partner: ProductLike): CartLineSelection {
+  const own = parseProductMenuOptions(product.opciones_menu);
+  const options = parseProductMenuOptions(partner.opciones_menu);
+  const result: CartLineSelection = {};
+  if (options?.tamanos?.length) {
+    const picked = own?.tamanos?.find((size) => size.id === selection.tamanoId);
+    const size = (picked && options.tamanos.find((entry) => sameLabel(entry.label, picked.label))) ?? options.tamanos[0];
+    result.tamanoId = size.id;
+    result.tamanoLabel = size.label;
+  }
+  const pickedNames = (own?.grupos ?? []).flatMap((group) =>
+    (selection.grupos?.[group.id] ?? []).flatMap((id) => {
+      const option = group.opciones.find((entry) => entry.id === id);
+      return option ? [{ group: group.nombre, option: option.nombre }] : [];
+    }));
+  const defaults = defaultGroupSelections(options?.grupos);
+  const grupos: Record<string, string[]> = {};
+  for (const group of options?.grupos ?? []) {
+    if (group.min <= 0 || group.opciones.length === 0) continue;
+    const sameGroup = pickedNames.filter((entry) => sameLabel(entry.group, group.nombre));
+    const pool = sameGroup.length ? sameGroup : pickedNames;
+    const mirrored = group.opciones.filter((option) => pool.some((entry) => sameLabel(entry.option, option.nombre)));
+    const listed = group.opciones.filter((option) => !option.textoLibre);
+    const fallback = (defaults[group.id] ?? []).length
+      ? defaults[group.id]
+      : (listed.length ? listed : group.opciones).map((option) => option.id);
+    const ids = mirrored.length ? mirrored.map((option) => option.id) : fallback;
+    grupos[group.id] = ids.slice(0, group.tipo === 'unica' || group.max <= 1 ? 1 : group.min);
+  }
+  if (Object.keys(grupos).length) result.grupos = grupos;
+  return result;
+}
+
+export function resolveCombinedUnitPrice(
+  product: ProductLike, category: CategoryLike | null | undefined, selection: CartLineSelection,
+  partner?: ProductLike | null, partnerCategory?: CategoryLike | null,
+) {
+  const first = resolveCartLineUnitPrice(product, category, selection);
+  return selection.combinacion && partner
+    ? Math.max(first, resolveCartLineUnitPrice(partner, partnerCategory, selection.combinacion.seleccion))
+    : first;
+}
+
 /**
  * Central price engine: base + selected options after applying dependency
  * rules. Same snapshot the order API freezes.
@@ -814,12 +987,68 @@ export function calculateProductPrice(
   };
 }
 
+export const COMBINATION_TITLE_PREFIX = '(Combinación)';
+
+function productName(product: ProductLike) {
+  return (product.nombre ?? '').toString().trim() || 'Producto';
+}
+
+/** "(Combinación) A + B" for lines that combine two products. */
+export function combinedLineTitle(product: ProductLike, partner: ProductLike) {
+  return `${COMBINATION_TITLE_PREFIX} ${productName(product)} + ${productName(partner)}`;
+}
+
+/**
+ * Details of a combined line as one merged list, same wording as the merchant comanda:
+ * "Tamaños: Grande", "Extras: Añadir extra (piña)", "Sin: Cebolla".
+ */
+function combinedLineDetails(
+  product: ProductLike, selection: CartLineSelection, category: CategoryLike | null | undefined,
+  partner: ProductLike, partnerSelection: CartLineSelection, partnerCategory: CategoryLike | null | undefined,
+) {
+  const byGroup = new Map<string, string[]>();
+  const add = (group: string, label: string) => {
+    const labels = byGroup.get(group) ?? [];
+    if (!labels.includes(label)) byGroup.set(group, [...labels, label]);
+  };
+  const removedByProduct: string[][] = [];
+  for (const [entry, picked, entryCategory] of [
+    [product, selection, category], [partner, partnerSelection, partnerCategory],
+  ] as const) {
+    const options = parseProductMenuOptions(entry.opciones_menu);
+    const size = options?.tamanos?.find((item) => item.id === picked.tamanoId)?.label ?? picked.tamanoLabel;
+    if (size) add('Tamaño', String(size));
+    for (const ajusteId of picked.ajusteIds ?? []) {
+      const ajuste = options?.ajustes?.find((item) => item.id === ajusteId);
+      if (ajuste?.label) add('', ajuste.label);
+    }
+    if (picked.servicioAdicional) {
+      add('', parseCategoryMenuOptions(entryCategory?.opciones_menu ?? null)?.servicio_adicional?.label ?? 'Servicio adicional');
+    }
+    for (const { group, option } of resolveSelectedGroupChoices(options, picked)) {
+      add(group.nombre, getOptionDisplayName(option, picked, group.id));
+    }
+    removedByProduct.push((options?.personalizacion?.exclusiones?.ingredientes ?? [])
+      .filter((ingredient) => picked.exclusionesIds?.includes(ingredient.id))
+      .map((ingredient) => ingredient.nombre));
+  }
+  const lines = [...byGroup].map(([group, labels]) => `${group ? `${group}: ` : ''}${labels.join(', ')}`);
+  const both = removedByProduct.every((removed) => removed.length > 0);
+  const removed = both
+    ? removedByProduct.map((entries, index) => `${entries.join(', ')} (${productName(index === 0 ? product : partner)})`)
+    : removedByProduct.flat();
+  if (removed.length) lines.push(`Sin: ${removed.join(', ')}`);
+  return lines;
+}
+
 export function buildOrderLineLabel(
   product: ProductLike,
   selection: CartLineSelection,
   category?: CategoryLike | null,
+  partner?: ProductLike | null,
 ) {
-  const parts = [((product.nombre ?? '').toString().trim() || 'Producto')];
+  if (selection.combinacion && partner) return combinedLineTitle(product, partner);
+  const parts = [productName(product)];
   const options = parseProductMenuOptions(product.opciones_menu);
   const categoryOptions = parseCategoryMenuOptions(category?.opciones_menu ?? null);
 
@@ -855,6 +1084,8 @@ export function summarizeCartLineSelection(
   product: ProductLike,
   selection: CartLineSelection,
   category?: CategoryLike | null,
+  partner?: ProductLike | null,
+  partnerCategory?: CategoryLike | null,
 ) {
   const options = parseProductMenuOptions(product.opciones_menu);
   const categoryOptions = parseCategoryMenuOptions(category?.opciones_menu ?? null);
@@ -881,7 +1112,13 @@ export function summarizeCartLineSelection(
   for (const { group, option } of resolveSelectedGroupChoices(options, selection)) {
     chunks.push(getOptionDisplayName(option, selection, group.id));
   }
+  for (const ingredient of options?.personalizacion?.exclusiones?.ingredientes ?? []) {
+    if (selection.exclusionesIds?.includes(ingredient.id)) chunks.push(`Sin ${ingredient.nombre}`);
+  }
 
+  if (selection.combinacion && partner) {
+    return combinedLineDetails(product, selection, category, partner, selection.combinacion.seleccion, partnerCategory).join(' · ');
+  }
   return chunks.join(' · ');
 }
 

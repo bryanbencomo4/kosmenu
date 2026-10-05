@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
 import type { CartLineSelection } from '../../../_lib/menu-product-options';
@@ -14,11 +14,14 @@ import {
   defaultGroupSelections,
   nextGroupSelection,
   sanitizeFreeText,
-  resolveCartLineUnitPrice,
   resolveOptionPrice,
   validateOptionGroupSelection,
+  validateCustomizationSelection,
+  resolveCombinedUnitPrice,
+  autoPartnerSelection,
   type MenuOptionGroup,
 } from '../../../_lib/menu-product-options';
+import { useLockBodyScroll } from '../../../_lib/use-lock-body-scroll';
 
 function describeGroupRule(group: MenuOptionGroup) {
   if (group.tipo === 'unica') return group.obligatorio ? 'Obligatorio · elige 1' : 'Opcional · elige 1';
@@ -30,16 +33,287 @@ function describeGroupRule(group: MenuOptionGroup) {
   return `Opcional · hasta ${group.max}`;
 }
 
-type ProductOptionsSheetProps = {
-  open: boolean;
-  canAdd: boolean;
-  product: {
+function optionRowStyle(active: boolean) {
+  return active
+    ? {
+        borderColor: 'var(--menu-primary)',
+        backgroundColor: 'color-mix(in srgb, var(--menu-primary) 12%, var(--menu-surface))',
+      }
+    : {
+        borderColor: 'var(--menu-border)',
+        backgroundColor: 'var(--menu-surface-alt)',
+      };
+}
+
+function ChoiceMark({ kind, active }: { kind: 'radio' | 'checkbox'; active: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`grid h-5 w-5 shrink-0 place-items-center border-2 ${
+        kind === 'radio' ? 'rounded-full' : 'rounded-md'
+      }`}
+      style={{
+        borderColor: active ? 'var(--menu-primary)' : 'var(--menu-border)',
+        backgroundColor: active && kind === 'checkbox' ? 'var(--menu-primary)' : 'transparent',
+        color: 'var(--menu-on-primary)',
+      }}
+    >
+      {active ? (
+        kind === 'radio' ? (
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: 'var(--menu-primary)' }} />
+        ) : (
+          <span className="text-[11px] font-black leading-none">✓</span>
+        )
+      ) : null}
+    </span>
+  );
+}
+
+function OptionSectionHeader({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
+        {title}
+      </p>
+      {hint ? (
+        <span className="shrink-0 text-[11px] font-bold text-[var(--menu-text-muted)]">{hint}</span>
+      ) : null}
+    </div>
+  );
+}
+
+const COMPACT_LIST_THRESHOLD = 4;
+const REMOVALS_QUESTION_KEY = ':exclusiones';
+const COMBO_QUESTION_KEY = ':combinacion';
+const COLLAPSED_VISIBLE_COUNT = 6;
+const SEARCH_THRESHOLD = 8;
+
+function normalizeSearch(value: string) {
+  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+
+function choiceRowClass(compact: boolean) {
+  return compact
+    ? 'flex h-full min-h-12 w-full items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition disabled:opacity-45'
+    : 'flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition disabled:opacity-45';
+}
+
+function choiceLabelClass(compact: boolean) {
+  return compact
+    ? 'line-clamp-2 break-words text-sm font-bold leading-tight text-[var(--menu-text)]'
+    : 'block break-words text-sm font-bold text-[var(--menu-text)]';
+}
+
+/**
+ * Long lists start as a compact two-column grid showing the first few items, with search
+ * once they get long. Single-choice lists fold into the picked row after the shopper taps one.
+ * Selected items are never hidden by the fold.
+ */
+function ChoiceList<T extends { id: string }>({
+  items,
+  selectedIds,
+  getLabel,
+  renderItem,
+  searchLabel,
+  single = false,
+  allowCompact = true,
+  foldMinItems = COMPACT_LIST_THRESHOLD + 1,
+}: {
+  items: T[];
+  selectedIds: string[];
+  getLabel: (item: T) => string;
+  renderItem: (item: T, compact: boolean) => ReactNode;
+  searchLabel: string;
+  single?: boolean;
+  allowCompact?: boolean;
+  foldMinItems?: number;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState('');
+  const [folded, setFolded] = useState(false);
+  const selectionKey = selectedIds.join('|');
+  const [lastSelectionKey, setLastSelectionKey] = useState(selectionKey);
+  if (selectionKey !== lastSelectionKey) {
+    setLastSelectionKey(selectionKey);
+    if (single && selectedIds.length === 1 && items.length >= foldMinItems) {
+      setFolded(true);
+      setQuery('');
+      setExpanded(false);
+    }
+  }
+
+  const picked = single && folded ? items.find((item) => item.id === selectedIds[0]) : undefined;
+  if (picked) {
+    return (
+      <div ref={rootRef} className="mt-3 flex items-stretch gap-2">
+        <div className="min-w-0 flex-1">{renderItem(picked, false)}</div>
+        <button
+          type="button"
+          onClick={() => setFolded(false)}
+          className="shrink-0 self-start rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3 text-sm font-bold text-[var(--menu-text)]"
+        >
+          Cambiar
+        </button>
+      </div>
+    );
+  }
+
+  const normalizedQuery = normalizeSearch(query);
+  const filtered = normalizedQuery
+    ? items.filter((item) => normalizeSearch(getLabel(item)).includes(normalizedQuery))
+    : items;
+  const selected = new Set(selectedIds);
+  const canFold = items.length > COLLAPSED_VISIBLE_COUNT + 1;
+  const collapsed = canFold && !expanded && !normalizedQuery;
+  const visible = collapsed
+    ? filtered.filter((item, index) => index < COLLAPSED_VISIBLE_COUNT || selected.has(item.id))
+    : filtered;
+  const hiddenCount = filtered.length - visible.length;
+  const compact = allowCompact && items.length > COMPACT_LIST_THRESHOLD;
+
+  return (
+    <div ref={rootRef}>
+      {items.length > SEARCH_THRESHOLD ? (
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Buscar..."
+          aria-label={searchLabel}
+          className="mt-3 h-11 w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 text-base font-semibold text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)] focus:border-[var(--menu-primary)] sm:text-sm"
+        />
+      ) : null}
+      <div className={`mt-3 grid gap-2 ${compact ? 'grid-cols-2' : ''}`}>
+        {visible.map((item) => <Fragment key={item.id}>{renderItem(item, compact)}</Fragment>)}
+      </div>
+      {normalizedQuery && filtered.length === 0 ? (
+        <p className="mt-3 text-center text-sm font-semibold text-[var(--menu-text-muted)]">
+          Sin resultados para “{query.trim()}”
+        </p>
+      ) : null}
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="mt-2 w-full rounded-2xl border border-dashed border-[var(--menu-border)] px-4 py-3 text-sm font-bold text-[var(--menu-primary)]"
+        >
+          Ver {hiddenCount} más
+        </button>
+      ) : null}
+      {canFold && expanded && !normalizedQuery ? (
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded(false);
+            rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }}
+          className="mt-2 w-full rounded-2xl px-4 py-2 text-sm font-bold text-[var(--menu-text-muted)]"
+        >
+          Ver menos
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function QuestionToggle({ question, hint, open, onToggle }: {
+  question: string; hint: string; open: boolean; onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={open}
+      aria-expanded={open}
+      onClick={onToggle}
+      className="flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-left transition"
+      style={optionRowStyle(open)}
+    >
+      <ChoiceMark kind="checkbox" active={open} />
+      <span className="min-w-0 flex-1">
+        <span className="block break-words text-[15px] font-extrabold leading-snug text-[var(--menu-text)]">
+          {question}
+        </span>
+        <span className="mt-0.5 block text-xs font-semibold text-[var(--menu-text-muted)]">{hint}</span>
+      </span>
+    </button>
+  );
+}
+
+function plural(count: number, singular: string, pluralForm: string) {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+function QuestionPanel({ gated, children }: { gated: boolean; children: ReactNode }) {
+  if (!gated) return <>{children}</>;
+  return (
+    <div className="mt-3 border-l-2 pl-3" style={{ borderColor: 'var(--menu-primary)' }}>
+      {children}
+    </div>
+  );
+}
+
+function IngredientRemovalControls({ title, ingredients, selected, onChange }: {
+  title: string; ingredients: Array<{ id: string; nombre: string }>;
+  selected: string[]; onChange: (ids: string[]) => void;
+}) {
+  return (
+    <section>
+      <OptionSectionHeader
+        title={title}
+        hint={selected.length ? `Sin ${selected.length}` : 'Opcional'}
+      />
+      <ChoiceList
+        items={ingredients}
+        selectedIds={selected}
+        getLabel={(ingredient) => ingredient.nombre}
+        searchLabel={`Buscar en ${title}`}
+        renderItem={(ingredient, compact) => {
+          const removed = selected.includes(ingredient.id);
+          return (
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={removed}
+              onClick={() => onChange(
+                removed
+                  ? selected.filter((id) => id !== ingredient.id)
+                  : [...selected, ingredient.id],
+              )}
+              className={choiceRowClass(compact)}
+              style={optionRowStyle(removed)}
+            >
+              <ChoiceMark kind="checkbox" active={removed} />
+              <span className="min-w-0 flex-1">
+                <span className={choiceLabelClass(compact)}>{ingredient.nombre}</span>
+              </span>
+            </button>
+          );
+        }}
+      />
+    </section>
+  );
+}
+
+type ConfigurableProduct = {
     id: string;
     nombre: string;
     descripcion?: string | null;
     precio?: number | null;
     opciones_menu?: unknown;
-  } | null;
+    imagen_url?: string | null;
+    disponible?: boolean | null;
+    comercio_id?: string;
+    category?: { opciones_menu?: unknown } | null;
+};
+
+type ProductOptionsSheetProps = {
+  open: boolean;
+  canAdd: boolean;
+  product: ConfigurableProduct | null;
+  compatibleProducts?: ConfigurableProduct[];
+  secondary?: boolean;
   imageUrl: string | null;
   category: {
     opciones_menu?: unknown;
@@ -58,7 +332,10 @@ export function ProductOptionsSheet({
   formatPrice,
   onClose,
   onConfirm,
+  compatibleProducts = [],
+  secondary = false,
 }: ProductOptionsSheetProps) {
+  useLockBodyScroll(open && Boolean(product));
   const options = useMemo(() => parseProductMenuOptions(product?.opciones_menu), [product]);
   const categoryOptions = useMemo(
     () => parseCategoryMenuOptions(category?.opciones_menu),
@@ -71,6 +348,12 @@ export function ProductOptionsSheet({
   const [groupSelections, setGroupSelections] = useState<Record<string, string[]>>({});
   const [freeTexts, setFreeTexts] = useState<Record<string, Record<string, string>>>({});
   const [quantity, setQuantity] = useState(1);
+  const [partnerId, setPartnerId] = useState('');
+  const [exclusionesIds, setExclusionesIds] = useState<string[]>([]);
+  const [openQuestions, setOpenQuestions] = useState<Record<string, boolean>>({});
+  const [listSession, setListSession] = useState(0);
+  const [attentionGroupId, setAttentionGroupId] = useState('');
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open || !product) return;
@@ -79,10 +362,26 @@ export function ProductOptionsSheet({
     setTamanoId(defaultSize);
     setServicioAdicional(false);
     setAjusteIds([]);
-    setGroupSelections(defaultGroupSelections(options?.grupos));
+    const defaults = defaultGroupSelections(options?.grupos);
+    setGroupSelections(defaults);
+    setOpenQuestions(Object.fromEntries(
+      (options?.grupos ?? [])
+        .filter((group) => group.pregunta)
+        .map((group) => [group.id, (defaults[group.id]?.length ?? 0) > 0]),
+    ));
     setFreeTexts({});
     setQuantity(1);
+    setPartnerId('');
+    setExclusionesIds([]);
+    setListSession((previous) => previous + 1);
+    setAttentionGroupId('');
   }, [open, product, options]);
+
+  useEffect(() => {
+    if (!attentionGroupId) return;
+    const timer = window.setTimeout(() => setAttentionGroupId(''), 1600);
+    return () => window.clearTimeout(timer);
+  }, [attentionGroupId]);
 
   function toggleGroupOption(group: MenuOptionGroup, optionId: string) {
     setGroupSelections((prev) => {
@@ -141,8 +440,13 @@ export function ProductOptionsSheet({
     ...(servicioAdicional ? { servicioAdicional: true } : {}),
     ...(ajusteIds.length > 0 ? { ajusteIds } : {}),
   };
+  const closedQuestionGroups = new Set(
+    (options?.grupos ?? [])
+      .filter((group) => group.pregunta && !openQuestions[group.id])
+      .map((group) => group.id),
+  );
   const selectedGroups = Object.fromEntries(
-    Object.entries(groupSelections).filter(([, ids]) => ids.length > 0),
+    Object.entries(groupSelections).filter(([groupId, ids]) => ids.length > 0 && !closedQuestionGroups.has(groupId)),
   );
   if (Object.keys(selectedGroups).length > 0) {
     selection.grupos = selectedGroups;
@@ -160,9 +464,24 @@ export function ProductOptionsSheet({
   if (Object.keys(selectedTexts).length > 0) {
     selection.textos = selectedTexts;
   }
+  const removals = options?.personalizacion?.exclusiones;
+  const removalsOpen = !removals?.pregunta || openQuestions[REMOVALS_QUESTION_KEY] === true;
+  if (exclusionesIds.length && removalsOpen) selection.exclusionesIds = exclusionesIds;
+  const combo = secondary ? null : options?.personalizacion?.combinacion;
+  const comboOpen = !combo?.pregunta || openQuestions[COMBO_QUESTION_KEY] === true;
+  const compatible = combo ? compatibleProducts.filter((entry) =>
+    entry.id !== product.id && entry.disponible !== false &&
+    (!product.comercio_id || entry.comercio_id === product.comercio_id) &&
+    combo.productosCompatibles.includes(entry.id)) : [];
+  const partner = comboOpen ? compatible.find((entry) => entry.id === partnerId) : undefined;
+  const combine = Boolean(partner);
+  const partnerSelection = partner ? autoPartnerSelection(product, selection, partner) : {};
+  if (combine && partner) selection.combinacion = { productId: partner.id, seleccion: partnerSelection };
 
-  const unitPrice = resolveCartLineUnitPrice(product, category, selection);
+  const unitPrice = resolveCombinedUnitPrice(product, category, selection, partner, partner?.category);
   const groupIssues = validateOptionGroupSelection(product, selection);
+  const customIssues = options?.personalizacion ? validateCustomizationSelection(product, selection) : [];
+  const partnerIssues = partner ? validateCustomizationSelection(partner, partnerSelection) : [];
   const hasGroups = (options?.grupos?.length ?? 0) > 0;
   const hasDependentPrices = productHasDependentPrices(product);
   const servicioLabel = categoryOptions?.servicio_adicional?.label ?? 'Servicio adicional';
@@ -173,9 +492,12 @@ export function ProductOptionsSheet({
 
   const requiresSize = (options?.tamanos?.length ?? 0) > 0;
   const canConfirm =
-    canAdd && (!requiresSize || Boolean(tamanoId)) && groupIssues.length === 0 && unitPrice > 0;
+    canAdd && (!requiresSize || Boolean(tamanoId)) && groupIssues.length === 0 && customIssues.length === 0 &&
+    (!combine || Boolean(partner)) && partnerIssues.length === 0 && unitPrice > 0;
+  const pendingGroupId = canAdd ? groupIssues[0]?.groupId ?? '' : '';
 
   return (
+    <>
     <div
       className="fixed inset-0 z-[130] flex items-end justify-center bg-black/45 p-2 sm:items-center sm:p-4"
       onMouseDown={(event) => {
@@ -209,10 +531,14 @@ export function ProductOptionsSheet({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6">
+        <div
+          ref={bodyRef}
+          data-sheet-scroll
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6 [touch-action:pan-y]"
+        >
           <div className="flex items-start justify-between gap-3">
             <h3 className="min-w-0 text-xl font-extrabold leading-tight text-[var(--menu-text)] sm:text-2xl">
-              {product.nombre}
+              {secondary ? `Configura ${product.nombre}` : product.nombre}
             </h3>
             <span className="shrink-0 rounded-full bg-[var(--menu-surface-alt)] px-3 py-1.5 text-sm font-extrabold text-[var(--menu-text)]">
               {hasGroups ? formatProductPriceLabel(product, formatPrice) : formatPrice(product.precio ?? 0)}
@@ -333,8 +659,84 @@ export function ProductOptionsSheet({
             const selectedIds = groupSelections[group.id] ?? [];
             const reachedMax = group.tipo === 'multiple' && selectedIds.length >= group.max;
             const pending = groupIssues.find((issue) => issue.groupId === group.id);
+            const singleChoice = group.tipo === 'unica' || group.max <= 1;
+            const attention = attentionGroupId === group.id;
+            const questionOpen = !group.pregunta || openQuestions[group.id] === true;
+            const cheapestExtra = group.pregunta
+              ? Math.min(...group.opciones.map((option) => resolveOptionPrice(option, selection)).filter((price) => price > 0))
+              : Infinity;
+            const directOption = group.preguntaDirecta ? group.opciones[0] : undefined;
+            const directPrice = directOption ? resolveOptionPrice(directOption, selection) : 0;
+            const questionHint = directOption
+              ? questionOpen && directOption.textoLibre
+                ? 'Escribe abajo lo que quieres'
+                : directPrice > 0 ? `+${formatPrice(directPrice)}` : directOption.nombre
+              : questionOpen
+              ? selectedIds.length
+                ? plural(selectedIds.length, 'elegido', 'elegidos')
+                : 'Elige abajo'
+              : `${plural(group.opciones.length, 'opción', 'opciones')}${
+                  Number.isFinite(cheapestExtra) ? ` · desde +${formatPrice(cheapestExtra)}` : ''
+                }`;
             return (
-              <section key={group.id}>
+              <section
+                key={group.id}
+                data-option-group={group.id}
+                className="scroll-mt-4 rounded-2xl transition-shadow duration-300"
+                style={attention ? { boxShadow: '0 0 0 6px color-mix(in srgb, var(--menu-primary) 18%, transparent)' } : undefined}
+              >
+                {group.pregunta ? (
+                  <QuestionToggle
+                    question={group.pregunta}
+                    hint={questionHint}
+                    open={questionOpen}
+                    onToggle={() => {
+                      const opening = !questionOpen;
+                      setOpenQuestions((previous) => ({ ...previous, [group.id]: opening }));
+                      const onlyOption = group.opciones[0];
+                      if (opening && group.preguntaDirecta && onlyOption && !selectedIds.includes(onlyOption.id)) {
+                        setGroupSelections((previous) => ({ ...previous, [group.id]: [onlyOption.id] }));
+                      }
+                    }}
+                  />
+                ) : null}
+                {questionOpen ? (
+                <QuestionPanel gated={Boolean(group.pregunta)}>
+                {group.preguntaDirecta ? (() => {
+                  const option = group.opciones[0];
+                  const resolvedPrice = resolveOptionPrice(option, selection);
+                  const reason = describeDependentPriceReason(option, options?.grupos ?? [], selection);
+                  const textMissing = option.textoLibre && !sanitizeFreeText(freeTexts[group.id]?.[option.id] ?? '');
+                  return (
+                    <div className="grid gap-2">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="block break-words text-sm font-bold text-[var(--menu-text)]">{option.nombre}</span>
+                          {reason ? (
+                            <span className="mt-0.5 block text-[11px] font-semibold text-[var(--menu-text-muted)]">{reason}</span>
+                          ) : null}
+                        </span>
+                        {resolvedPrice > 0 || reason ? (
+                          <span className="shrink-0 text-sm font-black text-[var(--menu-text)]">+{formatPrice(resolvedPrice)}</span>
+                        ) : null}
+                      </div>
+                      {option.textoLibre && selectedIds.includes(option.id) ? (
+                        <input
+                          value={freeTexts[group.id]?.[option.id] ?? ''}
+                          onChange={(event) => setFreeText(group.id, option.id, event.target.value)}
+                          maxLength={80}
+                          autoFocus
+                          enterKeyHint="done"
+                          placeholder="Ej. Extra de piña"
+                          aria-label={`Escribe ${option.nombre}`}
+                          aria-invalid={Boolean(pending && textMissing) || undefined}
+                          className="h-12 w-full rounded-2xl border bg-[var(--menu-surface)] px-4 text-base font-semibold text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)] sm:text-sm"
+                          style={{ borderColor: pending && textMissing && attention ? 'var(--menu-primary)' : 'var(--menu-border)' }}
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })() : (<>
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
                     {group.nombre}
@@ -344,10 +746,18 @@ export function ProductOptionsSheet({
                     style={{ color: pending ? 'var(--menu-primary)' : 'var(--menu-text-muted)' }}
                   >
                     {describeGroupRule(group)}
+                    {!singleChoice && selectedIds.length > 0 ? ` · ${selectedIds.length}/${group.max}` : ''}
                   </span>
                 </div>
-                <div className="mt-3 grid gap-2">
-                  {group.opciones.map((option) => {
+                <ChoiceList
+                  key={`${group.id}:${listSession}`}
+                  items={group.opciones}
+                  selectedIds={selectedIds}
+                  single={singleChoice}
+                  allowCompact={!group.opciones.some((option) => option.textoLibre)}
+                  getLabel={(option) => option.nombre}
+                  searchLabel={`Buscar en ${group.nombre}`}
+                  renderItem={(option, compact) => {
                     const active = selectedIds.includes(option.id);
                     const disabled = !active && reachedMax;
                     const resolvedPrice = resolveOptionPrice(option, selection);
@@ -357,57 +767,30 @@ export function ProductOptionsSheet({
                       selection,
                     );
                     const showPrice = resolvedPrice > 0 || Boolean(reason);
+                    const priceLabel = showPrice ? `+${formatPrice(resolvedPrice)}` : null;
                     return (
-                      <div key={option.id} className="grid gap-2">
+                      <div className="grid h-full gap-2">
                         <button
                           type="button"
                           role={group.tipo === 'unica' ? 'radio' : 'checkbox'}
                           aria-checked={active}
                           disabled={disabled}
                           onClick={() => toggleGroupOption(group, option.id)}
-                          className="flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition disabled:opacity-45"
-                          style={
-                            active
-                              ? {
-                                  borderColor: 'var(--menu-primary)',
-                                  backgroundColor:
-                                    'color-mix(in srgb, var(--menu-primary) 12%, var(--menu-surface))',
-                                }
-                              : {
-                                  borderColor: 'var(--menu-border)',
-                                  backgroundColor: 'var(--menu-surface-alt)',
-                                }
-                          }
+                          className={choiceRowClass(compact)}
+                          style={optionRowStyle(active)}
                         >
-                          <span
-                            aria-hidden
-                            className={`grid h-5 w-5 shrink-0 place-items-center border-2 ${
-                              group.tipo === 'unica' ? 'rounded-full' : 'rounded-md'
-                            }`}
-                            style={{
-                              borderColor: active ? 'var(--menu-primary)' : 'var(--menu-border)',
-                              backgroundColor:
-                                active && group.tipo === 'multiple' ? 'var(--menu-primary)' : 'transparent',
-                              color: 'var(--menu-on-primary)',
-                            }}
-                          >
-                            {active ? (
-                              group.tipo === 'unica' ? (
-                                <span
-                                  className="h-2.5 w-2.5 rounded-full"
-                                  style={{ backgroundColor: 'var(--menu-primary)' }}
-                                />
-                              ) : (
-                                <span className="text-[11px] font-black leading-none">✓</span>
-                              )
-                            ) : null}
-                          </span>
+                          <ChoiceMark kind={group.tipo === 'unica' ? 'radio' : 'checkbox'} active={active} />
                           <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-bold text-[var(--menu-text)]">
+                            <span className={choiceLabelClass(compact)}>
                               {option.nombre}
                             </span>
+                            {compact && priceLabel ? (
+                              <span className="mt-0.5 block text-xs font-black text-[var(--menu-text)]">
+                                {priceLabel}
+                              </span>
+                            ) : null}
                             {reason ? (
-                              <span className="mt-0.5 block text-[11px] font-semibold text-[var(--menu-text-muted)]">
+                              <span className={`mt-0.5 block text-[11px] font-semibold text-[var(--menu-text-muted)] ${compact ? 'line-clamp-2' : ''}`}>
                                 {reason}
                               </span>
                             ) : option.textoLibre ? (
@@ -416,9 +799,9 @@ export function ProductOptionsSheet({
                               </span>
                             ) : null}
                           </span>
-                          {showPrice ? (
+                          {!compact && priceLabel ? (
                             <span className="shrink-0 text-sm font-black text-[var(--menu-text)]">
-                              +{formatPrice(resolvedPrice)}
+                              {priceLabel}
                             </span>
                           ) : null}
                         </button>
@@ -435,13 +818,88 @@ export function ProductOptionsSheet({
                         ) : null}
                       </div>
                     );
-                  })}
-                </div>
+                  }}
+                />
+                </>)}
+                </QuestionPanel>
+                ) : null}
               </section>
             );
           })}
 
-          <section>
+          {removals ? (() => {
+            const controls = (
+              <IngredientRemovalControls key={`exclusiones:${listSession}`} title={removals.titulo}
+                ingredients={removals.ingredientes}
+                selected={exclusionesIds} onChange={setExclusionesIds} />
+            );
+            if (!removals.pregunta) return controls;
+            return (
+              <section>
+                <QuestionToggle
+                  question={removals.pregunta}
+                  hint={removalsOpen
+                    ? exclusionesIds.length ? `Sin ${plural(exclusionesIds.length, 'ingrediente', 'ingredientes')}` : 'Toca lo que quieras quitar'
+                    : plural(removals.ingredientes.length, 'ingrediente', 'ingredientes')}
+                  open={removalsOpen}
+                  onToggle={() => setOpenQuestions((previous) => ({ ...previous, [REMOVALS_QUESTION_KEY]: !removalsOpen }))}
+                />
+                {removalsOpen ? <QuestionPanel gated>{controls}</QuestionPanel> : null}
+              </section>
+            );
+          })() : null}
+          {combo && compatible.length ? (
+            <section>
+              {combo.pregunta ? (
+                <QuestionToggle
+                  question={combo.pregunta}
+                  hint={comboOpen
+                    ? partner ? partner.nombre : 'Elige 1 abajo'
+                    : plural(compatible.length, 'producto', 'productos')}
+                  open={comboOpen}
+                  onToggle={() => setOpenQuestions((previous) => ({ ...previous, [COMBO_QUESTION_KEY]: !comboOpen }))}
+                />
+              ) : null}
+              {comboOpen ? (
+              <QuestionPanel gated={Boolean(combo.pregunta)}>
+              <OptionSectionHeader
+                title={combo.titulo}
+                hint={`Opcional · elige 1${compatible.length > COLLAPSED_VISIBLE_COUNT ? ` de ${compatible.length}` : ''}`}
+              />
+              <ChoiceList
+                key={`combo:${listSession}`}
+                items={compatible}
+                selectedIds={partnerId ? [partnerId] : []}
+                single
+                foldMinItems={1}
+                getLabel={(entry) => entry.nombre}
+                searchLabel={`Buscar en ${combo.titulo}`}
+                renderItem={(entry, compact) => {
+                  const active = partnerId === entry.id;
+                  return (
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => {
+                        setPartnerId(active ? '' : entry.id);
+                      }}
+                      className={choiceRowClass(compact)}
+                      style={optionRowStyle(active)}
+                    >
+                      <ChoiceMark kind="radio" active={active} />
+                      <span className="min-w-0 flex-1">
+                        <span className={choiceLabelClass(compact)}>{entry.nombre}</span>
+                      </span>
+                    </button>
+                  );
+                }}
+              />
+              </QuestionPanel>
+              ) : null}
+            </section>
+          ) : null}
+          {!secondary && <section>
             <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Cantidad</p>
             <div className="mt-3 inline-flex items-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] p-1">
               <button
@@ -460,7 +918,7 @@ export function ProductOptionsSheet({
                 +
               </button>
             </div>
-          </section>
+          </section>}
           </div>
         </div>
 
@@ -468,7 +926,7 @@ export function ProductOptionsSheet({
           {hasGroups ? (
             <div className="mb-2 flex items-center justify-between gap-3">
               <span className="min-w-0 truncate text-xs font-semibold text-[var(--menu-text-muted)]">
-                {groupIssues[0]?.message ?? 'Precio actualizado'}
+                {groupIssues[0]?.message ?? customIssues[0] ?? partnerIssues[0] ?? 'Precio actualizado'}
               </span>
               <span className="shrink-0 text-lg font-black text-[var(--menu-text)]">
                 {formatPrice(unitPrice * quantity)}
@@ -477,15 +935,25 @@ export function ProductOptionsSheet({
           ) : null}
           <button
             type="button"
-            disabled={!canConfirm}
-            onClick={() => onConfirm(selection, quantity)}
-            className="inline-flex min-h-12 w-full items-center justify-center rounded-[16px] text-sm font-bold disabled:opacity-50"
+            disabled={!canConfirm && !pendingGroupId}
+            aria-disabled={!canConfirm || undefined}
+            onClick={() => {
+              if (canConfirm) {
+                onConfirm(selection, quantity);
+                return;
+              }
+              const target = bodyRef.current?.querySelector(`[data-option-group="${CSS.escape(pendingGroupId)}"]`);
+              target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              setAttentionGroupId(pendingGroupId);
+            }}
+            className={`inline-flex min-h-12 w-full items-center justify-center rounded-[16px] text-sm font-bold disabled:opacity-50 ${canConfirm ? '' : 'opacity-50'}`}
             style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
           >
-            {hasGroups ? 'Agregar al pedido' : `Agregar · ${formatPrice(unitPrice * quantity)}`}
+            {secondary ? `Guardar opciones · ${formatPrice(unitPrice)}` : hasGroups ? 'Agregar al pedido' : `Agregar · ${formatPrice(unitPrice * quantity)}`}
           </button>
         </div>
       </div>
     </div>
+    </>
   );
 }

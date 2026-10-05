@@ -601,7 +601,15 @@ class PedidoItemModifierGroup {
   final String grupo;
   final List<PedidoItemModifier> opciones;
 
-  const PedidoItemModifierGroup({required this.grupo, required this.opciones});
+  /// True when [opciones] are already formatted lines ("Tamaño: Grande")
+  /// to be shown as a bullet list.
+  final bool bulleted;
+
+  const PedidoItemModifierGroup({
+    required this.grupo,
+    required this.opciones,
+    this.bulleted = false,
+  });
 
   /// "Tamaño: Grande" for a single pick, "Extras: ✓ Tocineta ✓ Extra queso"
   /// for several.
@@ -626,6 +634,10 @@ class PedidoItemModel {
   final double? precioBase;
   final List<PedidoItemModifier> opciones;
 
+  /// Raw `personalizacion` snapshot, kept as-is so saving the order back
+  /// never drops it.
+  final Map<String, dynamic>? personalizacion;
+
   const PedidoItemModel({
     required this.nombre,
     required this.cantidad,
@@ -638,6 +650,7 @@ class PedidoItemModel {
     this.producto,
     this.precioBase,
     this.opciones = const [],
+    this.personalizacion,
   });
 
   double get total => cantidad * precio;
@@ -660,19 +673,97 @@ class PedidoItemModel {
       producto: producto,
       precioBase: precioBase,
       opciones: opciones,
+      personalizacion: personalizacion,
     );
   }
 
   bool get hasModifiers => opciones.isNotEmpty;
 
+  static const combinationTitlePrefix = '(Combinación)';
+
+  static String _text(Object? value) =>
+      value is String ? value.trim() : '';
+
+  /// Lines combining two products read as "(Combinación) A + B" with one
+  /// merged list ("Tamaño: Grande", "Sin: Cebolla"); same rules as
+  /// `site/app/_lib/order-line-sections.ts`. Null for every other line.
+  ({String title, List<String> lines})? get _combinedSummary {
+    final raw = personalizacion;
+    if (raw == null || raw['version'] != 1) return null;
+    final rawComponents = raw['componentes'];
+    if (rawComponents is! List || rawComponents.length < 2) return null;
+    if (rawComponents.any((component) => component is! Map)) return null;
+    final components = rawComponents.cast<Map>();
+    final names = [for (final c in components) _text(c['nombre'])];
+    if (names.any((name) => name.isEmpty)) return null;
+
+    final byGroup = <String, List<String>>{};
+    for (final component in components) {
+      final selecciones = component['selecciones'];
+      if (selecciones is! List) continue;
+      for (final option in selecciones) {
+        if (option is! Map) continue;
+        final label = _text(option['opcion']);
+        if (label.isEmpty) continue;
+        final labels = byGroup.putIfAbsent(_text(option['grupo']), () => []);
+        if (!labels.contains(label)) labels.add(label);
+      }
+    }
+    final lines = [
+      for (final entry in byGroup.entries)
+        entry.key.isEmpty
+            ? entry.value.join(', ')
+            : '${entry.key}: ${entry.value.join(', ')}',
+    ];
+
+    final removedByProduct = [
+      for (final component in components)
+        [
+          if (component['exclusiones'] is List)
+            for (final entry in component['exclusiones'] as List)
+              if (entry is Map && _text(entry['nombre']).isNotEmpty)
+                _text(entry['nombre']),
+        ],
+    ];
+    final productsWithRemovals = removedByProduct
+        .where((removed) => removed.isNotEmpty)
+        .length;
+    final removed = productsWithRemovals > 1
+        ? [
+            for (var i = 0; i < removedByProduct.length; i++)
+              if (removedByProduct[i].isNotEmpty)
+                '${removedByProduct[i].join(', ')} (${names[i]})',
+          ]
+        : removedByProduct.expand((entries) => entries).toList();
+    if (removed.isNotEmpty) lines.add('Sin: ${removed.join(', ')}');
+
+    return (title: '$combinationTitlePrefix ${names.join(' + ')}', lines: lines);
+  }
+
   /// Base product name when the line has modifiers (they are listed apart);
   /// otherwise the stored label, exactly as before.
   String get displayName {
+    final combined = _combinedSummary;
+    if (combined != null) return combined.title;
     final base = producto?.trim() ?? '';
     return hasModifiers && base.isNotEmpty ? base : nombre;
   }
 
   List<PedidoItemModifierGroup> get modifierGroups {
+    final combined = _combinedSummary;
+    if (combined != null) {
+      return [
+        if (combined.lines.isNotEmpty)
+          PedidoItemModifierGroup(
+            grupo: '',
+            bulleted: true,
+            opciones: [
+              for (final line in combined.lines)
+                PedidoItemModifier(grupo: '', nombre: line),
+            ],
+          ),
+      ];
+    }
     final byGroup = <String, List<PedidoItemModifier>>{};
     for (final option in opciones) {
       byGroup.putIfAbsent(option.grupo, () => []).add(option);
@@ -731,6 +822,9 @@ class PedidoItemModel {
                 ?PedidoItemModifier.fromMap(entry),
             ]
           : const [],
+      personalizacion: map['personalizacion'] is Map
+          ? Map<String, dynamic>.from(map['personalizacion'] as Map)
+          : null,
     );
   }
 
@@ -765,6 +859,7 @@ class PedidoItemModel {
       'precio_base': ?precioBase,
       if (opciones.isNotEmpty)
         'selecciones': opciones.map((option) => option.toMap()).toList(),
+      'personalizacion': ?personalizacion,
     };
   }
 }

@@ -9,6 +9,7 @@ import { KioskHome } from './KioskHome';
 import { KioskImage } from './KioskImage';
 import { KioskTopBar } from './KioskTopBar';
 import { KioskVoucher } from './KioskVoucher';
+import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import { useKioskPageChrome } from './useKioskPageChrome';
 import {
   FULFILLMENT_LABEL,
@@ -112,6 +113,8 @@ export function KioskMenuExperience({
   onToggleTheme,
   stickyOffsetClass,
 }: KioskMenuExperienceProps) {
+  const browseOnly = !fulfillment || !isOpen;
+  useLockBodyScroll(Boolean(addedPrompt && !browseOnly));
   const [screen, setScreen] = useState<KioskScreen>(fulfillment ? 'categories' : 'home');
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
@@ -161,7 +164,6 @@ export function KioskMenuExperience({
     });
   }, [activeProducts, searchQuery, screen]);
 
-  const browseOnly = !fulfillment || !isOpen;
   useKioskPageChrome({ themeMode });
   const topBar = (
     <KioskTopBar

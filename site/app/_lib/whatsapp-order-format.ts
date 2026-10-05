@@ -1,5 +1,6 @@
 import { convertOrderAmount, normalizeOrderCurrency } from '../api/_lib/order-currency';
 import { isWhatsappManualOrder } from './order-management-mode';
+import { combinedOrderLineSummary } from './order-line-sections';
 
 export type WhatsappOrderFormat = 'summary' | 'detailed';
 
@@ -106,9 +107,14 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
     for (const item of categoryItems) {
       const quantity = Number(item.cantidad);
       const name = text(item.producto) || text(item.nombre) || 'Producto';
-      productLines.push(`*${quantity}x ${name}*`);
+      const combined = combinedOrderLineSummary(item);
+      productLines.push(`*${quantity}x ${combined?.title ?? name}*`);
       const price = convert(item.precio_final ?? item.precio);
       if (price != null) productLines.push(`${amount(price, currency)}${quantity > 1 ? ' c/u' : ''}`);
+      if (combined) {
+        productLines.push(...combined.lines.map((line) => `• ${line}`), '');
+        continue;
+      }
       const snapshot = Array.isArray(item.selecciones)
         ? item.selecciones
         : Array.isArray(item.opciones) ? item.opciones : [];
@@ -167,8 +173,10 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
   if (paymentLabel.toLowerCase().includes('efectivo')) {
     const paidWith = Number(details.pago_con);
     const change = Number(details.cambio_de);
-    if (Number.isFinite(paidWith) && paidWith > 0) lines.push(`Paga con: ${amount(paidWith, currency)}`);
-    if (Number.isFinite(change) && change > 0) lines.push(`Cambio: ${amount(change, currency)}`);
+    if (Number.isFinite(paidWith) && paidWith > 0) {
+      lines.push(`Paga con: ${amount(paidWith, currency)}`);
+      lines.push(`Cambio: ${Number.isFinite(change) && change > 0 ? amount(change, currency) : amount(0, currency)}`);
+    }
   }
   lines.push(
     '', manual ? '📲 Gestión: Por WhatsApp' : '⏳ Estado: Pendiente',
@@ -188,7 +196,16 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
 }
 
 export function optionalMerchantComanda(commerce: unknown, input: MerchantComandaInput): string | undefined {
-  if (!isWhatsappManualOrder(input.details) && resolveWhatsappOrderFormat(commerce) !== 'detailed') return undefined;
+  const details = record(input.details);
+  const customized = (Array.isArray(details.items) ? details.items : []).some((rawItem) => {
+    const customization = record(record(rawItem).personalizacion);
+    if (customization.version !== 1 || !Array.isArray(customization.componentes)) return false;
+    return customization.componentes.length === 2 || customization.componentes.some((component) => {
+      const exclusions = record(component).exclusiones;
+      return Array.isArray(exclusions) && exclusions.length > 0;
+    });
+  });
+  if (!customized && !isWhatsappManualOrder(input.details) && resolveWhatsappOrderFormat(commerce) !== 'detailed') return undefined;
   try {
     return buildDetailedMerchantWhatsappText(input);
   } catch {

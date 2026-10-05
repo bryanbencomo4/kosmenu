@@ -1,6 +1,7 @@
 import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
 import { convertOrderAmount, normalizeOrderCurrency } from './order-currency';
 import { resolveOrderManagementMode } from '../../_lib/order-management-mode';
+import { combinedOrderLineSummary } from '../../_lib/order-line-sections';
 
 export type PublicOrderStatus =
   | 'pendiente'
@@ -212,7 +213,21 @@ export function toPublicOrderTrackingResponse(
   const items = itemsRaw
     .map((item) => {
       const row = (item ?? {}) as Record<string, unknown>;
-      const name = (row.nombre ?? row.name ?? 'Producto').toString().trim() || 'Producto';
+      const baseName = (row.nombre ?? row.name ?? 'Producto').toString().trim() || 'Producto';
+      const customization = row.personalizacion && typeof row.personalizacion === 'object'
+        ? row.personalizacion as Record<string, unknown> : null;
+      const frozenLabels = customization?.version === 1 && Array.isArray(row.selecciones)
+        ? row.selecciones.flatMap((rawOption) => {
+            if (!rawOption || typeof rawOption !== 'object') return [];
+            const option = rawOption as Record<string, unknown>;
+            const label = typeof option.opcion === 'string' ? option.opcion.trim() : '';
+            const group = typeof option.grupo === 'string' ? option.grupo.trim() : '';
+            return label && label !== baseName ? [group ? `${group}: ${label}` : label] : [];
+          }) : [];
+      const combined = combinedOrderLineSummary(row);
+      const name = combined
+        ? [combined.title, ...combined.lines].join(' · ')
+        : frozenLabels.length ? `${baseName} · ${frozenLabels.join(' · ')}` : baseName;
       const quantity = Number(row.cantidad ?? row.quantity ?? 0);
       const unitPriceBase = Number(row.precio ?? row.price);
       if (!Number.isFinite(quantity) || quantity <= 0) return null;

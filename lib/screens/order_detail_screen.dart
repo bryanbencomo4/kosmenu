@@ -4584,7 +4584,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                   ),
                                                 ),
                                                 for (final group
-                                                    in item.modifierGroups) ...[
+                                                    in item.modifierGroups)
+                                                  if (group.bulleted) ...[
+                                                    for (final option
+                                                        in group.opciones)
+                                                      Text(
+                                                        '• ${option.nombre}',
+                                                        style:
+                                                            GoogleFonts.manrope(
+                                                              color: muted,
+                                                              fontSize: 12.5,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                            ),
+                                                      ),
+                                                  ] else ...[
                                                   if (group.grupo.isNotEmpty)
                                                     Text(
                                                       '${group.grupo}:',

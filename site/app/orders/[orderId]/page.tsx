@@ -809,6 +809,7 @@ function OrderTrackingPageInner() {
     convertFromCop(total, checkoutCurrency, exchangeRate);
 
   const paymentReference = (order?.detalles?.referencia_pago ?? '').toString().trim();
+  const cashPaidAmount = toNumberOrNull(order?.detalles?.pago_con) ?? 0;
   const cashChangeAmount = toNumberOrNull(order?.detalles?.cambio_de) ?? 0;
   const orderNotes = (order?.detalles?.order_notes ?? '').toString().trim();
   const deliveryDelegate = order?.detalles?.delivery_delegate ?? null;
@@ -1138,7 +1139,14 @@ function OrderTrackingPageInner() {
           ? 'El costo del delivery no está incluido en el total del pedido. Debes pagarlo aparte al repartidor.'
           : null
       }
-      cashChangeLabel={cashChangeAmount > 0 ? formatAmountByCurrency(cashChangeAmount, checkoutCurrency) : null}
+      cashPaidLabel={cashPaidAmount > 0 ? formatAmountByCurrency(cashPaidAmount, checkoutCurrency) : null}
+      cashChangeLabel={
+        cashPaidAmount > 0
+          ? formatAmountByCurrency(cashChangeAmount, checkoutCurrency)
+          : cashChangeAmount > 0
+            ? formatAmountByCurrency(cashChangeAmount, checkoutCurrency)
+            : null
+      }
       totalLabel={formatAmountByCurrency(totalCheckout, checkoutCurrency)}
       paymentLabel={paymentLabel || null}
       paymentDetails={paymentDetails}

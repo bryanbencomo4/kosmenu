@@ -15,6 +15,7 @@ import {
   validateOptionGroupSelection,
   type MenuOptionGroup,
 } from '../../../../_lib/menu-product-options';
+import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 
 export type UpsellConfigurableProduct = {
   id: string;
@@ -114,6 +115,7 @@ export function UpsellOptionConfigurator({
   onClose,
   onConfirm,
 }: UpsellOptionConfiguratorProps) {
+  useLockBodyScroll(true);
   const options = useMemo(() => parseProductMenuOptions(product.opciones_menu), [product]);
   const categoryOptions = useMemo(
     () => parseCategoryMenuOptions(product.category?.opciones_menu),
@@ -224,7 +226,7 @@ export function UpsellOptionConfigurator({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4">
+        <div data-sheet-scroll className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 pb-4 [touch-action:pan-y]">
           {options?.tamanos?.length ? (
             <section>
               <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--menu-text-muted)' }}>

@@ -4,6 +4,7 @@ import { Manrope } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { ArrowLeft, X } from 'lucide-react';
 
+import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { FULFILLMENT_LABEL, type KioskFulfillment } from './kiosk-types';
 
@@ -54,6 +55,7 @@ export function KioskCheckout({
   onNext,
   children,
 }: KioskCheckoutProps) {
+  useLockBodyScroll(true);
   const currentIndex = Math.max(
     0,
     steps.findIndex((step) => step.id === currentStepId),
@@ -128,7 +130,7 @@ export function KioskCheckout({
         </ol>
       </header>
 
-      <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div data-sheet-scroll className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [touch-action:pan-y]">
         <div className="mx-auto w-full max-w-[560px] pb-4">
           <div>{children}</div>
           {error ? (

@@ -307,6 +307,12 @@ export async function POST(request: Request) {
     }
 
     const validated = validationResult.data;
+    if (rawItemSelections.some((selection) => selection?.combinacion && !isUuid(selection.combinacion.productId))) {
+      return NextResponse.json(
+        { ok: false, code: 'INVALID_OPTIONS', error: 'Esta combinación no está permitida.' },
+        { status: 400 },
+      );
+    }
     const rawIdempotencyHeader = request.headers.get('x-idempotency-key');
     const idempotencyKey = normalizeIdempotencyKey(rawIdempotencyHeader);
     if (rawIdempotencyHeader && rawIdempotencyHeader.trim() && !idempotencyKey) {
@@ -328,6 +334,8 @@ export async function POST(request: Request) {
       paymentMethod: normalizePaymentMethod(body.paymentMethod ?? incomingDetalles.metodo_pago),
       paymentProofUrl: normalizeText(body.paymentProofUrl ?? incomingDetalles.comprobante_url),
       orderNotes: normalizeText(body.orderNotes ?? incomingDetalles.order_notes),
+      ...(rawItemSelections.some((selection) => selection?.combinacion || selection?.exclusionesIds?.length)
+        ? { personalizacion: rawItemSelections } : {}),
     };
     const requestHash = hashOrderIdempotencyPayload(idempotencyPayload);
 
@@ -395,7 +403,7 @@ export async function POST(request: Request) {
     const cashPaymentAmount = Number(body.cashPaymentAmount ?? incomingDetalles.pago_con ?? 0);
     const cashChangeAmount = Number(body.cashChangeAmount ?? incomingDetalles.cambio_de ?? 0);
 
-    const subtotal = items.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
+    let subtotal = items.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
     let total = subtotal + (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
     const supabase = getServiceSupabaseClient();
 
@@ -448,6 +456,34 @@ export async function POST(request: Request) {
     const baseCurrency = normalizeOrderCurrency(comercioRow?.moneda);
     if (!resolvedComercioId) {
       return NextResponse.json({ error: 'Comercio not found.' }, { status: 404 });
+    }
+
+    const snapshotResult = await buildOrderItemSnapshots({
+      items,
+      selections: rawItemSelections,
+      comercioId: resolvedComercioId,
+      loadProducts: async (productIds) => {
+        const { data, error } = await supabase
+          .from('productos')
+          .select('id,comercio_id,disponible,categoria_id,nombre,imagen_url,precio,opciones_menu')
+          .eq('comercio_id', resolvedComercioId)
+          .in('id', productIds);
+        if (error) throw new Error(error.message);
+        return (data ?? []) as SnapshotProductRow[];
+      },
+      loadCategories: async (categoryIds) => {
+        const { data, error } = await supabase
+          .from('categorias')
+          .select('id,nombre,opciones_menu')
+          .eq('comercio_id', resolvedComercioId)
+          .in('id', categoryIds);
+        if (error) throw new Error(error.message);
+        return (data ?? []) as SnapshotCategoryRow[];
+      },
+    });
+    if (snapshotResult.ok === true) {
+      subtotal = snapshotResult.items.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
+      total = subtotal + (Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0);
     }
 
     const originLat = Number(comercioRow?.latitud);
@@ -559,28 +595,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const snapshotResult = await buildOrderItemSnapshots({
-      items,
-      selections: rawItemSelections,
-      loadProducts: async (productIds) => {
-        const { data, error } = await supabase
-          .from('productos')
-          .select('id,categoria_id,nombre,imagen_url,precio,opciones_menu')
-          .eq('comercio_id', resolvedComercioId)
-          .in('id', productIds);
-        if (error) throw new Error(error.message);
-        return (data ?? []) as SnapshotProductRow[];
-      },
-      loadCategories: async (categoryIds) => {
-        const { data, error } = await supabase
-          .from('categorias')
-          .select('id,nombre,opciones_menu')
-          .eq('comercio_id', resolvedComercioId)
-          .in('id', categoryIds);
-        if (error) throw new Error(error.message);
-        return (data ?? []) as SnapshotCategoryRow[];
-      },
-    });
     if (snapshotResult.ok === false) {
       return NextResponse.json(
         { ok: false, error: snapshotResult.message, code: snapshotResult.code },
@@ -588,7 +602,6 @@ export async function POST(request: Request) {
       );
     }
     const storedItems = snapshotResult.items;
-
     const subtotalCheckout = convertOrderAmount(subtotal, baseCurrency, currency, exchangeRate);
     const costoDeliveryCheckout = convertOrderAmount(
       Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
@@ -771,6 +784,7 @@ export async function POST(request: Request) {
         subtotal,
         costoDelivery: Number.isFinite(costoDelivery) ? Math.max(costoDelivery, 0) : 0,
         total,
+        ...(storedItems.some((item) => item.personalizacion) ? { customizationTotalCheckout: totalCheckout } : {}),
         trackingUrl: publicOrderUrl,
         ...(merchantWhatsappText ? { merchantWhatsappText } : {}),
         emailStatus,

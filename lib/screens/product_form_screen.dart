@@ -457,7 +457,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _showBuyCreditsSheet() async {
@@ -553,7 +555,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   String? _descriptionContextForAi(String productName) {
     final raw = _descriptionController.text.trim();
-    if (_isRedundantProductDescription(productName: productName, description: raw)) {
+    if (_isRedundantProductDescription(
+      productName: productName,
+      description: raw,
+    )) {
       return null;
     }
     return raw;
@@ -694,7 +699,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (_isGeneratingDescription || _isSaving) return;
 
     if (_nameController.text.trim().isEmpty) {
-      _showMessage('Escribe el nombre del producto para generar la descripción.');
+      _showMessage(
+        'Escribe el nombre del producto para generar la descripción.',
+      );
       return;
     }
 
@@ -723,14 +730,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
       if (comercioId.isNotEmpty) {
         try {
-          final generated = await _productDescriptionAiService.generateDescription(
-            comercioId: comercioId,
-            productName: productName,
-            categoryName: _selectedCategoryName,
-            description: _descriptionContextForAi(productName),
-            businessName: _businessName,
-            businessCategory: _businessCategory,
-          );
+          final generated = await _productDescriptionAiService
+              .generateDescription(
+                comercioId: comercioId,
+                productName: productName,
+                categoryName: _selectedCategoryName,
+                description: _descriptionContextForAi(productName),
+                businessName: _businessName,
+                businessCategory: _businessCategory,
+              );
           resultText = generated.description;
           creditsUsed = generated.creditsCharged;
         } catch (error) {
@@ -753,8 +761,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         _descriptionController
           ..text = resultText
           ..selection = TextSelection.collapsed(offset: resultText.length);
-        _aiCreditsBalance =
-            (_aiCreditsBalance - creditsUsed).clamp(0, double.infinity);
+        _aiCreditsBalance = (_aiCreditsBalance - creditsUsed).clamp(
+          0,
+          double.infinity,
+        );
       });
       if (comercioId.isNotEmpty) {
         _showMessage('Descripción generada con IA');
@@ -794,7 +804,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         .where((category) => category.id == _selectedCategoryId)
         .map((category) => category.nombre)
         .cast<String?>()
-        .firstWhere((name) => name != null, orElse: () => widget.product?.categoriaId)
+        .firstWhere(
+          (name) => name != null,
+          orElse: () => widget.product?.categoriaId,
+        )
         ?.toString();
     final customPrompt = await showAiImagePromptDialog(
       context,
@@ -868,7 +881,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
   }
 
-  void _applyAiImageSnapshot({required String imageUrl, required String status}) {
+  void _applyAiImageSnapshot({
+    required String imageUrl,
+    required String status,
+  }) {
     _aiImagePollTimer?.cancel();
     _aiImagePollTimer = null;
     setState(() {
@@ -971,10 +987,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           .uploadBinary(
             fileName,
             uploadBytes,
-            fileOptions: FileOptions(
-              upsert: true,
-              contentType: 'image/jpeg',
-            ),
+            fileOptions: FileOptions(upsert: true, contentType: 'image/jpeg'),
           );
 
       return Supabase.instance.client.storage
@@ -992,11 +1005,21 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (!MerchantSession.canManageCatalog) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(MerchantSession.deniedMessage('modificar productos'))),
+        SnackBar(
+          content: Text(MerchantSession.deniedMessage('modificar productos')),
+        ),
       );
       return;
     }
     if (!_formKey.currentState!.validate()) return;
+    final personalizationError =
+        _optionsEditorKey.currentState?.personalizationError;
+    if (personalizationError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(personalizationError)));
+      return;
+    }
 
     setState(() => _isSaving = true);
 
@@ -1006,8 +1029,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         finalImageUrl = await _uploadImage(_pickedImage!);
       }
 
-      final compareRaw = _compareAtPriceController.text.trim().replaceAll(',', '.');
-      final compareParsed = compareRaw.isEmpty ? null : double.tryParse(compareRaw);
+      final compareRaw = _compareAtPriceController.text.trim().replaceAll(
+        ',',
+        '.',
+      );
+      final compareParsed = compareRaw.isEmpty
+          ? null
+          : double.tryParse(compareRaw);
       final compareAtBase = compareParsed == null
           ? null
           : _convertToBaseCurrency(
@@ -1037,12 +1065,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             (current?.containsKey('grupos') ?? false) ||
             (current?.containsKey('activadas') ?? false);
         // Simple products that never used options keep their row untouched.
-        if (optionsEditor.active || hadGroups) {
-          payload['opciones_menu'] = ProductOptionGroup.mergeIntoMenuOptions(
+        if (optionsEditor.active ||
+            hadGroups ||
+            optionsEditor.personalizationChanged) {
+          final merged = ProductOptionGroup.mergeIntoMenuOptions(
             current,
             optionsEditor.groups,
             enabled: optionsEditor.active,
           );
+          payload['opciones_menu'] = optionsEditor.personalizationChanged
+              ? {...?merged, 'personalizacion': optionsEditor.personalization}
+              : merged;
         }
       }
 
@@ -1257,9 +1290,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   onSave: _save,
                   optionsSection: ProductOptionsEditor(
                     key: _optionsEditorKey,
+                    initialMenuOptions: widget.product?.opcionesMenu,
+                    productId: widget.product?.id,
+                    comercioId: SupabaseConfig.currentComercioId,
+                    descriptionController: _descriptionController,
                     initialGroups: widget.product?.optionGroups ?? const [],
-                    initiallyActive:
-                        widget.product?.hasOptionsEnabled ?? false,
+                    initiallyActive: widget.product?.hasOptionsEnabled ?? false,
                     currencyCode: _baseCurrency,
                     enabled: !_isSaving,
                   ),
@@ -1564,7 +1600,10 @@ class _ImagePanel extends StatelessWidget {
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton.icon(
-                              onPressed: (!canGenerateAiImage || isSaving || isGeneratingAiImage)
+                              onPressed:
+                                  (!canGenerateAiImage ||
+                                      isSaving ||
+                                      isGeneratingAiImage)
                                   ? null
                                   : onGenerateAiImageAction,
                               icon: isGeneratingAiImage
@@ -1592,7 +1631,10 @@ class _ImagePanel extends StatelessWidget {
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton.icon(
-                              onPressed: (isSaving || isGeneratingDescription || isLoadingAiCredits)
+                              onPressed:
+                                  (isSaving ||
+                                      isGeneratingDescription ||
+                                      isLoadingAiCredits)
                                   ? null
                                   : onGenerateDescriptionAction,
                               icon: isGeneratingDescription
@@ -1622,7 +1664,10 @@ class _ImagePanel extends StatelessWidget {
                       children: [
                         Expanded(
                           child: FilledButton.icon(
-                            onPressed: (!canGenerateAiImage || isSaving || isGeneratingAiImage)
+                            onPressed:
+                                (!canGenerateAiImage ||
+                                    isSaving ||
+                                    isGeneratingAiImage)
                                 ? null
                                 : onGenerateAiImageAction,
                             icon: isGeneratingAiImage
@@ -1649,7 +1694,10 @@ class _ImagePanel extends StatelessWidget {
                         const SizedBox(width: 8),
                         Expanded(
                           child: FilledButton.icon(
-                            onPressed: (isSaving || isGeneratingDescription || isLoadingAiCredits)
+                            onPressed:
+                                (isSaving ||
+                                    isGeneratingDescription ||
+                                    isLoadingAiCredits)
                                 ? null
                                 : onGenerateDescriptionAction,
                             icon: isGeneratingDescription
@@ -2073,11 +2121,17 @@ class _FormPanel extends StatelessWidget {
                 onChanged: isSaving ? null : onUpsellEnabledChanged,
                 title: Text(
                   'Incluir en sugerencias de venta adicional',
-                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5),
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
                 ),
                 subtitle: Text(
                   'Si lo apagas, este producto nunca aparece como sugerencia aunque una regla lo incluya.',
-                  style: GoogleFonts.manrope(fontSize: 11.5, color: colorScheme.onSurfaceVariant),
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
               const SizedBox(height: 16),

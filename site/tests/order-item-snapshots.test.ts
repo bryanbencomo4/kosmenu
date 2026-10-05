@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildOrderItemSnapshots, type SnapshotProductRow } from '../app/api/_lib/order-item-snapshots';
+import type { CartLineSelection } from '../app/_lib/menu-product-options';
+import { toPublicOrderTrackingResponse } from '../app/api/_lib/public-order';
 
 const hamburguesaRow: SnapshotProductRow = {
   id: 'p1',
@@ -49,6 +51,65 @@ function loaders(
 }
 
 describe('buildOrderItemSnapshots', () => {
+  const customRows = (priceA = 30000, priceB = 40000): SnapshotProductRow[] => [
+    { id: 'a', comercio_id: 'tenant', disponible: true, nombre: 'Producto A', precio: priceA,
+      opciones_menu: { personalizacion: { version: 1,
+        combinacion: { activada: true, titulo: 'Combina con', productos_compatibles: ['b'], regla_precio: 'max' },
+        exclusiones: { activadas: true, titulo: '¿Quieres quitar algo?', ingredientes: [{ id: 'remove_a', nombre: 'Ingrediente A' }, { id: 'remove_c', nombre: 'Ingrediente C' }] },
+      } } },
+    { id: 'b', comercio_id: 'tenant', disponible: true, nombre: 'Producto B', precio: priceB,
+      opciones_menu: { personalizacion: { version: 1, exclusiones: { activadas: true, titulo: '¿Quieres quitar algo?', ingredientes: [{ id: 'remove_b', nombre: 'Ingrediente B' }] } } } },
+  ];
+  const customize = (rows = customRows(), selection: CartLineSelection = { combinacion: { productId: 'b', seleccion: {} } }, quantity = 1) => buildOrderItemSnapshots({
+    comercioId: 'tenant', items: [{ product_id: 'a', nombre: 'FORGED NAME', cantidad: quantity, precio: 1 }],
+    selections: [selection], ...loaders(rows),
+  });
+  it.each([[30000, 40000, 40000], [50000, 35000, 50000]])('recalculates MAX %i/%i despite a forged frontend price', async (a, b, expected) => {
+    const result = await customize(customRows(a, b));
+    expect(result.ok && result.items[0].precio).toBe(expected);
+    expect(result.ok && result.items[0].personalizacion?.regla_precio).toBe('max');
+  });
+  it('quantity applies after MAX and snapshots independent exclusions', async () => {
+    const selection = { exclusionesIds: ['remove_a', 'remove_c'], combinacion: { productId: 'b', seleccion: { exclusionesIds: ['remove_b'] } } };
+    const rows = customRows();
+    const result = await customize(rows, selection, 2);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.items[0].precio * result.items[0].cantidad).toBe(80000);
+    expect(result.items[0].personalizacion?.componentes.map((entry) => entry.exclusiones.map((ingredient) => ingredient.nombre)))
+      .toEqual([['Ingrediente A', 'Ingrediente C'], ['Ingrediente B']]);
+    rows[1].nombre = 'Renamed'; rows[1].precio = 90000;
+    expect(result.items[0].personalizacion?.componentes[1].nombre).toBe('Producto B');
+    expect(result.items[0].precio).toBe(40000);
+    const publicOrder = toPublicOrderTrackingResponse({ id: 'qa', comercio_id: 'tenant', estado: 'pendiente', created_at: '2026-10-04T00:00:00Z', detalles: { items: result.items, moneda_base: 'COP', total: 80000 } }, 'QA', null);
+    expect(publicOrder.items[0].name).toBe('(Combinación) Producto A + Producto B · Sin: Ingrediente A, Ingrediente C (Producto A), Ingrediente B (Producto B)');
+    expect(publicOrder.items[0].name).not.toContain('remove_a');
+    expect(publicOrder.items[0].name).not.toContain('Renamed');
+  });
+  it.each(['foreign', 'unavailable', 'missing', 'unauthorized', 'unpriced'])('rejects partner %s', async (kind) => {
+    const rows = customRows();
+    if (kind === 'foreign') rows[1].comercio_id = 'other';
+    if (kind === 'unavailable') rows[1].disponible = false;
+    if (kind === 'unpriced') rows[1].precio = 0;
+    if (kind === 'missing') rows.pop();
+    const result = await customize(rows, { combinacion: { productId: kind === 'unauthorized' ? 'c' : 'b', seleccion: {} } });
+    expect(result.ok).toBe(false);
+  });
+  it('validates each product with its own required group ids', async () => {
+    const rows = customRows();
+    for (const [index, row] of rows.entries()) row.opciones_menu = { ...(row.opciones_menu as object), activadas: true, grupos: [{ id: `g${index}`, nombre: 'Formato', tipo: 'unica', obligatorio: true, opciones: [{ id: `o${index}`, nombre: 'Opción', precio: index ? 40000 : 20000 }] }] };
+    const valid = { grupos: { g0: ['o0'] }, combinacion: { productId: 'b', seleccion: { grupos: { g1: ['o1'] } } } };
+    const result = await customize(rows, valid);
+    expect(result.ok && result.items[0].precio).toBe(80000);
+    expect((await customize(rows, { ...valid, combinacion: { productId: 'b', seleccion: { grupos: { g0: ['o0'] } } } })).ok).toBe(false);
+  });
+  it('exclusions alone do not change price and cannot be forged', async () => {
+    const rows = customRows();
+    expect((await customize(rows, { exclusionesIds: ['remove_a'] })).ok).toBe(true);
+    const result = await customize(rows, { exclusionesIds: ['remove_a'] });
+    expect(result.ok && result.items[0].precio).toBe(30000);
+    expect((await customize(rows, { exclusionesIds: ['forged'] })).ok).toBe(false);
+  });
   it('stores image/category snapshots for simple lines without options', async () => {
     const deps = loaders();
     const result = await buildOrderItemSnapshots({

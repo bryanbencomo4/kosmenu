@@ -290,6 +290,12 @@ describe('option groups: cart line + snapshot (case 4)', () => {
       precioFinal: 8.5,
     });
     expect(buildOrderLineLabel(hamburguesa, selection)).toBe('Hamburguesa Clásica · Grande · Tocineta');
+    expect(buildOrderLineLabel(
+      { id: 'a', nombre: 'Especial Nápoles', precio: 19000 },
+      { combinacion: { productId: 'b', seleccion: {} } },
+      null,
+      { id: 'b', nombre: 'Margarita', precio: 16000 },
+    )).toBe('(Combinación) Especial Nápoles + Margarita');
   });
 
   it('sanitizes untrusted selections', () => {
@@ -396,8 +402,9 @@ describe('dependent prices: generic rules, not pizza-specific', () => {
       precioFinal: 26500,
     });
     expect(describeDependentPriceReason(extra, groups, { grupos: { tamano: ['grande'] } })).toBe(
-      'según Grande',
+      'según tamaño',
     );
+    expect(describeDependentPriceReason(extra, groups, {})).toBe('según tamaño');
   });
 
   it('case 5: changing the parent after picking the extra recalculates', () => {

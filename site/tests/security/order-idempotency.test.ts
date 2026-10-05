@@ -6,6 +6,13 @@ import {
 } from '../../app/api/_lib/order-idempotency-key';
 
 describe('order idempotency key contract', () => {
+  it('customized intent cannot replay a different partner or exclusions', () => {
+    const base = { comercioId: 'c1', items: [{ product_id: 'a', cantidad: 1, precio: 40000 }] };
+    const intent = { ...base, personalizacion: [{ combinacion: { productId: 'b', seleccion: { exclusionesIds: ['one'] } } }] };
+    expect(hashOrderIdempotencyPayload(intent)).not.toBe(hashOrderIdempotencyPayload(base));
+    expect(hashOrderIdempotencyPayload(intent)).not.toBe(hashOrderIdempotencyPayload({ ...base, personalizacion: [{ combinacion: { productId: 'b', seleccion: { exclusionesIds: ['two'] } } }] }));
+    expect(hashOrderIdempotencyPayload(base)).toBe(hashOrderIdempotencyPayload({ ...base, personalizacion: undefined }));
+  });
   it('accepts uuid-like keys without PII', () => {
     expect(normalizeIdempotencyKey('a1b2c3d4-e5f6-4789-a012-3456789abcde')).toBeTruthy();
   });

@@ -35,7 +35,15 @@ import { KioskCheckout } from './_components/kiosk/KioskCheckout';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
 import { parseKioskHomeConfig } from '../../_lib/kiosk-home-config';
+import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
 import { parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
+import {
+  cashTenderValidity,
+  currencyAllowsDecimals,
+  parseCashAmount,
+  parseCashAmountInput,
+  suggestCashTenders,
+} from '../../_lib/cash-tender';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
 import { PreCheckoutUpsellSheet } from './_components/upsell/PreCheckoutUpsellSheet';
 import {
@@ -61,7 +69,9 @@ import {
   isServicioAdicionalName,
   parseCartLineKey,
   productRequiresConfiguration,
-  resolveCartLineUnitPrice,
+  resolveCombinedUnitPrice,
+  parseProductPersonalization,
+  validateCustomizationSelection,
   summarizeCartLineSelection,
   validateOptionGroupSelection,
   type CartLineSelection,
@@ -96,6 +106,7 @@ type CategoriaRow = {
 
 type ProductoRow = {
   id: string;
+  comercio_id?: string;
   categoria_id: string;
   nombre: string;
   descripcion?: string | null;
@@ -108,6 +119,33 @@ type ProductoRow = {
   orden?: number | null;
   opciones_menu?: unknown;
 };
+
+function menuLinePrice(product: ProductoRow, category: CategoriaRow | null, selection: CartLineSelection, products: Map<string, ProductoRow>, categories: Map<string, CategoriaRow>) {
+  const partner = selection.combinacion ? products.get(selection.combinacion.productId) : null;
+  return resolveCombinedUnitPrice(product, category, selection, partner, partner ? categories.get(partner.id) : null);
+}
+
+function menuLineInvalid(product: ProductoRow, selection: CartLineSelection, products: Map<string, ProductoRow>) {
+  const config = parseProductPersonalization(product.opciones_menu);
+  if (!config && !selection.combinacion && !selection.exclusionesIds?.length) return validateOptionGroupSelection(product, selection).length > 0;
+  if (validateCustomizationSelection(product, selection).length) return true;
+  if (!selection.combinacion) return false;
+  const partner = products.get(selection.combinacion.productId);
+  return !partner || partner.disponible === false || partner.id === product.id ||
+    !config?.combinacion?.productosCompatibles.includes(partner.id) ||
+    (product.comercio_id != null && partner.comercio_id !== product.comercio_id) ||
+    validateCustomizationSelection(partner, selection.combinacion.seleccion).length > 0;
+}
+
+function menuLineLabel(product: ProductoRow, selection: CartLineSelection, category: CategoriaRow | null, products: Map<string, ProductoRow>) {
+  const partner = selection.combinacion ? products.get(selection.combinacion.productId) : null;
+  return buildOrderLineLabel(product, selection, category, partner);
+}
+
+function menuLineSummary(product: ProductoRow, selection: CartLineSelection, category: CategoriaRow | null, products: Map<string, ProductoRow>, categories: Map<string, CategoriaRow>) {
+  const partner = selection.combinacion ? products.get(selection.combinacion.productId) : null;
+  return summarizeCartLineSelection(product, selection, category, partner, partner ? categories.get(partner.id) : null);
+}
 
 type UpsellSettingsRow = {
   enabled?: boolean | null;
@@ -1547,42 +1585,6 @@ function toNumberOrNull(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function currencyAllowsDecimals(currency: string) {
-  const code = (currency || '').trim().toUpperCase();
-  return code !== 'COP' && code !== 'SIN MONEDA';
-}
-
-function parseCashAmountInput(raw: string, currency: string) {
-  const allowDecimals = currencyAllowsDecimals(currency);
-  const cleaned = raw.replace(/[^\d.,]/g, '').replace(',', '.');
-  if (!cleaned) return '';
-  if (!allowDecimals) {
-    return cleaned.replace(/\./g, '').replace(/^0+(?=\d)/, '');
-  }
-  const [integerPart = '', ...fractionParts] = cleaned.split('.');
-  const safeInteger = integerPart.replace(/^0+(?=\d)/, '') || (cleaned.includes('.') ? '0' : '');
-  const fraction = fractionParts.join('').slice(0, 2);
-  return fraction.length > 0 || cleaned.endsWith('.') ? `${safeInteger}.${fraction}` : safeInteger;
-}
-
-function suggestCashTenders(total: number, currency: string) {
-  const code = (currency || 'COP').trim().toUpperCase();
-  const bills =
-    code === 'USD'
-      ? [1, 5, 10, 20, 50, 100]
-      : code === 'VES'
-        ? [20, 50, 100, 200, 500, 1000, 2000]
-        : [1000, 2000, 5000, 10000, 20000, 50000, 100000];
-  const suggestions = new Set<number>();
-  for (const bill of bills) {
-    if (bill > total) suggestions.add(bill);
-  }
-  const step = bills[0] ?? 1;
-  const roundedUp = Math.ceil((total + 0.0001) / step) * step;
-  if (roundedUp > total) suggestions.add(Number(roundedUp.toFixed(2)));
-  return [...suggestions].sort((left, right) => left - right).slice(0, 4);
-}
-
 function getBrowserCurrentPoint() {
   if (typeof window === 'undefined' || !navigator.geolocation) {
     return Promise.resolve<DeliveryPoint | null>(null);
@@ -1653,7 +1655,6 @@ export default function PublicMenuPage() {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [cashPaymentInput, setCashPaymentInput] = useState('');
-  const [needsCashChange, setNeedsCashChange] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
   const [themeOverride, setThemeOverride] = useState<MenuThemeMode | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
@@ -2046,16 +2047,18 @@ export default function PublicMenuPage() {
         const { productId, selection } = parseCartLineKey(cartKey);
         const product = productById.get(productId);
         const unitPrice = product
-          ? resolveCartLineUnitPrice(
+          ? menuLinePrice(
               product,
               categoryByProductId.get(productId) ?? null,
               selection,
+              productById,
+              categoryByProductId,
             )
           : 0;
         // Lines whose option groups changed since they were added (e.g. an
         // option was removed) can no longer be ordered as-is.
         const optionsInvalid =
-          product != null && validateOptionGroupSelection(product, selection).length > 0;
+          product != null && menuLineInvalid(product, selection, productById);
         if (!product || unitPrice <= 0 || quantity <= 0 || optionsInvalid) {
           changed = true;
           continue;
@@ -2101,7 +2104,7 @@ export default function PublicMenuPage() {
         const product = productById.get(productId);
         if (!product || quantity <= 0) return null;
         const category = categoryByProductId.get(productId) ?? null;
-        const unitPrice = resolveCartLineUnitPrice(product, category, selection);
+        const unitPrice = menuLinePrice(product, category, selection, productById, categoryByProductId);
         if (unitPrice <= 0) return null;
         return { cartKey, product, category, selection, quantity, unitPrice };
       })
@@ -2988,16 +2991,13 @@ export default function PublicMenuPage() {
   const paymentReferenceLast4 = normalizePhone(digitalPaymentReference).slice(-4);
   const isPaymentReferenceValid = !isDigitalPayment || /^\d{4}$/.test(paymentReferenceLast4);
   const hasPaymentProof = !isDigitalPayment || paymentProofFile !== null;
-  const paymentWithAmount = toNumberOrNull(cashPaymentInput);
-  const cashChangeRequired = isDeliveryOrder && isCashPayment && needsCashChange;
-  const isCashTenderValid =
-    !cashChangeRequired ||
-    (paymentWithAmount !== null && paymentWithAmount > orderGrandTotalConverted);
-  const changeAmount =
-    cashChangeRequired && isCashTenderValid && paymentWithAmount !== null
-      ? paymentWithAmount - orderGrandTotalConverted
-      : 0;
-  const cashTenderSuggestions = cashChangeRequired
+  const paymentWithAmount = isCashPayment
+    ? parseCashAmount(cashPaymentInput, selectedCurrencyCode)
+    : null;
+  const cashTender = cashTenderValidity(paymentWithAmount, orderGrandTotalConverted);
+  const isCashTenderValid = !isCashPayment || cashTender.valid;
+  const changeAmount = isCashPayment && cashTender.valid ? cashTender.change : 0;
+  const cashTenderSuggestions = isCashPayment
     ? suggestCashTenders(orderGrandTotalConverted, selectedCurrencyCode)
     : [];
   const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
@@ -3015,11 +3015,11 @@ export default function PublicMenuPage() {
           selectedCurrencyCode,
           selectedExchangeRate,
         );
-        const optionSummary = summarizeCartLineSelection(product, selection, category);
+        const optionSummary = menuLineSummary(product, selection, category, productById, categoryByProductId);
         return {
           id: cartKey,
-          name: buildOrderLineLabel(product, selection, category),
-          description: optionSummary || (product.descripcion ?? '').trim(),
+          name: menuLineLabel(product, selection, category, productById),
+          description: optionSummary || (selection.combinacion ? '' : (product.descripcion ?? '').trim()),
           imageUrl: safeImageSrc(product.imagen_url, comercioLogoUrl),
           quantity,
           canIncrease: baseUnitPrice > 0,
@@ -3031,6 +3031,7 @@ export default function PublicMenuPage() {
       businessBaseCurrency,
       cartItems,
       comercioLogoUrl,
+      productById,
       selectedCurrencyCode,
       selectedExchangeRate,
     ],
@@ -3348,13 +3349,6 @@ export default function PublicMenuPage() {
   }, []);
 
   useEffect(() => {
-    if (!isDeliveryOrder || !isCashPayment) {
-      setNeedsCashChange(false);
-      setCashPaymentInput('');
-    }
-  }, [isCashPayment, isDeliveryOrder]);
-
-  useEffect(() => {
     if (!isDigitalPayment) {
       setDigitalPaymentReference('');
       setPaymentProofFile(null);
@@ -3391,14 +3385,9 @@ export default function PublicMenuPage() {
     }
   }
 
-  useEffect(() => {
-    if (!isInfoOpen && !isConfirmOpen && !isPreCheckoutUpsellOpen && !expandedProductImage && !isMapPickerOpen && !isQuickActionsOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [isInfoOpen, isConfirmOpen, isPreCheckoutUpsellOpen, expandedProductImage, isMapPickerOpen, isQuickActionsOpen]);
+  useLockBodyScroll(Boolean(
+    isInfoOpen || expandedProductImage || isMapPickerOpen || isQuickActionsOpen,
+  ));
 
   useEffect(() => {
     if (isInfoOpen || isConfirmOpen || expandedProductImage || isMapPickerOpen) {
@@ -3492,6 +3481,10 @@ export default function PublicMenuPage() {
       setSelectedPaymentMethodId(selectedCurrencyGroup.methods[0].id);
     }
   }, [selectedCurrencyGroup, selectedPaymentMethodId]);
+
+  useEffect(() => {
+    setCashPaymentInput('');
+  }, [selectedPaymentMethodId, selectedCurrencyCode]);
 
   useEffect(() => {
     if (supportsDelivery) return;
@@ -3763,7 +3756,8 @@ export default function PublicMenuPage() {
     if (!product) return;
 
     const category = categoryByProductId.get(productId) ?? null;
-    const unitPrice = resolveCartLineUnitPrice(product, category, selection);
+    if (menuLineInvalid(product, selection, productById)) return;
+    const unitPrice = menuLinePrice(product, category, selection, productById, categoryByProductId);
     if (unitPrice <= 0) return;
 
     const cartKey = buildCartLineKey(productId, selection);
@@ -4102,7 +4096,7 @@ export default function PublicMenuPage() {
     );
     const orderItems = cartItems.map((item) => ({
       product_id: item.product.id,
-      nombre: buildOrderLineLabel(item.product, item.selection, item.category),
+      nombre: menuLineLabel(item.product, item.selection, item.category, productById),
       cantidad: item.quantity,
       precio: item.unitPrice,
       opciones: item.selection,
@@ -4131,8 +4125,8 @@ export default function PublicMenuPage() {
       ]
         .filter(Boolean)
         .join('. '),
-      pago_con: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
-      cambio_de: isCashPayment && changeAmount > 0 ? changeAmount : 0,
+      pago_con: isCashPayment && isCashTenderValid && paymentWithAmount !== null ? paymentWithAmount : null,
+      cambio_de: isCashPayment && isCashTenderValid ? changeAmount : 0,
       subtotal: orderSubtotal,
       subtotal_moneda_checkout: subtotalConverted,
       costo_delivery: deliveryCost,
@@ -4162,8 +4156,8 @@ export default function PublicMenuPage() {
         : null,
       paymentReferenceLast4: paymentMeta.referenceLast4 || null,
       paymentProofUrl: paymentProofUrl || null,
-      cashPaymentAmount: isCashPayment && paymentWithAmount !== null ? paymentWithAmount : null,
-      cashChangeAmount: isCashPayment && changeAmount > 0 ? changeAmount : 0,
+      cashPaymentAmount: isCashPayment && isCashTenderValid && paymentWithAmount !== null ? paymentWithAmount : null,
+      cashChangeAmount: isCashPayment && isCashTenderValid ? changeAmount : 0,
       orderNotes: [
         kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
         normalizedOrderNotes,
@@ -4267,6 +4261,9 @@ export default function PublicMenuPage() {
     }
 
     const detailedMessage = responsePayload?.data?.merchantWhatsappText;
+    const customizationTotalCheckout = typeof responsePayload?.data?.customizationTotalCheckout === 'number' &&
+      Number.isFinite(responsePayload.data.customizationTotalCheckout)
+      ? responsePayload.data.customizationTotalCheckout as number : undefined;
     const message = typeof detailedMessage === 'string' && detailedMessage.trim()
       ? detailedMessage
       : buildClientOrderSummary({
@@ -4275,7 +4272,7 @@ export default function PublicMenuPage() {
           customerWhatsapp,
           deliveryMode: delivery.mode,
           paymentLabel,
-          totalLabel: formatAmountByCurrency(totalConverted, paymentMeta.currency),
+          totalLabel: formatAmountByCurrency(customizationTotalCheckout ?? totalConverted, paymentMeta.currency),
           appOrderUrl: smartOrderUrl,
           managementMode: normalizeOrderManagementMode(responsePayload?.data?.managementMode),
         });
@@ -4284,6 +4281,7 @@ export default function PublicMenuPage() {
       orderId,
       orderUrl,
       managementMode: normalizeOrderManagementMode(responsePayload?.data?.managementMode),
+      customizationTotalCheckout,
       waUrl: whatsappNumber
         ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
         : '',
@@ -4430,7 +4428,7 @@ export default function PublicMenuPage() {
       }
 
       const voucherItems = cartItems.map((item) => ({
-        name: buildOrderLineLabel(item.product, item.selection, item.category),
+        name: menuLineLabel(item.product, item.selection, item.category, productById),
         quantity: item.quantity,
         priceLabel: formatAmountByCurrency(
           convertFromBaseCurrency(
@@ -4448,7 +4446,7 @@ export default function PublicMenuPage() {
         orderUrl: persisted.orderUrl,
         whatsappUrl: persisted.waUrl,
         fulfillment: kioskFulfillment ?? 'takeaway',
-        totalLabel: formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode),
+        totalLabel: formatAmountByCurrency(persisted.customizationTotalCheckout ?? orderGrandTotalConverted, selectedCurrencyCode),
         items: voucherItems,
       };
       if (typeof window !== 'undefined') {
@@ -5024,8 +5022,8 @@ export default function PublicMenuPage() {
           open={isPreCheckoutUpsellOpen}
           cartItems={cartItems.map((item) => ({
             id: item.cartKey,
-            name: item.product.nombre,
-            detail: summarizeCartLineSelection(item.product, item.selection, item.category) || null,
+            name: menuLineLabel(item.product, item.selection, item.category, productById),
+            detail: menuLineSummary(item.product, item.selection, item.category, productById, categoryByProductId) || null,
             quantity: item.quantity,
             priceLabel: formatUpsellPrice(item.unitPrice * item.quantity),
             imageUrl: displayProductImage(item.product.imagen_url, comercioLogoUrl, 160),
@@ -5069,6 +5067,12 @@ export default function PublicMenuPage() {
         />
 
         <ProductOptionsSheet
+          compatibleProducts={productOptionsSheet.open
+            ? (parseProductPersonalization(productById.get(productOptionsSheet.productId ?? '')?.opciones_menu)?.combinacion?.productosCompatibles ?? []).flatMap((id) => {
+                const entry = productById.get(id);
+                return entry && entry.disponible !== false ? [{ ...entry, category: categoryByProductId.get(id) ?? null }] : [];
+              })
+            : []}
           open={productOptionsSheet.open && !kioskVoucher}
           canAdd={
             !scheduleClosed &&
@@ -5163,7 +5167,7 @@ export default function PublicMenuPage() {
                 </button>
               </div>
 
-              <div className="h-[calc(100%-64px)] overflow-y-auto px-4 py-4 pb-24 sm:px-6">
+              <div data-sheet-scroll className="h-[calc(100%-64px)] overflow-y-auto overscroll-contain px-4 py-4 pb-24 sm:px-6">
                 <div className="space-y-3">
                   <section className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
                     <button
@@ -6015,98 +6019,70 @@ export default function PublicMenuPage() {
                         </div>
                       )}
 
-                      {isDeliveryOrder && isCashPayment ? (
+                      {isCashPayment ? (
                         <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                            ¿Necesitas cambio?
-                          </p>
-                          <div className="mt-3 grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setNeedsCashChange(false);
-                                setCashPaymentInput('');
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                              ¿Con cuánto vas a pagar?
+                            </span>
+                            <div
+                              className="flex h-12 items-center rounded-xl border bg-[var(--menu-surface-alt)] px-3"
+                              style={{
+                                borderColor:
+                                  cashPaymentInput && !isCashTenderValid ? '#F43F5E' : 'var(--menu-border)',
                               }}
-                              className="min-h-11 rounded-[14px] text-sm font-bold"
-                              style={
-                                !needsCashChange
-                                  ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary, #fff)' }
-                                  : { backgroundColor: 'var(--menu-surface-alt)', color: 'var(--menu-text-muted)' }
-                              }
                             >
-                              No, pago exacto
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setNeedsCashChange(true)}
-                              className="min-h-11 rounded-[14px] text-sm font-bold"
-                              style={
-                                needsCashChange
-                                  ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary, #fff)' }
-                                  : { backgroundColor: 'var(--menu-surface-alt)', color: 'var(--menu-text-muted)' }
-                              }
-                            >
-                              Sí, necesito cambio
-                            </button>
-                          </div>
-
-                          {needsCashChange ? (
-                            <label className="mt-4 block">
-                              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                                ¿Con cuánto vas a pagar?
+                              <span className="pr-2 text-sm font-semibold text-[var(--menu-text-muted)]">
+                                {selectedCurrencyCode === 'VES' ? 'Bs' : selectedCurrencyCode}
                               </span>
-                              <div
-                                className="flex h-12 items-center rounded-xl border bg-[var(--menu-surface-alt)] px-3"
-                                style={{
-                                  borderColor:
-                                    cashPaymentInput && !isCashTenderValid ? '#F43F5E' : 'var(--menu-border)',
-                                }}
-                              >
-                                <span className="pr-2 text-sm font-semibold text-[var(--menu-text-muted)]">
-                                  {selectedCurrencyCode}
-                                </span>
-                                <input
-                                  type="text"
-                                  inputMode={currencyAllowsDecimals(selectedCurrencyCode) ? 'decimal' : 'numeric'}
-                                  value={cashPaymentInput}
-                                  onChange={(event) =>
-                                    setCashPaymentInput(parseCashAmountInput(event.target.value, selectedCurrencyCode))
-                                  }
-                                  placeholder={`Mayor a ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`}
-                                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                                />
-                              </div>
-                              {cashTenderSuggestions.length > 0 ? (
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  {cashTenderSuggestions.map((amount) => (
-                                    <button
-                                      key={amount}
-                                      type="button"
-                                      onClick={() => setCashPaymentInput(String(amount))}
-                                      className="rounded-full bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold text-[var(--menu-text-muted)]"
-                                    >
-                                      {formatAmountByCurrency(amount, selectedCurrencyCode)}
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : null}
-                              {cashPaymentInput && !isCashTenderValid ? (
-                                <p className="mt-2 text-xs font-semibold text-rose-500">
-                                  El efectivo debe ser mayor al total ({formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}).
-                                </p>
-                              ) : null}
-                              {changeAmount > 0 ? (
-                                <p
-                                  className="mt-2 text-xs font-semibold"
-                                  style={{ color: 'color-mix(in srgb, #10B981 72%, var(--menu-text))' }}
+                              <input
+                                type="text"
+                                inputMode={currencyAllowsDecimals(selectedCurrencyCode) ? 'decimal' : 'numeric'}
+                                autoComplete="off"
+                                enterKeyHint="done"
+                                value={cashPaymentInput}
+                                onChange={(event) =>
+                                  setCashPaymentInput(parseCashAmountInput(event.target.value, selectedCurrencyCode))
+                                }
+                                placeholder={formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                                className="h-full min-w-0 flex-1 bg-transparent text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                                aria-required
+                                aria-invalid={cashPaymentInput ? !isCashTenderValid : undefined}
+                              />
+                            </div>
+                          </label>
+                          {cashTenderSuggestions.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {cashTenderSuggestions.map((amount) => (
+                                <button
+                                  key={amount}
+                                  type="button"
+                                  onClick={() => setCashPaymentInput(parseCashAmountInput(String(amount), selectedCurrencyCode))}
+                                  className="rounded-full bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold text-[var(--menu-text-muted)]"
                                 >
-                                  Te devolvemos {formatAmountByCurrency(changeAmount, selectedCurrencyCode)}.
-                                </p>
-                              ) : null}
-                            </label>
+                                  {formatAmountByCurrency(amount, selectedCurrencyCode)}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                          {!cashPaymentInput ? (
+                            <p className="mt-2 text-xs font-medium text-[var(--menu-text-muted)]">
+                              Obligatorio. Escribe un monto en efectivo igual o mayor al total.
+                            </p>
+                          ) : !isCashTenderValid ? (
+                            <p className="mt-2 text-xs font-semibold text-rose-500">
+                              El efectivo debe ser igual o mayor al total ({formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}).
+                            </p>
+                          ) : changeAmount > 0 ? (
+                            <p
+                              className="mt-2 text-sm font-bold"
+                              style={{ color: 'color-mix(in srgb, #10B981 72%, var(--menu-text))' }}
+                            >
+                              Cambio: {formatAmountByCurrency(changeAmount, selectedCurrencyCode)}
+                            </p>
                           ) : (
-                            <p className="mt-3 text-xs font-medium text-[var(--menu-text-muted)]">
-                              El rider llevará el pedido para pago exacto, sin cambio.
+                            <p className="mt-2 text-sm font-bold text-[var(--menu-text)]">
+                              Pago exacto. Sin cambio.
                             </p>
                           )}
                         </div>
@@ -6170,6 +6146,18 @@ export default function PublicMenuPage() {
                           <span>Total en {selectedCurrencyCode}</span>
                           <span style={titleFontStyle}>{formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}</span>
                         </p>
+                        {isCashPayment && isCashTenderValid && paymentWithAmount !== null ? (
+                          <>
+                            <p className="mt-1 flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
+                              <span>Paga con</span>
+                              <span className="font-semibold">{formatAmountByCurrency(paymentWithAmount, selectedCurrencyCode)}</span>
+                            </p>
+                            <p className="mt-1 flex items-center justify-between text-sm font-bold text-[var(--menu-text)]">
+                              <span>Cambio</span>
+                              <span>{formatAmountByCurrency(changeAmount, selectedCurrencyCode)}</span>
+                            </p>
+                          </>
+                        ) : null}
                         {selectedCurrencyCode !== businessBaseCurrency ? (
                           <p className="mt-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
                             Tasa snapshot ({exchangeSourceLabel(selectedExchangeSource)}): {formatTickerRate(selectedExchangeRate)} {selectedCurrencyCode} por 1 {businessBaseCurrency}

@@ -28,5 +28,6 @@ export function stableOrderIdempotencyPayload(payload: unknown) {
     paymentMethod: raw.paymentMethod ?? null,
     paymentProofUrl: raw.paymentProofUrl ?? null,
     orderNotes: raw.orderNotes ?? null,
+    ...(raw.personalizacion ? { personalizacion: raw.personalizacion } : {}),
   };
 }

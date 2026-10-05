@@ -69,8 +69,14 @@ class AppLinks {
   const AppLinks._();
 
   // Keep base URL without trailing slash to avoid //v/... routes.
-  static const String productionUrl = 'https://elmenuxfa.com';
-  static const String merchantAppUrl = 'https://app.elmenuxfa.com';
+  static const String productionUrl = String.fromEnvironment(
+    'PUBLIC_SITE_URL',
+    defaultValue: 'https://elmenuxfa.com',
+  );
+  static const String merchantAppUrl = String.fromEnvironment(
+    'MERCHANT_APP_URL',
+    defaultValue: 'https://app.elmenuxfa.com',
+  );
   static const String brandIsotipoUrl = '$productionUrl/branding/isotipo.png';
 
   static Uri passwordRecoveryRedirectUri({

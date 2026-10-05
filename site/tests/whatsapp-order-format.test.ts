@@ -37,6 +37,16 @@ describe('legacy client summary byte-for-byte regression', () => {
 });
 
 describe('strict per-commerce WhatsApp opt-in', () => {
+  it('customized lines keep preparation details even with legacy summary, but plain configured lines do not change format', () => {
+    const input = { ...order, details: { ...order.details, items: [{
+      nombre: 'Producto A', cantidad: 1, precio: 40000,
+      selecciones: [{ grupo: '', opcion: 'Sin ingrediente', precio: 0 }],
+      personalizacion: { version: 1, componentes: [{ exclusiones: [{ nombre: 'Ingrediente' }] }] },
+    }] } };
+    expect(optionalMerchantComanda({}, input)).toContain('Sin ingrediente');
+    expect(optionalMerchantComanda({}, { ...input, details: { ...input.details, items: [{ ...input.details.items[0], personalizacion: { version: 1, componentes: [{ exclusiones: [] }] } }] } })).toBeUndefined();
+    expect(optionalMerchantComanda({}, { ...input, details: { ...input.details, items: [{ ...input.details.items[0], personalizacion: { version: 1, componentes: [{ exclusiones: [] }, { exclusiones: [] }] } }] } })).toContain('DETALLE DEL PEDIDO');
+  });
   it.each([undefined, null, {}, { config_negocio: null }, { config_negocio: { whatsapp_order_format: 'summary' } }, { config_negocio: { whatsapp_order_format: 'DETAILED' } }])('defaults to unchanged legacy fallback for %j', (commerce) => {
     expect(resolveWhatsappOrderFormat(commerce)).toBe('summary');
     expect(optionalMerchantComanda(commerce, order)).toBeUndefined();
@@ -58,6 +68,57 @@ describe('strict per-commerce WhatsApp opt-in', () => {
 });
 
 describe('merchant comanda from stored snapshots', () => {
+  it('prints independent component options/exclusions from snapshots, never technical ids', () => {
+    const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details,
+      items: [{ nombre: 'Producto A + Producto B', producto: 'Producto A + Producto B', cantidad: 2, precio: 80000,
+        selecciones: [
+          { grupo: 'Combina con', opcion: 'Producto A + Producto B', precio: 0 },
+          { grupo: 'Producto A · Formato', opcion: 'Grande', precio: 0 },
+          { grupo: 'Producto A', opcion: 'Sin cebolla', precio: 0 },
+          { grupo: 'Producto B · Formato', opcion: 'Grande', precio: 0 },
+          { grupo: 'Producto B', opcion: 'Sin aceitunas', precio: 0 },
+        ],
+        personalizacion: { componentes: [{ product_id: 'SECRET_A' }, { product_id: 'SECRET_B' }] },
+      }],
+    } });
+    for (const label of ['Producto A + Producto B', 'Producto A: Sin cebolla', 'Producto B: Sin aceitunas', '80.000']) expect(message).toContain(label);
+    expect(message).not.toContain('SECRET_A');
+    expect(message).not.toContain('SECRET_B');
+  });
+  it('prints combined lines as one natural list', () => {
+    const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details,
+      items: [{ nombre: 'Campesina + Queso y Bocadillo', producto: 'Campesina + Queso y Bocadillo', cantidad: 1, precio: 55587,
+        selecciones: [
+          { grupo: 'Combina con', opcion: 'Campesina + Queso y Bocadillo', precio: 0 },
+          { grupo: 'Campesina · Tamaño', opcion: 'Grande', precio: 0 },
+        ],
+        personalizacion: { version: 1, regla_precio: 'max', precio_final: 55587, componentes: [
+          { product_id: 'SECRET_A', nombre: 'Campesina', precio_efectivo: 55587,
+            selecciones: [{ grupo: 'Tamaño', opcion: 'Grande', precio: 0 }, { grupo: 'Ingrediente Extra', opcion: 'Extra de pollo', precio: 3000 }],
+            exclusiones: [{ id: 'r1', nombre: 'Maiz' }, { id: 'r2', nombre: 'Cebolla' }] },
+          { product_id: 'SECRET_B', nombre: 'Queso y Bocadillo', precio_efectivo: 40000, selecciones: [], exclusiones: [] },
+        ] },
+      }],
+    } });
+    expect(message).toContain('*1x (Combinación) Campesina + Queso y Bocadillo*');
+    expect(message).toContain([
+      '• Tamaño: Grande',
+      '• Ingrediente Extra: Extra de pollo',
+      '• Sin: Maiz, Cebolla',
+      '',
+    ].join('\n'));
+    expect(message).not.toContain('Combina con');
+    expect(message).not.toContain('Sin cambios');
+    expect(message).not.toContain('SECRET_A');
+  });
+  it('names the product of each removal only when both products have removals', () => {
+    const component = (nombre: string, removed: string[]) => ({ nombre, selecciones: [], exclusiones: removed.map((entry) => ({ nombre: entry })) });
+    const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details,
+      items: [{ nombre: 'A + B', cantidad: 1, precio: 1000,
+        personalizacion: { version: 1, componentes: [component('Campesina', ['Cebolla']), component('Hawaiana', ['Piña'])] } }],
+    } });
+    expect(message).toContain('• Sin: Cebolla (Campesina), Piña (Hawaiana)');
+  });
   it('groups interleaved products by their stored category', () => {
     const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details,
       items: [

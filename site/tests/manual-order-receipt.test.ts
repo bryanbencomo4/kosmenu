@@ -20,7 +20,7 @@ const props: ComponentProps<typeof OrderReceipt> = {
   ], currentStep: 0,
   items: [{ name: 'Pizza', quantity: 2, categoryName: 'Pizzas', amountLabel: '$ 18.000' }],
   subtotalLabel: '$ 18.000', deliveryLabel: '$ 2.000', deliveryFeeNote: null,
-  cashChangeLabel: null, totalLabel: '$ 20.000', paymentLabel: 'Efectivo', paymentDetails: null,
+  cashPaidLabel: null, cashChangeLabel: null, totalLabel: '$ 20.000', paymentLabel: 'Efectivo', paymentDetails: null,
   orderNotes: 'Cortar en ocho partes', cancelDetail: '',
   deliveryDelegateLabel: 'Repartidor reportó llegada', deliveryDelegateAcceptedAt: '',
   deliveryDelegateArrivedAt: '', deliveryDelegateCompletedAt: '',

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Minus, Plus, ShoppingBag, ShoppingCart, X } from 'lucide-react';
 
 import type { CartLineSelection } from '../../../../_lib/menu-product-options';
+import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import type { PreCheckoutSuggestionGroup } from '../../../../_lib/pre-checkout-upsell';
 import {
   UpsellOptionConfigurator,
@@ -297,6 +298,7 @@ export function PreCheckoutUpsellSheet({
   onConfirmConfigured,
   canConfigure = true,
 }: PreCheckoutUpsellSheetProps) {
+  useLockBodyScroll(open);
   const [recsReady, setRecsReady] = useState(false);
   const [configuring, setConfiguring] = useState<UpsellConfigurableProduct | null>(null);
 
@@ -341,7 +343,7 @@ export function PreCheckoutUpsellSheet({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div data-sheet-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain [touch-action:pan-y]">
           <div className="lg:grid lg:min-h-full lg:grid-cols-[280px_minmax(0,1fr)]">
             <aside
               className="hidden border-r px-5 py-6 lg:flex lg:flex-col"

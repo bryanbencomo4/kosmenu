@@ -781,6 +781,32 @@ class KitchenPrepSection extends StatelessWidget {
                                 ),
                               ),
                               for (final group in item.modifierGroups)
+                                if (group.bulleted)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        for (final option in group.opciones)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 2,
+                                            ),
+                                            child: Text(
+                                              '• ${option.nombre}',
+                                              style: GoogleFonts.manrope(
+                                                color: KitchenMockupColors.text,
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w700,
+                                                height: 1.25,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  )
+                                else
                                 Padding(
                                   padding: const EdgeInsets.only(top: 6),
                                   child: Column(
