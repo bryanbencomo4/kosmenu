@@ -40,6 +40,7 @@ import { parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-confi
 import {
   cashTenderValidity,
   currencyAllowsDecimals,
+  describeCashBills,
   parseCashAmount,
   parseCashAmountInput,
   suggestCashTenders,
@@ -2994,7 +2995,7 @@ export default function PublicMenuPage() {
   const paymentWithAmount = isCashPayment
     ? parseCashAmount(cashPaymentInput, selectedCurrencyCode)
     : null;
-  const cashTender = cashTenderValidity(paymentWithAmount, orderGrandTotalConverted);
+  const cashTender = cashTenderValidity(paymentWithAmount, orderGrandTotalConverted, selectedCurrencyCode);
   const isCashTenderValid = !isCashPayment || cashTender.valid;
   const changeAmount = isCashPayment && cashTender.valid ? cashTender.change : 0;
   const cashTenderSuggestions = isCashPayment
@@ -6044,7 +6045,11 @@ export default function PublicMenuPage() {
                                 onChange={(event) =>
                                   setCashPaymentInput(parseCashAmountInput(event.target.value, selectedCurrencyCode))
                                 }
-                                placeholder={formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                                placeholder={
+                                  cashTenderSuggestions[0] != null
+                                    ? formatAmountByCurrency(cashTenderSuggestions[0], selectedCurrencyCode)
+                                    : formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)
+                                }
                                 className="h-full min-w-0 flex-1 bg-transparent text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
                                 aria-required
                                 aria-invalid={cashPaymentInput ? !isCashTenderValid : undefined}
@@ -6065,9 +6070,9 @@ export default function PublicMenuPage() {
                               ))}
                             </div>
                           ) : null}
-                          {!cashPaymentInput ? (
-                            <p className="mt-2 text-xs font-medium text-[var(--menu-text-muted)]">
-                              Obligatorio. Escribe un monto en efectivo igual o mayor al total.
+                          {!cashPaymentInput ? null : cashTender.reason === 'bills' ? (
+                            <p className="mt-2 text-xs font-semibold text-rose-500">
+                              Ese monto no se puede dar en efectivo. Usa billetes de {describeCashBills(selectedCurrencyCode)}. Puedes sumarlos.
                             </p>
                           ) : !isCashTenderValid ? (
                             <p className="mt-2 text-xs font-semibold text-rose-500">
