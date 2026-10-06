@@ -160,21 +160,28 @@ export function KioskMenuExperience({
 
   const activeCategory = categories.find((category) => category.id === activeCategoryId) ?? null;
   const activeProducts = activeCategoryId ? productsByCategory[activeCategoryId] ?? [] : [];
+  const searchQueryFolded = foldSearchText(searchQuery);
 
-  const visibleCategories = useMemo(() => {
-    const query = foldSearchText(searchQuery);
-    if (!query || screen !== 'categories') return categories;
-    return categories.filter((category) => foldSearchText(category.name).includes(query));
-  }, [categories, searchQuery, screen]);
+  const catalogProducts = useMemo(
+    () =>
+      categories.flatMap((category) =>
+        (productsByCategory[category.id] ?? []).map((product) => ({ product, category })),
+      ),
+    [categories, productsByCategory],
+  );
 
-  const visibleProducts = useMemo(() => {
-    const query = foldSearchText(searchQuery);
-    if (!query || screen !== 'products') return activeProducts;
-    return activeProducts.filter((product) => {
-      const haystack = foldSearchText(`${product.name} ${product.description}`);
-      return haystack.includes(query);
-    });
-  }, [activeProducts, searchQuery, screen]);
+  const searchHits = useMemo(() => {
+    if (!searchQueryFolded) return null;
+    const categoryHits = categories
+      .filter((category) => foldSearchText(category.name).includes(searchQueryFolded))
+      .map((category) => ({ kind: 'category' as const, category }));
+    const productHits = catalogProducts
+      .filter(({ product }) =>
+        foldSearchText(`${product.name} ${product.description}`).includes(searchQueryFolded),
+      )
+      .map(({ product, category }) => ({ kind: 'product' as const, product, category }));
+    return [...categoryHits, ...productHits];
+  }, [catalogProducts, categories, searchQueryFolded]);
 
   useKioskPageChrome({ themeMode });
   const topBar = (
@@ -317,7 +324,7 @@ export function KioskMenuExperience({
             type="search"
             value={searchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={screen === 'products' ? 'Buscar producto' : 'Buscar categoría'}
+            placeholder="Buscar en el menú"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="none"
@@ -347,12 +354,76 @@ export function KioskMenuExperience({
               : '¿Qué se te antoja hoy?'}
         </p>
 
-        {screen === 'categories' ? (
-          visibleCategories.length === 0 ? (
+        {searchHits ? (
+          searchHits.length === 0 ? (
+            <EmptyState message="No hay resultados con esa búsqueda." />
+          ) : (
+            <div className="grid gap-3">
+              {searchHits.map((hit) =>
+                hit.kind === 'category' ? (
+                  <button
+                    key={`category-${hit.category.id}`}
+                    type="button"
+                    onClick={() => {
+                      setActiveCategoryId(hit.category.id);
+                      onSearchChange('');
+                      setScreen('products');
+                    }}
+                    className="kiosk-card flex w-full items-center gap-3 overflow-hidden rounded-[22px] bg-[var(--menu-surface)] p-3 text-left shadow-[var(--menu-shadow)]"
+                  >
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-[16px] bg-[var(--menu-surface-alt)]">
+                      {hit.category.coverUrl ? (
+                        <KioskImage src={hit.category.coverUrl} alt="" className="h-full w-full" />
+                      ) : (
+                        <div className="grid h-full place-items-center text-2xl">{hit.category.glyph}</div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">Categoría</p>
+                      <p className={`${titleFont.className} truncate text-base font-extrabold text-[var(--menu-text)]`}>{hit.category.name}</p>
+                      <p className="mt-0.5 text-xs text-[var(--menu-text-muted)]">
+                        {hit.category.productCount} {hit.category.productCount === 1 ? 'producto' : 'productos'}
+                      </p>
+                    </div>
+                  </button>
+                ) : (
+                  <button
+                    key={`product-${hit.product.id}`}
+                    type="button"
+                    aria-label={browseOnly ? hit.product.name : `Ver detalles de ${hit.product.name}`}
+                    onClick={() => {
+                      if (browseOnly) return;
+                      onAddProduct(hit.product.id);
+                    }}
+                    className={`kiosk-card flex w-full items-center gap-3 overflow-hidden rounded-[22px] bg-[var(--menu-surface)] p-3 text-left shadow-[var(--menu-shadow)] ${
+                      browseOnly ? 'cursor-default' : ''
+                    }`}
+                  >
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-[16px] bg-[var(--menu-surface-alt)]">
+                      {hit.product.imageUrl ? (
+                        <KioskImage src={hit.product.imageUrl} alt={hit.product.name} className="h-full w-full" />
+                      ) : (
+                        <div className="grid h-full place-items-center text-2xl">{hit.category.glyph || '🍽️'}</div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                        Producto · {hit.category.name}
+                      </p>
+                      <p className={`${titleFont.className} truncate text-base font-extrabold text-[var(--menu-text)]`}>{hit.product.name}</p>
+                      <p className="mt-0.5 text-sm font-bold text-[var(--menu-text)]">{hit.product.priceLabel}</p>
+                    </div>
+                  </button>
+                ),
+              )}
+            </div>
+          )
+        ) : screen === 'categories' ? (
+          categories.length === 0 ? (
             <EmptyState message="No hay categorías con esa búsqueda." />
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {visibleCategories.map((category, index) => (
+              {categories.map((category, index) => (
                 <button
                   key={category.id}
                   type="button"
@@ -383,11 +454,11 @@ export function KioskMenuExperience({
               ))}
             </div>
           )
-        ) : visibleProducts.length === 0 ? (
+        ) : activeProducts.length === 0 ? (
           <EmptyState message="No hay productos con esa búsqueda." />
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {visibleProducts.map((product, index) => (
+            {activeProducts.map((product, index) => (
               <button
                 key={product.id}
                 type="button"
