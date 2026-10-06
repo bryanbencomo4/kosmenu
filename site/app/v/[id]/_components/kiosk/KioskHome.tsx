@@ -1,8 +1,9 @@
 'use client';
 
 import { Caveat, Manrope } from 'next/font/google';
-import { useEffect, useState, type ReactNode } from 'react';
-import { BookOpen, ChevronRight, Facebook, Instagram, MapPin, Moon, Music2, ShoppingBag, Star, Sun, Truck, Utensils, Youtube } from 'lucide-react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { BookOpen, ChevronRight, CreditCard, Facebook, Instagram, MapPin, Moon, Music2, ShoppingBag, Star, Sun, Truck, Utensils, X, Youtube } from 'lucide-react';
 
 import {
   DEFAULT_KIOSK_HOME_CONFIG,
@@ -13,6 +14,7 @@ import { KioskImage } from './KioskImage';
 import { pickKioskGreeting } from './kiosk-greetings';
 import type { KioskFulfillment } from './kiosk-types';
 import type { MenuThemeMode } from '../../_lib/menu-theme';
+import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 
 const greetingFont = Caveat({
   subsets: ['latin'],
@@ -39,9 +41,14 @@ type KioskHomeProps = {
   supportsDelivery: boolean;
   themeMode: MenuThemeMode;
   homeConfig?: KioskHomeConfig;
+  paymentGroups?: Array<{
+    currency: string;
+    methods: Array<{ id: string; label: string; details: string }>;
+  }>;
   onToggleTheme: () => void;
   onSelect: (fulfillment: KioskFulfillment) => void;
   onBrowseMenu: () => void;
+  onOpenCatalog: () => void;
 };
 
 export function KioskHome({
@@ -58,24 +65,52 @@ export function KioskHome({
   supportsDelivery,
   themeMode,
   homeConfig = DEFAULT_KIOSK_HOME_CONFIG,
+  paymentGroups = [],
   onToggleTheme,
   onSelect,
   onBrowseMenu,
+  onOpenCatalog,
 }: KioskHomeProps) {
   const [greeting, setGreeting] = useState<string | null>(null);
+  const homeRef = useRef<HTMLElement>(null);
+  const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
+  const [sheetTheme, setSheetTheme] = useState<CSSProperties>({});
+  const payableGroups = paymentGroups.filter((group) => group.methods.length > 0);
   const showComerAqui = homeConfig.comerAqui;
   const showParaLlevar = homeConfig.paraLlevar;
   const showDelivery = homeConfig.delivery;
   const fulfillmentCount = Number(showComerAqui) + Number(showParaLlevar) + Number(showDelivery);
-  const showBrowse = !isOpen || homeConfig.verMenu || fulfillmentCount === 0;
+  const showBrowse = !isOpen || homeConfig.verMenu || (fulfillmentCount === 0 && !homeConfig.catalogo);
   const mobileCols = fulfillmentCount <= 1 ? 1 : fulfillmentCount === 2 ? 2 : 3;
 
   useEffect(() => {
     setGreeting(pickKioskGreeting());
   }, []);
 
+  useEffect(() => {
+    if (!paymentSheetOpen || !homeRef.current) return;
+    const computed = getComputedStyle(homeRef.current);
+    const names = [
+      '--menu-background',
+      '--menu-surface',
+      '--menu-surface-alt',
+      '--menu-text',
+      '--menu-text-muted',
+      '--menu-primary',
+      '--menu-on-primary',
+      '--menu-border',
+      '--menu-shadow',
+    ];
+    const next: Record<string, string> = {};
+    for (const name of names) {
+      const value = computed.getPropertyValue(name).trim();
+      if (value) next[name] = value;
+    }
+    setSheetTheme(next);
+  }, [paymentSheetOpen]);
+
   return (
-    <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--menu-background)] text-[var(--menu-text)] overscroll-none">
+    <section ref={homeRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--menu-background)] text-[var(--menu-text)] overscroll-none">
       <KioskDecor />
       <KioskMotionStyles />
 
@@ -232,6 +267,24 @@ export function KioskHome({
             </button>
           ) : null}
 
+          {homeConfig.catalogo ? (
+            <button
+              type="button"
+              onClick={onOpenCatalog}
+              className="kiosk-card flex min-h-14 w-full items-center gap-3 rounded-[20px] bg-[var(--menu-surface)] px-3.5 py-3 text-left text-[var(--menu-text)] shadow-[var(--menu-shadow)] sm:min-h-[4.5rem] sm:rounded-[22px]"
+              style={{ animationDelay: '90ms' }}
+            >
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] sm:h-11 sm:w-11" style={{ backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface-alt))', color: 'var(--menu-primary)' }}>
+                <BookOpen className="h-5 w-5" strokeWidth={2.1} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[1.02rem] font-bold tracking-[-0.02em]">Ver catálogo</span>
+                <span className="mt-0.5 block text-[12px] font-medium text-[var(--menu-text-muted)] sm:text-sm">Suma productos y mira cómo pagar.</span>
+              </span>
+              <ChevronRight className="h-5 w-5 shrink-0" />
+            </button>
+          ) : null}
+
           {fulfillmentCount > 0 ? (
           <div className={`grid gap-2 sm:hidden ${mobileCols === 1 ? 'grid-cols-1' : mobileCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
             {showComerAqui ? (
@@ -313,6 +366,23 @@ export function KioskHome({
             ) : null}
           </div>
           ) : null}
+
+          {homeConfig.verMetodosPago ? (
+            <button
+              type="button"
+              onClick={() => setPaymentSheetOpen(true)}
+              className="kiosk-card flex min-h-14 w-full items-center gap-3 rounded-[20px] bg-[var(--menu-surface)] px-3.5 py-3 text-left text-[var(--menu-text)] shadow-[var(--menu-shadow)] sm:min-h-[4.5rem] sm:rounded-[22px]"
+            >
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] sm:h-11 sm:w-11" style={{ backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface-alt))', color: 'var(--menu-primary)' }}>
+                <CreditCard className="h-5 w-5" strokeWidth={2.1} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[1.02rem] font-bold tracking-[-0.02em]">Ver métodos de pago</span>
+                <span className="mt-0.5 block text-[12px] font-medium text-[var(--menu-text-muted)] sm:text-sm">Agrupados por moneda</span>
+              </span>
+              <ChevronRight className="h-5 w-5 shrink-0" />
+            </button>
+          ) : null}
         </div>
         </div>
       </div>
@@ -336,7 +406,122 @@ export function KioskHome({
           </a>
         </div>
       </footer>
+      {paymentSheetOpen
+        ? createPortal(
+            <PaymentMethodsSheet
+              groups={payableGroups}
+              themeStyle={sheetTheme}
+              onClose={() => setPaymentSheetOpen(false)}
+            />,
+            document.body,
+          )
+        : null}
     </section>
+  );
+}
+
+function PaymentMethodsSheet({
+  groups,
+  themeStyle,
+  onClose,
+}: {
+  groups: Array<{
+    currency: string;
+    methods: Array<{ id: string; label: string; details: string }>;
+  }>;
+  themeStyle: CSSProperties;
+  onClose: () => void;
+}) {
+  useLockBodyScroll(true);
+  const [currency, setCurrency] = useState<string | null>(null);
+  const activeCurrency = groups.find((group) => group.currency === currency)?.currency ?? groups[0]?.currency ?? '';
+  const methods = groups.find((group) => group.currency === activeCurrency)?.methods ?? [];
+
+  return (
+    <div
+      className="fixed inset-0 z-[130] flex items-end justify-center bg-black/45 p-2 sm:items-center sm:p-4"
+      style={{ ...themeStyle, paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="home-payment-methods-title"
+        className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] text-[var(--menu-text,#111111)] shadow-[0_24px_80px_rgba(0,0,0,0.28)] sm:max-h-[min(88vh,760px)]"
+        style={{ backgroundColor: 'var(--menu-surface, #ffffff)' }}
+      >
+        <div className="flex items-start justify-between gap-3 px-5 pb-1 pt-4 sm:px-6">
+          <div className="min-w-0 pr-2">
+            <h2 id="home-payment-methods-title" className="text-xl font-extrabold leading-tight sm:text-2xl">
+              Métodos de pago
+            </h2>
+            <p className="mt-2 text-sm leading-6" style={{ color: 'var(--menu-text-muted, #6b7280)' }}>
+              Agrupados por moneda
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur-sm"
+            aria-label="Cerrar"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div data-sheet-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6 [touch-action:pan-y]">
+          {groups.length === 0 ? (
+            <p className="rounded-[18px] px-4 py-6 text-center text-sm" style={{ backgroundColor: 'var(--menu-surface-alt, #f3f4f6)', color: 'var(--menu-text-muted, #6b7280)' }}>
+              Este comercio no publicó métodos de pago.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {groups.length > 1 ? (
+                <div className="flex gap-2" role="group" aria-label="Moneda de pago">
+                  {groups.map((group) => {
+                    const isSelected = group.currency === activeCurrency;
+                    return (
+                      <button
+                        key={group.currency}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => setCurrency(group.currency)}
+                        className="min-h-11 flex-1 rounded-2xl px-2 text-sm font-bold"
+                        style={
+                          isSelected
+                            ? { backgroundColor: 'var(--menu-primary, #111111)', color: 'var(--menu-on-primary, #ffffff)' }
+                            : { backgroundColor: 'var(--menu-surface-alt, #f3f4f6)', color: 'var(--menu-text-muted, #6b7280)' }
+                        }
+                      >
+                        {group.currency === 'VES' ? 'Bs (VES)' : group.currency}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {methods.map((method) => (
+                <div
+                  key={method.id}
+                  className="rounded-2xl border px-4 py-3"
+                  style={{
+                    backgroundColor: 'var(--menu-surface-alt, #f3f4f6)',
+                    borderColor: 'var(--menu-border, #e5e7eb)',
+                  }}
+                >
+                  <p className="text-[15px] font-bold">{method.label}</p>
+                  {method.details ? (
+                    <p className="mt-1 text-sm leading-6" style={{ color: 'var(--menu-text-muted, #6b7280)' }}>
+                      {method.details}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

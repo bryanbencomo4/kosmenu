@@ -134,7 +134,7 @@ class PreCheckoutUpsellConfig {
     return PreCheckoutUpsellConfig(
       activo: nested['activo'] == true || nested['enabled'] == true,
       tipos: tipos.isEmpty ? defaultTipos : tipos,
-      maxProductos: max.clamp(1, 12),
+      maxProductos: max.clamp(1, 48),
       reglas: rawReglas is List
           ? rawReglas
                 .whereType<Map>()

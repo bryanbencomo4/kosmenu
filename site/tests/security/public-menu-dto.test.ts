@@ -40,9 +40,11 @@ describe('public menu DTO', () => {
       comerAqui: true,
       paraLlevar: true,
       delivery: true,
+      catalogo: false,
       calificacion: true,
       ubicacion: true,
       redes: true,
+      verMetodosPago: false,
     });
     expect(dto!.delivery_tarifas).toEqual({ enabled: false });
     assertNoSensitivePublicComercioFields(dto!);
@@ -74,9 +76,11 @@ describe('public menu DTO', () => {
       comerAqui: false,
       paraLlevar: false,
       delivery: false,
+      catalogo: false,
       calificacion: false,
       ubicacion: true,
       redes: true,
+      verMetodosPago: false,
     });
     expect(dto!.delivery_tarifas).toEqual({ enabled: false });
     expect(dto).not.toHaveProperty('branding_ia');

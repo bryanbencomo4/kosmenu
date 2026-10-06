@@ -8,9 +8,11 @@ export type KioskHomeConfig = {
   comerAqui: boolean;
   paraLlevar: boolean;
   delivery: boolean;
+  catalogo: boolean;
   calificacion: boolean;
   ubicacion: boolean;
   redes: boolean;
+  verMetodosPago: boolean;
 };
 
 export const DEFAULT_KIOSK_HOME_CONFIG: KioskHomeConfig = {
@@ -18,9 +20,11 @@ export const DEFAULT_KIOSK_HOME_CONFIG: KioskHomeConfig = {
   comerAqui: true,
   paraLlevar: true,
   delivery: true,
+  catalogo: false,
   calificacion: true,
   ubicacion: true,
   redes: true,
+  verMetodosPago: false,
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -61,6 +65,10 @@ export function parseKioskHomeConfig(raw: unknown): KioskHomeConfig {
       actionSource?.delivery ?? source.delivery,
       DEFAULT_KIOSK_HOME_CONFIG.delivery,
     ),
+    catalogo: readBool(
+      actionSource?.catalogo ?? source.catalogo,
+      DEFAULT_KIOSK_HOME_CONFIG.catalogo,
+    ),
     calificacion: readBool(
       displaySource?.calificacion ?? source.calificacion,
       DEFAULT_KIOSK_HOME_CONFIG.calificacion,
@@ -70,6 +78,10 @@ export function parseKioskHomeConfig(raw: unknown): KioskHomeConfig {
       DEFAULT_KIOSK_HOME_CONFIG.ubicacion,
     ),
     redes: readBool(displaySource?.redes ?? source.redes, DEFAULT_KIOSK_HOME_CONFIG.redes),
+    verMetodosPago: readBool(
+      displaySource?.ver_metodos_pago ?? source.ver_metodos_pago ?? source.verMetodosPago,
+      DEFAULT_KIOSK_HOME_CONFIG.verMetodosPago,
+    ),
   };
 }
 
@@ -83,8 +95,10 @@ export function kioskHomeConfigToJson(config: KioskHomeConfig) {
     comer_aqui: config.comerAqui,
     para_llevar: config.paraLlevar,
     delivery: config.delivery,
+    catalogo: config.catalogo,
     calificacion: config.calificacion,
     ubicacion: config.ubicacion,
     redes: config.redes,
+    ver_metodos_pago: config.verMetodosPago,
   };
 }

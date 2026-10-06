@@ -319,10 +319,10 @@ class _PreCheckoutUpsellScreenState extends State<PreCheckoutUpsellScreen> {
                           style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: 20, color: _purple),
                         ),
                         Slider(
-                          value: _config.maxProductos.toDouble(),
+                          value: _config.maxProductos.toDouble().clamp(1, 24),
                           min: 1,
-                          max: 8,
-                          divisions: 7,
+                          max: 24,
+                          divisions: 23,
                           label: '${_config.maxProductos}',
                           activeColor: _purple,
                           onChanged: _saving
@@ -331,6 +331,10 @@ class _PreCheckoutUpsellScreenState extends State<PreCheckoutUpsellScreen> {
                                     () => _config = _config.copyWith(maxProductos: value.round()),
                                   ),
                           onChangeEnd: (value) => _save(_config.copyWith(maxProductos: value.round())),
+                        ),
+                        Text(
+                          'Puedes sugerir hasta 24 productos.',
+                          style: GoogleFonts.poppins(fontSize: 12, color: const Color(0xFF6B7280)),
                         ),
                       ],
                     ),

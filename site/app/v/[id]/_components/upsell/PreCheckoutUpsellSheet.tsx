@@ -2,7 +2,7 @@
 
 import { Caveat } from 'next/font/google';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Minus, Plus, ShoppingBag, ShoppingCart, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CreditCard, Minus, Plus, ShoppingBag, ShoppingCart, Trash2, X } from 'lucide-react';
 
 import type { CartLineSelection } from '../../../../_lib/menu-product-options';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
@@ -39,6 +39,18 @@ export type PreCheckoutProductCard = {
 
 export type PreCheckoutUpsellGroupCard = Omit<PreCheckoutSuggestionGroup, 'products'> & {
   products: PreCheckoutProductCard[];
+  categoryProducts?: PreCheckoutProductCard[];
+};
+
+export type CatalogPaymentMethod = {
+  id: string;
+  label: string;
+  details: string;
+};
+
+export type CatalogPaymentGroup = {
+  currency: string;
+  methods: CatalogPaymentMethod[];
 };
 
 type PreCheckoutUpsellSheetProps = {
@@ -56,7 +68,15 @@ type PreCheckoutUpsellSheetProps = {
   resolveConfigurableProduct: (productId: string) => UpsellConfigurableProduct | null;
   onConfirmConfigured: (productId: string, selection: CartLineSelection, quantity: number) => void;
   canConfigure?: boolean;
+  catalogMode?: boolean;
+  paymentGroups?: CatalogPaymentGroup[];
+  selectedPaymentCurrency?: string;
+  onSelectPaymentCurrency?: (currency: string) => void;
 };
+
+function currencyChipLabel(currency: string) {
+  return currency === 'VES' ? 'Bs (VES)' : currency;
+}
 
 function kindEmoji(kind: PreCheckoutSuggestionGroup['kind']) {
   if (kind === 'bebida') return '🥤';
@@ -128,12 +148,14 @@ function ProductCard({
   onAdd,
   onDecrement,
   onConfigure,
+  fill = false,
 }: {
   product: PreCheckoutProductCard;
   formatPrice: (amount: number) => string;
   onAdd: () => void;
   onDecrement: () => void;
   onConfigure: () => void;
+  fill?: boolean;
 }) {
   const showStepper = !product.hasOptions && product.quantity > 0;
   const priceLabel = product.hasOptions
@@ -142,7 +164,7 @@ function ProductCard({
 
   return (
     <article
-      className="flex w-[148px] shrink-0 snap-start flex-col rounded-[20px] p-2.5 lg:w-auto"
+      className={`flex shrink-0 snap-start flex-col rounded-[20px] p-2.5 ${fill ? 'w-full' : 'w-[148px] lg:w-auto'}`}
       style={{ backgroundColor: 'var(--menu-surface-alt)' }}
     >
       <button type="button" onClick={product.hasOptions ? onConfigure : onAdd} className="text-left">
@@ -254,8 +276,12 @@ function SuggestionGroup({
   onConfigure: (productId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const hiddenCount = Math.max(0, group.products.length - VISIBLE_PRODUCTS);
-  const visible = expanded ? group.products : group.products.slice(0, VISIBLE_PRODUCTS);
+  const [showCategory, setShowCategory] = useState(false);
+  const categoryProducts = group.categoryProducts?.length ? group.categoryProducts : group.products;
+  const canOpenCategory = categoryProducts.length > group.products.length;
+  const pool = showCategory ? categoryProducts : group.products;
+  const hiddenCount = showCategory ? 0 : Math.max(0, pool.length - VISIBLE_PRODUCTS);
+  const visible = showCategory || expanded ? pool : pool.slice(0, VISIBLE_PRODUCTS);
 
   return (
     <section>
@@ -271,24 +297,47 @@ function SuggestionGroup({
             {kindSubtitle(group.kind)}
           </p>
         </div>
-        {hiddenCount > 0 ? (
-          <button
-            type="button"
-            onClick={() => setExpanded((prev) => !prev)}
-            className="inline-flex items-center gap-1 text-[12px] font-bold"
-            style={{ color: 'var(--menu-primary)' }}
-          >
-            {expanded ? 'Ver menos' : 'Ver más'}
-            <ArrowRight className={`h-3.5 w-3.5 ${expanded ? 'rotate-90' : ''}`} />
-          </button>
-        ) : null}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {canOpenCategory ? (
+            <button
+              type="button"
+              onClick={() => {
+                setShowCategory((prev) => !prev);
+                setExpanded(false);
+              }}
+              className="inline-flex items-center gap-1 text-[12px] font-bold"
+              style={{ color: 'var(--menu-primary)' }}
+            >
+              {showCategory ? 'Ver sugeridos' : 'Ver categoría completa'}
+              <ArrowRight className={`h-3.5 w-3.5 ${showCategory ? 'rotate-180' : ''}`} />
+            </button>
+          ) : null}
+          {!showCategory && hiddenCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((prev) => !prev)}
+              className="inline-flex items-center gap-1 text-[12px] font-bold"
+              style={{ color: 'var(--menu-primary)' }}
+            >
+              {expanded ? 'Ver menos' : 'Ver más'}
+              <ArrowRight className={`h-3.5 w-3.5 ${expanded ? 'rotate-90' : ''}`} />
+            </button>
+          ) : null}
+        </div>
       </div>
-      <div className="-mx-4 flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0 xl:grid-cols-4 [&::-webkit-scrollbar]:hidden">
+      <div
+        className={
+          showCategory
+            ? 'grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4'
+            : '-mx-4 flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0 xl:grid-cols-4 [&::-webkit-scrollbar]:hidden'
+        }
+      >
         {visible.map((product) => (
           <ProductCard
             key={product.id}
             product={product}
             formatPrice={formatPrice}
+            fill={showCategory}
             onAdd={() => onAdd(product.id)}
             onDecrement={() => onDecrement(product.id)}
             onConfigure={() => onConfigure(product.id)}
@@ -314,15 +363,21 @@ export function PreCheckoutUpsellSheet({
   resolveConfigurableProduct,
   onConfirmConfigured,
   canConfigure = true,
+  catalogMode = false,
+  paymentGroups = [],
+  selectedPaymentCurrency,
+  onSelectPaymentCurrency,
 }: PreCheckoutUpsellSheetProps) {
   useLockBodyScroll(open);
   const [recsReady, setRecsReady] = useState(false);
   const [configuring, setConfiguring] = useState<UpsellConfigurableProduct | null>(null);
+  const [showPayments, setShowPayments] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setRecsReady(false);
       setConfiguring(null);
+      setShowPayments(false);
       return;
     }
     const frame = window.requestAnimationFrame(() => setRecsReady(true));
@@ -334,6 +389,14 @@ export function PreCheckoutUpsellSheet({
     if (!resolved) return;
     setConfiguring(resolved);
   }
+
+  const payableGroups = paymentGroups.filter((group) => group.methods.length > 0);
+  const activePaymentCurrency =
+    payableGroups.find((group) => group.currency === selectedPaymentCurrency)?.currency ??
+    payableGroups[0]?.currency ??
+    '';
+  const activePaymentMethods =
+    payableGroups.find((group) => group.currency === activePaymentCurrency)?.methods ?? [];
 
   if (!open) return null;
 
@@ -397,8 +460,17 @@ export function PreCheckoutUpsellSheet({
                   id="pre-checkout-upsell-title"
                   className={`${hintFont.className} max-w-[22rem] text-[30px] font-semibold leading-[1.12] sm:max-w-[30rem] sm:text-[36px] lg:text-[40px]`}
                 >
-                  ¿Seguimos armando el pedido{' '}
-                  <span style={{ color: 'var(--menu-primary)' }}>o vamos a pagar?</span>
+                  {showPayments ? (
+                    <>
+                      Métodos de pago{' '}
+                      <span style={{ color: 'var(--menu-primary)' }}>por moneda</span>
+                    </>
+                  ) : (
+                    <>
+                      ¿Seguimos armando el pedido{' '}
+                      <span style={{ color: 'var(--menu-primary)' }}>o vamos a pagar?</span>
+                    </>
+                  )}
                 </h2>
                 <button
                   type="button"
@@ -411,7 +483,9 @@ export function PreCheckoutUpsellSheet({
                 </button>
               </div>
               <p className="text-[13px]" style={{ color: 'var(--menu-text-muted)' }}>
-                Completa tu pedido con estas deliciosas opciones
+                {showPayments
+                  ? 'Elige la moneda para ver cómo pagar.'
+                  : 'Completa tu pedido con estas deliciosas opciones'}
               </p>
 
               <section
@@ -429,7 +503,73 @@ export function PreCheckoutUpsellSheet({
                 </div>
               </section>
 
-              {recsReady ? (
+              {showPayments ? (
+                <div className="mt-5 space-y-3">
+                  {payableGroups.length === 0 ? (
+                    <p className="text-[13px]" style={{ color: 'var(--menu-text-muted)' }}>
+                      Este comercio no publicó métodos de pago.
+                    </p>
+                  ) : (
+                    <>
+                      {payableGroups.length > 1 ? (
+                        <div
+                          className="rounded-[18px] p-3"
+                          style={{ backgroundColor: 'var(--menu-surface-alt)' }}
+                          role="group"
+                          aria-label="Moneda de pago"
+                        >
+                          <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--menu-text-muted)' }}>
+                            Moneda de pago
+                          </p>
+                          <div className="flex gap-2">
+                            {payableGroups.map((group) => {
+                              const isSelected = group.currency === activePaymentCurrency;
+                              return (
+                                <button
+                                  key={group.currency}
+                                  type="button"
+                                  aria-pressed={isSelected}
+                                  onClick={() => onSelectPaymentCurrency?.(group.currency)}
+                                  className="min-h-10 flex-1 rounded-xl px-3 text-sm font-bold"
+                                  style={
+                                    isSelected
+                                      ? {
+                                          backgroundColor: 'var(--menu-primary)',
+                                          color: 'var(--menu-on-primary)',
+                                        }
+                                      : {
+                                          backgroundColor: 'var(--menu-surface)',
+                                          color: 'var(--menu-text-muted)',
+                                        }
+                                  }
+                                >
+                                  {currencyChipLabel(group.currency)}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                      <div className="space-y-2">
+                        {activePaymentMethods.map((method) => (
+                          <div
+                            key={method.id}
+                            className="rounded-[22px] px-4 py-4"
+                            style={{ backgroundColor: 'var(--menu-surface-alt)' }}
+                          >
+                            <p className="text-sm font-bold">{method.label}</p>
+                            {method.details ? (
+                              <p className="mt-1 text-xs" style={{ color: 'var(--menu-text-muted)' }}>
+                                {method.details}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : recsReady ? (
                 <div className="mt-5 space-y-5">
                   {groups.map((group) => (
                     <SuggestionGroup
@@ -472,16 +612,36 @@ export function PreCheckoutUpsellSheet({
           </button>
           <button
             type="button"
-            onClick={onContinue}
-            disabled={cartCount <= 0}
+            onClick={() => {
+              if (showPayments) {
+                setShowPayments(false);
+                return;
+              }
+              if (catalogMode) {
+                setShowPayments(true);
+                return;
+              }
+              onContinue();
+            }}
+            disabled={!catalogMode && cartCount <= 0}
             className="inline-flex min-h-12 flex-col items-center justify-center rounded-[16px] px-2 text-center disabled:opacity-40"
             style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
           >
             <span className="inline-flex items-center gap-1 text-[13px] font-black">
-              <ShoppingBag className="h-4 w-4" />
-              Ir a pagar
+              {showPayments ? (
+                <ArrowLeft className="h-4 w-4" />
+              ) : catalogMode ? (
+                <CreditCard className="h-4 w-4" />
+              ) : (
+                <ShoppingBag className="h-4 w-4" />
+              )}
+              {catalogMode && !showPayments ? 'Ver métodos de pago' : showPayments ? 'Volver' : 'Ir a pagar'}
             </span>
-            <span className="mt-0.5 text-[10px] font-medium opacity-80">Continuar con el checkout</span>
+            {catalogMode && !showPayments ? null : (
+              <span className="mt-0.5 text-[10px] font-medium opacity-80">
+                {showPayments ? 'Regresar a las sugerencias' : 'Continuar con el checkout'}
+              </span>
+            )}
           </button>
         </div>
 

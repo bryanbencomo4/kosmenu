@@ -3,18 +3,22 @@ class KioskHomeConfig {
   final bool comerAqui;
   final bool paraLlevar;
   final bool delivery;
+  final bool catalogo;
   final bool calificacion;
   final bool ubicacion;
   final bool redes;
+  final bool verMetodosPago;
 
   const KioskHomeConfig({
     this.verMenu = false,
     this.comerAqui = true,
     this.paraLlevar = true,
     this.delivery = true,
+    this.catalogo = false,
     this.calificacion = true,
     this.ubicacion = true,
     this.redes = true,
+    this.verMetodosPago = false,
   });
 
   static bool _readBool(dynamic value, bool fallback) {
@@ -51,9 +55,11 @@ class KioskHomeConfig {
       comerAqui: _readBool(valueFor('comer_aqui', 'comerAqui'), true),
       paraLlevar: _readBool(valueFor('para_llevar', 'paraLlevar'), true),
       delivery: _readBool(valueFor('delivery'), true),
+      catalogo: _readBool(valueFor('catalogo'), false),
       calificacion: _readBool(valueFor('calificacion'), true),
       ubicacion: _readBool(valueFor('ubicacion'), true),
       redes: _readBool(valueFor('redes'), true),
+      verMetodosPago: _readBool(valueFor('ver_metodos_pago', 'verMetodosPago'), false),
     );
   }
 
@@ -69,18 +75,22 @@ class KioskHomeConfig {
     bool? comerAqui,
     bool? paraLlevar,
     bool? delivery,
+    bool? catalogo,
     bool? calificacion,
     bool? ubicacion,
     bool? redes,
+    bool? verMetodosPago,
   }) {
     return KioskHomeConfig(
       verMenu: verMenu ?? this.verMenu,
       comerAqui: comerAqui ?? this.comerAqui,
       paraLlevar: paraLlevar ?? this.paraLlevar,
       delivery: delivery ?? this.delivery,
+      catalogo: catalogo ?? this.catalogo,
       calificacion: calificacion ?? this.calificacion,
       ubicacion: ubicacion ?? this.ubicacion,
       redes: redes ?? this.redes,
+      verMetodosPago: verMetodosPago ?? this.verMetodosPago,
     );
   }
 
@@ -89,8 +99,10 @@ class KioskHomeConfig {
         'comer_aqui': comerAqui,
         'para_llevar': paraLlevar,
         'delivery': delivery,
+        'catalogo': catalogo,
         'calificacion': calificacion,
         'ubicacion': ubicacion,
         'redes': redes,
+        'ver_metodos_pago': verMetodosPago,
       };
 }

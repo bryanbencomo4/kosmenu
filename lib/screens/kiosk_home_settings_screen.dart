@@ -89,10 +89,12 @@ class _KioskHomeSettingsScreenState extends State<KioskHomeSettingsScreen> {
   String get _preview {
     final actions = <String>[
       if (_config.verMenu) 'Ver menú',
+      if (_config.catalogo) 'Catálogo',
       if (_config.comerAqui) 'Comer aquí',
       if (_config.paraLlevar) 'Para llevar',
       if (_config.delivery) 'Delivery',
     ];
+    if (_config.verMetodosPago) actions.add('Métodos de pago');
     if (actions.isEmpty) return 'El cliente verá Ver menú para consultar productos.';
     return 'El cliente verá: ${actions.join(', ')}.';
   }
@@ -130,6 +132,12 @@ class _KioskHomeSettingsScreenState extends State<KioskHomeSettingsScreen> {
                   subtitle: 'Solo consulta productos, sin pedidos. También aparece si el negocio está cerrado.',
                   value: _config.verMenu,
                   onChanged: (value) => _save(_config.copyWith(verMenu: value)),
+                ),
+                _switchCard(
+                  title: 'Catálogo',
+                  subtitle: 'El cliente ve los productos, los suma y mira el total y los métodos de pago.',
+                  value: _config.catalogo,
+                  onChanged: (value) => _save(_config.copyWith(catalogo: value)),
                 ),
                 _switchCard(
                   title: 'Comer aquí',
@@ -174,6 +182,12 @@ class _KioskHomeSettingsScreenState extends State<KioskHomeSettingsScreen> {
                   subtitle: 'Instagram, Facebook, YouTube o TikTok',
                   value: _config.redes,
                   onChanged: (value) => _save(_config.copyWith(redes: value)),
+                ),
+                _switchCard(
+                  title: 'Ver métodos de pago',
+                  subtitle: 'Se muestran en la pantalla de inicio. Desactivado, el inicio queda igual.',
+                  value: _config.verMetodosPago,
+                  onChanged: (value) => _save(_config.copyWith(verMetodosPago: value)),
                 ),
                 const SizedBox(height: 12),
                 _card(

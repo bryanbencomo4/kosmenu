@@ -32,6 +32,8 @@ void main() {
       expect(config.calificacion, isFalse);
       expect(config.ubicacion, isTrue);
       expect(config.redes, isTrue);
+      expect(config.catalogo, isFalse);
+      expect(config.verMetodosPago, isFalse);
     });
 
     test('al guardar no borra otras claves de config_negocio', () {
@@ -54,6 +56,8 @@ void main() {
       expect(merged['inicio_menu']['ver_menu'], isTrue);
       expect(merged['inicio_menu']['comer_aqui'], isFalse);
       expect(merged['inicio_menu']['calificacion'], isFalse);
+      expect(merged['inicio_menu']['catalogo'], isFalse);
+      expect(merged['inicio_menu']['ver_metodos_pago'], isFalse);
     });
   });
 }

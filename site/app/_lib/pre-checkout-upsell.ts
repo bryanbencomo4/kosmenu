@@ -160,7 +160,7 @@ function parseRules(raw: unknown): PreCheckoutUpsellRule[] {
 function parseMaxProductos(raw: unknown) {
   const value = typeof raw === 'number' ? raw : Number(raw);
   if (!Number.isFinite(value)) return DEFAULT_PRE_CHECKOUT_UPSELL.max_productos;
-  return Math.min(12, Math.max(1, Math.round(value)));
+  return Math.min(48, Math.max(1, Math.round(value)));
 }
 
 function parseListedCategories(raw: unknown): PreCheckoutListedCategory[] {

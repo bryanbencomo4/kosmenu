@@ -27,9 +27,11 @@ describe('kiosk home config', () => {
       comerAqui: false,
       paraLlevar: false,
       delivery: false,
+      catalogo: false,
       calificacion: false,
       ubicacion: true,
       redes: true,
+      verMetodosPago: false,
     });
   });
 
@@ -44,6 +46,16 @@ describe('kiosk home config', () => {
       redes: true,
     });
     expect(parseKioskHomeConfig(kioskHomeConfigToJson(parsed))).toEqual(parsed);
+  });
+
+  it('keeps catalog and payment methods off unless the merchant turns them on', () => {
+    expect(parseKioskHomeConfig({ ver_menu: true }).catalogo).toBe(false);
+    expect(parseKioskHomeConfig({ ver_menu: true }).verMetodosPago).toBe(false);
+    expect(parseKioskHomeConfig({ catalogo: true, ver_metodos_pago: true })).toMatchObject({
+      catalogo: true,
+      verMetodosPago: true,
+      comerAqui: true,
+    });
   });
 
   it('reads nested inicio_menu without dropping other config_negocio keys', () => {
@@ -65,9 +77,11 @@ describe('kiosk home config', () => {
       comerAqui: false,
       paraLlevar: false,
       delivery: true,
+      catalogo: false,
       calificacion: false,
       ubicacion: false,
       redes: false,
+      verMetodosPago: false,
     });
   });
 });

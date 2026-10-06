@@ -47,9 +47,16 @@ type KioskMenuExperienceProps = {
   closedCaption: string;
   supportsDelivery: boolean;
   homeConfig?: KioskHomeConfig;
+  paymentGroups?: Array<{
+    currency: string;
+    methods: Array<{ id: string; label: string; details: string }>;
+  }>;
   fulfillment: KioskFulfillment | null;
+  catalogMode?: boolean;
   onSelectFulfillment: (fulfillment: KioskFulfillment) => void;
   onResetFulfillment: () => void;
+  onEnterCatalog: () => void;
+  onLeaveCatalog: () => void;
   categories: KioskCategory[];
   productsByCategory: Record<string, KioskProduct[]>;
   searchQuery: string;
@@ -88,9 +95,13 @@ export function KioskMenuExperience({
   closedCaption,
   supportsDelivery,
   homeConfig = DEFAULT_KIOSK_HOME_CONFIG,
+  paymentGroups = [],
   fulfillment,
+  catalogMode = false,
   onSelectFulfillment,
   onResetFulfillment,
+  onEnterCatalog,
+  onLeaveCatalog,
   categories,
   productsByCategory,
   searchQuery,
@@ -114,7 +125,7 @@ export function KioskMenuExperience({
   onToggleTheme,
   stickyOffsetClass,
 }: KioskMenuExperienceProps) {
-  const browseOnly = !fulfillment || !isOpen;
+  const browseOnly = !catalogMode && (!fulfillment || !isOpen);
   useLockBodyScroll(Boolean(addedPrompt && !browseOnly));
   const [screen, setScreen] = useState<KioskScreen>(fulfillment ? 'categories' : 'home');
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -211,15 +222,24 @@ export function KioskMenuExperience({
           tagline={tagline}
           supportsDelivery={supportsDelivery}
           homeConfig={homeConfig}
+          paymentGroups={paymentGroups}
           themeMode={themeMode}
           onToggleTheme={onToggleTheme}
           onSelect={(next) => {
+            onLeaveCatalog();
             onSelectFulfillment(next);
             onSearchChange('');
             setActiveCategoryId(null);
             setScreen('categories');
           }}
           onBrowseMenu={() => {
+            onLeaveCatalog();
+            onSearchChange('');
+            setActiveCategoryId(null);
+            setScreen('categories');
+          }}
+          onOpenCatalog={() => {
+            onEnterCatalog();
             onSearchChange('');
             setActiveCategoryId(null);
             setScreen('categories');
@@ -249,6 +269,7 @@ export function KioskMenuExperience({
               setScreen('home');
               setActiveCategoryId(null);
               if (fulfillment) onResetFulfillment();
+              if (catalogMode) onLeaveCatalog();
             }}
             className="grid h-11 w-11 place-items-center rounded-[14px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
             aria-label="Volver"
@@ -257,7 +278,7 @@ export function KioskMenuExperience({
           </button>
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--menu-text-muted)]">
-              {fulfillment ? FULFILLMENT_LABEL[fulfillment] : 'Solo consulta'}
+              {catalogMode ? 'Catálogo' : fulfillment ? FULFILLMENT_LABEL[fulfillment] : 'Solo consulta'}
             </p>
             <h2 className={`${titleFont.className} truncate text-lg font-extrabold tracking-[-0.03em] text-[var(--menu-text)]`}>
               {screen === 'products' ? activeCategory?.name || 'Productos' : 'Categorías'}

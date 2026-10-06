@@ -1672,6 +1672,7 @@ export default function PublicMenuPage() {
   const [mapPickerProvider, setMapPickerProvider] = useState<'google' | 'leaflet'>('google');
   const [orderNotes, setOrderNotes] = useState('');
   const [kioskFulfillment, setKioskFulfillment] = useState<KioskFulfillment | null>(null);
+  const [catalogMode, setCatalogMode] = useState(false);
   const [kioskAddedPrompt, setKioskAddedPrompt] = useState<{ productName: string } | null>(null);
   const [kioskVoucher, setKioskVoucher] = useState<KioskVoucherData | null>(null);
   const [dismissedUpsellIds, setDismissedUpsellIds] = useState<Set<string>>(() => new Set());
@@ -2597,6 +2598,20 @@ export default function PublicMenuPage() {
     menuData?.marketRates,
     menuData?.metodosPago,
   ]);
+  const publicPaymentGroups = useMemo(
+    () =>
+      paymentMethodsByCurrency
+        .filter((group) => group.methods.length > 0)
+        .map((group) => ({
+          currency: group.currency,
+          methods: group.methods.map((method) => ({
+            id: method.id,
+            label: paymentMethodLabel(method),
+            details: paymentMethodDetails(method).join(' · '),
+          })),
+        })),
+    [paymentMethodsByCurrency],
+  );
   const businessCheckoutCurrencies = useMemo(
     () =>
       businessCheckoutCurrenciesFromData(
@@ -2817,9 +2832,8 @@ export default function PublicMenuPage() {
           productId: item.product.id,
           categoryId: item.product.categoria_id,
         })),
-      }).map((group) => ({
-        ...group,
-        products: group.products.map((product) => {
+      }).map((group) => {
+        const products = group.products.map((product) => {
           const fullProduct = productById.get(product.id);
           const category = categoryByProductId.get(product.id) ?? null;
           return {
@@ -2831,8 +2845,30 @@ export default function PublicMenuPage() {
               ? productRequiresConfiguration(fullProduct, category)
               : false,
           };
-        }),
-      })),
+        });
+        const categoryProducts = (menuData?.productos ?? [])
+          .filter((product) => product.categoria_id === group.categoryId && product.disponible !== false)
+          .slice()
+          .sort((left, right) => (left.orden ?? Number.MAX_SAFE_INTEGER) - (right.orden ?? Number.MAX_SAFE_INTEGER))
+          .flatMap((product) => {
+            const category = categoryByProductId.get(product.id) ?? null;
+            const precio = getProductMinimumPrice(product);
+            if (precio <= 0) return [];
+            return [{
+              id: product.id,
+              nombre: product.nombre,
+              precio,
+              imagen_url: displayProductImage(product.imagen_url, comercioLogoUrl, 280),
+              quantity: getProductCartQuantity(product.id),
+              hasOptions: productRequiresConfiguration(product, category),
+            }];
+          });
+        return {
+          ...group,
+          products,
+          categoryProducts,
+        };
+      }),
     [cart, cartItems, categoryByProductId, comercioLogoUrl, menuData?.categorias, menuData?.preCheckoutUpsell, menuData?.productos, productById],
   );
   const preCheckoutUpsellActive = Boolean(menuData?.preCheckoutUpsell?.activo);
@@ -3118,13 +3154,45 @@ export default function PublicMenuPage() {
     setDeliveryMode('pickup');
     setKioskAddedPrompt(null);
     setIsConfirmOpen(false);
-    setProductOptionsSheet({ open: false, productId: null });
+    if (!catalogMode) {
+      setProductOptionsSheet({ open: false, productId: null });
+    }
     if (typeof window !== 'undefined' && commerceIdentifier) {
       window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     }
-  }, [scheduleClosed, commerceIdentifier]);
+  }, [scheduleClosed, commerceIdentifier, catalogMode]);
+
+  function enterCatalogMode() {
+    if (!kioskHomeConfig.catalogo) return;
+    setCatalogMode(true);
+    setKioskFulfillment(null);
+    setDeliveryMode('pickup');
+    setKioskAddedPrompt(null);
+    setIsConfirmOpen(false);
+    setIsPreCheckoutUpsellOpen(false);
+    if (typeof window !== 'undefined' && commerceIdentifier) {
+      window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
+    }
+  }
+
+  function leaveCatalogMode() {
+    setCatalogMode(false);
+    setIsPreCheckoutUpsellOpen(false);
+    setKioskAddedPrompt(null);
+  }
+
+  function openCatalogSummary() {
+    if (!catalogMode || cartCount <= 0) return;
+    setKioskAddedPrompt(null);
+    setIsPreCheckoutUpsellOpen(true);
+  }
 
   function handleKioskAddProduct(productId: string) {
+    if (catalogMode) {
+      if (!kioskHomeConfig.catalogo) return;
+      setProductOptionsSheet({ open: true, productId });
+      return;
+    }
     if (scheduleClosed || !kioskFulfillment) return;
     setProductOptionsSheet({ open: true, productId });
   }
@@ -3751,7 +3819,7 @@ export default function PublicMenuPage() {
     selection: CartLineSelection,
     quantity = 1,
   ) {
-    if (scheduleClosed) {
+    if (scheduleClosed && !catalogMode) {
       window.alert('El restaurante está cerrado actualmente');
       return;
     }
@@ -3773,7 +3841,7 @@ export default function PublicMenuPage() {
   }
 
   function incrementProduct(productId: string) {
-    if (scheduleClosed) {
+    if (scheduleClosed && !catalogMode) {
       window.alert('El restaurante está cerrado actualmente');
       return;
     }
@@ -4292,7 +4360,7 @@ export default function PublicMenuPage() {
   }
 
   function proceedToCheckoutSheet() {
-    if (cartCount <= 0) return;
+    if (catalogMode || cartCount <= 0) return;
     const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
     void trackMenuFunnelEvent(comercioKey, 'checkout_started', {}, 'checkout');
     setCheckoutError(null);
@@ -4302,6 +4370,7 @@ export default function PublicMenuPage() {
   }
 
   function openCheckoutSheet() {
+    if (catalogMode) return;
     if (kioskVoucher) return;
     if (isOwnerPreview) {
       window.alert(
@@ -4334,6 +4403,7 @@ export default function PublicMenuPage() {
   }
 
   async function confirmOrder() {
+    if (catalogMode) return;
     if (isOwnerPreview) {
       setCheckoutError(
         'Vista previa. Los pedidos no se pueden confirmar aqui.',
@@ -4973,9 +5043,13 @@ export default function PublicMenuPage() {
           closedCaption={kioskClosedCaption}
           supportsDelivery={supportsDelivery}
           homeConfig={kioskHomeConfig}
+          paymentGroups={publicPaymentGroups}
           fulfillment={kioskFulfillment}
+          catalogMode={catalogMode}
           onSelectFulfillment={selectKioskFulfillment}
           onResetFulfillment={resetKioskFulfillment}
+          onEnterCatalog={enterCatalogMode}
+          onLeaveCatalog={leaveCatalogMode}
           categories={kioskCategories}
           productsByCategory={kioskProductsByCategory}
           searchQuery={searchQuery}
@@ -4983,15 +5057,23 @@ export default function PublicMenuPage() {
           cartCount={cartCount}
           cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
           onAddProduct={handleKioskAddProduct}
-          payCtaLabel={preCheckoutUpsellActive ? 'Siguiente' : 'Ir a pagar'}
+          payCtaLabel={catalogMode ? 'Ver pedido' : preCheckoutUpsellActive ? 'Siguiente' : 'Ir a pagar'}
           onPay={() => {
             setKioskAddedPrompt(null);
+            if (catalogMode) {
+              openCatalogSummary();
+              return;
+            }
             openCheckoutSheet();
           }}
-          addedPrompt={scheduleClosed || preCheckoutUpsellActive ? null : kioskAddedPrompt}
+          addedPrompt={scheduleClosed || preCheckoutUpsellActive || catalogMode ? null : kioskAddedPrompt}
           onContinueAdding={() => setKioskAddedPrompt(null)}
           onPayFromPrompt={() => {
             setKioskAddedPrompt(null);
+            if (catalogMode) {
+              openCatalogSummary();
+              return;
+            }
             openCheckoutSheet();
           }}
           voucher={kioskVoucher}
@@ -5040,8 +5122,18 @@ export default function PublicMenuPage() {
           onDecrement={decrementProductById}
           onRemove={removeProductFromCart}
           onKeepShopping={() => setIsPreCheckoutUpsellOpen(false)}
-          onContinue={proceedToCheckoutSheet}
-          canConfigure={!scheduleClosed}
+          onContinue={() => {
+            if (catalogMode) {
+              setIsPreCheckoutUpsellOpen(false);
+              return;
+            }
+            proceedToCheckoutSheet();
+          }}
+          canConfigure={catalogMode || !scheduleClosed}
+          catalogMode={catalogMode}
+          paymentGroups={publicPaymentGroups}
+          selectedPaymentCurrency={selectedCurrencyCode}
+          onSelectPaymentCurrency={selectMenuCurrency}
           resolveConfigurableProduct={(productId) => {
             const product = productById.get(productId);
             if (!product) return null;
@@ -5080,8 +5172,7 @@ export default function PublicMenuPage() {
             : []}
           open={productOptionsSheet.open && !kioskVoucher}
           canAdd={
-            !scheduleClosed &&
-            Boolean(kioskFulfillment) &&
+            (catalogMode || (!scheduleClosed && Boolean(kioskFulfillment))) &&
             productById.get(productOptionsSheet.productId ?? '')?.disponible !== false
           }
           product={
@@ -5109,7 +5200,7 @@ export default function PublicMenuPage() {
             const addedProduct = productById.get(productOptionsSheet.productId);
             addConfiguredProductToCart(productOptionsSheet.productId, selection, quantity);
             setProductOptionsSheet({ open: false, productId: null });
-            if (!preCheckoutUpsellActive) {
+            if (!preCheckoutUpsellActive && !catalogMode) {
               setKioskAddedPrompt({
                 productName: addedProduct?.nombre ?? 'Producto',
               });
