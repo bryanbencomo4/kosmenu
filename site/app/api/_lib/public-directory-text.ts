@@ -1,7 +1,5 @@
+import { foldSearchText } from '../../_lib/search-text';
+
 export function normalizeDirectoryQuery(value: string) {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
+  return foldSearchText(value);
 }

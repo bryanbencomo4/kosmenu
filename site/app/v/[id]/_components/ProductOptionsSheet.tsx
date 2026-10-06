@@ -22,6 +22,7 @@ import {
   type MenuOptionGroup,
 } from '../../../_lib/menu-product-options';
 import { useLockBodyScroll } from '../../../_lib/use-lock-body-scroll';
+import { foldSearchText } from '../../../_lib/search-text';
 
 function describeGroupRule(group: MenuOptionGroup) {
   if (group.tipo === 'unica') return group.obligatorio ? 'Obligatorio · elige 1' : 'Opcional · elige 1';
@@ -89,7 +90,7 @@ const COLLAPSED_VISIBLE_COUNT = 6;
 const SEARCH_THRESHOLD = 8;
 
 function normalizeSearch(value: string) {
-  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  return foldSearchText(value);
 }
 
 function choiceRowClass(compact: boolean) {

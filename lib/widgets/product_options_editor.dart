@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/models/product_option_group.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -945,7 +946,7 @@ class ProductOptionsEditorState extends State<ProductOptionsEditor> {
     );
   }
 
-  static String _searchKey(String value) => _ingredientKey(value);
+  static String _searchKey(String value) => foldSearchText(value);
 
   void _setCompatible(Iterable<String> ids, bool selected) {
     setState(() {

@@ -2,7 +2,7 @@
 
 import { Caveat } from 'next/font/google';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Minus, Plus, ShoppingBag, ShoppingCart, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Minus, Plus, ShoppingBag, ShoppingCart, Trash2, X } from 'lucide-react';
 
 import type { CartLineSelection } from '../../../../_lib/menu-product-options';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
@@ -50,6 +50,7 @@ type PreCheckoutUpsellSheetProps = {
   formatPrice: (amount: number) => string;
   onIncrement: (productId: string) => void;
   onDecrement: (productId: string) => void;
+  onRemove?: (cartKey: string) => void;
   onKeepShopping: () => void;
   onContinue: () => void;
   resolveConfigurableProduct: (productId: string) => UpsellConfigurableProduct | null;
@@ -191,12 +192,14 @@ function ProductCard({
 function CartList({
   items,
   compact,
+  onRemove,
 }: {
   items: PreCheckoutCartPreviewItem[];
   compact?: boolean;
+  onRemove?: (id: string) => void;
 }) {
   return (
-    <div className={compact ? 'max-h-36 space-y-2.5 overflow-y-auto' : 'space-y-4'}>
+    <div className={compact ? 'max-h-52 space-y-2.5 overflow-y-auto' : 'space-y-4'}>
       {items.map((item) => (
         <div key={item.id} className="flex items-start gap-3">
           {item.imageUrl ? (
@@ -215,9 +218,22 @@ function CartList({
               {item.detail ? `${item.detail} · ` : ''}x{item.quantity}
             </p>
           </div>
-          <p className="shrink-0 text-[12px] font-black lg:text-[13px]" style={{ color: 'var(--menu-text)' }}>
-            {item.priceLabel}
-          </p>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <p className="text-[12px] font-black lg:text-[13px]" style={{ color: 'var(--menu-text)' }}>
+              {item.priceLabel}
+            </p>
+            {onRemove ? (
+              <button
+                type="button"
+                onClick={() => onRemove(item.id)}
+                aria-label={`Quitar ${item.name}`}
+                className="inline-flex min-h-8 items-center gap-1 rounded-full px-1 text-[11px] font-black text-rose-500"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Quitar
+              </button>
+            ) : null}
+          </div>
         </div>
       ))}
     </div>
@@ -292,6 +308,7 @@ export function PreCheckoutUpsellSheet({
   formatPrice,
   onIncrement,
   onDecrement,
+  onRemove,
   onKeepShopping,
   onContinue,
   resolveConfigurableProduct,
@@ -361,7 +378,7 @@ export function PreCheckoutUpsellSheet({
                   {cartCount} {cartCount === 1 ? 'item' : 'items'}
                 </span>
               </div>
-              <CartList items={cartItems} />
+              <CartList items={cartItems} onRemove={onRemove} />
               <div className="mt-auto border-t pt-4" style={{ borderColor: 'var(--menu-border)' }}>
                 <div className="flex items-center justify-between">
                   <p className="text-[13px] font-semibold" style={{ color: 'var(--menu-text-muted)' }}>
@@ -401,7 +418,7 @@ export function PreCheckoutUpsellSheet({
                 className="mt-4 rounded-[20px] p-3 lg:hidden"
                 style={{ backgroundColor: 'var(--menu-surface-alt)' }}
               >
-                <CartList items={cartItems} compact />
+                <CartList items={cartItems} compact onRemove={onRemove} />
                 <div className="mt-3 flex items-center justify-between border-t pt-2.5" style={{ borderColor: 'var(--menu-border)' }}>
                   <p className="text-[12px] font-semibold" style={{ color: 'var(--menu-text-muted)' }}>
                     Total actual
@@ -456,7 +473,8 @@ export function PreCheckoutUpsellSheet({
           <button
             type="button"
             onClick={onContinue}
-            className="inline-flex min-h-12 flex-col items-center justify-center rounded-[16px] px-2 text-center"
+            disabled={cartCount <= 0}
+            className="inline-flex min-h-12 flex-col items-center justify-center rounded-[16px] px-2 text-center disabled:opacity-40"
             style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
           >
             <span className="inline-flex items-center gap-1 text-[13px] font-black">

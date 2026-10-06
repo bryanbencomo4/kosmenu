@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/models/merchant_panel.dart';
@@ -227,7 +228,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
 
   bool _matchesQuery(PedidoModel pedido, String q) {
     if (q.isEmpty) return true;
-    final name = (pedido.nombreCliente ?? '').toLowerCase();
+    final name = foldSearchText(pedido.nombreCliente);
     final phone = (pedido.clientePhone ?? '').toLowerCase();
     final id = (pedido.orderId ?? pedido.id).toLowerCase();
     return name.contains(q) || phone.contains(q) || id.contains(q);
@@ -241,7 +242,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
       for (final pedido in widget.orders) pedido.id: pedido,
     };
     final cursor = window.cursor;
-    final q = _query.trim().toLowerCase();
+    final q = foldSearchText(_query);
     final merged = <String, PedidoModel>{};
 
     for (final pedido in window.rows) {

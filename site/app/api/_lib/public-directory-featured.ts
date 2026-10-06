@@ -1,3 +1,5 @@
+import { foldSearchText } from '../../_lib/search-text';
+
 export type DirectorySearchEntry = {
   id: string;
   slug: string;
@@ -10,23 +12,14 @@ export function scoreDirectoryMatch(
   entry: DirectorySearchEntry,
   normalizedQuery: string,
 ) {
-  const haystack = [
+  const haystack = foldSearchText([
     entry.nombre,
     entry.slug,
     entry.categoria ?? '',
     entry.direccion ?? '',
-  ]
-    .join(' ')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
+  ].join(' '));
 
-  const slugNormalized = entry.slug
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
+  const slugNormalized = foldSearchText(entry.slug);
 
   if (slugNormalized === normalizedQuery) return 100;
   if (haystack.startsWith(normalizedQuery)) return 80;

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/services/delivery_courier_service.dart';
 import 'package:kosmenu_app/widgets/assign_courier/assign_courier_theme.dart';
 import 'package:kosmenu_app/widgets/assign_courier/courier_card.dart';
@@ -41,7 +42,7 @@ class _AssignCourierSheetState extends State<AssignCourierSheet> {
     final needle = query.toLowerCase();
     final filtered = _couriersList.where((courier) {
       if (query.isEmpty) return true;
-      if (needle.isNotEmpty && courier.alias.toLowerCase().contains(needle)) {
+      if (needle.isNotEmpty && foldSearchText(courier.alias).contains(foldSearchText(needle))) {
         return true;
       }
       if (digits.isNotEmpty && courier.normalizedPhone.contains(digits)) {

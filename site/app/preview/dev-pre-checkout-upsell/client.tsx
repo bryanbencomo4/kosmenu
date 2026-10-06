@@ -275,6 +275,14 @@ export function DevPreCheckoutUpsellClient() {
         formatPrice={money}
         onIncrement={(productId) => bump(productId, 1)}
         onDecrement={(productId) => bump(productId, -1)}
+        onRemove={(cartKey) => {
+          setQty((prev) => {
+            if (!(cartKey in prev)) return prev;
+            const next = { ...prev };
+            delete next[cartKey];
+            return next;
+          });
+        }}
         onKeepShopping={() => setOpen(false)}
         onContinue={() => {
           setOpen(false);

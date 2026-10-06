@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
@@ -735,13 +736,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
   }
 
   List<ProductModel> get _filteredProducts {
-    final query = _searchQuery.trim().toLowerCase();
+    final query = foldSearchText(_searchQuery);
     final searched = query.isEmpty
         ? _products
         : _products.where((product) {
             final price = product.precio.toStringAsFixed(2);
-            return product.nombre.toLowerCase().contains(query) ||
-                product.descripcion.toLowerCase().contains(query) ||
+            return foldSearchText(product.nombre).contains(query) ||
+                foldSearchText(product.descripcion).contains(query) ||
                 price.contains(query);
           }).toList();
 

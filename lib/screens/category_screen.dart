@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/models/catalog.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
@@ -2183,7 +2184,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }
 
   String _normalizedText(String? value) {
-    return value?.trim().toLowerCase() ?? '';
+    return foldSearchText(value);
   }
 
   Future<void> _openQuickCreateSheet() async {

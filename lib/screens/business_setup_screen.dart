@@ -17,6 +17,7 @@ import 'package:intl_phone_field/phone_number.dart' as intl_phone_number;
 import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/exchange_rate_adjustment.dart';
+import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/models/comercio.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
@@ -2299,8 +2300,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             builder: (context, setSheetState) {
               final filtered = sectors
                   .where(
-                    (item) =>
-                        item.toLowerCase().contains(query.toLowerCase().trim()),
+                    (item) => foldSearchText(item).contains(foldSearchText(query)),
                   )
                   .toList();
               final visibleCount = filtered.length < limit

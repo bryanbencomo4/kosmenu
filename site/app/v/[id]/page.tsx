@@ -35,6 +35,7 @@ import { KioskCheckout } from './_components/kiosk/KioskCheckout';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
 import { parseKioskHomeConfig } from '../../_lib/kiosk-home-config';
+import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
 import { parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
@@ -1397,11 +1398,7 @@ function menuGridClass(layoutType: 'list' | 'grid' | 'compact', itemsPerRow: num
 }
 
 function normalizeSearchText(value: string) {
-  return value
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim();
+  return foldSearchText(value);
 }
 
 type CategoryVisualTheme = {
@@ -3397,6 +3394,11 @@ export default function PublicMenuPage() {
   }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
 
   useEffect(() => {
+    if (!isPreCheckoutUpsellOpen || cartCount > 0) return;
+    setIsPreCheckoutUpsellOpen(false);
+  }, [cartCount, isPreCheckoutUpsellOpen]);
+
+  useEffect(() => {
     if (cartCount > 0 || !isConfirmOpen) return;
     setCheckoutError(null);
     setCheckoutStep(0);
@@ -4290,6 +4292,7 @@ export default function PublicMenuPage() {
   }
 
   function proceedToCheckoutSheet() {
+    if (cartCount <= 0) return;
     const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
     void trackMenuFunnelEvent(comercioKey, 'checkout_started', {}, 'checkout');
     setCheckoutError(null);
@@ -5035,6 +5038,7 @@ export default function PublicMenuPage() {
           formatPrice={formatUpsellPrice}
           onIncrement={incrementProduct}
           onDecrement={decrementProductById}
+          onRemove={removeProductFromCart}
           onKeepShopping={() => setIsPreCheckoutUpsellOpen(false)}
           onContinue={proceedToCheckoutSheet}
           canConfigure={!scheduleClosed}
@@ -6165,7 +6169,7 @@ export default function PublicMenuPage() {
                         ) : null}
                         {selectedCurrencyCode !== businessBaseCurrency ? (
                           <p className="mt-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
-                            Tasa snapshot ({exchangeSourceLabel(selectedExchangeSource)}): {formatTickerRate(selectedExchangeRate)} {selectedCurrencyCode} por 1 {businessBaseCurrency}
+                            Tasa de cambio: {formatTickerRate(selectedExchangeRate)} {selectedCurrencyCode} por 1 {businessBaseCurrency}
                           </p>
                         ) : null}
                       </div>

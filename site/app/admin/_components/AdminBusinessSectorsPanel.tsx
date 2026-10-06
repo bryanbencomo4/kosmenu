@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Layers3, Plus, RefreshCw, Search, ToggleLeft, ToggleRight } from 'lucide-react';
 
 import type { CurrentAdmin } from '../_lib/admin-auth';
+import { foldSearchText } from '../../_lib/search-text';
 
 type BusinessSector = {
   id: string;
@@ -62,7 +63,7 @@ export function AdminBusinessSectorsPanel({ admin }: AdminBusinessSectorsPanelPr
   }, [loadSectors]);
 
   const filteredSectors = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedQuery = foldSearchText(query);
 
     return sectors.filter((sector) => {
       if (!showInactive && !sector.is_active) {
@@ -73,7 +74,7 @@ export function AdminBusinessSectorsPanel({ admin }: AdminBusinessSectorsPanelPr
         return true;
       }
 
-      return sector.nombre.toLowerCase().includes(normalizedQuery);
+      return foldSearchText(sector.nombre).includes(normalizedQuery);
     });
   }, [query, sectors, showInactive]);
 

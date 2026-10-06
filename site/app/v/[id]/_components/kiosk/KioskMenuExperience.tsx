@@ -10,6 +10,7 @@ import { KioskImage } from './KioskImage';
 import { KioskTopBar } from './KioskTopBar';
 import { KioskVoucher } from './KioskVoucher';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
+import { foldSearchText } from '../../../../_lib/search-text';
 import { useKioskPageChrome } from './useKioskPageChrome';
 import {
   FULFILLMENT_LABEL,
@@ -150,16 +151,16 @@ export function KioskMenuExperience({
   const activeProducts = activeCategoryId ? productsByCategory[activeCategoryId] ?? [] : [];
 
   const visibleCategories = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = foldSearchText(searchQuery);
     if (!query || screen !== 'categories') return categories;
-    return categories.filter((category) => category.name.toLowerCase().includes(query));
+    return categories.filter((category) => foldSearchText(category.name).includes(query));
   }, [categories, searchQuery, screen]);
 
   const visibleProducts = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = foldSearchText(searchQuery);
     if (!query || screen !== 'products') return activeProducts;
     return activeProducts.filter((product) => {
-      const haystack = `${product.name} ${product.description}`.toLowerCase();
+      const haystack = foldSearchText(`${product.name} ${product.description}`);
       return haystack.includes(query);
     });
   }, [activeProducts, searchQuery, screen]);

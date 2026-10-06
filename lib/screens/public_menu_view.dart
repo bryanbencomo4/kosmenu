@@ -11,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/services/checkout_attempt_state.dart';
 import 'package:kosmenu_app/services/public_menu_api_service.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
@@ -1703,10 +1704,7 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   String _formatCop(double amount) => amount.toStringAsFixed(0);
 
   String _normalizeSearchText(String value) {
-    return value.toLowerCase().trim().replaceAll(
-      RegExp(r'[\u0300-\u036f]'),
-      '',
-    );
+    return foldSearchText(value);
   }
 
   @override
