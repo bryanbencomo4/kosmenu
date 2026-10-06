@@ -255,6 +255,22 @@ function QuestionPanel({ gated, children }: { gated: boolean; children: ReactNod
   );
 }
 
+function removalLabel(nombre: string) {
+  const trimmed = nombre.trim();
+  return /^sin\s+/i.test(trimmed) ? trimmed : `Sin ${trimmed}`;
+}
+
+function selectedRemovalHint(
+  ingredients: Array<{ id: string; nombre: string }>,
+  selected: string[],
+) {
+  const labels = selected
+    .map((id) => ingredients.find((ingredient) => ingredient.id === id)?.nombre)
+    .filter((nombre): nombre is string => Boolean(nombre))
+    .map(removalLabel);
+  return labels.length ? labels.join(', ') : 'Toca lo que quieras quitar';
+}
+
 function IngredientRemovalControls({ title, ingredients, selected, onChange }: {
   title: string; ingredients: Array<{ id: string; nombre: string }>;
   selected: string[]; onChange: (ids: string[]) => void;
@@ -263,7 +279,7 @@ function IngredientRemovalControls({ title, ingredients, selected, onChange }: {
     <section>
       <OptionSectionHeader
         title={title}
-        hint={selected.length ? `Sin ${selected.length}` : 'Opcional'}
+        hint="Opcional"
       />
       <ChoiceList
         items={ingredients}
@@ -287,7 +303,9 @@ function IngredientRemovalControls({ title, ingredients, selected, onChange }: {
             >
               <ChoiceMark kind="checkbox" active={removed} />
               <span className="min-w-0 flex-1">
-                <span className={choiceLabelClass(compact)}>{ingredient.nombre}</span>
+                <span className={choiceLabelClass(compact)}>
+                  {removed ? removalLabel(ingredient.nombre) : ingredient.nombre}
+                </span>
               </span>
             </button>
           );
@@ -840,7 +858,7 @@ export function ProductOptionsSheet({
                 <QuestionToggle
                   question={removals.pregunta}
                   hint={removalsOpen
-                    ? exclusionesIds.length ? `Sin ${plural(exclusionesIds.length, 'ingrediente', 'ingredientes')}` : 'Toca lo que quieras quitar'
+                    ? selectedRemovalHint(removals.ingredientes, exclusionesIds)
                     : plural(removals.ingredientes.length, 'ingrediente', 'ingredientes')}
                   open={removalsOpen}
                   onToggle={() => setOpenQuestions((previous) => ({ ...previous, [REMOVALS_QUESTION_KEY]: !removalsOpen }))}

@@ -57,9 +57,9 @@ export function AddToCartUpsellSheet({ open, suggestions, formatPrice, onAdd, on
               className="flex items-center gap-3 rounded-[18px] border p-2.5"
               style={{ borderColor: 'var(--menu-border)' }}
             >
-              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[14px] bg-[var(--menu-surface-alt)]">
+              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-[14px] bg-[var(--menu-surface-alt)]">
                 {suggestion.imageUrl ? (
-                  <img src={suggestion.imageUrl} alt={suggestion.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                  <img src={suggestion.imageUrl} alt={suggestion.name} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-0.5" />
                 ) : null}
               </div>
               <div className="min-w-0 flex-1">

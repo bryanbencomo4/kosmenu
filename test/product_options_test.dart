@@ -778,4 +778,55 @@ void main() {
       },
     );
   });
+
+  testWidgets('option groups can be folded and reordered', (tester) async {
+    final key = GlobalKey<ProductOptionsEditorState>();
+    ProductOptionGroup group(String id, String nombre) => ProductOptionGroup(
+      id: id,
+      nombre: nombre,
+      opciones: [
+        ProductOptionChoice(id: '${id}_o', nombre: 'Opción', precio: 0),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: Form(
+              child: ProductOptionsEditor(
+                key: key,
+                initiallyActive: true,
+                currencyCode: 'USD',
+                initialGroups: [group('g_sabor', 'Sabor'), group('g_tamano', 'Tamaño')],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Tipo'), findsNothing);
+    expect(find.text('Sabor'), findsOneWidget);
+    expect(find.text('Tamaño'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Desplegar grupo').first);
+    await tester.pump();
+    expect(find.text('Tipo'), findsOneWidget);
+    expect(find.text('Nombre del grupo'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Plegar grupo'));
+    await tester.pump();
+    expect(find.text('Tipo'), findsNothing);
+
+    List<String> names() => [
+      for (final entry in key.currentState!.groups) entry.nombre,
+    ];
+    expect(names(), ['Sabor', 'Tamaño']);
+    await tester.tap(find.byTooltip('Bajar grupo').first);
+    await tester.pump();
+    expect(names(), ['Tamaño', 'Sabor']);
+    await tester.tap(find.byTooltip('Subir grupo').at(1));
+    await tester.pump();
+    expect(names(), ['Sabor', 'Tamaño']);
+  });
 }

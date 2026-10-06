@@ -147,7 +147,7 @@ function ProductCard({
     >
       <button type="button" onClick={product.hasOptions ? onConfigure : onAdd} className="text-left">
         <div
-          className="mb-2 grid h-20 place-items-center overflow-hidden rounded-[14px] lg:h-24"
+          className="relative mb-2 h-36 overflow-hidden rounded-[14px] lg:h-40"
           style={{ backgroundColor: 'var(--menu-background)' }}
         >
           {product.imagen_url ? (
@@ -156,10 +156,10 @@ function ProductCard({
               alt=""
               loading="lazy"
               decoding="async"
-              className="h-full w-full object-contain"
+              className="absolute inset-0 h-full w-full object-contain p-1.5"
             />
           ) : (
-            <span className="text-2xl" aria-hidden>
+            <span className="grid h-full place-items-center text-2xl" aria-hidden>
               ✨
             </span>
           )}

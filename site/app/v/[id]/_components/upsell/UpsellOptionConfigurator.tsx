@@ -194,7 +194,7 @@ export function UpsellOptionConfigurator({
         <div className="flex items-start gap-3 px-4 pb-3 pt-4">
           {product.imagen_url ? (
             <div
-              className="h-16 w-16 shrink-0 overflow-hidden rounded-[16px]"
+              className="relative h-20 w-20 shrink-0 overflow-hidden rounded-[16px]"
               style={{ backgroundColor: 'var(--menu-surface-alt)' }}
             >
               <img
@@ -202,7 +202,7 @@ export function UpsellOptionConfigurator({
                 alt=""
                 loading="lazy"
                 decoding="async"
-                className="h-full w-full object-contain"
+                className="absolute inset-0 h-full w-full object-contain p-1"
               />
             </div>
           ) : null}

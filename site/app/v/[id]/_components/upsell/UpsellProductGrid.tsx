@@ -104,14 +104,14 @@ function UpsellProductTile({
         >
           <Heart className="h-4 w-4" />
         </button>
-        <div className="mx-auto h-[108px] w-[108px] overflow-hidden rounded-full bg-[var(--menu-surface-alt)]">
+        <div className="relative mx-auto h-[120px] w-[120px] overflow-hidden rounded-full bg-[var(--menu-surface-alt)]">
           {imageUrl && !failed ? (
             <img
               src={imageUrl}
               alt={product.nombre}
               loading="lazy"
               decoding="async"
-              className="h-full w-full object-cover"
+              className="absolute inset-0 h-full w-full object-contain p-1.5"
               onError={() => setFailed(true)}
             />
           ) : (

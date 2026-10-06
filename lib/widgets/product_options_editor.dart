@@ -104,6 +104,7 @@ class _GroupDraft {
     this.preguntaActivada = false,
     String pregunta = '',
     this.preguntaDirecta = false,
+    this.collapsed = false,
     List<_OptionDraft>? opciones,
   }) : nameController = TextEditingController(text: nombre),
        questionController = TextEditingController(text: pregunta),
@@ -118,6 +119,7 @@ class _GroupDraft {
   int max;
   bool preguntaActivada;
   bool preguntaDirecta;
+  bool collapsed;
   final List<_OptionDraft> opciones;
 
   bool get isSingle => tipo == ProductOptionGroupType.unica;
@@ -535,6 +537,7 @@ class ProductOptionsEditorState extends State<ProductOptionsEditor> {
           preguntaActivada: group.preguntaActivada,
           pregunta: group.pregunta,
           preguntaDirecta: group.preguntaDirecta,
+          collapsed: true,
           opciones: [
             for (final option in group.opciones)
               _OptionDraft(
@@ -633,6 +636,54 @@ class ProductOptionsEditorState extends State<ProductOptionsEditor> {
   void _removeGroup(_GroupDraft group) {
     setState(() => _groups.remove(group));
     WidgetsBinding.instance.addPostFrameCallback((_) => group.dispose());
+  }
+
+  void _moveGroup(_GroupDraft group, int delta) {
+    final index = _groups.indexOf(group);
+    final target = index + delta;
+    if (index < 0 || target < 0 || target >= _groups.length) return;
+    setState(() {
+      final moved = _groups.removeAt(index);
+      _groups.insert(target, moved);
+    });
+  }
+
+  /// Same checks as the open fields, so a folded group still blocks save.
+  String? _collapsedGroupIssue(_GroupDraft group) {
+    if (group.nameController.text.trim().isEmpty) {
+      return 'Escribe el nombre del grupo';
+    }
+    if (group.opciones.isEmpty) return 'Agrega al menos una opción';
+    for (final option in group.opciones) {
+      if (option.nameController.text.trim().isEmpty) return 'Escribe un nombre';
+      if (!option.dependiente) {
+        if (parseOptionPrice(option.priceController.text) == null) {
+          return 'Precio inválido';
+        }
+        continue;
+      }
+      for (final parent in _parentCandidates(group)) {
+        if (parent.id != option.dependsOnGroupId) continue;
+        for (final parentOption in parent.opciones) {
+          if (parentOption.nameController.text.trim().isEmpty) continue;
+          if (parseOptionPrice(option.ruleController(parentOption.id).text) ==
+              null) {
+            return 'Precio inválido';
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  String _groupSummary(_GroupDraft group) {
+    final kind = group.isSingle
+        ? 'Seleccionar una opción'
+        : 'Seleccionar varias';
+    final count = group.opciones.length;
+    final options = count == 1 ? '1 opción' : '$count opciones';
+    final required = group.obligatorio ? 'Obligatorio' : 'Opcional';
+    return '$kind · $options · $required';
   }
 
   void _addOption(_GroupDraft group) {
@@ -1230,10 +1281,14 @@ class ProductOptionsEditorState extends State<ProductOptionsEditor> {
       fontWeight: FontWeight.w700,
     );
     final optionCount = group.opciones.isEmpty ? 1 : group.opciones.length;
+    final index = _groups.indexOf(group);
+    final name = group.nameController.text.trim();
 
-    return Container(
+    return FormField<void>(
+      validator: (_) => group.collapsed ? _collapsedGroupIssue(group) : null,
+      builder: (field) => Container(
       key: ValueKey('option-group-${group.id}'),
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      padding: EdgeInsets.fromLTRB(8, group.collapsed ? 4 : 8, 4, group.collapsed ? 4 : 12),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(16),
@@ -1244,26 +1299,65 @@ class ProductOptionsEditorState extends State<ProductOptionsEditor> {
         children: [
           Row(
             children: [
-              Expanded(
-                child: TextFormField(
-                  controller: group.nameController,
-                  enabled: enabled,
-                  textInputAction: TextInputAction.next,
-                  style: GoogleFonts.manrope(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre del grupo',
-                    hintText: 'Ej. Tamaño, Extras',
-                  ),
-                  validator: (value) => (value?.trim().isEmpty ?? true)
-                      ? 'Escribe el nombre del grupo'
-                      : null,
+              IconButton(
+                tooltip: group.collapsed ? 'Desplegar grupo' : 'Plegar grupo',
+                visualDensity: VisualDensity.compact,
+                onPressed: () =>
+                    setState(() => group.collapsed = !group.collapsed),
+                icon: Icon(
+                  group.collapsed
+                      ? Icons.expand_more_rounded
+                      : Icons.expand_less_rounded,
+                  color: colorScheme.onSurfaceVariant,
                 ),
+              ),
+              if (group.collapsed)
+                Expanded(
+                  child: InkWell(
+                    onTap: () => setState(() => group.collapsed = false),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name.isEmpty ? 'Grupo sin nombre' : name,
+                          style: GoogleFonts.manrope(
+                            color: colorScheme.onSurface,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          _groupSummary(group),
+                          style: GoogleFonts.manrope(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                const Spacer(),
+              IconButton(
+                tooltip: 'Subir grupo',
+                visualDensity: VisualDensity.compact,
+                onPressed: enabled && index > 0
+                    ? () => _moveGroup(group, -1)
+                    : null,
+                icon: const Icon(Icons.arrow_upward_rounded),
+              ),
+              IconButton(
+                tooltip: 'Bajar grupo',
+                visualDensity: VisualDensity.compact,
+                onPressed: enabled && index >= 0 && index < _groups.length - 1
+                    ? () => _moveGroup(group, 1)
+                    : null,
+                icon: const Icon(Icons.arrow_downward_rounded),
               ),
               IconButton(
                 tooltip: 'Eliminar grupo',
+                visualDensity: VisualDensity.compact,
                 onPressed: enabled ? () => _removeGroup(group) : null,
                 icon: Icon(
                   Icons.delete_outline_rounded,
@@ -1272,8 +1366,43 @@ class ProductOptionsEditorState extends State<ProductOptionsEditor> {
               ),
             ],
           ),
+          if (field.hasError)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Text(
+                field.errorText ?? '',
+                style: GoogleFonts.manrope(
+                  color: colorScheme.error,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          if (!group.collapsed) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: TextFormField(
+              controller: group.nameController,
+              enabled: enabled,
+              textInputAction: TextInputAction.next,
+              style: GoogleFonts.manrope(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Nombre del grupo',
+                hintText: 'Ej. Tamaño, Extras',
+              ),
+              validator: (value) => (value?.trim().isEmpty ?? true)
+                  ? 'Escribe el nombre del grupo'
+                  : null,
+            ),
+          ),
           const SizedBox(height: 10),
-          Text('Tipo', style: labelStyle),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Text('Tipo', style: labelStyle),
+          ),
           RadioGroup<ProductOptionGroupType>(
             groupValue: group.tipo,
             onChanged: (value) {
@@ -1369,7 +1498,9 @@ class ProductOptionsEditorState extends State<ProductOptionsEditor> {
               textStyle: GoogleFonts.manrope(fontWeight: FontWeight.w700),
             ),
           ),
+          ],
         ],
+      ),
       ),
     );
   }

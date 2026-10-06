@@ -149,9 +149,9 @@ export function BundleRail({ items, formatPrice, onAdd, titleStyle }: BundleRail
               className="w-[220px] shrink-0 snap-start overflow-hidden rounded-[22px] border"
               style={{ backgroundColor: 'var(--menu-surface)', borderColor: 'var(--menu-border)', boxShadow: 'var(--menu-shadow)' }}
             >
-              <div className="relative h-[128px] bg-[var(--menu-surface-alt)]">
+              <div className="relative h-[148px] bg-[var(--menu-surface-alt)]">
                 {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.name} loading="lazy" decoding="async" draggable={false} className="pointer-events-none h-full w-full object-cover" />
+                  <img src={item.imageUrl} alt={item.name} loading="lazy" decoding="async" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full object-contain p-2" />
                 ) : (
                   <div className="grid h-full place-items-center text-3xl opacity-40">🍽️</div>
                 )}
