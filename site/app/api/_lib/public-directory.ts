@@ -69,6 +69,19 @@ type RawComercioRow = {
 const DIRECTORY_SELECT =
   'id,slug,nombre,logo_url,categoria,direccion,negocio_virtual,owner_id,updated_at,latitud,longitud,branding_ia,horarios,mostrar_en_directorio_publico';
 
+/** Demo / QA restaurants — never list in public discovery. */
+const DIRECTORY_EXCLUDED_SLUGS = new Set([
+  'qa-restaurant',
+  'la-mordida-demo',
+  'pizzas-y-pastas',
+  'demo',
+  'pizzas-el-trueno',
+]);
+
+function isExcludedDirectorySlug(slug: string) {
+  return DIRECTORY_EXCLUDED_SLUGS.has(slug.trim().toLowerCase());
+}
+
 const FEATURED_ORDER_LOOKBACK_DAYS = 90;
 const FEATURED_CANDIDATE_LIMIT = 120;
 const CLIENT_DIRECTORY_LIMIT = 80;
@@ -109,6 +122,7 @@ function toDirectoryBusiness(row: RawComercioRow): PublicDirectoryBusiness | nul
   const slug = (row.slug ?? '').toString().trim();
   const nombre = (row.nombre ?? '').toString().trim();
   if (!id || !slug || !nombre) return null;
+  if (isExcludedDirectorySlug(slug)) return null;
 
   const site = publicSiteUrl.replace(/\/$/, '');
   return {
