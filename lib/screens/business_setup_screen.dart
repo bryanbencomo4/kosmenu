@@ -8344,7 +8344,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     configNegocio['social_links'] = _socialLinksPayload();
     configNegocio['moneda_default'] = _baseCurrency;
     configNegocio['checkout_currencies'] = _selectedCurrencies.toList();
-    configNegocio['destacado_directorio'] = _directoryPromoted;
+    // Promotion is admin-only (admin.elmenuxfa.com). Preserve existing flag.
+    // Do not let the restaurant self-promote from this panel.
 
     final exchangeRates = <String, dynamic>{};
     final exchangeRateModes = <String, dynamic>{};
@@ -10964,9 +10965,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             onChanged: (value) {
               setState(() {
                 _showOnPublicDirectory = value;
-                if (!value) {
-                  _directoryPromoted = false;
-                }
               });
               unawaited(_saveDraft());
             },
@@ -10981,25 +10979,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               style: TextStyle(color: _setupTextMedium, fontSize: 12),
             ),
           ),
-          SwitchListTile.adaptive(
-            value: _directoryPromoted,
-            onChanged: !_showOnPublicDirectory
-                ? null
-                : (value) {
-                    setState(() => _directoryPromoted = value);
-                    unawaited(_saveDraft());
-                  },
-            activeThumbColor: _palette.primary,
-            activeTrackColor: _palette.primary.withValues(alpha: 0.45),
-            inactiveThumbColor: const Color(0xFFE7E0F9),
-            inactiveTrackColor: const Color(0xFF3A305A),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            title: const Text('Sitio promocionado'),
-            subtitle: const Text(
-              'Prioridad manual en “Sitios promocionados”. Se gestiona desde el panel; no depende de la calificación.',
-              style: TextStyle(color: _setupTextMedium, fontSize: 12),
+          if (_directoryPromoted)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 4, 4, 0),
+              child: Text(
+                'Tu negocio esta marcado como sitio promocionado por el equipo ElMenuxFA.',
+                style: TextStyle(color: _setupTextMedium, fontSize: 12),
+              ),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 4, 4, 0),
+              child: Text(
+                'La promocion en el directorio se gestiona con el equipo ElMenuxFA (no se activa desde aqui).',
+                style: TextStyle(color: _setupTextMedium, fontSize: 12),
+              ),
             ),
-          ),
         ],
       ],
     );

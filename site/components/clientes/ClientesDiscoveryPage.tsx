@@ -14,6 +14,7 @@ import {
   Instagram,
   LoaderCircle,
   MapPin,
+  Megaphone,
   Menu,
   Navigation,
   Search,
@@ -40,6 +41,11 @@ import {
   businessBenefitsHref,
   socialLinks,
 } from '../../app/_lib/public-site-config';
+import {
+  trackDirectoryPromoEvent,
+  withPromoMenuSrc,
+  type ClientPromoPlacement,
+} from '../../app/_lib/directory-promo-client';
 import { foldSearchText } from '../../app/_lib/search-text';
 import { ClientesDirectoryMap } from './ClientesDirectoryMap';
 
@@ -497,6 +503,7 @@ function RestaurantCard({
   onToggleFavorite,
   onSelect,
   onShowOnMap,
+  promoPlacement = null,
 }: {
   business: DirectoryBusiness;
   compact?: boolean;
@@ -505,6 +512,7 @@ function RestaurantCard({
   onToggleFavorite: (id: string) => void;
   onSelect?: (id: string) => void;
   onShowOnMap?: (id: string) => void;
+  promoPlacement?: ClientPromoPlacement | null;
 }) {
   const slides = useMemo(
     () => buildCardMediaSlides(business),
@@ -549,6 +557,28 @@ function RestaurantCard({
     observer.observe(node);
     return () => observer.disconnect();
   }, [business.id]);
+
+  useEffect(() => {
+    if (!inView || !promoPlacement) return;
+    trackDirectoryPromoEvent({
+      comercioId: business.id,
+      type: 'impression',
+      placement: promoPlacement,
+    });
+  }, [business.id, inView, promoPlacement]);
+
+  const menuHref = promoPlacement
+    ? withPromoMenuSrc(business.menuUrl)
+    : business.menuUrl;
+
+  const trackPromoClick = useCallback(() => {
+    if (!promoPlacement) return;
+    trackDirectoryPromoEvent({
+      comercioId: business.id,
+      type: 'click',
+      placement: promoPlacement,
+    });
+  }, [business.id, promoPlacement]);
 
   useEffect(() => {
     if (!inView || slides.length <= 1) return;
@@ -639,8 +669,11 @@ function RestaurantCard({
     <>
       <div className="flex items-start justify-between gap-1.5">
         <Link
-          href={business.menuUrl}
-          onClick={() => onSelect?.(business.id)}
+          href={menuHref}
+          onClick={() => {
+            trackPromoClick();
+            onSelect?.(business.id);
+          }}
           className={`font-extrabold leading-snug text-slate-900 hover:text-[#6D28D9] ${
             forceRow
               ? 'line-clamp-1 text-[14px]'
@@ -717,7 +750,8 @@ function RestaurantCard({
           </button>
         ) : null}
         <Link
-          href={business.menuUrl}
+          href={menuHref}
+          onClick={trackPromoClick}
           className="inline-flex items-center gap-1 text-[12px] font-bold text-[#6D28D9] sm:ml-auto"
         >
           Ver menú <ArrowRight className="h-3.5 w-3.5" />
@@ -739,9 +773,12 @@ function RestaurantCard({
   const media = (
     <Link
       ref={mediaRootRef}
-      href={business.menuUrl}
+      href={menuHref}
       className={`${mediaFrameClass} ${mediaBg}`}
-      onClick={() => onSelect?.(business.id)}
+      onClick={() => {
+        trackPromoClick();
+        onSelect?.(business.id);
+      }}
     >
       {activeSlide ? (
         <div className="absolute inset-0">
@@ -1460,26 +1497,25 @@ export function ClientesDiscoveryPage() {
   );
 
   const statusLine = useMemo(() => {
-    if (loading && !hasLoadedOnce.current) return 'Buscando restaurantes...';
+    if (loading && !hasLoadedOnce.current) return 'Buscando restaurantes…';
     const count = filteredResults.length;
     const parts = [`${count} lugar${count === 1 ? '' : 'es'}`];
     if (debouncedQuery.trim()) {
-      parts.push('relevancia · menú · cercanía · rating');
+      parts.push('según tu búsqueda y cercanía');
     } else if (sortMode === 'near' && coords) {
-      parts.push('ordenados por cercanía');
+      parts.push('los más cercanos primero');
     } else if (sortMode === 'rated') {
-      parts.push('mejor calificados primero');
+      parts.push('con mejor calificación');
     } else {
-      parts.push('prioridad promocionados + relevancia');
+      parts.push('para descubrir hoy');
     }
     if (region) parts.push(`en ${region}`);
     if (category) {
       const chip = categories.find((item) => item.id === category);
       if (chip) parts.push(chip.label.toLowerCase());
     }
-    if (radiusKm != null) parts.push(`≤ ${radiusKm} km`);
+    if (radiusKm != null) parts.push(`a menos de ${radiusKm} km`);
     if (favoritesOnly) parts.push('solo favoritos');
-    if (refreshing) parts.push('actualizando');
     return parts.join(' · ');
   }, [
     categories,
@@ -1490,7 +1526,6 @@ export function ClientesDiscoveryPage() {
     filteredResults.length,
     loading,
     radiusKm,
-    refreshing,
     region,
     sortMode,
   ]);
@@ -1505,6 +1540,16 @@ export function ClientesDiscoveryPage() {
     heroFadeIn && heroIncoming ? heroIncoming : hero;
   const heroIndicatorIndex =
     heroFadeIn && heroIncomingIndex != null ? heroIncomingIndex : heroIndex;
+
+  useEffect(() => {
+    const active = heroVisible ?? hero;
+    if (!heroInView || !active?.promovido) return;
+    trackDirectoryPromoEvent({
+      comercioId: active.id,
+      type: 'impression',
+      placement: 'promoted_hero',
+    });
+  }, [hero, heroInView, heroVisible]);
 
   const updateSearchQuery = useCallback((nextRaw: string) => {
     const next = nextRaw.slice(0, 80);
@@ -1797,8 +1842,8 @@ export function ClientesDiscoveryPage() {
                 está aquí
               </h1>
               <p className="mt-2 hidden max-w-lg text-slate-600 sm:mt-3 sm:block sm:text-base md:text-lg">
-                Busca por antojo, región o cercanía. Los promocionados los elige el restaurante; los
-                destacados salen de las notas reales de sus clientes.
+                Explora restaurantes reales, menús reales y recomendaciones de personas que aman
+                comer.
               </p>
               <div ref={heroSearchRef} className="relative z-30 mt-4 sm:mt-6">
                 {/* Mobile: Airbnb-style single search pill */}
@@ -1949,8 +1994,8 @@ export function ClientesDiscoveryPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 flex items-center justify-between gap-2 px-0.5 sm:mt-3 sm:px-1">
-                  <div className="flex min-w-0 gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="mt-3 flex items-center justify-between gap-2 px-0.5 py-1 sm:mt-3 sm:px-1">
+                  <div className="flex min-w-0 gap-2 overflow-x-auto py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {(
                       [
                         ['burger', 'Burger'],
@@ -1964,7 +2009,7 @@ export function ClientesDiscoveryPage() {
                         key={value}
                         type="button"
                         onClick={() => enterSearchMode({ query: value, focus: true })}
-                        className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 ring-1 ring-slate-200 transition hover:ring-violet-200 sm:px-3.5 sm:py-2 sm:text-xs"
+                        className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 transition hover:border-violet-200 sm:px-3.5 sm:py-2 sm:text-xs"
                       >
                         {label}
                       </button>
@@ -1977,7 +2022,7 @@ export function ClientesDiscoveryPage() {
                       openSearchModal();
                     }}
                     aria-label="Filtros"
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-slate-600 ring-1 ring-slate-200 sm:hidden"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 sm:hidden"
                   >
                     <SlidersHorizontal className="h-4 w-4" />
                   </button>
@@ -1987,7 +2032,7 @@ export function ClientesDiscoveryPage() {
                       enterSearchMode({ focus: false });
                       openSearchModal();
                     }}
-                    className="hidden shrink-0 items-center gap-1.5 rounded-full bg-white px-3.5 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200 sm:inline-flex"
+                    className="hidden shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-600 sm:inline-flex"
                   >
                     <SlidersHorizontal className="h-3.5 w-3.5" />
                     Filtros
@@ -2013,8 +2058,21 @@ export function ClientesDiscoveryPage() {
             >
               {hero ? (
                 <Link
-                  href={(heroVisible ?? hero).menuUrl}
+                  href={
+                    (heroVisible ?? hero).promovido
+                      ? withPromoMenuSrc((heroVisible ?? hero).menuUrl)
+                      : (heroVisible ?? hero).menuUrl
+                  }
                   className="absolute inset-0 block"
+                  onClick={() => {
+                    const current = heroVisible ?? hero;
+                    if (!current.promovido) return;
+                    trackDirectoryPromoEvent({
+                      comercioId: current.id,
+                      type: 'click',
+                      placement: 'promoted_hero',
+                    });
+                  }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -2227,11 +2285,19 @@ export function ClientesDiscoveryPage() {
         {!hasActiveFilters && (loading || promoted.length > 0) ? (
           <section id="promocionados" className="mx-auto max-w-6xl px-3 pb-8 sm:px-4 sm:pb-10">
             <div className="mb-3 flex items-end justify-between gap-3 sm:mb-4">
-              <div className="min-w-0">
-                <h2 className="text-xl font-extrabold tracking-tight sm:text-2xl">Sitios promocionados</h2>
-                <p className="hidden text-sm text-slate-500 sm:block">
-                  Prioridad manual desde el panel del restaurante.
-                </p>
+              <div className="flex min-w-0 items-start gap-2.5 sm:gap-3">
+                <Megaphone
+                  className="mt-0.5 h-6 w-6 shrink-0 text-[#6D28D9] sm:mt-1 sm:h-7 sm:w-7"
+                  aria-hidden
+                />
+                <div className="min-w-0">
+                  <h2 className="text-xl font-extrabold tracking-tight sm:text-2xl">
+                    Sitios promocionados
+                  </h2>
+                  <p className="mt-0.5 text-sm text-slate-500">
+                    Conoce los restaurantes destacados de la semana
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {promoted.length > 1 ? (
@@ -2277,6 +2343,7 @@ export function ClientesDiscoveryPage() {
                       selected={selectedId === business.id}
                       onToggleFavorite={toggleFavorite}
                       onSelect={setSelectedId}
+                      promoPlacement="promoted_carousel"
                     />
                   </div>
                 ))}
@@ -2315,7 +2382,7 @@ export function ClientesDiscoveryPage() {
                 </p>
               ) : null}
             </div>
-            <div className="flex w-full items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] sm:w-auto [&::-webkit-scrollbar]:hidden">
+            <div className="flex w-full items-center gap-2 overflow-x-auto py-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:w-auto [&::-webkit-scrollbar]:hidden">
               {(
                 [
                   ['smart', 'Para ti'],
@@ -2333,10 +2400,10 @@ export function ClientesDiscoveryPage() {
                     }
                     setSortMode(mode);
                   }}
-                  className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold ${
                     sortMode === mode
-                      ? 'bg-[#6D28D9] text-white'
-                      : 'bg-white text-slate-600 ring-1 ring-slate-200'
+                      ? 'border-[#6D28D9] bg-[#6D28D9] text-white'
+                      : 'border-slate-200 bg-white text-slate-600'
                   }`}
                 >
                   {label}
@@ -2347,10 +2414,10 @@ export function ClientesDiscoveryPage() {
                   type="button"
                   id="search-map-toggle"
                   onClick={() => setShowSearchMap((value) => !value)}
-                  className={`ml-auto shrink-0 rounded-full px-3 py-1.5 text-xs font-bold sm:hidden ${
+                  className={`ml-auto shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold sm:hidden ${
                     showSearchMap
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-white text-slate-600 ring-1 ring-slate-200'
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-600'
                   }`}
                 >
                   {showSearchMap ? 'Ocultar mapa' : 'Ver mapa'}
@@ -2577,20 +2644,20 @@ export function ClientesDiscoveryPage() {
               </div>
             </div>
             <div className="p-4 sm:p-6">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 py-1">
                 {regions.length > 1 ? (
                   <button
                     type="button"
                     aria-label="Regiones anteriores"
                     onClick={() => scrollRegionCarousel(-1)}
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
                 ) : null}
                 <div
                   ref={regionCarouselRef}
-                  className="flex min-w-0 flex-1 gap-2 overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  className="flex min-w-0 flex-1 gap-2 overflow-x-auto scroll-smooth py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
                   {regions.map((item) => {
                     const active = region === item.name;
@@ -2602,10 +2669,10 @@ export function ClientesDiscoveryPage() {
                           setRegion(active ? '' : item.name);
                           scrollToResults();
                         }}
-                        className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-[13px] font-bold ring-1 transition sm:px-4 sm:text-sm ${
+                        className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-[13px] font-bold transition sm:px-4 sm:text-sm ${
                           active
-                            ? 'bg-[#6D28D9] text-white ring-[#6D28D9]'
-                            : 'bg-slate-50 text-slate-700 ring-slate-200 hover:bg-violet-50'
+                            ? 'border-[#6D28D9] bg-[#6D28D9] text-white'
+                            : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-violet-50'
                         }`}
                       >
                         <span>{item.name}</span>
@@ -2625,7 +2692,7 @@ export function ClientesDiscoveryPage() {
                     type="button"
                     aria-label="Regiones siguientes"
                     onClick={() => scrollRegionCarousel(1)}
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
                   >
                     <ChevronRight className="h-4 w-4" />
                   </button>

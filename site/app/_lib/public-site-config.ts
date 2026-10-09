@@ -77,7 +77,7 @@ export const developmentAdminHosts =
   process.env.NODE_ENV === 'production' ? [] : [...DEVELOPMENT_ADMIN_HOSTS];
 
 /** Marketing / benefits site for restaurants. */
-export const businessBenefitsHref = `${businessSiteUrl.replace(/\/$/, '')}/#solucion`;
+export const businessBenefitsHref = businessSiteUrl.replace(/\/$/, '') || DEFAULT_BUSINESS_SITE_URL;
 
 export const supportEmail = resolveText(
   process.env.NEXT_PUBLIC_SUPPORT_EMAIL ?? process.env.NEXT_PUBLIC_MARKETING_EMAIL,

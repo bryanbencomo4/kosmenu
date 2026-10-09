@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Building2,
   FileText,
@@ -40,18 +40,37 @@ const iconMap: Record<AdminNavIcon, typeof LayoutDashboard> = {
   security: ShieldCheck,
 };
 
-function isActiveItem(currentPathname: string, href: string) {
-  const [basePath] = href.split('#');
+function isActiveItem(
+  currentPathname: string,
+  href: string,
+  searchParams: URLSearchParams,
+) {
+  const [withoutHash] = href.split('#');
+  const [basePath, query = ''] = withoutHash.split('?');
+  const hrefParams = new URLSearchParams(query);
 
   if (basePath === '/admin') {
     return currentPathname === '/' || currentPathname === '/admin';
   }
 
-  return currentPathname === basePath;
+  if (currentPathname !== basePath) {
+    return false;
+  }
+
+  // Distinguish /admin/negocios vs /admin/negocios?promo=1
+  if (hrefParams.has('promo')) {
+    return searchParams.get('promo') === hrefParams.get('promo');
+  }
+  if (basePath === '/admin/negocios') {
+    return !searchParams.get('promo');
+  }
+
+  return true;
 }
 
 export function AdminSidebar({ admin }: { admin: CurrentAdmin }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const navigation = adminNavigation.filter(
     (item) => !item.permission || admin.permissions.includes(item.permission),
   );
@@ -82,7 +101,7 @@ export function AdminSidebar({ admin }: { admin: CurrentAdmin }) {
         <nav className="mt-6 flex-1 space-y-1.5 overflow-y-auto pr-1">
           {navigation.map((item) => {
             const Icon = iconMap[item.icon];
-            const active = isActiveItem(pathname, item.href);
+            const active = isActiveItem(pathname, item.href, searchParams);
 
             return (
               <Link

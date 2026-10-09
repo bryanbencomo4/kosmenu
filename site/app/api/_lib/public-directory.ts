@@ -17,6 +17,8 @@ import {
   toFiniteCoord,
 } from './public-directory-geo';
 import { tokenizeSearchText } from '../../_lib/search-text';
+import { loadPromoStatsWindow } from './directory-promo-events';
+import { rankPromotedDelivery } from './directory-promo-rank';
 import { normalizeDirectoryQuery } from './public-directory-text';
 import { getServiceSupabaseClient } from './supabase-server';
 
@@ -788,7 +790,28 @@ export async function listClientDirectory(options: {
     : sortClientDirectory(entries, origin);
 
   const publicResults = sorted.map(toPublicClientBusiness);
-  const promoted = publicResults.filter((entry) => entry.promovido);
+  const promotedPool = publicResults.filter((entry) => entry.promovido);
+  let promoted = promotedPool;
+  if (promotedPool.length > 1) {
+    try {
+      const statsById = await loadPromoStatsWindow(
+        promotedPool.map((entry) => entry.id),
+        7,
+      );
+      const hourBucket = new Date().toISOString().slice(0, 13);
+      promoted = rankPromotedDelivery(
+        promotedPool.map((entry) => ({
+          ...entry,
+          isOpen: entry.isOpen,
+        })),
+        statsById,
+        hourBucket,
+      );
+    } catch {
+      // Keep filter order if stats/ranking unavailable.
+      promoted = promotedPool;
+    }
+  }
   const topRated = [...publicResults]
     .filter((entry) => entry.ratingCount > 0)
     .sort((left, right) => {

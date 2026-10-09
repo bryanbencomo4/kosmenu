@@ -42,7 +42,7 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
   },
   {
     label: 'Negocios',
-    href: '/admin#businesses',
+    href: '/admin/negocios',
     icon: 'businesses',
     permission: 'businesses.read',
   },
@@ -60,9 +60,9 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
   },
   {
     label: 'Promocionados',
-    href: '/admin#promoted',
+    href: '/admin/negocios?promo=1',
     icon: 'promoted',
-    permission: 'analytics.read',
+    permission: 'businesses.read',
   },
   {
     label: 'Suscripciones',

@@ -47,6 +47,11 @@ import {
   isTransientSupabaseFailure,
   supabaseWriteCircuit,
 } from '../_lib/supabase-circuit';
+import {
+  parsePromoAttributionCookie,
+  PROMO_ATTR_COOKIE,
+  recordDirectoryPromoEvents,
+} from '../_lib/directory-promo-events';
 
 export const maxDuration = 10;
 
@@ -802,6 +807,35 @@ export async function POST(request: Request) {
     }
 
     supabaseWriteCircuit.recordSuccess();
+
+    // Attribute order to directory promo click (24h window) when present.
+    try {
+      const cookieHeader = request.headers.get('cookie') ?? '';
+      const match = cookieHeader
+        .split(';')
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(`${PROMO_ATTR_COOKIE}=`));
+      const rawAttr = match ? match.slice(PROMO_ATTR_COOKIE.length + 1) : null;
+      const attribution = parsePromoAttributionCookie(rawAttr);
+      if (attribution && attribution.comercioId === resolvedComercioId) {
+        const pedidoId = (insertedOrder.id ?? '').toString().trim();
+        void recordDirectoryPromoEvents([
+          {
+            comercioId: resolvedComercioId,
+            eventType: 'order',
+            visitorId: `order:${pedidoId || orderId}`,
+            sessionId: `order:${orderId}`,
+            placement: 'promoted_carousel',
+            orderId: pedidoId || null,
+          },
+        ]).catch(() => {
+          // Never block checkout on analytics.
+        });
+      }
+    } catch {
+      // ignore attribution failures
+    }
+
       const response = NextResponse.json(responseBody, { status: 201 });
       if (publicShortCode) {
         response.cookies.set({
