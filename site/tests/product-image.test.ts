@@ -49,4 +49,15 @@ describe('product image resolution', () => {
     expect(optimizeMenuImageUrl(external, 320)).toBe(external);
     expect(optimizeMenuImageUrl(null)).toBeNull();
   });
+
+  it('defaults tile width and caps logo fallback width', () => {
+    const product =
+      'https://project.supabase.co/storage/v1/object/public/product-images/shop/pizza.png';
+    const logo =
+      'https://project.supabase.co/storage/v1/object/public/logos-comercios/shop/logo.png';
+    const tile = new URL(displayProductImage(product, logo)!);
+    expect(tile.searchParams.get('width')).toBe('320');
+    const logoOnly = new URL(displayProductImage('', logo)!);
+    expect(logoOnly.searchParams.get('width')).toBe('240');
+  });
 });

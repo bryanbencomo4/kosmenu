@@ -105,10 +105,11 @@ where email = lower('bryanppg@gmail.com');
 7. A user authenticated in Supabase but not allowed in `admin_users` lands on `/admin/unauthorized`.
 8. `bryanppg@gmail.com` as `super_admin` reaches the admin dashboard.
 9. `admin.elmenuxfa.com/admin/api/me` returns admin data with a valid session.
-10. `elmenuxfa.com` serves the business landing page.
+10. `elmenuxfa.com` serves the consumer discovery home.
 11. `www.elmenuxfa.com` redirects to `elmenuxfa.com`.
-12. `business.elmenuxfa.com` redirects to `elmenuxfa.com`.
-13. Admin traffic does not fall into `/v/...`.
+12. `business.elmenuxfa.com` serves the restaurant marketing landing (rewrites `/` → `/business`).
+13. `elmenuxfa.com/clientes` redirects to `elmenuxfa.com/`.
+14. Admin traffic does not fall into `/v/...`.
 
 ## Password Recovery Notes
 
@@ -119,7 +120,7 @@ where email = lower('bryanppg@gmail.com');
 - `https://admin.elmenuxfa.com/forgot-password` is supported as an alias that lands on the same screen.
 - The admin recovery screen is `https://admin.elmenuxfa.com/admin/reset-password`.
 - `https://admin.elmenuxfa.com/reset-password` is supported as an alias that lands on the same screen.
-- The recovery link for admin accounts must never point to `https://elmenuxfa.com`, because that host serves the public landing and cannot complete the admin password reset flow.
+- The recovery link for admin accounts must never point to `https://elmenuxfa.com`, because that host serves the consumer discovery site and cannot complete the admin password reset flow.
 
 ## Recovery Fallback Publico
 

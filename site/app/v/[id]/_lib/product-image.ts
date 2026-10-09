@@ -4,10 +4,20 @@ export type ImageableProduct = {
   imagen_url?: string | null;
 };
 
+/** Display widths (CSS px × ~2 for retina) used across the public menu. */
+export const MENU_IMAGE_WIDTH = {
+  logo: 240,
+  thumb: 160,
+  tile: 320,
+  category: 400,
+  sheet: 720,
+  hero: 1200,
+} as const;
+
 /** Request a small WebP variant from Supabase Storage for menu rendering. */
 export function optimizeMenuImageUrl(
   imageUrl: string | null | undefined,
-  width = 480,
+  width: number = MENU_IMAGE_WIDTH.tile,
   quality = 72,
 ) {
   const raw = (imageUrl ?? '').trim();
@@ -35,7 +45,7 @@ export function optimizeMenuImageUrl(
 export function productImageUrl(
   imageUrl: string | null | undefined,
   logoUrl?: string | null,
-  width = 480,
+  width: number = MENU_IMAGE_WIDTH.tile,
 ) {
   const raw = (imageUrl ?? '').trim();
   if (!raw) return null;
@@ -48,9 +58,12 @@ export function productImageUrl(
 export function displayProductImage(
   imageUrl: string | null | undefined,
   logoUrl?: string | null,
-  width = 480,
+  width: number = MENU_IMAGE_WIDTH.tile,
 ) {
-  return productImageUrl(imageUrl, logoUrl, width) || optimizeMenuImageUrl(logoUrl, 320);
+  return (
+    productImageUrl(imageUrl, logoUrl, width) ||
+    optimizeMenuImageUrl(logoUrl, Math.min(width, MENU_IMAGE_WIDTH.logo))
+  );
 }
 
 export function resolveHeroCover(
@@ -58,7 +71,7 @@ export function resolveHeroCover(
   logoUrl?: string | null,
 ): string | null {
   for (const product of products) {
-    const url = productImageUrl(product.imagen_url, logoUrl, 1200);
+    const url = productImageUrl(product.imagen_url, logoUrl, MENU_IMAGE_WIDTH.hero);
     if (url) return url;
   }
   return optimizeMenuImageUrl(logoUrl, 640);

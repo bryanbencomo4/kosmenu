@@ -4,7 +4,10 @@ import type { NextRequest } from 'next/server';
 import {
   adminSiteHost,
   appSiteUrl,
+  businessSiteHost,
+  businessSiteUrl,
   developmentAdminHosts,
+  developmentBusinessHosts,
   developmentPublicHosts,
   legalPagePaths,
   publicSiteHost,
@@ -12,6 +15,7 @@ import {
 
 const EXCLUDED_PREFIXES = [
   '/api',
+  '/business',
   '/d',
   '/wp-json',
   '/_next',
@@ -27,13 +31,14 @@ const EXCLUDED_EXACT = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml', .
 const CANONICAL_HOST = publicSiteHost;
 const CANONICAL_REDIRECT_HOSTS = new Set([
   'www.elmenuxfa.com',
-  'business.elmenuxfa.com',
   'kosmenu.vercel.app',
 ]);
+const BUSINESS_HOSTS = new Set<string>([businessSiteHost, ...developmentBusinessHosts]);
 const ADMIN_HOSTS = new Set<string>([adminSiteHost, ...developmentAdminHosts]);
 const LOCAL_DEVELOPMENT_HOSTS = new Set<string>(['localhost', '127.0.0.1', '0.0.0.0']);
 const LOCAL_DEVELOPMENT_ALIAS_HOSTS = new Set<string>([
   ...developmentPublicHosts,
+  ...developmentBusinessHosts,
   ...developmentAdminHosts,
 ]);
 const ADMIN_INTERNAL_PREFIX = '/admin';
@@ -227,6 +232,13 @@ function buildAppAuthCallbackRedirect(request: NextRequest) {
   return redirectUrl;
 }
 
+function businessSiteRedirect(pathname = '/', search = '') {
+  const target = new URL(businessSiteUrl);
+  target.pathname = pathname === '/' ? '/' : pathname;
+  target.search = search;
+  return target;
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const host = requestHost(request);
@@ -235,6 +247,7 @@ export function middleware(request: NextRequest) {
   const isLocalDevelopmentHost = LOCAL_DEVELOPMENT_HOSTS.has(hostname);
   const isLocalDevelopmentAliasHost = LOCAL_DEVELOPMENT_ALIAS_HOSTS.has(hostname);
   const isDevelopmentHost = isLocalDevelopmentHost || isLocalDevelopmentAliasHost;
+  const isBusinessHost = BUSINESS_HOSTS.has(hostname);
   const isAdminHost = ADMIN_HOSTS.has(hostname);
   const isPreviewAdminPath =
     isVercelPreviewHost(hostname) &&
@@ -243,6 +256,7 @@ export function middleware(request: NextRequest) {
 
   const needsCanonicalHost =
     !isDevelopmentHost &&
+    !isBusinessHost &&
     CANONICAL_REDIRECT_HOSTS.has(hostname) &&
     !shouldPreserveHostForWellKnown(pathname);
   const needsHttps =
@@ -338,11 +352,35 @@ export function middleware(request: NextRequest) {
     );
   }
 
-  if (pathname === '/business') {
+  // Legacy consumer path → apex home
+  if (pathname === '/clientes' || pathname.startsWith('/clientes/')) {
     const redirectUrl = cloneRedirectUrl(request);
     redirectUrl.pathname = '/';
-    redirectUrl.search = '';
+    redirectUrl.search = request.nextUrl.search;
     return applySecurityHeaders(NextResponse.redirect(redirectUrl, 308), pathname);
+  }
+
+  // Business marketing site lives on business.* (local/dev can use /business).
+  if (isBusinessHost) {
+    if (pathname === '/' || pathname === '') {
+      const rewriteUrl = request.nextUrl.clone();
+      rewriteUrl.pathname = '/business';
+      return applySecurityHeaders(NextResponse.rewrite(rewriteUrl), pathname);
+    }
+    // No restaurant-slug rewrite on the business host.
+    return applySecurityHeaders(NextResponse.next(), pathname);
+  }
+
+  // On apex/production, send /business to the business subdomain.
+  if (
+    (pathname === '/business' || pathname.startsWith('/business/')) &&
+    !isDevelopmentHost
+  ) {
+    const suffix = pathname === '/business' ? '/' : pathname.slice('/business'.length) || '/';
+    return applySecurityHeaders(
+      NextResponse.redirect(businessSiteRedirect(suffix, request.nextUrl.search), 308),
+      pathname,
+    );
   }
 
   if (pathname === '/') {

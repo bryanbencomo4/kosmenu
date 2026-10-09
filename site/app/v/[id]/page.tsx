@@ -15,6 +15,7 @@ import {
 } from './_lib/menu-theme';
 import {
   displayProductImage,
+  MENU_IMAGE_WIDTH,
   optimizeMenuImageUrl,
   resolveHeroCover,
 } from './_lib/product-image';
@@ -919,7 +920,7 @@ function getGoogleFontsUrl(branding: BrandingConfig | null | undefined) {
 function safeImageSrc(
   imageUrl: string | null | undefined,
   fallbackImageUrl?: string | null,
-  width = 480,
+  width: number = MENU_IMAGE_WIDTH.tile,
 ) {
   const src = (imageUrl ?? '').trim();
   if (src.length > 0) return optimizeMenuImageUrl(src, width);
@@ -2923,7 +2924,8 @@ export default function PublicMenuPage() {
           ruleId: suggestion.ruleId,
           name: product.nombre,
           price: product.precio ?? 0,
-          imageUrl: displayProductImage(product.imagen_url, comercioLogoUrl) || null,
+          imageUrl:
+            displayProductImage(product.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.thumb) || null,
         };
       })
       .filter(Boolean) as Array<{ productId: string; ruleId: string; name: string; price: number; imageUrl: string | null }>;
@@ -2966,7 +2968,9 @@ export default function PublicMenuPage() {
           description: bundle.description,
           price: toNumberOrNull(bundle.bundle_price) ?? 0,
           normalPrice,
-          imageUrl: displayProductImage(coverProduct?.imagen_url, comercioLogoUrl) || null,
+          imageUrl:
+            displayProductImage(coverProduct?.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.tile) ||
+            null,
           itemsLabel,
         };
       });
@@ -3054,7 +3058,7 @@ export default function PublicMenuPage() {
           id: cartKey,
           name: menuLineLabel(product, selection, category, productById),
           description: optionSummary || (selection.combinacion ? '' : (product.descripcion ?? '').trim()),
-          imageUrl: safeImageSrc(product.imagen_url, comercioLogoUrl),
+          imageUrl: safeImageSrc(product.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.thumb),
           quantity,
           canIncrease: baseUnitPrice > 0,
           unitPrice,
@@ -3093,7 +3097,9 @@ export default function PublicMenuPage() {
       categoriasConProductos.map((categoria) => {
         const cover =
           categoria.productos
-            .map((producto) => displayProductImage(producto.imagen_url, comercioLogoUrl))
+            .map((producto) =>
+              displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.category),
+            )
             .find(Boolean) ?? null;
         return {
           id: categoria.id,
@@ -3121,7 +3127,7 @@ export default function PublicMenuPage() {
         name: producto.nombre,
         description: (producto.descripcion ?? '').trim(),
         priceLabel: formatProductPriceLabel(producto, formatUpsellPrice),
-        imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl),
+        imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.tile),
         available: producto.disponible !== false,
         optionsSummary: getProductOptionsSummary(producto),
       }));
@@ -5185,6 +5191,7 @@ export default function PublicMenuPage() {
               ? displayProductImage(
                   productById.get(productOptionsSheet.productId)?.imagen_url,
                   comercioLogoUrl,
+                  MENU_IMAGE_WIDTH.sheet,
                 )
               : null
           }

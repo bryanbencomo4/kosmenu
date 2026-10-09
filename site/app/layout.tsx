@@ -21,14 +21,13 @@ const bodyFont = Roboto({
 
 export const metadata: Metadata = {
   metadataBase: new URL(publicSiteUrl),
-  title: 'elmenuxfa | Menú inteligente para restaurantes con QR y autoservicio',
+  title: 'elmenuxfa | Descubre restaurantes cerca de ti',
   description:
-    'Convierte cada mesa en un vendedor inteligente. Kit Portamenú Inteligente $10 de lanzamiento. Plataforma $10/mes o $90/año. Autoservicio para restaurantes.',
+    'Explora menús reales, sitios promocionados y los restaurantes mejor calificados de la comunidad elmenuxfa.',
   keywords: [
-    'menú inteligente para restaurantes',
-    'menú QR',
-    'autoservicio para restaurantes',
-    'portamenú inteligente',
+    'restaurantes cerca de ti',
+    'menú digital',
+    'directorio de restaurantes',
     'elmenuxfa',
   ],
   robots:
