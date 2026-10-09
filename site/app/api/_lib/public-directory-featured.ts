@@ -1,4 +1,9 @@
-import { foldSearchText } from '../../_lib/search-text';
+import {
+  foldSearchText,
+  fuzzyIncludes,
+  scoreFoldedMatch,
+  tokenizeSearchText,
+} from '../../_lib/search-text';
 
 export type DirectorySearchEntry = {
   id: string;
@@ -28,7 +33,7 @@ const QUERY_EXPANDERS: Array<{ trigger: RegExp; aliases: string[] }> = [
 ];
 
 function expandQueryTokens(normalizedQuery: string): string[] {
-  const base = normalizedQuery.split(/\s+/).filter(Boolean);
+  const base = tokenizeSearchText(normalizedQuery);
   const extras: string[] = [];
   for (const rule of QUERY_EXPANDERS) {
     if (rule.trigger.test(normalizedQuery)) {
@@ -54,12 +59,23 @@ function bestProductMatch(
     const folded = foldSearchText(raw);
     if (!folded) continue;
 
-    let score = 0;
-    if (folded === normalizedQuery) score = 72;
-    else if (folded.startsWith(normalizedQuery)) score = 66;
-    else if (folded.includes(normalizedQuery)) score = 58;
-    else if (tokens.length > 0 && tokens.every((token) => folded.includes(token))) score = 52;
-    else if (tokens.some((token) => token.length >= 3 && folded.includes(token))) score = 46;
+    let score = scoreFoldedMatch(folded, normalizedQuery);
+
+    // Token coverage against dish name (aliases + fuzzy).
+    if (score < 72 && tokens.length > 0) {
+      let hits = 0;
+      for (const token of tokens) {
+        if (folded.includes(token) || fuzzyIncludes(folded, token)) hits += 1;
+      }
+      if (hits === tokens.length) {
+        score = Math.max(score, tokens.length > 1 ? 56 : 50);
+      } else if (hits > 0) {
+        score = Math.max(score, 34 + Math.round((hits / tokens.length) * 14));
+      }
+    }
+
+    // Dish matches are slightly favored in ranking vs weak business hits.
+    if (score > 0) score = Math.min(96, score + 4);
 
     if (score > bestScore) {
       bestScore = score;
@@ -87,12 +103,22 @@ export function matchDirectoryEntry(
 
   let score = 0;
   if (slugNormalized === normalizedQuery || nameNormalized === normalizedQuery) score = 100;
-  else if (nameNormalized.startsWith(normalizedQuery) || haystack.startsWith(normalizedQuery)) {
-    score = 80;
-  } else if (slugNormalized.startsWith(normalizedQuery)) score = 70;
-  else if (haystack.includes(normalizedQuery)) score = 50;
-  else if (tokens.length > 1 && tokens.every((token) => haystack.includes(token))) score = 42;
-  else if (tokens.some((token) => token.length >= 4 && haystack.includes(token))) score = 36;
+  else {
+    score = Math.max(
+      scoreFoldedMatch(nameNormalized, normalizedQuery),
+      scoreFoldedMatch(slugNormalized, normalizedQuery) * 0.9,
+      scoreFoldedMatch(haystack, normalizedQuery) * 0.85,
+    );
+    // Alias / fuzzy token coverage on business fields.
+    if (score < 42 && tokens.length > 0) {
+      let hits = 0;
+      for (const token of tokens) {
+        if (haystack.includes(token) || fuzzyIncludes(haystack, token)) hits += 1;
+      }
+      if (hits === tokens.length) score = Math.max(score, tokens.length > 1 ? 44 : 38);
+      else if (hits > 0) score = Math.max(score, 30 + Math.round((hits / tokens.length) * 10));
+    }
+  }
 
   const product = bestProductMatch(entry.productNames, normalizedQuery, tokens);
   if (product.score > score) {

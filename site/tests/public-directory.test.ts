@@ -59,6 +59,20 @@ describe('scoreDirectoryMatch', () => {
     expect(match.matchedDish?.toLowerCase()).toContain('hamburguesa');
   });
 
+  it('matches dishes with typos / missing accents', () => {
+    const typo = matchDirectoryEntry(sampleBusinesses[1], 'hamburgesa');
+    expect(typo.score).toBeGreaterThan(0);
+    expect(typo.matchedDish?.toLowerCase()).toContain('hamburguesa');
+
+    const withAccentDish = {
+      ...sampleBusinesses[1],
+      productNames: ['Jamón serrano', 'Papas fritas'],
+    };
+    const accent = matchDirectoryEntry(withAccentDish, 'jamon');
+    expect(accent.score).toBeGreaterThan(0);
+    expect(accent.matchedDish?.toLowerCase()).toContain('jamón');
+  });
+
   it('expands burger aliases to hamburguesa dishes', () => {
     const match = matchDirectoryEntry(sampleBusinesses[1], 'burger');
     expect(match.score).toBeGreaterThan(0);

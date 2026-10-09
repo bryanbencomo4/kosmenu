@@ -16,6 +16,7 @@ import {
   distanceKm,
   toFiniteCoord,
 } from './public-directory-geo';
+import { tokenizeSearchText } from '../../_lib/search-text';
 import { normalizeDirectoryQuery } from './public-directory-text';
 import { getServiceSupabaseClient } from './supabase-server';
 
@@ -53,6 +54,8 @@ export type ClientDirectoryBusiness = PublicDirectoryBusiness & {
   /** null = horario no configurado */
   isOpen: boolean | null;
   openLabel: string | null;
+  /** Public dish names used for instant client + server search. */
+  productNames: string[];
   /** Food teasers for discovery cards (image + price). */
   showcaseDishes: DirectoryShowcaseDish[];
   matchedDish?: string | null;
@@ -101,7 +104,8 @@ function isExcludedDirectorySlug(slug: string) {
 const FEATURED_ORDER_LOOKBACK_DAYS = 90;
 const FEATURED_CANDIDATE_LIMIT = 120;
 const CLIENT_DIRECTORY_LIMIT = 80;
-const CLIENT_SEARCH_EXTRA_LIMIT = 48;
+const CLIENT_SEARCH_EXTRA_LIMIT = 64;
+const CLIENT_SEARCH_PRODUCT_LIMIT = 280;
 const FEATURED_CACHE_TTL_MS = 60_000;
 const CLIENT_CACHE_TTL_MS = 45_000;
 const VERIFY_BATCH_SIZE = 8;
@@ -109,10 +113,33 @@ const VERIFY_BATCH_SIZE = 8;
 type Cached<T> = { exp: number; value: T };
 const featuredCache = new Map<number, Cached<PublicDirectoryBusiness[]>>();
 let clientDirectoryCache: Cached<ClientDirectoryCached[]> | null = null;
-const PRODUCT_NAMES_PER_BUSINESS = 16;
-const PRODUCT_NAMES_TOTAL_CAP = 640;
+const PRODUCT_NAMES_PER_BUSINESS = 48;
 const SHOWCASE_DISHES_PER_BUSINESS = 4;
 const SHOWCASE_DISHES_TOTAL_CAP = 480;
+
+function mergeProductNames(base: string[], extra: string[]) {
+  const out = [...base];
+  for (const name of extra) {
+    if (!name || out.includes(name)) continue;
+    if (out.length >= PRODUCT_NAMES_PER_BUSINESS) break;
+    out.push(name);
+  }
+  return out;
+}
+
+function buildSearchIlikePatterns(rawQuery: string, normalizedQuery: string) {
+  const patterns = new Set<string>();
+  const add = (term: string) => {
+    const safe = term.replace(/[%_,]/g, '').trim().slice(0, 40);
+    if (safe.length >= 2) patterns.add(`%${safe}%`);
+  };
+  for (const term of [rawQuery, normalizedQuery]) add(term);
+  // Token patterns catch dish hits when the full phrase isn't in a single field.
+  for (const token of tokenizeSearchText(normalizedQuery)) {
+    if (token.length >= 3) add(token);
+  }
+  return [...patterns];
+}
 
 async function mapInBatches<T, R>(
   items: T[],
@@ -240,28 +267,33 @@ async function loadProductNames(comercioIds: string[]) {
   if (comercioIds.length === 0) return names;
 
   const supabase = getServiceSupabaseClient();
-  const { data, error } = await supabase
-    .from('productos')
-    .select('comercio_id,nombre,disponible,orden')
-    .in('comercio_id', comercioIds)
-    .order('orden', { ascending: true })
-    .limit(PRODUCT_NAMES_TOTAL_CAP);
+  // Batch so each commerce gets a fair share of dish names for client search.
+  const BATCH = 20;
+  for (let offset = 0; offset < comercioIds.length; offset += BATCH) {
+    const chunk = comercioIds.slice(offset, offset + BATCH);
+    const { data, error } = await supabase
+      .from('productos')
+      .select('comercio_id,nombre,disponible,orden')
+      .in('comercio_id', chunk)
+      .order('orden', { ascending: true })
+      .limit(PRODUCT_NAMES_PER_BUSINESS * chunk.length);
 
-  if (error || !data) return names;
+    if (error || !data) continue;
 
-  for (const row of data as Array<{
-    comercio_id?: string | null;
-    nombre?: string | null;
-    disponible?: boolean | null;
-  }>) {
-    if (row.disponible === false) continue;
-    const id = (row.comercio_id ?? '').toString().trim();
-    const nombre = (row.nombre ?? '').toString().trim();
-    if (!id || !nombre) continue;
-    const list = names.get(id) ?? [];
-    if (list.length >= PRODUCT_NAMES_PER_BUSINESS) continue;
-    list.push(nombre);
-    names.set(id, list);
+    for (const row of data as Array<{
+      comercio_id?: string | null;
+      nombre?: string | null;
+      disponible?: boolean | null;
+    }>) {
+      if (row.disponible === false) continue;
+      const id = (row.comercio_id ?? '').toString().trim();
+      const nombre = (row.nombre ?? '').toString().trim();
+      if (!id || !nombre) continue;
+      const list = names.get(id) ?? [];
+      if (list.length >= PRODUCT_NAMES_PER_BUSINESS) continue;
+      list.push(nombre);
+      names.set(id, list);
+    }
   }
 
   return names;
@@ -299,9 +331,10 @@ function openSortRank(horarios: unknown) {
 }
 
 function toPublicClientBusiness(entry: ClientDirectoryCached): ClientDirectoryBusiness {
-  const { productNames: _productNames, horarios, ...publicEntry } = entry;
+  const { horarios, productNames, ...publicEntry } = entry;
   return {
     ...publicEntry,
+    productNames: productNames.slice(0, PRODUCT_NAMES_PER_BUSINESS),
     ...scheduleFields(horarios),
   };
 }
@@ -475,15 +508,32 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
 
 /** Extra hits from full DB (name + dish) so search is not limited to the carousel pool. */
 async function loadClientDirectorySearchExtras(
+  rawQuery: string,
   normalizedQuery: string,
-  excludeIds: Set<string>,
-): Promise<ClientDirectoryCached[]> {
-  if (normalizedQuery.length < 2) return [];
+  knownIds: Set<string>,
+): Promise<{
+  newEntries: ClientDirectoryCached[];
+  productNamesById: Map<string, string[]>;
+}> {
+  if (normalizedQuery.length < 2) {
+    return { newEntries: [], productNamesById: new Map() };
+  }
 
   const supabase = getServiceSupabaseClient();
-  const safeTerm = normalizedQuery.replace(/[%_,]/g, '').slice(0, 40);
-  if (!safeTerm) return [];
-  const pattern = `%${safeTerm}%`;
+  const patterns = buildSearchIlikePatterns(rawQuery, normalizedQuery);
+  if (patterns.length === 0) {
+    return { newEntries: [], productNamesById: new Map() };
+  }
+
+  const businessOr = patterns
+    .flatMap((pattern) => [
+      `nombre.ilike."${pattern}"`,
+      `slug.ilike."${pattern}"`,
+      `categoria.ilike."${pattern}"`,
+      `direccion.ilike."${pattern}"`,
+    ])
+    .join(',');
+  const productOr = patterns.map((pattern) => `nombre.ilike."${pattern}"`).join(',');
 
   const [byBusiness, byProduct] = await Promise.all([
     supabase
@@ -491,39 +541,42 @@ async function loadClientDirectorySearchExtras(
       .select(DIRECTORY_SELECT)
       .eq('en_linea', true)
       .eq('mostrar_en_directorio_publico', true)
-      .or(
-        `nombre.ilike."${pattern}",slug.ilike."${pattern}",categoria.ilike."${pattern}",direccion.ilike."${pattern}"`,
-      )
+      .or(businessOr)
       .order('updated_at', { ascending: false })
       .limit(CLIENT_SEARCH_EXTRA_LIMIT),
     supabase
       .from('productos')
-      .select('comercio_id,nombre')
-      .ilike('nombre', pattern)
-      .limit(120),
+      .select('comercio_id,nombre,disponible')
+      .or(productOr)
+      .limit(CLIENT_SEARCH_PRODUCT_LIMIT),
   ]);
 
   const productRows = (byProduct.data ?? []) as Array<{
     comercio_id?: string | null;
     nombre?: string | null;
+    disponible?: boolean | null;
   }>;
-  const productHits = new Map<string, string[]>();
+  const productNamesById = new Map<string, string[]>();
   for (const row of productRows) {
+    if (row.disponible === false) continue;
     const id = (row.comercio_id ?? '').toString().trim();
     const nombre = (row.nombre ?? '').toString().trim();
-    if (!id || !nombre || excludeIds.has(id)) continue;
-    const list = productHits.get(id) ?? [];
-    if (list.length < PRODUCT_NAMES_PER_BUSINESS) list.push(nombre);
-    productHits.set(id, list);
+    if (!id || !nombre) continue;
+    const list = productNamesById.get(id) ?? [];
+    if (list.length >= PRODUCT_NAMES_PER_BUSINESS || list.includes(nombre)) continue;
+    list.push(nombre);
+    productNamesById.set(id, list);
   }
 
   const businessRows = ((byBusiness.data ?? []) as RawComercioRow[]).filter((row) => {
     const id = (row.id ?? '').toString().trim();
-    return Boolean(id) && !excludeIds.has(id);
+    return Boolean(id) && !knownIds.has(id);
   });
 
-  const missingProductIds = [...productHits.keys()].filter(
-    (id) => !businessRows.some((row) => (row.id ?? '').toString().trim() === id),
+  const missingProductIds = [...productNamesById.keys()].filter(
+    (id) =>
+      !knownIds.has(id) &&
+      !businessRows.some((row) => (row.id ?? '').toString().trim() === id),
   );
 
   let productBusinessRows: RawComercioRow[] = [];
@@ -541,22 +594,20 @@ async function loadClientDirectorySearchExtras(
   const unique = new Map<string, RawComercioRow>();
   for (const row of mergedRows) {
     const id = (row.id ?? '').toString().trim();
-    if (!id || unique.has(id) || excludeIds.has(id)) continue;
+    if (!id || unique.has(id) || knownIds.has(id)) continue;
     unique.set(id, row);
   }
 
-  const enriched = await enrichClientDirectoryRows([...unique.values()].slice(0, CLIENT_SEARCH_EXTRA_LIMIT));
-  return enriched.map((entry) => {
-    const fromProducts = productHits.get(entry.id);
+  const enriched = await enrichClientDirectoryRows(
+    [...unique.values()].slice(0, CLIENT_SEARCH_EXTRA_LIMIT),
+  );
+  const newEntries = enriched.map((entry) => {
+    const fromProducts = productNamesById.get(entry.id);
     if (!fromProducts || fromProducts.length === 0) return entry;
-    const mergedNames = [...entry.productNames];
-    for (const name of fromProducts) {
-      if (!mergedNames.includes(name) && mergedNames.length < PRODUCT_NAMES_PER_BUSINESS) {
-        mergedNames.push(name);
-      }
-    }
-    return { ...entry, productNames: mergedNames };
+    return { ...entry, productNames: mergeProductNames(entry.productNames, fromProducts) };
   });
+
+  return { newEntries, productNamesById };
 }
 
 function withDistances(
@@ -695,9 +746,24 @@ export async function listClientDirectory(options: {
 
   if (normalizedQuery) {
     const knownIds = new Set(entries.map((entry) => entry.id));
-    const extras = await loadClientDirectorySearchExtras(normalizedQuery, knownIds);
-    if (extras.length > 0) {
-      entries = [...entries, ...extras];
+    const { newEntries, productNamesById } = await loadClientDirectorySearchExtras(
+      options.query ?? '',
+      normalizedQuery,
+      knownIds,
+    );
+    // Merge dish hits into already-cached businesses (no re-enrich).
+    if (productNamesById.size > 0) {
+      entries = entries.map((entry) => {
+        const extraNames = productNamesById.get(entry.id);
+        if (!extraNames || extraNames.length === 0) return entry;
+        return {
+          ...entry,
+          productNames: mergeProductNames(entry.productNames, extraNames),
+        };
+      });
+    }
+    if (newEntries.length > 0) {
+      entries = [...entries, ...newEntries];
     }
   }
 

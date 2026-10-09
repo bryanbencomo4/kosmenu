@@ -34,11 +34,13 @@ import {
 } from 'react';
 
 import { DIRECTORY_CATEGORY_CHIPS } from '../../app/api/_lib/public-directory-geo';
+import { rankDirectorySearchDetails } from '../../app/api/_lib/public-directory-featured';
 import {
   appSignupHref,
   businessBenefitsHref,
   socialLinks,
 } from '../../app/_lib/public-site-config';
+import { foldSearchText } from '../../app/_lib/search-text';
 import { ClientesDirectoryMap } from './ClientesDirectoryMap';
 
 function TikTokIcon({ className }: { className?: string }) {
@@ -78,7 +80,7 @@ const RADIUS_OPTIONS = [5, 10, 25, 50] as const;
 const DEFAULT_NEAR_RADIUS_KM = 25;
 const PAGE_SIZE = 12;
 const SEARCH_PAGE_SIZE = 24;
-const SEARCH_DEBOUNCE_MS = 220;
+const SEARCH_DEBOUNCE_MS = 140;
 
 type DirectoryShowcaseDish = {
   name: string;
@@ -104,10 +106,55 @@ type DirectoryBusiness = {
   menuUrl: string;
   isOpen?: boolean | null;
   openLabel?: string | null;
+  productNames?: string[];
   showcaseDishes?: DirectoryShowcaseDish[];
   matchedDish?: string | null;
   matchScore?: number;
 };
+
+function mergeUniqueNames(base: string[] | undefined, extra: string[] | undefined) {
+  const out = [...(base ?? [])];
+  for (const name of extra ?? []) {
+    if (!name || out.includes(name)) continue;
+    if (out.length >= 48) break;
+    out.push(name);
+  }
+  return out;
+}
+
+function applyInstantDirectorySearch(
+  index: DirectoryBusiness[],
+  normalizedQuery: string,
+): DirectoryBusiness[] {
+  if (!normalizedQuery || index.length === 0) return [];
+  const details = rankDirectorySearchDetails(
+    index.map((item) => ({
+      id: item.id,
+      slug: item.slug,
+      nombre: item.nombre,
+      categoria: item.categoria,
+      direccion: item.direccion,
+      productNames: item.productNames ?? [],
+    })),
+    normalizedQuery,
+  );
+  const byId = new Map(index.map((item) => [item.id, item]));
+  const ranked: DirectoryBusiness[] = [];
+  for (const detail of details) {
+    const base = byId.get(detail.entry.id);
+    if (!base) continue;
+    ranked.push({
+      ...base,
+      matchScore: detail.score,
+      matchedDish: detail.matchedDish,
+    });
+  }
+  return ranked.sort((left, right) => {
+    const openDiff = openPriority(left) - openPriority(right);
+    if (openDiff !== 0) return openDiff;
+    return (right.matchScore ?? 0) - (left.matchScore ?? 0);
+  });
+}
 
 type CardMediaSlide =
   | { kind: 'logo'; imageUrl: string }
@@ -436,6 +483,8 @@ function sortBusinesses(list: DirectoryBusiness[], mode: SortMode) {
   return copy.sort((a, b) => {
     const openDiff = openPriority(a) - openPriority(b);
     if (openDiff !== 0) return openDiff;
+    const scoreDiff = (b.matchScore ?? 0) - (a.matchScore ?? 0);
+    if (scoreDiff !== 0) return scoreDiff;
     return 0;
   });
 }
@@ -826,6 +875,7 @@ export function ClientesDiscoveryPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [payload, setPayload] = useState<DirectoryPayload>({});
+  const [browseIndex, setBrowseIndex] = useState<DirectoryBusiness[]>([]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -952,7 +1002,7 @@ export function ClientesDiscoveryPage() {
 
   useEffect(() => {
     setVisibleCount(pageSize);
-  }, [category, coords, debouncedQuery, favoritesOnly, pageSize, radiusKm, region, sortMode]);
+  }, [category, coords, favoritesOnly, pageSize, query, radiusKm, region, sortMode]);
 
   const scrollToResults = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -1099,8 +1149,26 @@ export function ClientesDiscoveryPage() {
           error?: string;
         };
         if (!response.ok) throw new Error(json.error ?? 'No se pudo cargar el directorio.');
+        const nextPayload = json.data ?? {};
         startTransition(() => {
-          setPayload(json.data ?? {});
+          setPayload(nextPayload);
+          const nextResults = nextPayload.results ?? [];
+          if (!trimmed) {
+            setBrowseIndex(nextResults);
+          } else if (nextResults.length > 0) {
+            setBrowseIndex((prev) => {
+              const map = new Map(prev.map((item) => [item.id, item]));
+              for (const item of nextResults) {
+                const existing = map.get(item.id);
+                map.set(item.id, {
+                  ...existing,
+                  ...item,
+                  productNames: mergeUniqueNames(existing?.productNames, item.productNames),
+                });
+              }
+              return [...map.values()];
+            });
+          }
           hasLoadedOnce.current = true;
         });
       } catch (fetchError) {
@@ -1130,7 +1198,31 @@ export function ClientesDiscoveryPage() {
     [coords, radiusKm],
   );
 
-  const results = payload.results ?? [];
+  const liveQueryFolded = foldSearchText(query);
+  const settledQueryFolded = foldSearchText(debouncedQuery);
+  const instantSearchResults = useMemo(() => {
+    if (liveQueryFolded.length < 2) return null;
+    return applyInstantDirectorySearch(browseIndex, liveQueryFolded);
+  }, [browseIndex, liveQueryFolded]);
+
+  const results = useMemo(() => {
+    const serverResults = payload.results ?? [];
+    if (liveQueryFolded.length < 2) return serverResults;
+    const serverSettled =
+      liveQueryFolded === settledQueryFolded && !refreshing && hasLoadedOnce.current;
+    if (serverSettled) {
+      // Server extras can include restaurants outside the warm browse index.
+      return serverResults.length > 0 ? serverResults : (instantSearchResults ?? serverResults);
+    }
+    // Typing ahead / waiting on network: show local ranked hits immediately.
+    return instantSearchResults ?? serverResults;
+  }, [
+    instantSearchResults,
+    liveQueryFolded,
+    payload.results,
+    refreshing,
+    settledQueryFolded,
+  ]);
   const promoted = withinRadius(payload.promoted ?? results.filter((item) => item.promovido));
   const topRated = withinRadius(payload.topRated ?? []);
   const regions = normalizeRegionStats(payload.regions);
@@ -1434,11 +1526,11 @@ export function ClientesDiscoveryPage() {
   const searchStatusText =
     query.trim().length === 0
       ? null
-      : refreshing || query.trim() !== debouncedQuery.trim()
-        ? 'Buscando…'
-        : filteredResults.length === 0 && hasLoadedOnce.current
-          ? 'Sin resultados'
-          : `${filteredResults.length} resultado${filteredResults.length === 1 ? '' : 's'}`;
+      : filteredResults.length > 0
+        ? `${filteredResults.length} resultado${filteredResults.length === 1 ? '' : 's'}`
+        : refreshing || query.trim() !== debouncedQuery.trim() || !hasLoadedOnce.current
+          ? 'Buscando…'
+          : 'Sin resultados';
 
   return (
     <div className={`${body.className} min-h-screen bg-[#FAFAFC] text-slate-900`}>
@@ -2274,7 +2366,7 @@ export function ClientesDiscoveryPage() {
           >
             <div
               className={`order-1 transition-opacity duration-200 ${
-                refreshing ? 'opacity-70' : 'opacity-100'
+                refreshing && filteredResults.length === 0 ? 'opacity-70' : 'opacity-100'
               } ${searchMode ? '' : 'lg:order-2'}`}
             >
               {error ? <p className="mb-3 text-sm text-rose-600">{error}</p> : null}
