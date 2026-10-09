@@ -1207,25 +1207,25 @@ export function ClientesDiscoveryPage() {
                 ) : null}
               </div>
             </div>
-            <div className="relative overflow-hidden rounded-[22px] bg-slate-900 shadow-xl sm:rounded-[32px] sm:shadow-2xl">
+            <div className="relative mx-auto h-[260px] w-full max-w-[420px] overflow-hidden rounded-[22px] bg-slate-900 shadow-xl sm:mx-0 sm:h-[340px] sm:max-w-none sm:rounded-[32px] sm:shadow-2xl lg:h-[400px]">
               {hero ? (
-                <Link href={hero.menuUrl} className="block h-full min-h-[200px] sm:min-h-[300px] lg:min-h-[360px]">
+                <Link href={hero.menuUrl} className="absolute inset-0 block">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     key={hero.id}
                     src={hero.coverUrl || hero.logoUrl || '/branding/full_logo.png'}
                     alt=""
-                    className="h-full min-h-[200px] w-full object-cover opacity-90 transition duration-700 sm:min-h-[300px] lg:min-h-[360px]"
+                    className="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-700"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-3.5 text-white sm:p-6">
                     <p className="text-[10px] font-bold uppercase tracking-wide text-violet-200 sm:text-xs">
                       {hero.promovido ? 'Sitio promocionado' : 'Recomendado'}
                     </p>
-                    <p className="mt-0.5 font-[var(--font-display)] text-lg font-black tracking-tight sm:mt-1 sm:text-2xl">
+                    <p className="mt-0.5 line-clamp-2 font-[var(--font-display)] text-lg font-black tracking-tight sm:mt-1 sm:text-2xl">
                       {hero.nombre}
                     </p>
-                    <p className="mt-0.5 text-[11px] text-white/80 sm:mt-1 sm:text-sm">
+                    <p className="mt-0.5 truncate text-[11px] text-white/80 sm:mt-1 sm:text-sm">
                       {hero.ratingCount > 0
                         ? `★ ${hero.ratingAverage.toFixed(1)} · ${hero.ratingCount} opiniones`
                         : hero.categoria || 'Menú digital'}
@@ -1237,12 +1237,12 @@ export function ClientesDiscoveryPage() {
                   </div>
                 </Link>
               ) : (
-                <div className="grid min-h-[200px] place-items-center text-violet-200 sm:min-h-[300px] lg:min-h-[360px]">
+                <div className="grid h-full place-items-center text-violet-200">
                   <Store className="h-12 w-12" />
                 </div>
               )}
               <p
-                className={`${script.className} pointer-events-none absolute right-3 top-3 hidden text-2xl text-white/90 sm:right-6 sm:top-6 sm:block sm:text-3xl`}
+                className={`${script.className} pointer-events-none absolute right-3 top-3 z-10 hidden text-2xl text-white/90 sm:right-6 sm:top-6 sm:block sm:text-3xl`}
               >
                 Apoyemos el talento local ♥
               </p>
