@@ -13,8 +13,6 @@ import {
   developmentBusinessHosts,
 } from '../app/_lib/public-site-config';
 
-const AUTO_OPEN_STORAGE_KEY = 'elmenuxfa-wa-autochat';
-
 const BUSINESS_CHAT_MESSAGES = [
   '¿Listo para transformar tu restaurante?\u00A0🚀',
   '¿Quieres adquirir el Kit Menú Inteligente\u00A0📦 o tienes alguna duda sobre la plataforma?\u00A0📲',
@@ -92,24 +90,6 @@ export function WhatsAppChatWidget() {
   }, []);
 
   useEffect(() => {
-    if (hidden) return;
-
-    let alreadyClosed = false;
-    try {
-      alreadyClosed = window.sessionStorage.getItem(AUTO_OPEN_STORAGE_KEY) === 'closed';
-    } catch {
-      alreadyClosed = false;
-    }
-    if (alreadyClosed) return;
-
-    const openTimer = window.setTimeout(() => {
-      setOpen(true);
-    }, 900);
-
-    return () => window.clearTimeout(openTimer);
-  }, [hidden]);
-
-  useEffect(() => {
     if (!open) {
       setTyping(false);
       setVisibleCount(0);
@@ -157,23 +137,14 @@ export function WhatsAppChatWidget() {
   useEffect(() => {
     if (!open) return;
 
-    const closeChat = () => {
-      setOpen(false);
-      try {
-        window.sessionStorage.setItem(AUTO_OPEN_STORAGE_KEY, 'closed');
-      } catch {
-        // Ignore storage errors; auto-open may repeat this session.
-      }
-    };
-
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeChat();
+      if (event.key === 'Escape') setOpen(false);
     };
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
       if (!allowOutsideCloseRef.current) return;
       const target = event.target as Node | null;
       if (target && rootRef.current && !rootRef.current.contains(target)) {
-        closeChat();
+        setOpen(false);
       }
     };
 
@@ -192,15 +163,6 @@ export function WhatsAppChatWidget() {
   }
 
   const statusLabel = typing || visibleCount < chatMessages.length ? 'escribiendo…' : 'en línea';
-
-  const closeChat = () => {
-    setOpen(false);
-    try {
-      window.sessionStorage.setItem(AUTO_OPEN_STORAGE_KEY, 'closed');
-    } catch {
-      // Ignore storage errors.
-    }
-  };
 
   return (
     <div ref={rootRef} className="whatsapp-chat-widget pointer-events-none fixed bottom-4 right-4 z-[60] sm:bottom-6 sm:right-6">
@@ -233,7 +195,7 @@ export function WhatsAppChatWidget() {
               </div>
               <button
                 type="button"
-                onClick={closeChat}
+                onClick={() => setOpen(false)}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
                 aria-label="Cerrar chat"
               >
@@ -291,13 +253,7 @@ export function WhatsAppChatWidget() {
           aria-expanded={open}
           aria-controls={panelId}
           aria-label={open ? 'Cerrar chat de WhatsApp' : 'Abrir chat de WhatsApp'}
-          onClick={() => {
-            if (open) {
-              closeChat();
-              return;
-            }
-            setOpen(true);
-          }}
+          onClick={() => setOpen((value) => !value)}
           className="pointer-events-auto relative inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-[0_18px_40px_-16px_rgba(37,211,102,1),0_0_0_6px_rgba(37,211,102,0.16)] transition hover:scale-105 hover:bg-[#20bd5a]"
         >
           {open ? <X className="h-6 w-6" /> : <WhatsAppGlyph className="h-7 w-7" />}

@@ -319,9 +319,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _orderManagementMode = 'platform';
   bool _isVirtualBusiness = false;
 
-  /// Hidden until the public business directory ships on the landing page.
-  static const bool _publicDirectoryUiEnabled = false;
-  bool _showOnPublicDirectory = false;
+  /// Directory discovery at /clientes — merchants opt in and can promote manually.
+  static const bool _publicDirectoryUiEnabled = true;
+  bool _showOnPublicDirectory = true;
+  bool _directoryPromoted = false;
   String _selectedPhoneCountryIso = 'VE';
   bool _menuScanCompleted = false;
   String _menuAiSetupMode = '';
@@ -761,7 +762,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _publicDirectoryUiEnabled &&
         (raw?['mostrar_en_directorio_publico'] is bool
             ? raw!['mostrar_en_directorio_publico'] as bool
-            : false);
+            : true);
+    _directoryPromoted =
+        seedBusinessConfig['destacado_directorio'] == true ||
+        seedBusinessConfig['promovido'] == true;
     if (_isVirtualBusiness) {
       _allowDelivery = false;
     }
@@ -930,6 +934,72 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
 
     _hydrateExchangeAdjustments(seedBusinessConfig);
+    _hydrateCheckoutExchangeConfig(seedBusinessConfig);
+  }
+
+  /// Restores per-currency rates/modes/sources saved in config_negocio.
+  void _hydrateCheckoutExchangeConfig(Map<String, dynamic> configNegocio) {
+    final rawCheckout = configNegocio['checkout_currencies'];
+    final checkoutCurrencies = (rawCheckout is List ? rawCheckout : const [])
+        .map((item) => item.toString().trim().toUpperCase())
+        .where(_currencies.contains)
+        .toList();
+    if (checkoutCurrencies.isNotEmpty) {
+      _selectedCurrencies
+        ..clear()
+        ..addAll(checkoutCurrencies);
+      if (!_selectedCurrencies.contains(_primaryCheckoutCurrency) &&
+          _primaryCheckoutCurrency.trim().isNotEmpty) {
+        _selectedCurrencies.add(_primaryCheckoutCurrency);
+      }
+      if (!_selectedCurrencies.contains(_activeCheckoutCurrency)) {
+        _activeCheckoutCurrency = _selectedCurrencies.contains(
+              _primaryCheckoutCurrency,
+            )
+            ? _primaryCheckoutCurrency
+            : _selectedCurrencies.first;
+      }
+    }
+
+    final rawRates = _toStringDynamicMap(configNegocio['exchange_rates']);
+    for (final entry in rawRates.entries) {
+      final code = entry.key.trim().toUpperCase();
+      if (!_currencies.contains(code) || code == _baseCurrency) {
+        continue;
+      }
+      final rate = _parseExchangeRate(entry.value);
+      if (rate > 0) {
+        _exchangeRateByCurrency[code] = _formatExchangeRate(rate);
+      }
+    }
+
+    final rawModes = _toStringDynamicMap(configNegocio['exchange_rate_modes']);
+    for (final entry in rawModes.entries) {
+      final code = entry.key.trim().toUpperCase();
+      final mode = entry.value.toString().trim().toLowerCase();
+      if (!_currencies.contains(code)) {
+        continue;
+      }
+      if (mode == _exchangeModeAuto || mode == _exchangeModeManual) {
+        _exchangeRateModeByCurrency[code] = mode;
+      }
+    }
+
+    final rawSources = _toStringDynamicMap(
+      configNegocio['exchange_rate_sources'],
+    );
+    for (final entry in rawSources.entries) {
+      final code = entry.key.trim().toUpperCase();
+      final source = entry.value.toString().trim().toLowerCase();
+      if (!_currencies.contains(code)) {
+        continue;
+      }
+      if (source == _exchangeSourceP2pBinance ||
+          source == _exchangeSourceGoogle ||
+          _isBcvSource(source)) {
+        _exchangeRateSourceByCurrency[code] = _canonicalExchangeSource(source);
+      }
+    }
   }
 
   /// Restores saved adjustments (and the auto mode/source they depend on).
@@ -1313,17 +1383,18 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           final current =
               target['Transferencia'] ??
               _PaymentMethodDraft(method: 'Transferencia');
-          final detailsRaw = map['detalles']?.toString().trim() ?? '';
+          final detailsValue = map['detalles'];
+          final detailsRaw = detailsValue is String
+              ? detailsValue.trim()
+              : '';
           _TransferAccountDraft? account;
-          if (detailsRaw.isNotEmpty) {
-            try {
-              final parsed = jsonDecode(detailsRaw);
-              if (parsed is Map<String, dynamic>) {
-                account = _TransferAccountDraft.fromMap(parsed);
-              }
-            } catch (_) {
-              account = null;
+          try {
+            final parsedMap = _paymentDetallesAsMap(detailsValue);
+            if (parsedMap != null) {
+              account = _TransferAccountDraft.fromMap(parsedMap);
             }
+          } catch (_) {
+            account = null;
           }
 
           account ??= _TransferAccountDraft.fromLegacyColumns(
@@ -1345,10 +1416,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             transferAccounts: mergedAccounts,
           );
         } else {
+          final detailsValue = map['detalles'];
           target[method] = _PaymentMethodDraft(
             method: method,
             description: map['descripcion']?.toString() ?? '',
-            extraDetails: map['detalles']?.toString() ?? '',
+            extraDetails: detailsValue is String
+                ? detailsValue
+                : (detailsValue?.toString() ?? ''),
           );
         }
       }
@@ -1357,6 +1431,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         return;
       }
 
+      final previousPrimary = _primaryCheckoutCurrency.trim().toUpperCase();
+
       _selectedCurrencies
         ..clear()
         ..addAll(selectedByCurrency.keys);
@@ -1364,18 +1440,34 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _selectedCurrencies.add('USD');
       }
       if (!_selectedCurrencies.contains(_activeCheckoutCurrency)) {
-        _activeCheckoutCurrency = _selectedCurrencies.first;
+        _activeCheckoutCurrency = _selectedCurrencies.contains(previousPrimary)
+            ? previousPrimary
+            : _selectedCurrencies.first;
       }
-      _primaryCheckoutCurrency = _activeCheckoutCurrency;
+      // Keep the menu's primary currency when it is still available. Overwriting
+      // it with the active editor tab broke COP businesses after loading
+      // multi-currency payment rows.
+      if (_currencies.contains(previousPrimary) &&
+          _selectedCurrencies.contains(previousPrimary)) {
+        _primaryCheckoutCurrency = previousPrimary;
+      } else if (!_selectedCurrencies.contains(_primaryCheckoutCurrency) ||
+          _primaryCheckoutCurrency.trim().isEmpty) {
+        _primaryCheckoutCurrency = _selectedCurrencies.contains('COP')
+            ? 'COP'
+            : _selectedCurrencies.first;
+      }
 
       _selectedPaymentsByCurrency
         ..clear()
         ..addEntries(
           selectedByCurrency.entries.map(
-            (entry) => MapEntry(
-              entry.key,
-              entry.value.where(_paymentMethods.contains).toSet(),
-            ),
+            (entry) {
+              final methods = entry.value.where(_paymentMethods.contains).toSet();
+              return MapEntry(
+                entry.key,
+                methods.isEmpty ? <String>{'Efectivo'} : methods,
+              );
+            },
           ),
         );
 
@@ -1386,9 +1478,32 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       for (final currency in _selectedCurrencies) {
         _ensurePaymentDraftsForSelection(currency);
       }
+      _loadActiveCurrencyIntoController();
     } catch (_) {
       // Keep local defaults if loading fails.
     }
+  }
+
+  Map<String, dynamic>? _paymentDetallesAsMap(dynamic raw) {
+    if (raw == null) {
+      return null;
+    }
+    if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+    final text = raw.toString().trim();
+    if (text.isEmpty || !text.startsWith('{')) {
+      return null;
+    }
+    try {
+      final parsed = jsonDecode(text);
+      if (parsed is Map) {
+        return Map<String, dynamic>.from(parsed);
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
   }
 
   String _draftKeyFor(String userId) => '$_draftKeyPrefix:$userId';
@@ -1645,7 +1760,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _isVirtualBusiness = map['isVirtualBusiness'] as bool? ?? false;
       _showOnPublicDirectory =
           _publicDirectoryUiEnabled &&
-          (map['showOnPublicDirectory'] as bool? ?? false);
+          (map['showOnPublicDirectory'] as bool? ?? true);
+      _directoryPromoted = map['directoryPromoted'] as bool? ?? false;
       if (_isVirtualBusiness) {
         _allowDelivery = false;
       }
@@ -1837,6 +1953,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'showOnPublicDirectory': _publicDirectoryUiEnabled
           ? _showOnPublicDirectory
           : false,
+      'directoryPromoted': _directoryPromoted,
       'menuScanCompleted': _menuScanCompleted,
       'menuAiSetupMode': _menuAiSetupMode,
       'manualMenuSetupSelected': _manualMenuSetupSelected,
@@ -4516,6 +4633,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'longitud': _isVirtualBusiness ? null : _businessLongitude,
               'negocio_virtual': _isVirtualBusiness,
               'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
+              if (_publicDirectoryUiEnabled)
+                'mostrar_en_directorio_publico': _showOnPublicDirectory,
+              'branding_ia': _buildBrandingIaPayload(),
             },
             removable: <String>{
               'whatsapp',
@@ -4525,6 +4645,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'longitud',
               'negocio_virtual',
               'permite_delivery',
+              'mostrar_en_directorio_publico',
+              'branding_ia',
             },
           );
           await _saveWhatsappOrderFormat(comercioId);
@@ -8222,6 +8344,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     configNegocio['social_links'] = _socialLinksPayload();
     configNegocio['moneda_default'] = _baseCurrency;
     configNegocio['checkout_currencies'] = _selectedCurrencies.toList();
+    configNegocio['destacado_directorio'] = _directoryPromoted;
 
     final exchangeRates = <String, dynamic>{};
     final exchangeRateModes = <String, dynamic>{};
@@ -9315,6 +9438,41 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   }
 
   Widget _buildCheckoutStep() {
+    try {
+      return _buildCheckoutStepBody();
+    } catch (error, stack) {
+      final message = Error.safeToString(error);
+      debugPrint('Checkout step build error: $message\n$stack');
+      return Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'No se pudo mostrar cobros y tasa de cambio.',
+              style: TextStyle(
+                color: _setupTextHigh,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              style: const TextStyle(color: Color(0xFFFFD1DC), fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Vuelve al inicio e intenta de nuevo. Si sigue fallando, recarga la pagina.',
+              style: TextStyle(color: _setupTextMedium, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Widget _buildCheckoutStepBody() {
     if (_selectedCurrencies.isEmpty) {
       _selectedCurrencies.add('USD');
     }
@@ -9326,6 +9484,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final currentCurrency = _currentCurrency;
     final baseCurrency = _baseCurrency;
     final currentPairLabel = '$baseCurrency/$currentCurrency';
+    _ensureCurrencyConfig(currentCurrency);
+    _enforceExchangeRulesForCurrency(currentCurrency);
     final requiresRate = _requiresExchangeRateForCurrency(currentCurrency);
     final canUseAuto =
         requiresRate && _hasAutoSourcesForCurrency(currentCurrency);
@@ -9355,12 +9515,24 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final allowBcv = _isBcvPairAvailable(currentCurrency);
     final allowP2p = _isP2pPairAvailable(currentCurrency);
     final allowGoogle = _isGooglePairAvailable(currentCurrency);
+    final availableRadioSources = <String>[
+      if (allowBcv) ...[_exchangeSourceBcvEur, _exchangeSourceBcvUsd],
+      if (allowP2p) _exchangeSourceP2pBinance,
+      if (allowGoogle) _exchangeSourceGoogle,
+    ];
+    final safeExchangeSource =
+        availableRadioSources.contains(_exchangeRateSource)
+        ? _exchangeRateSource
+        : (availableRadioSources.isNotEmpty
+              ? availableRadioSources.first
+              : _exchangeRateSource);
+    if (safeExchangeSource != _exchangeRateSource) {
+      _exchangeRateSource = safeExchangeSource;
+    }
     final currenciesForEditing = <String>[
       if (_selectedCurrencies.contains(baseCurrency)) baseCurrency,
       ..._selectedCurrencies.where((currency) => currency != baseCurrency),
     ];
-    _ensureCurrencyConfig(currentCurrency);
-    _enforceExchangeRulesForCurrency(currentCurrency);
     final currentPayments = _selectedPaymentsForCurrency(currentCurrency);
     final currentDrafts = _paymentDraftsForCurrency(currentCurrency);
     final isExchangeRateEditable =
@@ -9776,10 +9948,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 ],
                 if (requiresRate &&
                     canUseAuto &&
-                    _exchangeRateMode == _exchangeModeAuto) ...[
+                    _exchangeRateMode == _exchangeModeAuto &&
+                    availableRadioSources.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   RadioGroup<String>(
-                    groupValue: _exchangeRateSource,
+                    groupValue: safeExchangeSource,
                     onChanged: (value) async {
                       if (value == null) {
                         return;
@@ -10789,7 +10962,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           SwitchListTile.adaptive(
             value: _showOnPublicDirectory,
             onChanged: (value) {
-              setState(() => _showOnPublicDirectory = value);
+              setState(() {
+                _showOnPublicDirectory = value;
+                if (!value) {
+                  _directoryPromoted = false;
+                }
+              });
               unawaited(_saveDraft());
             },
             activeThumbColor: _palette.primary,
@@ -10797,9 +10975,28 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             inactiveThumbColor: const Color(0xFFE7E0F9),
             inactiveTrackColor: const Color(0xFF3A305A),
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            title: const Text('Mostrar en elmenuxfa.com'),
+            title: const Text('Mostrar en elmenuxfa.com/clientes'),
             subtitle: const Text(
-              'Aparece en el directorio publico donde los clientes descubren negocios. Tu menu propio sigue en tu enlace.',
+              'Aparece en el directorio donde los clientes descubren negocios cerca. Tu menu propio sigue en tu enlace.',
+              style: TextStyle(color: _setupTextMedium, fontSize: 12),
+            ),
+          ),
+          SwitchListTile.adaptive(
+            value: _directoryPromoted,
+            onChanged: !_showOnPublicDirectory
+                ? null
+                : (value) {
+                    setState(() => _directoryPromoted = value);
+                    unawaited(_saveDraft());
+                  },
+            activeThumbColor: _palette.primary,
+            activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+            inactiveThumbColor: const Color(0xFFE7E0F9),
+            inactiveTrackColor: const Color(0xFF3A305A),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: const Text('Sitio promocionado'),
+            subtitle: const Text(
+              'Prioridad manual en “Sitios promocionados”. Se gestiona desde el panel; no depende de la calificación.',
               style: TextStyle(color: _setupTextMedium, fontSize: 12),
             ),
           ),

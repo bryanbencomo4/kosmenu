@@ -29,7 +29,11 @@ final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 /// `Material` or `Scaffold`) because this can be rendered anywhere in the tree,
 /// including above the app's own providers.
 Widget _buildRecoverableErrorScreen(FlutterErrorDetails details) {
-  debugPrint('UI build error: ${details.exceptionAsString()}');
+  final exceptionText = details.exceptionAsString().trim();
+  debugPrint('UI build error: $exceptionText');
+  if (details.stack != null) {
+    debugPrint('${details.stack}');
+  }
 
   return Directionality(
     textDirection: TextDirection.ltr,
@@ -62,6 +66,20 @@ Widget _buildRecoverableErrorScreen(FlutterErrorDetails details) {
             textAlign: TextAlign.center,
             style: TextStyle(color: Color(0xFFB9AED7), fontSize: 14),
           ),
+          if (exceptionText.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              exceptionText.length > 280
+                  ? '${exceptionText.substring(0, 280)}…'
+                  : exceptionText,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFC4B5FD),
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           GestureDetector(
             onTap: () => _navigatorKey.currentState?.pushAndRemoveUntil(

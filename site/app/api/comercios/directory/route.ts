@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { listClientDirectory, searchPublicDirectory } from '../../_lib/public-directory';
-import { DIRECTORY_CATEGORY_CHIPS, DIRECTORY_REGIONS } from '../../_lib/public-directory-geo';
+import { DIRECTORY_CATEGORY_CHIPS } from '../../_lib/public-directory-geo';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
 
 export async function GET(request: Request) {
@@ -38,7 +38,6 @@ export async function GET(request: Request) {
           data: {
             query,
             ...payload,
-            regions: DIRECTORY_REGIONS,
             categories: DIRECTORY_CATEGORY_CHIPS,
           },
         },

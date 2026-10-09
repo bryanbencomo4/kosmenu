@@ -4,6 +4,8 @@ import Link from 'next/link';
 import {
   ArrowRight,
   BarChart3,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -31,10 +33,7 @@ import {
   useState,
 } from 'react';
 
-import {
-  DIRECTORY_CATEGORY_CHIPS,
-  DIRECTORY_REGIONS,
-} from '../../app/api/_lib/public-directory-geo';
+import { DIRECTORY_CATEGORY_CHIPS } from '../../app/api/_lib/public-directory-geo';
 import {
   appSignupHref,
   businessBenefitsHref,
@@ -81,6 +80,13 @@ const PAGE_SIZE = 12;
 const SEARCH_PAGE_SIZE = 24;
 const SEARCH_DEBOUNCE_MS = 220;
 
+type DirectoryShowcaseDish = {
+  name: string;
+  imageUrl: string;
+  price: number;
+  compareAtPrice?: number | null;
+};
+
 type DirectoryBusiness = {
   id: string;
   slug: string;
@@ -98,9 +104,188 @@ type DirectoryBusiness = {
   menuUrl: string;
   isOpen?: boolean | null;
   openLabel?: string | null;
+  showcaseDishes?: DirectoryShowcaseDish[];
   matchedDish?: string | null;
   matchScore?: number;
 };
+
+type CardMediaSlide =
+  | { kind: 'logo'; imageUrl: string }
+  | {
+      kind: 'dish';
+      imageUrl: string;
+      name: string;
+      price: number;
+      compareAtPrice: number | null;
+    };
+
+function formatDirectoryPrice(price: number) {
+  if (!Number.isFinite(price) || price <= 0) return '';
+  if (price >= 1000) {
+    return `Bs ${new Intl.NumberFormat('es-VE', { maximumFractionDigits: 0 }).format(price)}`;
+  }
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(price);
+}
+
+function shuffleWithSeed<T>(items: T[], seed: string): T[] {
+  const copy = [...items];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    hash = (hash * 1664525 + 1013904223) >>> 0;
+    const j = hash % (i + 1);
+    const tmp = copy[i]!;
+    copy[i] = copy[j]!;
+    copy[j] = tmp;
+  }
+  return copy;
+}
+
+function buildCardMediaSlides(business: DirectoryBusiness): CardMediaSlide[] {
+  const dishes = shuffleWithSeed(business.showcaseDishes ?? [], business.id).slice(0, 3);
+  const slides: CardMediaSlide[] = [];
+  if (business.logoUrl) {
+    slides.push({ kind: 'logo', imageUrl: business.logoUrl });
+  }
+  for (const dish of dishes) {
+    if (!dish.imageUrl) continue;
+    // Skip dish slides that are just the logo re-uploaded as a product.
+    if (business.logoUrl && dish.imageUrl === business.logoUrl) continue;
+    slides.push({
+      kind: 'dish',
+      imageUrl: dish.imageUrl,
+      name: dish.name,
+      price: dish.price,
+      compareAtPrice: dish.compareAtPrice ?? null,
+    });
+  }
+  if (slides.length === 0 && business.coverUrl) {
+    slides.push({ kind: 'logo', imageUrl: business.coverUrl });
+  }
+  return slides;
+}
+
+const CARD_MEDIA_HOLD_MS = 4200;
+const CARD_MEDIA_FADE_MS = 480;
+const HERO_MEDIA_HOLD_MS = 4500;
+const preloadedImages = new Map<string, Promise<boolean>>();
+
+function staggerDelayMs(seed: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return 600 + (hash >>> 0) % 3200;
+}
+
+function heroSlideImageUrl(business: DirectoryBusiness) {
+  return business.coverUrl || business.logoUrl || '/branding/full_logo.png';
+}
+
+function preloadCardImage(url: string): Promise<boolean> {
+  const cached = preloadedImages.get(url);
+  if (cached) return cached;
+  if (typeof window === 'undefined') {
+    return Promise.resolve(false);
+  }
+  const promise = new Promise<boolean>((resolve) => {
+    const img = new window.Image();
+    img.decoding = 'async';
+    const finish = (ok: boolean) => resolve(ok);
+    img.onload = () => {
+      if (typeof img.decode === 'function') {
+        img
+          .decode()
+          .then(() => finish(true))
+          .catch(() => finish(true));
+        return;
+      }
+      finish(true);
+    };
+    img.onerror = () => finish(false);
+    img.src = url;
+  });
+  preloadedImages.set(url, promise);
+  return promise;
+}
+
+function CardMediaImage({
+  slide,
+  forceRow,
+  priority = false,
+}: {
+  slide: CardMediaSlide;
+  forceRow: boolean;
+  priority?: boolean;
+}) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={slide.imageUrl}
+      alt=""
+      decoding="async"
+      loading={priority ? 'eager' : 'lazy'}
+      draggable={false}
+      className={
+        slide.kind === 'logo'
+          ? forceRow
+            ? 'h-full w-full object-contain p-1.5'
+            : 'h-full w-full object-contain p-6 sm:p-8'
+          : 'h-full w-full object-cover'
+      }
+    />
+  );
+}
+
+function CardDishOffer({
+  slide,
+  forceRow,
+}: {
+  slide: Extract<CardMediaSlide, { kind: 'dish' }>;
+  forceRow: boolean;
+}) {
+  return (
+    <>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-2 pb-1.5 pt-8 sm:px-3 sm:pb-2.5 sm:pt-12">
+        <p
+          className={`truncate font-bold text-white ${
+            forceRow ? 'text-[9px] leading-tight' : 'text-[12px] sm:text-[13px]'
+          }`}
+        >
+          {slide.name}
+        </p>
+        {!forceRow ? (
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className="rounded-full bg-[#6D28D9] px-2 py-0.5 text-[11px] font-extrabold tabular-nums text-white shadow-sm">
+              {formatDirectoryPrice(slide.price)}
+            </span>
+            {slide.compareAtPrice ? (
+              <span className="text-[11px] font-semibold text-white/70 line-through tabular-nums">
+                {formatDirectoryPrice(slide.compareAtPrice)}
+              </span>
+            ) : (
+              <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/90">
+                Oferta
+              </span>
+            )}
+          </div>
+        ) : null}
+      </div>
+      {forceRow ? (
+        <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-[#6D28D9] px-1 py-0.5 text-[8px] font-extrabold tabular-nums text-white">
+          {formatDirectoryPrice(slide.price)}
+        </span>
+      ) : null}
+    </>
+  );
+}
 
 async function resolveZoneLabel(lat: number, lng: number): Promise<string | null> {
   try {
@@ -124,14 +309,37 @@ async function resolveZoneLabel(lat: number, lng: number): Promise<string | null
 
 type CategoryChip = { id: string; label: string; glyph: string };
 
+type DirectoryRegionStat = {
+  name: string;
+  count: number;
+};
+
 type DirectoryPayload = {
   results?: DirectoryBusiness[];
   promoted?: DirectoryBusiness[];
   topRated?: DirectoryBusiness[];
   total?: number;
-  regions?: string[];
+  regions?: DirectoryRegionStat[];
   categories?: CategoryChip[];
 };
+
+function normalizeRegionStats(raw: unknown): DirectoryRegionStat[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DirectoryRegionStat[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const name = item.trim();
+      if (name) out.push({ name, count: 0 });
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const name = String((item as { name?: unknown }).name ?? '').trim();
+    const count = Number((item as { count?: unknown }).count ?? 0);
+    if (!name || !Number.isFinite(count) || count <= 0) continue;
+    out.push({ name, count });
+  }
+  return out;
+}
 
 type SortMode = 'smart' | 'near' | 'rated';
 
@@ -204,8 +412,8 @@ function openPriority(business: DirectoryBusiness) {
 }
 
 function sortBusinesses(list: DirectoryBusiness[], mode: SortMode) {
-  // Closed / unavailable restaurants must not appear in discovery.
-  const copy = list.filter((item) => item.isOpen !== false);
+  // Open first, then unknown hours, then closed — still show closed with badge.
+  const copy = [...list];
   if (mode === 'near') {
     return copy.sort((a, b) => {
       const openDiff = openPriority(a) - openPriority(b);
@@ -249,16 +457,127 @@ function RestaurantCard({
   onSelect?: (id: string) => void;
   onShowOnMap?: (id: string) => void;
 }) {
-  const cover = business.coverUrl;
-  const logo = business.logoUrl;
-  // Prefer cover photo; fall back to logo. Avoid tiny nested logo boxes.
-  const image = cover || logo;
-  const isLogoOnly = Boolean(image) && (!cover || cover === logo);
-  // Compact = dense row in results. Showcase (promo / top rated) = vertical card.
+  const slides = useMemo(
+    () => buildCardMediaSlides(business),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuild only when showcase media changes
+    [business.id, business.logoUrl, business.coverUrl, business.showcaseDishes],
+  );
+  const [slideIndex, setSlideIndex] = useState(0);
+  const [incomingIndex, setIncomingIndex] = useState<number | null>(null);
+  const [fadeIn, setFadeIn] = useState(false);
+  const [inView, setInView] = useState(false);
+  const mediaRootRef = useRef<HTMLAnchorElement | null>(null);
+  const slideIndexRef = useRef(0);
+  const transitioningRef = useRef(false);
   const forceRow = compact;
-  const mediaBg = isLogoOnly
-    ? 'bg-[#f8f7fc]'
-    : 'bg-[linear-gradient(145deg,#f5f3ff,#eef2ff)]';
+  const activeSlide = slides[slideIndex] ?? slides[0] ?? null;
+  const incomingSlide =
+    incomingIndex != null ? slides[incomingIndex] ?? null : null;
+  const visibleSlide = fadeIn && incomingSlide ? incomingSlide : activeSlide;
+
+  useEffect(() => {
+    slideIndexRef.current = slideIndex;
+  }, [slideIndex]);
+
+  useEffect(() => {
+    setSlideIndex(0);
+    setIncomingIndex(null);
+    setFadeIn(false);
+    transitioningRef.current = false;
+    slideIndexRef.current = 0;
+  }, [business.id]);
+
+  useEffect(() => {
+    const node = mediaRootRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setInView(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setInView(Boolean(entry?.isIntersecting)),
+      { rootMargin: '120px 0px', threshold: 0.2 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [business.id]);
+
+  useEffect(() => {
+    if (!inView || slides.length <= 1) return;
+    const next = slides[(slideIndex + 1) % slides.length];
+    if (next?.imageUrl) void preloadCardImage(next.imageUrl);
+  }, [inView, slideIndex, slides]);
+
+  useEffect(() => {
+    if (!inView || slides.length <= 1) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    let cancelled = false;
+    let holdTimer = 0;
+    let fadeTimer = 0;
+
+    const tick = async () => {
+      if (cancelled || transitioningRef.current || document.hidden) {
+        holdTimer = window.setTimeout(tick, CARD_MEDIA_HOLD_MS);
+        return;
+      }
+      const current = slideIndexRef.current;
+      const next = (current + 1) % slides.length;
+      const nextSlide = slides[next];
+      if (!nextSlide) {
+        holdTimer = window.setTimeout(tick, CARD_MEDIA_HOLD_MS);
+        return;
+      }
+
+      transitioningRef.current = true;
+      const loaded = await preloadCardImage(nextSlide.imageUrl);
+      if (cancelled) {
+        transitioningRef.current = false;
+        return;
+      }
+      if (!loaded) {
+        transitioningRef.current = false;
+        holdTimer = window.setTimeout(tick, CARD_MEDIA_HOLD_MS);
+        return;
+      }
+
+      setIncomingIndex(next);
+      setFadeIn(false);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (cancelled) return;
+          setFadeIn(true);
+        });
+      });
+
+      fadeTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        setSlideIndex(next);
+        slideIndexRef.current = next;
+        setIncomingIndex(null);
+        setFadeIn(false);
+        transitioningRef.current = false;
+        holdTimer = window.setTimeout(tick, CARD_MEDIA_HOLD_MS);
+      }, CARD_MEDIA_FADE_MS);
+    };
+
+    holdTimer = window.setTimeout(tick, staggerDelayMs(business.id) + CARD_MEDIA_HOLD_MS);
+    const onVisibility = () => {
+      if (!document.hidden && !transitioningRef.current) {
+        const next = slides[(slideIndexRef.current + 1) % slides.length];
+        if (next?.imageUrl) void preloadCardImage(next.imageUrl);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(holdTimer);
+      window.clearTimeout(fadeTimer);
+      document.removeEventListener('visibilitychange', onVisibility);
+      transitioningRef.current = false;
+    };
+  }, [business.id, inView, slides]);
+
   const shellClass = `group relative overflow-hidden rounded-2xl bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(109,40,217,0.12)] ${
     selected
       ? 'border-2 border-[#6D28D9] shadow-[0_14px_32px_rgba(109,40,217,0.16)]'
@@ -292,21 +611,17 @@ function RestaurantCard({
           <Heart className={`h-3.5 w-3.5 ${favorite ? 'fill-current' : ''}`} />
         </button>
       </div>
+      {business.isOpen === false ? (
+        <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+          Cerrado
+        </span>
+      ) : null}
       <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-[12px]">
-        {business.isOpen != null ? (
-          <span
-            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-              business.isOpen
-                ? 'bg-emerald-50 text-emerald-700'
-                : 'bg-rose-50 text-rose-700'
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                business.isOpen ? 'bg-emerald-500' : 'bg-rose-500'
-              }`}
-            />
-            {business.isOpen ? 'Abierto' : 'Cerrado'}
+        {business.isOpen === true ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Abierto
           </span>
         ) : null}
         {business.ratingCount > 0 ? (
@@ -362,42 +677,84 @@ function RestaurantCard({
     </>
   );
 
+  const mediaFrameClass = forceRow
+    ? 'relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-100'
+    : 'relative block aspect-[16/10] w-full overflow-hidden';
+  const mediaBg =
+    visibleSlide?.kind === 'dish'
+      ? 'bg-slate-900'
+      : 'bg-[linear-gradient(160deg,#f8f7fc_0%,#f1eefe_55%,#eef2ff_100%)]';
+  const indicatorIndex =
+    fadeIn && incomingIndex != null ? incomingIndex : slideIndex;
+
+  const media = (
+    <Link
+      ref={mediaRootRef}
+      href={business.menuUrl}
+      className={`${mediaFrameClass} ${mediaBg}`}
+      onClick={() => onSelect?.(business.id)}
+    >
+      {activeSlide ? (
+        <div className="absolute inset-0">
+          <CardMediaImage slide={activeSlide} forceRow={forceRow} priority />
+        </div>
+      ) : (
+        <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
+          <Store className={forceRow ? 'h-6 w-6' : 'h-8 w-8'} />
+        </div>
+      )}
+      {incomingSlide ? (
+        <div
+          className={`absolute inset-0 transition-opacity ease-out ${
+            fadeIn ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={{ transitionDuration: `${CARD_MEDIA_FADE_MS}ms` }}
+          aria-hidden={!fadeIn}
+        >
+          <div
+            className={`absolute inset-0 ${
+              incomingSlide.kind === 'dish'
+                ? 'bg-slate-900'
+                : 'bg-[linear-gradient(160deg,#f8f7fc_0%,#f1eefe_55%,#eef2ff_100%)]'
+            }`}
+          >
+            <CardMediaImage slide={incomingSlide} forceRow={forceRow} priority />
+          </div>
+        </div>
+      ) : null}
+      {visibleSlide?.kind === 'dish' ? (
+        <CardDishOffer slide={visibleSlide} forceRow={forceRow} />
+      ) : null}
+      {business.promovido ? (
+        <span
+          className={`absolute left-1.5 top-1.5 z-[1] rounded-full bg-[#6D28D9] font-bold uppercase tracking-wide text-white ${
+            forceRow
+              ? 'px-1.5 py-0.5 text-[8px]'
+              : 'left-2 top-2 px-2.5 py-1 text-[10px]'
+          }`}
+        >
+          Promo
+        </span>
+      ) : null}
+      {!forceRow && slides.length > 1 ? (
+        <span className="absolute bottom-2 right-2 z-[1] flex gap-1">
+          {slides.map((slide, index) => (
+            <span
+              key={`${slide.kind}-${index}`}
+              className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${
+                index === indicatorIndex ? 'bg-white' : 'bg-white/45'
+              }`}
+            />
+          ))}
+        </span>
+      ) : null}
+    </Link>
+  );
+
   if (forceRow) {
     return (
       <article className={`${shellClass} flex gap-2.5 p-2.5`}>
-        <Link
-          href={business.menuUrl}
-          className={`relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-100 ${mediaBg}`}
-          onClick={() => onSelect?.(business.id)}
-        >
-          {image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={image}
-              alt=""
-              className={
-                isLogoOnly
-                  ? 'h-full w-full scale-110 object-cover'
-                  : 'h-full w-full object-cover'
-              }
-              loading="lazy"
-            />
-          ) : (
-            <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
-              <Store className="h-6 w-6" />
-            </div>
-          )}
-          {business.promovido ? (
-            <span className="absolute left-1 top-1 rounded-full bg-[#6D28D9] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
-              Promo
-            </span>
-          ) : null}
-          {business.isOpen === false ? (
-            <span className="absolute bottom-1 left-1 rounded-full bg-rose-600/95 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
-              Cerrado
-            </span>
-          ) : null}
-        </Link>
+        {media}
         <div className="flex min-w-0 flex-1 flex-col justify-center">{meta}</div>
       </article>
     );
@@ -406,39 +763,7 @@ function RestaurantCard({
   return (
     <article className={`${shellClass} flex h-full flex-col`}>
       <div className="relative shrink-0">
-        <Link
-          href={business.menuUrl}
-          className={`relative block aspect-[16/10] w-full overflow-hidden ${mediaBg}`}
-          onClick={() => onSelect?.(business.id)}
-        >
-          {image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={image}
-              alt=""
-              className={
-                isLogoOnly
-                  ? 'h-full w-full object-contain p-5 sm:p-6'
-                  : 'h-full w-full object-cover'
-              }
-              loading="lazy"
-            />
-          ) : (
-            <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
-              <Store className="h-8 w-8" />
-            </div>
-          )}
-          {business.promovido ? (
-            <span className="absolute left-2 top-2 rounded-full bg-[#6D28D9] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
-              Promo
-            </span>
-          ) : null}
-          {business.isOpen === false ? (
-            <span className="absolute bottom-2 left-2 rounded-full bg-rose-600/95 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
-              Cerrado
-            </span>
-          ) : null}
-        </Link>
+        {media}
         <button
           type="button"
           aria-label={favorite ? 'Quitar de favoritos' : 'Guardar en favoritos'}
@@ -489,6 +814,7 @@ export function ClientesDiscoveryPage() {
   const [zoneLabel, setZoneLabel] = useState<string | null>(null);
   const [radiusKm, setRadiusKm] = useState<(typeof RADIUS_OPTIONS)[number] | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [whereMenuOpen, setWhereMenuOpen] = useState(false);
   const [audienceGateOpen, setAudienceGateOpen] = useState(false);
   const [audienceDontShowAgain, setAudienceDontShowAgain] = useState(false);
   const [draftQuery, setDraftQuery] = useState('');
@@ -504,9 +830,18 @@ export function ClientesDiscoveryPage() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [heroIndex, setHeroIndex] = useState(0);
+  const [heroIncomingIndex, setHeroIncomingIndex] = useState<number | null>(null);
+  const [heroFadeIn, setHeroFadeIn] = useState(false);
+  const [heroInView, setHeroInView] = useState(false);
+  const [heroCycleToken, setHeroCycleToken] = useState(0);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const resultsRef = useRef<HTMLElement | null>(null);
   const promoCarouselRef = useRef<HTMLDivElement | null>(null);
+  const regionCarouselRef = useRef<HTMLDivElement | null>(null);
+  const whereMenuRef = useRef<HTMLDivElement | null>(null);
+  const heroRootRef = useRef<HTMLDivElement | null>(null);
+  const heroIndexRef = useRef(0);
+  const heroBusyRef = useRef(false);
   const hasLoadedOnce = useRef(false);
   const geoAskedRef = useRef(false);
 
@@ -514,6 +849,13 @@ export function ClientesDiscoveryPage() {
     const el = promoCarouselRef.current;
     if (!el) return;
     const step = Math.min(320, Math.max(240, Math.round(el.clientWidth * 0.72)));
+    el.scrollBy({ left: direction * step, behavior: 'smooth' });
+  }, []);
+
+  const scrollRegionCarousel = useCallback((direction: -1 | 1) => {
+    const el = regionCarouselRef.current;
+    if (!el) return;
+    const step = Math.min(280, Math.max(180, Math.round(el.clientWidth * 0.7)));
     el.scrollBy({ left: direction * step, behavior: 'smooth' });
   }, []);
 
@@ -617,6 +959,37 @@ export function ClientesDiscoveryPage() {
       resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }, []);
+
+  const selectRegion = useCallback(
+    (nextRegion: string) => {
+      setRegion(nextRegion);
+      setWhereMenuOpen(false);
+      if (nextRegion) {
+        setRadiusKm(null);
+        setSortMode('smart');
+      }
+      scrollToResults();
+    },
+    [scrollToResults],
+  );
+
+  useEffect(() => {
+    if (!whereMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && whereMenuRef.current?.contains(target)) return;
+      setWhereMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setWhereMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [whereMenuOpen]);
 
   const enterSearchMode = useCallback(
     (opts?: { query?: string; focus?: boolean }) => {
@@ -760,10 +1133,7 @@ export function ClientesDiscoveryPage() {
   const results = payload.results ?? [];
   const promoted = withinRadius(payload.promoted ?? results.filter((item) => item.promovido));
   const topRated = withinRadius(payload.topRated ?? []);
-  const regions =
-    payload.regions && payload.regions.length > 0
-      ? payload.regions
-      : [...DIRECTORY_REGIONS];
+  const regions = normalizeRegionStats(payload.regions);
   const categories =
     payload.categories && payload.categories.length > 0
       ? payload.categories
@@ -784,12 +1154,123 @@ export function ClientesDiscoveryPage() {
   }, [promoted, results, topRated, withinRadius]);
 
   useEffect(() => {
-    if (heroSlides.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setHeroIndex((index) => (index + 1) % heroSlides.length);
-    }, 4500);
-    return () => window.clearInterval(timer);
-  }, [heroSlides.length]);
+    heroIndexRef.current = heroIndex;
+  }, [heroIndex]);
+
+  useEffect(() => {
+    if (heroIndex < heroSlides.length) return;
+    setHeroIndex(0);
+    heroIndexRef.current = 0;
+    setHeroIncomingIndex(null);
+    setHeroFadeIn(false);
+    heroBusyRef.current = false;
+  }, [heroIndex, heroSlides.length]);
+
+  useEffect(() => {
+    const node = heroRootRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setHeroInView(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setHeroInView(Boolean(entry?.isIntersecting)),
+      { rootMargin: '160px 0px', threshold: 0.25 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!heroInView || heroSlides.length <= 1) return;
+    const next = heroSlides[(heroIndex + 1) % heroSlides.length];
+    if (next) void preloadCardImage(heroSlideImageUrl(next));
+  }, [heroInView, heroIndex, heroSlides]);
+
+  const goToHeroSlide = useCallback(
+    async (nextIndex: number, opts?: { manual?: boolean }) => {
+      if (heroSlides.length <= 1) return;
+      const next = ((nextIndex % heroSlides.length) + heroSlides.length) % heroSlides.length;
+      if (heroBusyRef.current) return;
+      if (next === heroIndexRef.current) {
+        if (opts?.manual) setHeroCycleToken((token) => token + 1);
+        return;
+      }
+      const slide = heroSlides[next];
+      if (!slide) return;
+
+      if (opts?.manual) setHeroCycleToken((token) => token + 1);
+      heroBusyRef.current = true;
+      const loaded = await preloadCardImage(heroSlideImageUrl(slide));
+      if (!loaded) {
+        heroBusyRef.current = false;
+        return;
+      }
+
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reducedMotion) {
+        setHeroIndex(next);
+        heroIndexRef.current = next;
+        setHeroIncomingIndex(null);
+        setHeroFadeIn(false);
+        heroBusyRef.current = false;
+        return;
+      }
+
+      setHeroIncomingIndex(next);
+      setHeroFadeIn(false);
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            setHeroFadeIn(true);
+            window.setTimeout(resolve, CARD_MEDIA_FADE_MS);
+          });
+        });
+      });
+      setHeroIndex(next);
+      heroIndexRef.current = next;
+      setHeroIncomingIndex(null);
+      setHeroFadeIn(false);
+      heroBusyRef.current = false;
+    },
+    [heroSlides],
+  );
+
+  useEffect(() => {
+    if (!heroInView || heroSlides.length <= 1) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    let cancelled = false;
+    let holdTimer = 0;
+
+    const schedule = (delay: number) => {
+      holdTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        if (document.hidden || heroBusyRef.current) {
+          schedule(HERO_MEDIA_HOLD_MS);
+          return;
+        }
+        const next = (heroIndexRef.current + 1) % heroSlides.length;
+        void goToHeroSlide(next).finally(() => {
+          if (!cancelled) schedule(HERO_MEDIA_HOLD_MS);
+        });
+      }, delay);
+    };
+
+    schedule(HERO_MEDIA_HOLD_MS);
+    const onVisibility = () => {
+      if (!document.hidden) {
+        const next = heroSlides[(heroIndexRef.current + 1) % heroSlides.length];
+        if (next) void preloadCardImage(heroSlideImageUrl(next));
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(holdTimer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [goToHeroSlide, heroCycleToken, heroInView, heroSlides]);
 
   const filteredResults = useMemo(() => {
     let list = results;
@@ -926,6 +1407,12 @@ export function ClientesDiscoveryPage() {
     categories.find((item) => item.id === category)?.label ?? category;
 
   const hero = heroSlides[heroIndex] ?? heroSlides[0] ?? null;
+  const heroIncoming =
+    heroIncomingIndex != null ? heroSlides[heroIncomingIndex] ?? null : null;
+  const heroVisible =
+    heroFadeIn && heroIncoming ? heroIncoming : hero;
+  const heroIndicatorIndex =
+    heroFadeIn && heroIncomingIndex != null ? heroIncomingIndex : heroIndex;
 
   const updateSearchQuery = useCallback((nextRaw: string) => {
     const next = nextRaw.slice(0, 80);
@@ -1207,10 +1694,10 @@ export function ClientesDiscoveryPage() {
 
         {!searchMode ? (
         <>
-        <section className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(109,40,217,0.16),transparent_34%),linear-gradient(180deg,#fff,#fafafc)]" />
+        <section className={`relative ${whereMenuOpen ? 'z-30' : 'z-10'}`}>
+          <div className="pointer-events-none absolute inset-0 overflow-hidden bg-[radial-gradient(circle_at_80%_20%,rgba(109,40,217,0.16),transparent_34%),linear-gradient(180deg,#fff,#fafafc)]" />
           <div className="relative mx-auto grid max-w-6xl gap-5 px-3 pb-6 pt-5 sm:gap-8 sm:px-4 sm:pb-10 sm:pt-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:pt-14">
-            <div>
+            <div className="relative z-20 min-w-0">
               <h1 className="max-w-xl font-[var(--font-display)] text-[1.75rem] font-black leading-[1.08] tracking-[-0.04em] text-[#0F172A] sm:text-4xl md:text-[3.35rem] md:leading-[1.02]">
                 Tu próxima{' '}
                 <span className="text-[#6D28D9]">comida</span>
@@ -1221,7 +1708,7 @@ export function ClientesDiscoveryPage() {
                 Busca por antojo, región o cercanía. Los promocionados los elige el restaurante; los
                 destacados salen de las notas reales de sus clientes.
               </p>
-              <div ref={heroSearchRef} className="mt-4 sm:mt-6">
+              <div ref={heroSearchRef} className="relative z-30 mt-4 sm:mt-6">
                 {/* Mobile: Airbnb-style single search pill */}
                 <button
                   type="button"
@@ -1246,13 +1733,13 @@ export function ClientesDiscoveryPage() {
                 </button>
 
                 {/* Desktop/tablet: expanded search card */}
-                <button
-                  type="button"
-                  onClick={() => enterSearchMode({ focus: true })}
-                  className="group hidden w-full rounded-[28px] bg-white p-2 text-left shadow-[0_20px_60px_rgba(15,23,42,0.12)] ring-1 ring-black/5 transition hover:-translate-y-0.5 hover:shadow-[0_22px_70px_rgba(109,40,217,0.18)] hover:ring-[#6D28D9]/30 sm:block"
-                >
+                <div className="group relative hidden w-full rounded-[28px] bg-white p-2 text-left shadow-[0_20px_60px_rgba(15,23,42,0.12)] ring-1 ring-black/5 transition hover:shadow-[0_22px_70px_rgba(109,40,217,0.18)] hover:ring-[#6D28D9]/30 sm:block">
                   <div className="flex flex-col sm:flex-row sm:items-stretch">
-                    <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 rounded-[22px] px-4 py-3 sm:rounded-none sm:rounded-l-[22px]">
+                    <button
+                      type="button"
+                      onClick={() => enterSearchMode({ focus: true })}
+                      className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 rounded-[22px] px-4 py-3 text-left transition hover:bg-slate-50 sm:rounded-none sm:rounded-l-[22px]"
+                    >
                       <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-slate-500">
                         Qué buscas
                       </span>
@@ -1260,25 +1747,115 @@ export function ClientesDiscoveryPage() {
                         <Search className="h-4 w-4 shrink-0 text-[#6D28D9]" />
                         <span className="truncate">Burger, pizza, café, restaurante…</span>
                       </span>
-                    </span>
+                    </button>
                     <span className="mx-3 hidden w-px bg-slate-200 sm:block" />
-                    <span className="flex min-w-0 flex-[0.85] flex-col justify-center gap-0.5 rounded-[22px] border-t border-slate-100 px-4 py-3 sm:border-t-0 sm:rounded-none">
-                      <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-slate-500">
-                        Dónde
-                      </span>
-                      <span className="flex items-center gap-2 truncate text-[15px] font-semibold text-slate-900">
-                        <MapPin className="h-4 w-4 shrink-0 text-[#6D28D9]" />
-                        <span className="truncate">{locationLabel}</span>
-                      </span>
-                    </span>
-                    <span className="flex items-center p-1 sm:pl-2">
-                      <span className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#6D28D9] px-6 text-sm font-bold text-white shadow-lg shadow-violet-500/25 sm:w-auto sm:px-7">
+                    <div ref={whereMenuRef} className="relative min-w-0 flex-[0.85]">
+                      <button
+                        type="button"
+                        aria-haspopup="listbox"
+                        aria-expanded={whereMenuOpen}
+                        onClick={() => setWhereMenuOpen((open) => !open)}
+                        className={`flex w-full flex-col justify-center gap-0.5 rounded-[22px] border-t border-slate-100 px-4 py-3 text-left transition sm:border-t-0 sm:rounded-none ${
+                          whereMenuOpen ? 'bg-violet-50' : 'hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-slate-500">
+                          Dónde
+                        </span>
+                        <span className="flex items-center gap-2 truncate text-[15px] font-semibold text-slate-900">
+                          <MapPin className="h-4 w-4 shrink-0 text-[#6D28D9]" />
+                          <span className="min-w-0 flex-1 truncate">{locationLabel}</span>
+                          <ChevronDown
+                            className={`h-4 w-4 shrink-0 text-slate-400 transition ${
+                              whereMenuOpen ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </span>
+                      </button>
+                      {whereMenuOpen ? (
+                        <div
+                          role="listbox"
+                          aria-label="Seleccionar región"
+                          className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-50 max-h-72 overflow-y-auto rounded-2xl bg-white p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.16)] ring-1 ring-slate-200 sm:left-auto sm:right-0 sm:w-[min(100%,18rem)]"
+                        >
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={!region}
+                            onClick={() => selectRegion('')}
+                            className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                              !region
+                                ? 'bg-violet-50 text-[#6D28D9]'
+                                : 'text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span className="min-w-0 flex-1">Todas las regiones</span>
+                            {!region ? <Check className="h-4 w-4 shrink-0" /> : null}
+                          </button>
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={false}
+                            onClick={() => {
+                              setRegion('');
+                              setWhereMenuOpen(false);
+                              requestLocation({ switchToNear: true, forcePrompt: true });
+                              scrollToResults();
+                            }}
+                            className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <Navigation className="h-4 w-4 shrink-0 text-[#6D28D9]" />
+                            <span className="min-w-0 flex-1">
+                              {geoStatus === 'loading' ? 'Obteniendo ubicación…' : 'Cerca de mí'}
+                            </span>
+                          </button>
+                          {regions.length > 0 ? (
+                            <div className="my-1 border-t border-slate-100" />
+                          ) : null}
+                          {regions.map((item) => {
+                            const active = region === item.name;
+                            return (
+                              <button
+                                key={item.name}
+                                type="button"
+                                role="option"
+                                aria-selected={active}
+                                onClick={() => selectRegion(item.name)}
+                                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                                  active
+                                    ? 'bg-violet-50 text-[#6D28D9]'
+                                    : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                                <span
+                                  className={`rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums ${
+                                    active
+                                      ? 'bg-[#6D28D9]/15 text-[#6D28D9]'
+                                      : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {item.count}
+                                </span>
+                                {active ? <Check className="h-4 w-4 shrink-0" /> : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center p-1 sm:pl-2">
+                      <button
+                        type="button"
+                        onClick={() => enterSearchMode({ focus: true })}
+                        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#6D28D9] px-6 text-sm font-bold text-white shadow-lg shadow-violet-500/25 sm:w-auto sm:px-7"
+                      >
                         <Search className="h-4 w-4" />
                         Buscar
-                      </span>
-                    </span>
+                      </button>
+                    </div>
                   </div>
-                </button>
+                </div>
 
                 <div className="mt-3 flex items-center justify-between gap-2 px-0.5 sm:mt-3 sm:px-1">
                   <div className="flex min-w-0 gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -1338,29 +1915,53 @@ export function ClientesDiscoveryPage() {
                 ) : null}
               </div>
             </div>
-            <div className="relative mx-auto h-[260px] w-full max-w-[420px] overflow-hidden rounded-[22px] bg-slate-900 shadow-xl sm:mx-0 sm:h-[340px] sm:max-w-none sm:rounded-[32px] sm:shadow-2xl lg:h-[400px]">
+            <div
+              ref={heroRootRef}
+              className="relative mx-auto h-[260px] w-full max-w-[420px] overflow-hidden rounded-[22px] bg-slate-900 shadow-xl sm:mx-0 sm:h-[340px] sm:max-w-none sm:rounded-[32px] sm:shadow-2xl lg:h-[400px]"
+            >
               {hero ? (
-                <Link href={hero.menuUrl} className="absolute inset-0 block">
+                <Link
+                  href={(heroVisible ?? hero).menuUrl}
+                  className="absolute inset-0 block"
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    key={hero.id}
-                    src={hero.coverUrl || hero.logoUrl || '/branding/full_logo.png'}
+                    src={heroSlideImageUrl(hero)}
                     alt=""
-                    className="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-700"
+                    decoding="async"
+                    fetchPriority="high"
+                    className="absolute inset-0 h-full w-full object-cover opacity-90"
                   />
+                  {heroIncoming ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={heroSlideImageUrl(heroIncoming)}
+                      alt=""
+                      decoding="async"
+                      aria-hidden={!heroFadeIn}
+                      className={`absolute inset-0 h-full w-full object-cover transition-opacity ease-out ${
+                        heroFadeIn ? 'opacity-90' : 'opacity-0'
+                      }`}
+                      style={{ transitionDuration: `${CARD_MEDIA_FADE_MS}ms` }}
+                    />
+                  ) : null}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-3.5 text-white sm:p-6">
                     <p className="text-[10px] font-bold uppercase tracking-wide text-violet-200 sm:text-xs">
-                      {hero.promovido ? 'Sitio promocionado' : 'Recomendado'}
+                      {(heroVisible ?? hero).promovido
+                        ? 'Sitio promocionado'
+                        : 'Recomendado'}
                     </p>
                     <p className="mt-0.5 line-clamp-2 font-[var(--font-display)] text-lg font-black tracking-tight sm:mt-1 sm:text-2xl">
-                      {hero.nombre}
+                      {(heroVisible ?? hero).nombre}
                     </p>
                     <p className="mt-0.5 truncate text-[11px] text-white/80 sm:mt-1 sm:text-sm">
-                      {hero.ratingCount > 0
-                        ? `★ ${hero.ratingAverage.toFixed(1)} · ${hero.ratingCount} opiniones`
-                        : hero.categoria || 'Menú digital'}
-                      {hero.distanceKm != null ? ` · ${hero.distanceKm} km` : ''}
+                      {(heroVisible ?? hero).ratingCount > 0
+                        ? `★ ${(heroVisible ?? hero).ratingAverage.toFixed(1)} · ${(heroVisible ?? hero).ratingCount} opiniones`
+                        : (heroVisible ?? hero).categoria || 'Menú digital'}
+                      {(heroVisible ?? hero).distanceKm != null
+                        ? ` · ${(heroVisible ?? hero).distanceKm} km`
+                        : ''}
                     </p>
                     <span className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#6D28D9] sm:mt-3">
                       Ver menú <ArrowRight className="h-3.5 w-3.5" />
@@ -1385,7 +1986,7 @@ export function ClientesDiscoveryPage() {
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      setHeroIndex((index) => (index - 1 + heroSlides.length) % heroSlides.length);
+                      void goToHeroSlide(heroIndexRef.current - 1, { manual: true });
                     }}
                     className="absolute left-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg hover:bg-white sm:left-3 sm:h-10 sm:w-10"
                   >
@@ -1397,7 +1998,7 @@ export function ClientesDiscoveryPage() {
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      setHeroIndex((index) => (index + 1) % heroSlides.length);
+                      void goToHeroSlide(heroIndexRef.current + 1, { manual: true });
                     }}
                     className="absolute right-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg hover:bg-white sm:right-3 sm:h-10 sm:w-10"
                   >
@@ -1412,10 +2013,10 @@ export function ClientesDiscoveryPage() {
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          setHeroIndex(index);
+                          void goToHeroSlide(index, { manual: true });
                         }}
-                        className={`h-1.5 w-1.5 rounded-full sm:h-2 sm:w-2 ${
-                          index === heroIndex ? 'bg-white' : 'bg-white/40'
+                        className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 sm:h-2 sm:w-2 ${
+                          index === heroIndicatorIndex ? 'bg-white' : 'bg-white/40'
                         }`}
                       />
                     ))}
@@ -1857,6 +2458,7 @@ export function ClientesDiscoveryPage() {
 
         {!searchMode ? (
         <>
+        {regions.length > 0 ? (
         <section id="regiones" className="mx-auto max-w-6xl scroll-mt-20 px-3 pb-10 sm:px-4 sm:pb-14">
           <div className="overflow-hidden rounded-[24px] bg-white shadow-sm ring-1 ring-slate-100 sm:rounded-[28px]">
             <div className="relative overflow-hidden bg-[linear-gradient(160deg,#4c1d95,#6d28d9_55%,#a78bfa)] px-5 py-5 sm:px-8 sm:py-7">
@@ -1883,27 +2485,59 @@ export function ClientesDiscoveryPage() {
               </div>
             </div>
             <div className="p-4 sm:p-6">
-              <div className="flex flex-wrap gap-2">
-                {regions.map((item) => {
-                  const active = region === item;
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => {
-                        setRegion(active ? '' : item);
-                        scrollToResults();
-                      }}
-                      className={`rounded-full px-3.5 py-2 text-[13px] font-bold ring-1 transition sm:px-4 sm:text-sm ${
-                        active
-                          ? 'bg-[#6D28D9] text-white ring-[#6D28D9]'
-                          : 'bg-slate-50 text-slate-700 ring-slate-200 hover:bg-violet-50'
-                      }`}
-                    >
-                      {item}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center gap-2">
+                {regions.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-label="Regiones anteriores"
+                    onClick={() => scrollRegionCarousel(-1)}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                ) : null}
+                <div
+                  ref={regionCarouselRef}
+                  className="flex min-w-0 flex-1 gap-2 overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
+                  {regions.map((item) => {
+                    const active = region === item.name;
+                    return (
+                      <button
+                        key={item.name}
+                        type="button"
+                        onClick={() => {
+                          setRegion(active ? '' : item.name);
+                          scrollToResults();
+                        }}
+                        className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-[13px] font-bold ring-1 transition sm:px-4 sm:text-sm ${
+                          active
+                            ? 'bg-[#6D28D9] text-white ring-[#6D28D9]'
+                            : 'bg-slate-50 text-slate-700 ring-slate-200 hover:bg-violet-50'
+                        }`}
+                      >
+                        <span>{item.name}</span>
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums ${
+                            active ? 'bg-white/20 text-white' : 'bg-violet-100 text-[#6D28D9]'
+                          }`}
+                        >
+                          {item.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {regions.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-label="Regiones siguientes"
+                    onClick={() => scrollRegionCarousel(1)}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                ) : null}
               </div>
               {region ? (
                 <p className="mt-3 text-xs text-slate-500 sm:text-sm">
@@ -1925,6 +2559,7 @@ export function ClientesDiscoveryPage() {
             </div>
           </div>
         </section>
+        ) : null}
 
         <section id="para-negocios" className="mx-auto max-w-6xl px-3 py-6 sm:px-4 sm:py-12">
           <div className="relative overflow-hidden rounded-[28px] bg-[linear-gradient(160deg,#f7f4ff_0%,#faf8ff_42%,#ffffff_100%)] p-5 shadow-[0_18px_50px_rgba(109,40,217,0.08)] ring-1 ring-violet-100/80 sm:rounded-[32px] sm:p-8 lg:p-10">
@@ -2224,16 +2859,17 @@ export function ClientesDiscoveryPage() {
                   </button>
                   {regions.map((item) => (
                     <button
-                      key={item}
+                      key={item.name}
                       type="button"
-                      onClick={() => setDraftRegion(item)}
+                      onClick={() => setDraftRegion(item.name)}
                       className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-                        draftRegion === item
+                        draftRegion === item.name
                           ? 'bg-[#6D28D9] text-white'
                           : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
                       }`}
                     >
-                      {item}
+                      {item.name}
+                      <span className="ml-1.5 tabular-nums opacity-80">{item.count}</span>
                     </button>
                   ))}
                 </div>

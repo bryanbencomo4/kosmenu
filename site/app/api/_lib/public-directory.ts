@@ -12,11 +12,17 @@ import {
 import { resolveBusinessScheduleStatus } from './business-hours';
 import {
   categoryChipMatches,
+  DIRECTORY_REGIONS,
   distanceKm,
   toFiniteCoord,
 } from './public-directory-geo';
 import { normalizeDirectoryQuery } from './public-directory-text';
 import { getServiceSupabaseClient } from './supabase-server';
+
+export type DirectoryRegionStat = {
+  name: string;
+  count: number;
+};
 
 export type PublicDirectoryBusiness = {
   id: string;
@@ -27,6 +33,13 @@ export type PublicDirectoryBusiness = {
   direccion: string | null;
   negocioVirtual: boolean;
   menuUrl: string;
+};
+
+export type DirectoryShowcaseDish = {
+  name: string;
+  imageUrl: string;
+  price: number;
+  compareAtPrice: number | null;
 };
 
 export type ClientDirectoryBusiness = PublicDirectoryBusiness & {
@@ -40,6 +53,8 @@ export type ClientDirectoryBusiness = PublicDirectoryBusiness & {
   /** null = horario no configurado */
   isOpen: boolean | null;
   openLabel: string | null;
+  /** Food teasers for discovery cards (image + price). */
+  showcaseDishes: DirectoryShowcaseDish[];
   matchedDish?: string | null;
   matchScore?: number;
 };
@@ -76,6 +91,7 @@ const DIRECTORY_EXCLUDED_SLUGS = new Set([
   'pizzas-y-pastas',
   'demo',
   'pizzas-el-trueno',
+  'omg-burgers',
 ]);
 
 function isExcludedDirectorySlug(slug: string) {
@@ -95,6 +111,8 @@ const featuredCache = new Map<number, Cached<PublicDirectoryBusiness[]>>();
 let clientDirectoryCache: Cached<ClientDirectoryCached[]> | null = null;
 const PRODUCT_NAMES_PER_BUSINESS = 16;
 const PRODUCT_NAMES_TOTAL_CAP = 640;
+const SHOWCASE_DISHES_PER_BUSINESS = 4;
+const SHOWCASE_DISHES_TOTAL_CAP = 480;
 
 async function mapInBatches<T, R>(
   items: T[],
@@ -176,28 +194,45 @@ async function loadRecentOrderCounts(comercioIds: string[]) {
   return buildOrderCountMap((data ?? []) as Array<{ comercio_id?: string | null }>);
 }
 
-async function loadCoverUrls(comercioIds: string[]) {
-  const covers = new Map<string, string>();
-  if (comercioIds.length === 0) return covers;
+async function loadShowcaseDishes(comercioIds: string[]) {
+  const dishes = new Map<string, DirectoryShowcaseDish[]>();
+  if (comercioIds.length === 0) return dishes;
 
   const supabase = getServiceSupabaseClient();
   const { data, error } = await supabase
     .from('productos')
-    .select('comercio_id,imagen_url,orden')
+    .select('comercio_id,nombre,imagen_url,precio,precio_comparacion,disponible,orden')
     .in('comercio_id', comercioIds)
     .not('imagen_url', 'is', null)
     .order('orden', { ascending: true })
-    .limit(Math.min(comercioIds.length * 4, 320));
+    .limit(SHOWCASE_DISHES_TOTAL_CAP);
 
-  if (error || !data) return covers;
+  if (error || !data) return dishes;
 
-  for (const row of data as Array<{ comercio_id?: string | null; imagen_url?: string | null }>) {
+  for (const row of data as Array<{
+    comercio_id?: string | null;
+    nombre?: string | null;
+    imagen_url?: string | null;
+    precio?: number | string | null;
+    precio_comparacion?: number | string | null;
+    disponible?: boolean | null;
+  }>) {
+    if (row.disponible === false) continue;
     const id = (row.comercio_id ?? '').toString().trim();
-    const url = (row.imagen_url ?? '').toString().trim();
-    if (!id || !url || covers.has(id)) continue;
-    covers.set(id, url);
+    const name = (row.nombre ?? '').toString().trim();
+    const imageUrl = (row.imagen_url ?? '').toString().trim();
+    const price = Number(row.precio);
+    if (!id || !name || !imageUrl || !Number.isFinite(price) || price <= 0) continue;
+    const list = dishes.get(id) ?? [];
+    if (list.length >= SHOWCASE_DISHES_PER_BUSINESS) continue;
+    const compareRaw = Number(row.precio_comparacion);
+    const compareAtPrice =
+      Number.isFinite(compareRaw) && compareRaw > price ? compareRaw : null;
+    list.push({ name, imageUrl, price, compareAtPrice });
+    dishes.set(id, list);
   }
-  return covers;
+
+  return dishes;
 }
 
 async function loadProductNames(comercioIds: string[]) {
@@ -250,15 +285,10 @@ function scheduleFields(horarios: unknown): Pick<ClientDirectoryBusiness, 'isOpe
   }
   return {
     isOpen: false,
-    openLabel: status.nextOpenLabel ? `Cerrado · abre ${status.nextOpenLabel}` : 'Cerrado',
+    openLabel: status.nextOpenLabel
+      ? `Abre ${status.nextOpenLabel}`
+      : null,
   };
-}
-
-/** Closed by schedule = unavailable for discovery. Unconfigured hours still listed. */
-function isDirectoryAvailable(horarios: unknown) {
-  const status = resolveBusinessScheduleStatus(horarios);
-  if (!status.configured) return true;
-  return status.isOpen;
 }
 
 /** Lower sorts first: open → unknown hours → closed. */
@@ -364,8 +394,8 @@ async function loadClientDirectoryBase(): Promise<ClientDirectoryCached[]> {
   const allowedRows = rows.filter((row) => byId.has((row.id ?? '').toString().trim()));
   const ids = allowedRows.map((row) => (row.id ?? '').toString().trim()).filter(Boolean);
 
-  const [covers, ratings, productNames] = await Promise.all([
-    loadCoverUrls(ids),
+  const [showcaseDishes, ratings, productNames] = await Promise.all([
+    loadShowcaseDishes(ids),
     loadRatingMap(ids),
     loadProductNames(ids),
   ]);
@@ -375,6 +405,7 @@ async function loadClientDirectoryBase(): Promise<ClientDirectoryCached[]> {
       const base = toDirectoryBusiness(row);
       if (!base) return null;
       const rating = ratings.get(base.id) ?? { average: 0, count: 0 };
+      const dishes = showcaseDishes.get(base.id) ?? [];
       const lat = toFiniteCoord(row.latitud);
       const lng = toFiniteCoord(row.longitud);
       const hasValidCoords =
@@ -383,7 +414,7 @@ async function loadClientDirectoryBase(): Promise<ClientDirectoryCached[]> {
         !(Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01);
       return {
         ...base,
-        coverUrl: covers.get(base.id) ?? base.logoUrl,
+        coverUrl: dishes[0]?.imageUrl ?? base.logoUrl,
         lat: hasValidCoords ? lat : null,
         lng: hasValidCoords ? lng : null,
         ratingAverage: rating.average,
@@ -392,6 +423,7 @@ async function loadClientDirectoryBase(): Promise<ClientDirectoryCached[]> {
         distanceKm: null,
         horarios: row.horarios ?? null,
         productNames: productNames.get(base.id) ?? [],
+        showcaseDishes: dishes,
       };
     })
     .filter((entry): entry is ClientDirectoryCached => entry != null);
@@ -406,8 +438,8 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
   const byId = new Map(verifiedBasics.map((entry) => [entry.id, entry]));
   const allowedRows = rows.filter((row) => byId.has((row.id ?? '').toString().trim()));
   const ids = allowedRows.map((row) => (row.id ?? '').toString().trim()).filter(Boolean);
-  const [covers, ratings, productNames] = await Promise.all([
-    loadCoverUrls(ids),
+  const [showcaseDishes, ratings, productNames] = await Promise.all([
+    loadShowcaseDishes(ids),
     loadRatingMap(ids),
     loadProductNames(ids),
   ]);
@@ -417,6 +449,7 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
       const base = toDirectoryBusiness(row);
       if (!base) return null;
       const rating = ratings.get(base.id) ?? { average: 0, count: 0 };
+      const dishes = showcaseDishes.get(base.id) ?? [];
       const lat = toFiniteCoord(row.latitud);
       const lng = toFiniteCoord(row.longitud);
       const hasValidCoords =
@@ -425,7 +458,7 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
         !(Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01);
       return {
         ...base,
-        coverUrl: covers.get(base.id) ?? base.logoUrl,
+        coverUrl: dishes[0]?.imageUrl ?? base.logoUrl,
         lat: hasValidCoords ? lat : null,
         lng: hasValidCoords ? lng : null,
         ratingAverage: rating.average,
@@ -434,6 +467,7 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
         distanceKm: null,
         horarios: row.horarios ?? null,
         productNames: productNames.get(base.id) ?? [],
+        showcaseDishes: dishes,
       };
     })
     .filter((entry): entry is ClientDirectoryCached => entry != null);
@@ -614,6 +648,27 @@ function sortByDiscoveryRelevance(
     .map(({ _rank: _ignored, _openRank: _openIgnored, ...entry }) => entry);
 }
 
+function buildRegionStats(entries: ClientDirectoryCached[]): DirectoryRegionStat[] {
+  const normalizedRegions = DIRECTORY_REGIONS.map((name) => ({
+    name,
+    key: normalizeDirectoryQuery(name),
+  }));
+  const counts = new Map<string, number>(DIRECTORY_REGIONS.map((name) => [name, 0]));
+
+  for (const entry of entries) {
+    const address = normalizeDirectoryQuery(entry.direccion ?? '');
+    if (!address) continue;
+    const matched = normalizedRegions.find((region) => address.includes(region.key));
+    if (!matched) continue;
+    counts.set(matched.name, (counts.get(matched.name) ?? 0) + 1);
+  }
+
+  return DIRECTORY_REGIONS.map((name) => ({
+    name,
+    count: counts.get(name) ?? 0,
+  })).filter((region) => region.count > 0);
+}
+
 export async function listClientDirectory(options: {
   query?: string;
   region?: string;
@@ -635,6 +690,8 @@ export async function listClientDirectory(options: {
       : null;
 
   let entries = await loadClientDirectoryBase();
+  // Region chips use the full directory pool (not the active search filters).
+  const regions = buildRegionStats(entries);
 
   if (normalizedQuery) {
     const knownIds = new Set(entries.map((entry) => entry.id));
@@ -660,9 +717,6 @@ export async function listClientDirectory(options: {
     );
   }
 
-  // Hide restaurants that are closed right now (schedule configured + closed).
-  entries = entries.filter((entry) => isDirectoryAvailable(entry.horarios));
-
   const sorted = normalizedQuery
     ? sortByDiscoveryRelevance(entries, normalizedQuery, origin)
     : sortClientDirectory(entries, origin);
@@ -672,8 +726,8 @@ export async function listClientDirectory(options: {
   const topRated = [...publicResults]
     .filter((entry) => entry.ratingCount > 0)
     .sort((left, right) => {
-      const leftOpen = left.isOpen === true ? 0 : 1;
-      const rightOpen = right.isOpen === true ? 0 : 1;
+      const leftOpen = left.isOpen === true ? 0 : left.isOpen == null ? 1 : 2;
+      const rightOpen = right.isOpen === true ? 0 : right.isOpen == null ? 1 : 2;
       if (leftOpen !== rightOpen) return leftOpen - rightOpen;
       if (right.ratingAverage !== left.ratingAverage) {
         return right.ratingAverage - left.ratingAverage;
@@ -687,6 +741,7 @@ export async function listClientDirectory(options: {
     promoted: promoted.slice(0, 12),
     topRated,
     total: publicResults.length,
+    regions,
   };
 }
 
