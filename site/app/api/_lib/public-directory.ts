@@ -9,6 +9,7 @@ import {
   rankDirectorySearchDetails,
   rankDirectorySearchResults,
 } from './public-directory-featured';
+import { resolveBusinessScheduleStatus } from './business-hours';
 import {
   categoryChipMatches,
   distanceKm,
@@ -36,12 +37,16 @@ export type ClientDirectoryBusiness = PublicDirectoryBusiness & {
   ratingCount: number;
   promovido: boolean;
   distanceKm: number | null;
+  /** null = horario no configurado */
+  isOpen: boolean | null;
+  openLabel: string | null;
   matchedDish?: string | null;
   matchScore?: number;
 };
 
-type ClientDirectoryCached = ClientDirectoryBusiness & {
+type ClientDirectoryCached = Omit<ClientDirectoryBusiness, 'isOpen' | 'openLabel'> & {
   productNames: string[];
+  horarios: unknown;
 };
 
 type RawComercioRow = {
@@ -57,11 +62,12 @@ type RawComercioRow = {
   latitud?: number | string | null;
   longitud?: number | string | null;
   branding_ia?: unknown;
+  horarios?: unknown;
   mostrar_en_directorio_publico?: boolean | null;
 };
 
 const DIRECTORY_SELECT =
-  'id,slug,nombre,logo_url,categoria,direccion,negocio_virtual,owner_id,updated_at,latitud,longitud,branding_ia,mostrar_en_directorio_publico';
+  'id,slug,nombre,logo_url,categoria,direccion,negocio_virtual,owner_id,updated_at,latitud,longitud,branding_ia,horarios,mostrar_en_directorio_publico';
 
 const FEATURED_ORDER_LOOKBACK_DAYS = 90;
 const FEATURED_CANDIDATE_LIMIT = 120;
@@ -212,9 +218,34 @@ async function loadProductNames(comercioIds: string[]) {
   return names;
 }
 
+function scheduleFields(horarios: unknown): Pick<ClientDirectoryBusiness, 'isOpen' | 'openLabel'> {
+  const status = resolveBusinessScheduleStatus(horarios);
+  if (!status.configured) {
+    return { isOpen: null, openLabel: null };
+  }
+  if (status.isOpen) {
+    return {
+      isOpen: true,
+      openLabel:
+        status.closesAtLabel === '24 horas'
+          ? 'Abierto 24h'
+          : status.closesAtLabel
+            ? `Abierto · hasta ${status.closesAtLabel}`
+            : 'Abierto',
+    };
+  }
+  return {
+    isOpen: false,
+    openLabel: status.nextOpenLabel ? `Cerrado · abre ${status.nextOpenLabel}` : 'Cerrado',
+  };
+}
+
 function toPublicClientBusiness(entry: ClientDirectoryCached): ClientDirectoryBusiness {
-  const { productNames: _productNames, ...publicEntry } = entry;
-  return publicEntry;
+  const { productNames: _productNames, horarios, ...publicEntry } = entry;
+  return {
+    ...publicEntry,
+    ...scheduleFields(horarios),
+  };
 }
 
 async function loadRatingMap(comercioIds: string[]) {
@@ -331,6 +362,7 @@ async function loadClientDirectoryBase(): Promise<ClientDirectoryCached[]> {
         ratingCount: rating.count,
         promovido: readPromotedFlag(row.branding_ia),
         distanceKm: null,
+        horarios: row.horarios ?? null,
         productNames: productNames.get(base.id) ?? [],
       };
     })
@@ -372,6 +404,7 @@ async function enrichClientDirectoryRows(rows: RawComercioRow[]): Promise<Client
         ratingCount: rating.count,
         promovido: readPromotedFlag(row.branding_ia),
         distanceKm: null,
+        horarios: row.horarios ?? null,
         productNames: productNames.get(base.id) ?? [],
       };
     })

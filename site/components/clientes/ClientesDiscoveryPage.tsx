@@ -50,6 +50,7 @@ const FAVORITES_KEY = 'elmenuxfa_clientes_favorites_v1';
 const AUDIENCE_GATE_KEY = 'elmenuxfa_clientes_audience_gate_v1';
 const BENEFITS_HREF = businessBenefitsHref;
 const RADIUS_OPTIONS = [5, 10, 25, 50] as const;
+const DEFAULT_NEAR_RADIUS_KM = 25;
 const PAGE_SIZE = 12;
 const SEARCH_PAGE_SIZE = 24;
 const SEARCH_DEBOUNCE_MS = 220;
@@ -69,9 +70,31 @@ type DirectoryBusiness = {
   lat: number | null;
   lng: number | null;
   menuUrl: string;
+  isOpen?: boolean | null;
+  openLabel?: string | null;
   matchedDish?: string | null;
   matchScore?: number;
 };
+
+async function resolveZoneLabel(lat: number, lng: number): Promise<string | null> {
+  try {
+    const url =
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=es`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      locality?: string;
+      city?: string;
+      principalSubdivision?: string;
+    };
+    const parts = [data.locality || data.city, data.principalSubdivision]
+      .map((part) => (part ?? '').toString().trim())
+      .filter(Boolean);
+    return [...new Set(parts)].slice(0, 2).join(', ') || null;
+  } catch {
+    return null;
+  }
+}
 
 type CategoryChip = { id: string; label: string; glyph: string };
 
@@ -229,6 +252,22 @@ function RestaurantCard({
         </button>
       </div>
       <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-[12px]">
+        {business.isOpen != null ? (
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+              business.isOpen
+                ? 'bg-emerald-50 text-emerald-700'
+                : 'bg-rose-50 text-rose-700'
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                business.isOpen ? 'bg-emerald-500' : 'bg-rose-500'
+              }`}
+            />
+            {business.isOpen ? 'Abierto' : 'Cerrado'}
+          </span>
+        ) : null}
         {business.ratingCount > 0 ? (
           <span className="inline-flex items-center gap-0.5 font-semibold text-slate-700">
             <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
@@ -244,6 +283,11 @@ function RestaurantCard({
           <span className="shrink-0 font-semibold text-[#6D28D9]">· {business.distanceKm} km</span>
         ) : null}
       </div>
+      {business.isOpen === false && business.openLabel ? (
+        <p className="mt-0.5 truncate text-[11px] font-medium text-rose-600/90 sm:text-[12px]">
+          {business.openLabel}
+        </p>
+      ) : null}
       {business.matchedDish ? (
         <p className="mt-0.5 truncate text-[11px] font-semibold text-violet-700 sm:mt-1 sm:text-[12px]">
           Sirve: {business.matchedDish}
@@ -307,6 +351,11 @@ function RestaurantCard({
               Promo
             </span>
           ) : null}
+          {business.isOpen === false ? (
+            <span className="absolute bottom-1 left-1 rounded-full bg-rose-600/95 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
+              Cerrado
+            </span>
+          ) : null}
         </Link>
         <div className="flex min-w-0 flex-1 flex-col justify-center">{meta}</div>
       </article>
@@ -341,6 +390,11 @@ function RestaurantCard({
           {business.promovido ? (
             <span className="absolute left-2 top-2 rounded-full bg-[#6D28D9] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
               Promo
+            </span>
+          ) : null}
+          {business.isOpen === false ? (
+            <span className="absolute bottom-2 left-2 rounded-full bg-rose-600/95 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+              Cerrado
             </span>
           ) : null}
         </Link>
@@ -391,6 +445,7 @@ export function ClientesDiscoveryPage() {
   const [urlReady, setUrlReady] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ready' | 'denied'>('idle');
+  const [zoneLabel, setZoneLabel] = useState<string | null>(null);
   const [radiusKm, setRadiusKm] = useState<(typeof RADIUS_OPTIONS)[number] | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [audienceGateOpen, setAudienceGateOpen] = useState(false);
@@ -439,12 +494,21 @@ export function ClientesDiscoveryPage() {
     setGeoStatus('loading');
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setCoords({ lat: position.coords.latitude, lng: position.coords.longitude });
+        const next = { lat: position.coords.latitude, lng: position.coords.longitude };
+        setCoords(next);
         setGeoStatus('ready');
+        // Default to a local radius so far-away restaurants don't flood the feed.
+        setRadiusKm((prev) => prev ?? DEFAULT_NEAR_RADIUS_KM);
         // Only flip sort when explicitly requested — never override an active text search.
         if (opts?.switchToNear) setSortMode('near');
+        void resolveZoneLabel(next.lat, next.lng).then((label) => {
+          if (label) setZoneLabel(label);
+        });
       },
-      () => setGeoStatus('denied'),
+      () => {
+        setGeoStatus('denied');
+        setZoneLabel(null);
+      },
       {
         enableHighAccuracy: false,
         timeout: 12000,
@@ -642,9 +706,19 @@ export function ClientesDiscoveryPage() {
     };
   }, [category, coords, debouncedQuery, region, urlReady]);
 
+  const withinRadius = useCallback(
+    (list: DirectoryBusiness[]) => {
+      if (radiusKm == null || !coords) return list;
+      return list.filter(
+        (item) => item.distanceKm != null && item.distanceKm <= radiusKm,
+      );
+    },
+    [coords, radiusKm],
+  );
+
   const results = payload.results ?? [];
-  const promoted = payload.promoted ?? results.filter((item) => item.promovido);
-  const topRated = payload.topRated ?? [];
+  const promoted = withinRadius(payload.promoted ?? results.filter((item) => item.promovido));
+  const topRated = withinRadius(payload.topRated ?? []);
   const regions =
     payload.regions && payload.regions.length > 0
       ? payload.regions
@@ -657,7 +731,8 @@ export function ClientesDiscoveryPage() {
   const heroSlides = useMemo(() => {
     const seen = new Set<string>();
     const slides: DirectoryBusiness[] = [];
-    for (const item of [...promoted, ...topRated, ...results]) {
+    const nearbyResults = withinRadius(results);
+    for (const item of [...promoted, ...topRated, ...nearbyResults]) {
       if (seen.has(item.id)) continue;
       if (!(item.coverUrl || item.logoUrl)) continue;
       seen.add(item.id);
@@ -665,7 +740,7 @@ export function ClientesDiscoveryPage() {
       if (slides.length >= 6) break;
     }
     return slides;
-  }, [promoted, results, topRated]);
+  }, [promoted, results, topRated, withinRadius]);
 
   useEffect(() => {
     if (heroSlides.length <= 1) return;
@@ -735,7 +810,7 @@ export function ClientesDiscoveryPage() {
     setRegion('');
     setCategory('');
     setFavoritesOnly(false);
-    setRadiusKm(null);
+    setRadiusKm(coords ? DEFAULT_NEAR_RADIUS_KM : null);
     setSortMode(coords ? 'near' : 'smart');
   }, [coords]);
 
@@ -764,8 +839,10 @@ export function ClientesDiscoveryPage() {
   );
   const hasMoreResults = visibleCount < filteredResults.length;
 
+  const hasCustomRadius =
+    radiusKm != null && !(coords && radiusKm === DEFAULT_NEAR_RADIUS_KM);
   const hasActiveFilters = Boolean(
-    query.trim() || region.trim() || category.trim() || favoritesOnly || radiusKm != null,
+    query.trim() || region.trim() || category.trim() || favoritesOnly || hasCustomRadius,
   );
 
   const statusLine = useMemo(() => {
@@ -815,7 +892,17 @@ export function ClientesDiscoveryPage() {
     if (next.trim().length >= 2) setSortMode('smart');
   }, []);
 
-  const locationLabel = region || (geoStatus === 'ready' ? 'Cerca de ti' : 'Tu zona');
+  const locationLabel =
+    region || zoneLabel || (geoStatus === 'ready' ? 'Cerca de ti' : 'Tu zona');
+  const areaEmpty =
+    Boolean(coords) &&
+    radiusKm != null &&
+    filteredResults.length === 0 &&
+    !loading &&
+    hasLoadedOnce.current &&
+    !query.trim() &&
+    !category.trim() &&
+    !favoritesOnly;
   const searchStatusText =
     query.trim().length === 0
       ? null
@@ -941,20 +1028,23 @@ export function ClientesDiscoveryPage() {
                 <button
                   type="button"
                   onClick={() => requestLocation({ switchToNear: true })}
-                  className={`hidden items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold sm:inline-flex ${
+                  className={`hidden max-w-[14rem] items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold sm:inline-flex ${
                     geoStatus === 'ready'
                       ? 'bg-violet-100 text-[#6D28D9]'
                       : 'bg-slate-100 text-slate-700'
                   }`}
+                  title={zoneLabel || undefined}
                 >
                   <MapPin className="h-3.5 w-3.5 shrink-0 text-[#6D28D9]" />
-                  {geoStatus === 'ready'
-                    ? 'Cerca de ti'
-                    : geoStatus === 'loading'
-                      ? 'Ubicando...'
-                      : geoStatus === 'denied'
-                        ? 'Sin ubicación'
-                        : 'Ubicarme'}
+                  <span className="truncate">
+                    {geoStatus === 'ready'
+                      ? zoneLabel || 'Cerca de ti'
+                      : geoStatus === 'loading'
+                        ? 'Ubicando...'
+                        : geoStatus === 'denied'
+                          ? 'Sin ubicación'
+                          : 'Ubicarme'}
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -1400,7 +1490,7 @@ export function ClientesDiscoveryPage() {
           </section>
         ) : null}
 
-        {!hasActiveFilters ? (
+        {!hasActiveFilters && (loading || promoted.length > 0) ? (
           <section id="promocionados" className="mx-auto max-w-6xl px-3 pb-8 sm:px-4 sm:pb-10">
             <div className="mb-3 flex items-end justify-between gap-3 sm:mb-4">
               <div className="min-w-0">
@@ -1435,12 +1525,8 @@ export function ClientesDiscoveryPage() {
                 </a>
               </div>
             </div>
-            {loading ? (
+            {loading && promoted.length === 0 ? (
               <ResultSkeleton />
-            ) : promoted.length === 0 ? (
-              <p className="rounded-2xl bg-white p-6 text-sm text-slate-500 ring-1 ring-slate-100">
-                Aún no hay sitios promocionados. Los restaurantes pueden activarlo en Configuración → Operación.
-              </p>
             ) : (
               <div
                 ref={promoCarouselRef}
@@ -1485,6 +1571,15 @@ export function ClientesDiscoveryPage() {
                 {refreshing ? <LoaderCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" /> : null}
                 <span className="break-words">{statusLine}</span>
               </p>
+              {geoStatus === 'ready' || zoneLabel || region ? (
+                <p className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-[#6D28D9]">
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    Tu zona: {region || zoneLabel || 'Cerca de ti'}
+                    {radiusKm != null ? ` · ≤ ${radiusKm} km` : ''}
+                  </span>
+                </p>
+              ) : null}
             </div>
             <div className="flex w-full items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] sm:w-auto [&::-webkit-scrollbar]:hidden">
               {(
@@ -1545,23 +1640,68 @@ export function ClientesDiscoveryPage() {
                 <ResultSkeleton />
               ) : filteredResults.length === 0 ? (
                 <div className="rounded-[22px] bg-white p-6 text-center ring-1 ring-slate-100 sm:p-8">
-                  <p className="text-lg font-extrabold text-slate-900">
-                    {searchMode && !query.trim() ? 'Empieza a escribir' : 'Nada por aquí todavía'}
-                  </p>
-                  <p className="mt-2 text-sm text-slate-500">
-                    {searchMode && !query.trim()
-                      ? 'Busca un platillo o restaurante para ver todos los resultados relacionados.'
-                      : 'Prueba otra región, quita el filtro de categoría o amplía el radio.'}
-                  </p>
-                  {!searchMode ? (
-                    <button
-                      type="button"
-                      onClick={clearFilters}
-                      className="mt-4 rounded-2xl bg-[#6D28D9] px-4 py-2.5 text-sm font-bold text-white"
-                    >
-                      Limpiar filtros
-                    </button>
-                  ) : null}
+                  {areaEmpty ? (
+                    <>
+                      <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-violet-50 text-[#6D28D9]">
+                        <MapPin className="h-6 w-6" />
+                      </div>
+                      <p className="mt-3 text-lg font-extrabold text-slate-900">
+                        No hay restaurantes cerca de ti
+                      </p>
+                      <p className="mt-2 text-sm text-slate-500">
+                        En{' '}
+                        <span className="font-semibold text-slate-700">
+                          {zoneLabel || 'tu zona'}
+                        </span>
+                        {radiusKm != null ? ` (≤ ${radiusKm} km)` : ''} aún no hay menús publicados.
+                      </p>
+                      <Link
+                        href={BENEFITS_HREF}
+                        className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#6D28D9] px-5 text-sm font-bold text-white shadow-[0_12px_28px_rgba(109,40,217,0.22)]"
+                      >
+                        ¿Te gustaría registrar un restaurante en esta zona?
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                      <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                        {radiusKm != null && radiusKm < 50 ? (
+                          <button
+                            type="button"
+                            onClick={() => setRadiusKm(50)}
+                            className="rounded-full bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-700"
+                          >
+                            Ampliar a 50 km
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => setRadiusKm(null)}
+                          className="rounded-full bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-700"
+                        >
+                          Ver todos
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-lg font-extrabold text-slate-900">
+                        {searchMode && !query.trim() ? 'Empieza a escribir' : 'Nada por aquí todavía'}
+                      </p>
+                      <p className="mt-2 text-sm text-slate-500">
+                        {searchMode && !query.trim()
+                          ? 'Busca un platillo o restaurante para ver todos los resultados relacionados.'
+                          : 'Prueba otra región, quita el filtro de categoría o amplía el radio.'}
+                      </p>
+                      {!searchMode ? (
+                        <button
+                          type="button"
+                          onClick={clearFilters}
+                          className="mt-4 rounded-2xl bg-[#6D28D9] px-4 py-2.5 text-sm font-bold text-white"
+                        >
+                          Limpiar filtros
+                        </button>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               ) : (
                 <>
@@ -1887,6 +2027,7 @@ export function ClientesDiscoveryPage() {
             aria-modal="true"
             aria-labelledby="audience-gate-title"
             className="relative z-10 w-full max-w-md overflow-hidden rounded-t-[28px] bg-white shadow-2xl sm:rounded-[28px]"
+            onClick={(event) => event.stopPropagation()}
           >
             <div className="relative overflow-hidden bg-[linear-gradient(160deg,#f5f3ff_0%,#faf8ff_50%,#ffffff_100%)] px-5 pb-2 pt-5 sm:px-7 sm:pt-7">
               <div
@@ -1896,13 +2037,17 @@ export function ClientesDiscoveryPage() {
               <button
                 type="button"
                 aria-label="Cerrar"
-                onClick={() => dismissAudienceGate()}
-                className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white/90 text-slate-500 ring-1 ring-slate-100 sm:right-4 sm:top-4"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dismissAudienceGate();
+                }}
+                className="absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center rounded-full bg-white text-slate-500 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 sm:right-4 sm:top-4"
               >
                 <X className="h-4 w-4" />
               </button>
 
-              <div className="relative flex items-start justify-between gap-3">
+              <div className="relative flex items-start justify-between gap-3 pr-8">
                 <div className="min-w-0">
                   <div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#EDE9FE] text-[#6D28D9]">
                     <Store className="h-5 w-5" />
@@ -1921,7 +2066,7 @@ export function ClientesDiscoveryPage() {
                 <img
                   src="/branding/negocio-restaurant.png"
                   alt=""
-                  className="relative z-[1] h-24 w-24 shrink-0 object-contain sm:h-28 sm:w-28"
+                  className="pointer-events-none relative h-24 w-24 shrink-0 object-contain sm:h-28 sm:w-28"
                 />
               </div>
               <p className="relative mt-2 max-w-sm text-sm leading-relaxed text-slate-600 sm:text-[15px]">
