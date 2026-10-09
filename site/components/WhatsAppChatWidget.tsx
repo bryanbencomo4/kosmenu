@@ -1,18 +1,30 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { X } from 'lucide-react';
 
-import { adminSiteHost, chatWhatsappHref } from '../app/_lib/public-site-config';
+import {
+  adminSiteHost,
+  businessSiteHost,
+  chatWhatsappHref,
+  consumerChatWhatsappHref,
+  developmentBusinessHosts,
+} from '../app/_lib/public-site-config';
 
 const AUTO_OPEN_STORAGE_KEY = 'elmenuxfa-wa-autochat';
 
-const CHAT_MESSAGES = [
+const BUSINESS_CHAT_MESSAGES = [
   '¿Listo para transformar tu restaurante?\u00A0🚀',
   '¿Quieres adquirir el Kit Menú Inteligente\u00A0📦 o tienes alguna duda sobre la plataforma?\u00A0📲',
   '¡Escríbenos y te ayudamos de inmediato!\u00A0✨',
+] as const;
+
+const CONSUMER_CHAT_MESSAGES = [
+  '¿Buscas qué comer cerca de ti?\u00A0🍽️',
+  'Te ayudamos a encontrar menús, resolver dudas del directorio o reportar un problema.\u00A0📍',
+  '¡Escríbenos y te orientamos enseguida!\u00A0✨',
 ] as const;
 
 function WhatsAppGlyph({ className }: { className?: string }) {
@@ -45,6 +57,14 @@ function shouldHideWidget(pathname: string, hostname: string) {
   );
 }
 
+function isBusinessAudience(hostname: string, pathname: string) {
+  const host = hostname.toLowerCase();
+  if (host === businessSiteHost.toLowerCase()) return true;
+  if (developmentBusinessHosts.some((entry) => entry.toLowerCase() === host)) return true;
+  // Local/dev can open the marketing landing at /business without the business host.
+  return pathname === '/business' || pathname.startsWith('/business/');
+}
+
 function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
@@ -60,6 +80,12 @@ export function WhatsAppChatWidget() {
   const [visibleCount, setVisibleCount] = useState(0);
 
   const hidden = shouldHideWidget(pathname, hostname);
+  const businessAudience = isBusinessAudience(hostname, pathname);
+  const chatMessages = useMemo(
+    () => (businessAudience ? BUSINESS_CHAT_MESSAGES : CONSUMER_CHAT_MESSAGES),
+    [businessAudience],
+  );
+  const whatsappHref = businessAudience ? chatWhatsappHref : consumerChatWhatsappHref;
 
   useEffect(() => {
     setHostname(window.location.hostname);
@@ -93,7 +119,7 @@ export function WhatsAppChatWidget() {
 
     if (prefersReducedMotion()) {
       setTyping(false);
-      setVisibleCount(CHAT_MESSAGES.length);
+      setVisibleCount(chatMessages.length);
       allowOutsideCloseRef.current = true;
       return;
     }
@@ -126,7 +152,7 @@ export function WhatsAppChatWidget() {
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [open]);
+  }, [chatMessages.length, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -165,7 +191,7 @@ export function WhatsAppChatWidget() {
     return null;
   }
 
-  const statusLabel = typing || visibleCount < CHAT_MESSAGES.length ? 'escribiendo…' : 'en línea';
+  const statusLabel = typing || visibleCount < chatMessages.length ? 'escribiendo…' : 'en línea';
 
   const closeChat = () => {
     setOpen(false);
@@ -225,7 +251,7 @@ export function WhatsAppChatWidget() {
                 }}
               />
               <div className="relative flex w-[min(100%,20.5rem)] flex-col gap-2">
-                {CHAT_MESSAGES.slice(0, visibleCount).map((message, index) => (
+                {chatMessages.slice(0, visibleCount).map((message, index) => (
                   <div
                     key={message}
                     className={`whatsapp-chat-message rounded-[1.1rem] rounded-tl-md bg-white px-3.5 py-3 text-[0.92rem] leading-5 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.55)] ${
@@ -238,7 +264,7 @@ export function WhatsAppChatWidget() {
 
                 {typing ? <TypingDots /> : null}
 
-                {visibleCount === CHAT_MESSAGES.length ? (
+                {visibleCount === chatMessages.length ? (
                   <p className="whatsapp-chat-message px-1 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
                     Ahora
                   </p>
@@ -248,7 +274,7 @@ export function WhatsAppChatWidget() {
 
             <div className="border-t border-black/5 bg-white px-3.5 py-3">
               <a
-                href={chatWhatsappHref}
+                href={whatsappHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 text-[0.92rem] font-bold text-white shadow-[0_16px_30px_-18px_rgba(37,211,102,0.95)] transition hover:bg-[#20bd5a]"

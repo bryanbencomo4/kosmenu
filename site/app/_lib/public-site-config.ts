@@ -9,6 +9,10 @@ const DEFAULT_MARKETING_WHATSAPP_MESSAGE =
 const DEFAULT_CHAT_WHATSAPP_DIGITS = '584220451906';
 const DEFAULT_CHAT_WHATSAPP_MESSAGE =
   'Hola 👋 Me interesa adquirir el Kit Menú Inteligente 📦 para armar el menú digital de mi restaurante.';
+/** Diners / discovery site (elmenuxfa.com) — not restaurant sales. */
+const DEFAULT_CONSUMER_CHAT_WHATSAPP_DIGITS = DEFAULT_MARKETING_WHATSAPP_DIGITS;
+const DEFAULT_CONSUMER_CHAT_WHATSAPP_MESSAGE =
+  'Hola 👋 Necesito ayuda para encontrar un restaurante o usar un menú en elmenuxfa.com.';
 const DEVELOPMENT_PUBLIC_HOSTS = ['www.localhost', 'elmenuxfa.local', 'www.elmenuxfa.local'] as const;
 const DEVELOPMENT_BUSINESS_HOSTS = ['business.localhost', 'business.elmenuxfa.local'] as const;
 const DEVELOPMENT_ADMIN_HOSTS = ['admin.localhost', 'admin.elmenuxfa.local'] as const;
@@ -107,6 +111,18 @@ export const chatWhatsappMessage = resolveText(
 );
 
 export const chatWhatsappHref = `https://wa.me/${chatWhatsappDigits}?text=${encodeURIComponent(chatWhatsappMessage)}`;
+
+export const consumerChatWhatsappDigits = resolveDigits(
+  process.env.NEXT_PUBLIC_CONSUMER_CHAT_WHATSAPP_DIGITS,
+  DEFAULT_CONSUMER_CHAT_WHATSAPP_DIGITS,
+);
+
+export const consumerChatWhatsappMessage = resolveText(
+  process.env.NEXT_PUBLIC_CONSUMER_CHAT_WHATSAPP_MESSAGE,
+  DEFAULT_CONSUMER_CHAT_WHATSAPP_MESSAGE,
+);
+
+export const consumerChatWhatsappHref = `https://wa.me/${consumerChatWhatsappDigits}?text=${encodeURIComponent(consumerChatWhatsappMessage)}`;
 
 export const socialLinks = [
   { label: 'Instagram', href: 'https://www.instagram.com/elmenuxfa' },

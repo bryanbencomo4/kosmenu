@@ -7,7 +7,9 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Facebook,
   Heart,
+  Instagram,
   LoaderCircle,
   MapPin,
   Menu,
@@ -33,8 +35,32 @@ import {
   DIRECTORY_CATEGORY_CHIPS,
   DIRECTORY_REGIONS,
 } from '../../app/api/_lib/public-directory-geo';
-import { appSignupHref, businessBenefitsHref } from '../../app/_lib/public-site-config';
+import {
+  appSignupHref,
+  businessBenefitsHref,
+  socialLinks,
+} from '../../app/_lib/public-site-config';
 import { ClientesDirectoryMap } from './ClientesDirectoryMap';
+
+function TikTokIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
+      <path
+        d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+const socialIconByLabel = {
+  Instagram,
+  TikTok: TikTokIcon,
+  Facebook,
+} as const;
 
 const body = Manrope({
   subsets: ['latin'],
@@ -1990,26 +2016,47 @@ export function ClientesDiscoveryPage() {
       </main>
 
       <footer className="border-t border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-3 py-8 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-          <div>
-            <p className="font-extrabold text-slate-800">
-              elmenuxfa<span className="text-[#6D28D9]">.com</span>
-            </p>
-            <p className="mt-1">© {new Date().getFullYear()} · descubrimiento de menús</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 font-semibold sm:gap-x-4">
-            <a href="#resultados" className="hover:text-[#6D28D9]">
-              Explorar
-            </a>
-            <a href="#regiones" className="hover:text-[#6D28D9]">
-              Regiones
-            </a>
-            <a href="#para-negocios" className="hover:text-[#6D28D9]">
-              Negocios
-            </a>
-            <Link href={BENEFITS_HREF} className="text-[#6D28D9]">
-              Soy restaurante
-            </Link>
+        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-3 py-8 text-sm text-slate-500 sm:px-4">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="font-extrabold text-slate-800">
+                elmenuxfa<span className="text-[#6D28D9]">.com</span>
+              </p>
+              <p className="mt-1">© {new Date().getFullYear()} · descubrimiento de menús</p>
+              <p className="mt-4 text-sm font-semibold text-slate-800">Síguenos</p>
+              <div className="mt-2.5 flex items-center gap-2.5">
+                {socialLinks.map((social) => {
+                  const Icon = socialIconByLabel[social.label];
+                  return (
+                    <a
+                      key={social.label}
+                      href={social.href}
+                      aria-label={`elmenuxfa en ${social.label}`}
+                      title={social.label}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-600 transition hover:border-violet-300 hover:bg-violet-50 hover:text-[#6D28D9]"
+                    >
+                      <Icon className="h-4 w-4" />
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 font-semibold sm:justify-end sm:gap-x-4">
+              <a href="#resultados" className="hover:text-[#6D28D9]">
+                Explorar
+              </a>
+              <a href="#regiones" className="hover:text-[#6D28D9]">
+                Regiones
+              </a>
+              <a href="#para-negocios" className="hover:text-[#6D28D9]">
+                Negocios
+              </a>
+              <Link href={BENEFITS_HREF} className="text-[#6D28D9]">
+                Soy restaurante
+              </Link>
+            </div>
           </div>
         </div>
       </footer>
