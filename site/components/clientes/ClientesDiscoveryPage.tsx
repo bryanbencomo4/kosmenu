@@ -190,57 +190,160 @@ function RestaurantCard({
   // Prefer cover photo; fall back to logo. Avoid tiny nested logo boxes.
   const image = cover || logo;
   const isLogoOnly = Boolean(image) && (!cover || cover === logo);
-  // Dense horizontal row on mobile always; tall cards only on sm+ when not compact.
+  // Compact = dense row in results. Showcase (promo / top rated) = vertical card.
   const forceRow = compact;
-  const thumbBg = isLogoOnly
-    ? 'bg-white'
+  const mediaBg = isLogoOnly
+    ? 'bg-[#f8f7fc]'
     : 'bg-[linear-gradient(145deg,#f5f3ff,#eef2ff)]';
+  const shellClass = `group relative overflow-hidden rounded-2xl bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(109,40,217,0.12)] ${
+    selected
+      ? 'border-2 border-[#6D28D9] shadow-[0_14px_32px_rgba(109,40,217,0.16)]'
+      : business.promovido
+        ? 'border-2 border-[#6D28D9] shadow-[0_10px_28px_rgba(109,40,217,0.12)]'
+        : 'border border-slate-100'
+  }`;
+
+  const meta = (
+    <>
+      <div className="flex items-start justify-between gap-1.5">
+        <Link
+          href={business.menuUrl}
+          onClick={() => onSelect?.(business.id)}
+          className={`font-extrabold leading-snug text-slate-900 hover:text-[#6D28D9] ${
+            forceRow
+              ? 'line-clamp-1 text-[14px]'
+              : 'line-clamp-2 text-[14px] sm:text-[15px]'
+          }`}
+        >
+          {business.nombre}
+        </Link>
+        <button
+          type="button"
+          aria-label={favorite ? 'Quitar de favoritos' : 'Guardar en favoritos'}
+          onClick={() => onToggleFavorite(business.id)}
+          className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${
+            forceRow ? '' : 'sm:hidden'
+          } ${favorite ? 'bg-violet-100 text-[#6D28D9]' : 'bg-slate-50 text-slate-400'}`}
+        >
+          <Heart className={`h-3.5 w-3.5 ${favorite ? 'fill-current' : ''}`} />
+        </button>
+      </div>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-[12px]">
+        {business.ratingCount > 0 ? (
+          <span className="inline-flex items-center gap-0.5 font-semibold text-slate-700">
+            <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+            {business.ratingAverage.toFixed(1)}
+          </span>
+        ) : (
+          <span className="text-slate-400">Sin calificaciones</span>
+        )}
+        {business.categoria ? (
+          <span className="min-w-0 truncate">· {business.categoria}</span>
+        ) : null}
+        {business.distanceKm != null ? (
+          <span className="shrink-0 font-semibold text-[#6D28D9]">· {business.distanceKm} km</span>
+        ) : null}
+      </div>
+      {business.matchedDish ? (
+        <p className="mt-0.5 truncate text-[11px] font-semibold text-violet-700 sm:mt-1 sm:text-[12px]">
+          Sirve: {business.matchedDish}
+        </p>
+      ) : business.direccion ? (
+        <p
+          className={`mt-0.5 truncate text-[11px] text-slate-400 sm:mt-1 sm:text-[12px] ${
+            forceRow ? 'hidden sm:block' : ''
+          }`}
+        >
+          {business.direccion}
+        </p>
+      ) : null}
+      <div className="mt-1.5 flex items-center gap-3 sm:mt-2">
+        {onSelect || onShowOnMap ? (
+          <button
+            type="button"
+            onClick={() => (onShowOnMap ?? onSelect)?.(business.id)}
+            className="hidden text-[11px] font-bold text-slate-500 hover:text-[#6D28D9] sm:inline sm:text-[12px]"
+          >
+            Ver en mapa
+          </button>
+        ) : null}
+        <Link
+          href={business.menuUrl}
+          className="inline-flex items-center gap-1 text-[12px] font-bold text-[#6D28D9] sm:ml-auto"
+        >
+          Ver menú <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+    </>
+  );
+
+  if (forceRow) {
+    return (
+      <article className={`${shellClass} flex gap-2.5 p-2.5`}>
+        <Link
+          href={business.menuUrl}
+          className={`relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-100 ${mediaBg}`}
+          onClick={() => onSelect?.(business.id)}
+        >
+          {image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={image}
+              alt=""
+              className={
+                isLogoOnly
+                  ? 'h-full w-full scale-110 object-cover'
+                  : 'h-full w-full object-cover'
+              }
+              loading="lazy"
+            />
+          ) : (
+            <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
+              <Store className="h-6 w-6" />
+            </div>
+          )}
+          {business.promovido ? (
+            <span className="absolute left-1 top-1 rounded-full bg-[#6D28D9] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
+              Promo
+            </span>
+          ) : null}
+        </Link>
+        <div className="flex min-w-0 flex-1 flex-col justify-center">{meta}</div>
+      </article>
+    );
+  }
 
   return (
-    <article
-      className={`group relative rounded-2xl bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(109,40,217,0.12)] ${
-        selected
-          ? 'border-2 border-[#6D28D9] shadow-[0_14px_32px_rgba(109,40,217,0.16)]'
-          : business.promovido
-            ? 'border-2 border-[#6D28D9] shadow-[0_10px_28px_rgba(109,40,217,0.12)]'
-            : 'border border-slate-100'
-      } ${forceRow ? 'flex gap-2.5 p-2.5' : 'flex gap-2.5 p-2.5 sm:block sm:gap-0 sm:p-0'}`}
-    >
-      <Link
-        href={business.menuUrl}
-        className={
-          forceRow
-            ? `relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-100 ${thumbBg}`
-            : `relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-100 sm:h-auto sm:w-full sm:rounded-none sm:rounded-t-[14px] sm:aspect-[16/10] sm:ring-0 ${thumbBg}`
-        }
-        onClick={() => onSelect?.(business.id)}
-      >
-        {image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={image}
-            alt=""
-            className={
-              isLogoOnly
-                ? forceRow
-                  ? 'h-full w-full scale-110 object-cover'
-                  : 'h-full w-full object-cover sm:object-contain sm:p-6 sm:scale-100'
-                : 'h-full w-full object-cover'
-            }
-            loading="lazy"
-          />
-        ) : (
-          <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
-            <Store className="h-6 w-6" />
-          </div>
-        )}
-        {business.promovido ? (
-          <span className="absolute left-1 top-1 rounded-full bg-[#6D28D9] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white sm:left-2 sm:top-2 sm:px-2.5 sm:py-1 sm:text-[10px]">
-            Promo
-          </span>
-        ) : null}
-      </Link>
-      {!forceRow ? (
+    <article className={`${shellClass} flex h-full flex-col`}>
+      <div className="relative shrink-0">
+        <Link
+          href={business.menuUrl}
+          className={`relative block aspect-[16/10] w-full overflow-hidden ${mediaBg}`}
+          onClick={() => onSelect?.(business.id)}
+        >
+          {image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={image}
+              alt=""
+              className={
+                isLogoOnly
+                  ? 'h-full w-full object-contain p-5 sm:p-6'
+                  : 'h-full w-full object-cover'
+              }
+              loading="lazy"
+            />
+          ) : (
+            <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
+              <Store className="h-8 w-8" />
+            </div>
+          )}
+          {business.promovido ? (
+            <span className="absolute left-2 top-2 rounded-full bg-[#6D28D9] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+              Promo
+            </span>
+          ) : null}
+        </Link>
         <button
           type="button"
           aria-label={favorite ? 'Quitar de favoritos' : 'Guardar en favoritos'}
@@ -254,74 +357,8 @@ function RestaurantCard({
         >
           <Heart className={`h-4 w-4 ${favorite ? 'fill-current' : ''}`} />
         </button>
-      ) : null}
-      <div className={`min-w-0 flex-1 ${forceRow ? 'flex flex-col justify-center' : 'sm:p-4'}`}>
-        <div className="flex items-start justify-between gap-1.5">
-          <Link
-            href={business.menuUrl}
-            onClick={() => onSelect?.(business.id)}
-            className="line-clamp-1 text-[14px] font-extrabold leading-snug text-slate-900 hover:text-[#6D28D9] sm:line-clamp-2 sm:text-[15px]"
-          >
-            {business.nombre}
-          </Link>
-          <button
-            type="button"
-            aria-label={favorite ? 'Quitar de favoritos' : 'Guardar en favoritos'}
-            onClick={() => onToggleFavorite(business.id)}
-            className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${
-              forceRow ? '' : 'sm:hidden'
-            } ${favorite ? 'bg-violet-100 text-[#6D28D9]' : 'bg-slate-50 text-slate-400'}`}
-          >
-            <Heart className={`h-3.5 w-3.5 ${favorite ? 'fill-current' : ''}`} />
-          </button>
-        </div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500 sm:mt-1 sm:flex-wrap sm:gap-x-1.5 sm:text-[12px]">
-          {business.ratingCount > 0 ? (
-            <span className="inline-flex items-center gap-0.5 font-semibold text-slate-700">
-              <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-              {business.ratingAverage.toFixed(1)}
-            </span>
-          ) : (
-            <span className="hidden text-slate-400 sm:inline">Sin calificaciones</span>
-          )}
-          {business.categoria ? (
-            <span className="min-w-0 truncate">
-              <span className="text-slate-300 sm:hidden">· </span>
-              <span className="hidden sm:inline">· </span>
-              {business.categoria}
-            </span>
-          ) : null}
-          {business.distanceKm != null ? (
-            <span className="shrink-0 font-semibold text-[#6D28D9]">· {business.distanceKm} km</span>
-          ) : null}
-        </div>
-        {business.matchedDish ? (
-          <p className="mt-0.5 truncate text-[11px] font-semibold text-violet-700 sm:mt-1 sm:text-[12px]">
-            Sirve: {business.matchedDish}
-          </p>
-        ) : business.direccion ? (
-          <p className="mt-0.5 hidden truncate text-[11px] text-slate-400 sm:mt-1 sm:block sm:text-[12px]">
-            {business.direccion}
-          </p>
-        ) : null}
-        <div className="mt-1.5 flex items-center gap-3 sm:mt-2">
-          {onSelect || onShowOnMap ? (
-            <button
-              type="button"
-              onClick={() => (onShowOnMap ?? onSelect)?.(business.id)}
-              className="hidden text-[11px] font-bold text-slate-500 hover:text-[#6D28D9] sm:inline sm:text-[12px]"
-            >
-              Ver en mapa
-            </button>
-          ) : null}
-          <Link
-            href={business.menuUrl}
-            className="inline-flex items-center gap-1 text-[12px] font-bold text-[#6D28D9] sm:ml-auto sm:text-[12px]"
-          >
-            Ver menú <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
       </div>
+      <div className="flex min-w-0 flex-1 flex-col p-3.5 sm:p-4">{meta}</div>
     </article>
   );
 }
@@ -332,10 +369,10 @@ function ResultSkeleton() {
       {Array.from({ length: 6 }).map((_, index) => (
         <div
           key={index}
-          className="flex gap-3 overflow-hidden rounded-2xl bg-white p-3 ring-1 ring-slate-100 sm:block sm:p-0"
+          className="flex flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-slate-100"
         >
-          <div className="h-[4.5rem] w-[4.5rem] shrink-0 animate-pulse rounded-xl bg-slate-100 sm:aspect-[16/10] sm:h-auto sm:w-full sm:rounded-none" />
-          <div className="min-w-0 flex-1 space-y-2 py-1 sm:p-4">
+          <div className="aspect-[16/10] w-full animate-pulse bg-slate-100" />
+          <div className="space-y-2 p-3.5 sm:p-4">
             <div className="h-4 w-2/3 animate-pulse rounded bg-slate-100" />
             <div className="h-3 w-1/2 animate-pulse rounded bg-slate-100" />
           </div>
