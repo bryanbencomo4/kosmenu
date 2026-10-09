@@ -240,6 +240,20 @@ function scheduleFields(horarios: unknown): Pick<ClientDirectoryBusiness, 'isOpe
   };
 }
 
+/** Closed by schedule = unavailable for discovery. Unconfigured hours still listed. */
+function isDirectoryAvailable(horarios: unknown) {
+  const status = resolveBusinessScheduleStatus(horarios);
+  if (!status.configured) return true;
+  return status.isOpen;
+}
+
+/** Lower sorts first: open → unknown hours → closed. */
+function openSortRank(horarios: unknown) {
+  const status = resolveBusinessScheduleStatus(horarios);
+  if (!status.configured) return 1;
+  return status.isOpen ? 0 : 2;
+}
+
 function toPublicClientBusiness(entry: ClientDirectoryCached): ClientDirectoryBusiness {
   const { productNames: _productNames, horarios, ...publicEntry } = entry;
   return {
@@ -519,6 +533,8 @@ function sortClientDirectory(
   const withDistance = withDistances(entries, origin);
 
   return withDistance.sort((left, right) => {
+    const openDiff = openSortRank(left.horarios) - openSortRank(right.horarios);
+    if (openDiff !== 0) return openDiff;
     if (left.promovido !== right.promovido) return left.promovido ? -1 : 1;
     if (origin) {
       const leftDist = left.distanceKm ?? Number.POSITIVE_INFINITY;
@@ -548,6 +564,7 @@ function sortByDiscoveryRelevance(
     .map((entry) => {
       const detail = detailById.get(entry.id);
       if (!detail) return null;
+      const schedule = scheduleFields(entry.horarios);
       const rank = compositeDiscoveryScore({
         matchScore: detail.score,
         distanceKm: entry.distanceKm,
@@ -555,12 +572,14 @@ function sortByDiscoveryRelevance(
         ratingCount: entry.ratingCount,
         promovido: entry.promovido,
         hasOrigin: origin != null,
+        isOpen: schedule.isOpen,
       });
       return {
         ...entry,
         matchScore: detail.score,
         matchedDish: detail.matchedDish,
         _rank: rank,
+        _openRank: openSortRank(entry.horarios),
       };
     })
     .filter(
@@ -570,13 +589,15 @@ function sortByDiscoveryRelevance(
         matchScore: number;
         matchedDish: string | null;
         _rank: number;
+        _openRank: number;
       } => entry != null,
     )
     .sort((left, right) => {
+      if (left._openRank !== right._openRank) return left._openRank - right._openRank;
       if (right._rank !== left._rank) return right._rank - left._rank;
       return left.nombre.localeCompare(right.nombre, 'es');
     })
-    .map(({ _rank: _ignored, ...entry }) => entry);
+    .map(({ _rank: _ignored, _openRank: _openIgnored, ...entry }) => entry);
 }
 
 export async function listClientDirectory(options: {
@@ -625,6 +646,9 @@ export async function listClientDirectory(options: {
     );
   }
 
+  // Hide restaurants that are closed right now (schedule configured + closed).
+  entries = entries.filter((entry) => isDirectoryAvailable(entry.horarios));
+
   const sorted = normalizedQuery
     ? sortByDiscoveryRelevance(entries, normalizedQuery, origin)
     : sortClientDirectory(entries, origin);
@@ -634,6 +658,9 @@ export async function listClientDirectory(options: {
   const topRated = [...publicResults]
     .filter((entry) => entry.ratingCount > 0)
     .sort((left, right) => {
+      const leftOpen = left.isOpen === true ? 0 : 1;
+      const rightOpen = right.isOpen === true ? 0 : 1;
+      if (leftOpen !== rightOpen) return leftOpen - rightOpen;
       if (right.ratingAverage !== left.ratingAverage) {
         return right.ratingAverage - left.ratingAverage;
       }

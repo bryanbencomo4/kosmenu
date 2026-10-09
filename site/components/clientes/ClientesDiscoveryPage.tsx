@@ -197,10 +197,19 @@ function syncUrlState(state: {
   window.history.replaceState(null, '', path);
 }
 
+function openPriority(business: DirectoryBusiness) {
+  if (business.isOpen === true) return 0;
+  if (business.isOpen == null) return 1;
+  return 2;
+}
+
 function sortBusinesses(list: DirectoryBusiness[], mode: SortMode) {
-  const copy = [...list];
+  // Closed / unavailable restaurants must not appear in discovery.
+  const copy = list.filter((item) => item.isOpen !== false);
   if (mode === 'near') {
     return copy.sort((a, b) => {
+      const openDiff = openPriority(a) - openPriority(b);
+      if (openDiff !== 0) return openDiff;
       const da = a.distanceKm ?? Number.POSITIVE_INFINITY;
       const db = b.distanceKm ?? Number.POSITIVE_INFINITY;
       if (da !== db) return da - db;
@@ -209,12 +218,18 @@ function sortBusinesses(list: DirectoryBusiness[], mode: SortMode) {
   }
   if (mode === 'rated') {
     return copy.sort((a, b) => {
+      const openDiff = openPriority(a) - openPriority(b);
+      if (openDiff !== 0) return openDiff;
       if (b.ratingAverage !== a.ratingAverage) return b.ratingAverage - a.ratingAverage;
       if (b.ratingCount !== a.ratingCount) return b.ratingCount - a.ratingCount;
       return a.nombre.localeCompare(b.nombre, 'es');
     });
   }
-  return copy;
+  return copy.sort((a, b) => {
+    const openDiff = openPriority(a) - openPriority(b);
+    if (openDiff !== 0) return openDiff;
+    return 0;
+  });
 }
 
 function RestaurantCard({

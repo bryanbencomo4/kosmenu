@@ -112,6 +112,28 @@ describe('compositeDiscoveryScore', () => {
     });
     expect(localDish).toBeGreaterThan(distantName);
   });
+
+  it('prefers open restaurants over closed ones with similar scores', () => {
+    const open = compositeDiscoveryScore({
+      matchScore: 50,
+      distanceKm: 2,
+      ratingAverage: 4,
+      ratingCount: 5,
+      promovido: false,
+      hasOrigin: true,
+      isOpen: true,
+    });
+    const closed = compositeDiscoveryScore({
+      matchScore: 50,
+      distanceKm: 2,
+      ratingAverage: 4,
+      ratingCount: 5,
+      promovido: false,
+      hasOrigin: true,
+      isOpen: false,
+    });
+    expect(open).toBeGreaterThan(closed);
+  });
 });
 
 describe('pickFeaturedDirectoryBusinesses', () => {

@@ -152,6 +152,7 @@ export function compositeDiscoveryScore(options: {
   ratingCount: number;
   promovido: boolean;
   hasOrigin: boolean;
+  isOpen?: boolean | null;
 }) {
   let score = options.matchScore * 8;
 
@@ -170,6 +171,9 @@ export function compositeDiscoveryScore(options: {
   score += options.ratingAverage * 14;
   score += Math.min(Math.max(options.ratingCount, 0), 30) * 1.15;
   if (options.promovido) score += 22;
+  // Open now always outranks unknown/closed availability.
+  if (options.isOpen === true) score += 80;
+  else if (options.isOpen === false) score -= 120;
 
   return score;
 }
