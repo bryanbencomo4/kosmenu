@@ -1457,12 +1457,15 @@ class _ImagePanel extends StatelessWidget {
                         future: localImageFile!.readAsBytes(),
                         builder: (context, snapshot) {
                           if (snapshot.hasData) {
-                            return Image.memory(
-                              snapshot.data!,
-                              fit: BoxFit.cover,
-                              height: 230,
-                              width: double.infinity,
-                              gaplessPlayback: true,
+                            return ColoredBox(
+                              color: colorScheme.surfaceContainerHighest,
+                              child: Image.memory(
+                                snapshot.data!,
+                                fit: BoxFit.contain,
+                                height: 230,
+                                width: double.infinity,
+                                gaplessPlayback: true,
+                              ),
                             );
                           }
 
@@ -1481,11 +1484,14 @@ class _ImagePanel extends StatelessWidget {
                   _wrapHero(
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        remoteImageUrl!,
-                        fit: BoxFit.cover,
-                        height: 230,
-                        width: double.infinity,
+                      child: ColoredBox(
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Image.network(
+                          remoteImageUrl!,
+                          fit: BoxFit.contain,
+                          height: 230,
+                          width: double.infinity,
+                        ),
                       ),
                     ),
                   )
@@ -1493,15 +1499,18 @@ class _ImagePanel extends StatelessWidget {
                   _wrapHero(
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        fallbackImageUrl,
-                        fit: BoxFit.cover,
-                        height: 200,
-                        width: double.infinity,
-                        errorBuilder: (_, _, _) => Container(
+                      child: ColoredBox(
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Image.network(
+                          fallbackImageUrl,
+                          fit: BoxFit.contain,
                           height: 200,
                           width: double.infinity,
-                          color: colorScheme.surfaceContainerHighest,
+                          errorBuilder: (_, _, _) => Container(
+                            height: 200,
+                            width: double.infinity,
+                            color: colorScheme.surfaceContainerHighest,
+                          ),
                         ),
                       ),
                     ),

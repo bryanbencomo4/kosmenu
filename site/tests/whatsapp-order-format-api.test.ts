@@ -137,7 +137,7 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     state.managementMode = 'whatsapp_manual';
     const manual = await submit();
     expect(manual.managementMode).toBe('whatsapp_manual');
-    expect(manual.merchantWhatsappText).toContain('Gestión: Por WhatsApp');
+    expect(manual.merchantWhatsappText).toContain('Canal: WhatsApp');
     expect(manual.merchantWhatsappText).not.toContain('Estado: Pendiente');
     const oldManual = state.inserts[0].detalles as Record<string, unknown>;
     state.managementMode = 'platform';
@@ -161,7 +161,8 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
     });
     expect(result.managementMode).toBe('whatsapp_manual');
     expect(result.estado).toBe('pendiente');
-    expect(result.merchantWhatsappText).toContain('DELIVERY');
+    expect(result.merchantWhatsappText).toContain('DATOS DE ENTREGA');
+    expect(result.merchantWhatsappText).toContain('Costo de delivery: $ 2.000');
     expect(result.merchantWhatsappText).toContain('Calle Preview 1');
     const details = state.inserts[0].detalles as Record<string, unknown>;
     expect(details).not.toHaveProperty('delivery_delegate');
@@ -182,7 +183,7 @@ describe('per-commerce authoritative WhatsApp format at creation', () => {
       paymentMethod: { nombre: 'Pago móvil' },
       paymentProofUrl: `storage://comprobantes/${state.commerceId}/proof.png`,
     });
-    expect(data.merchantWhatsappText).toMatch(/Comprobante: https:\/\/[^\s]+\/p\/AbCdEf1234/);
+    expect(data.merchantWhatsappText).toMatch(/Comprobante:\nhttps:\/\/[^\s]+\/p\/AbCdEf1234/);
     expect(data.merchantWhatsappText).not.toContain('storage://');
     expect(data.merchantWhatsappText).not.toContain('proof.png');
     expect((state.inserts[0].detalles as Record<string, unknown>).comprobante_url)

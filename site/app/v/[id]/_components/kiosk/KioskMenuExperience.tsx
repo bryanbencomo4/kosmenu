@@ -305,6 +305,7 @@ export function KioskMenuExperience({
             <KioskImage
               src={logoUrl}
               alt=""
+              fit="cover"
               className="h-11 w-11 rounded-[14px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]"
             />
           ) : (
@@ -432,21 +433,27 @@ export function KioskMenuExperience({
                     onSearchChange('');
                     setScreen('products');
                   }}
-                  className="kiosk-card overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
+                  className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  <div className="relative aspect-[4/3] bg-[var(--menu-surface-alt)]">
-                    {category.coverUrl ? (
-                      <KioskImage src={category.coverUrl} alt="" className="h-full w-full" />
-                    ) : (
-                      <div className="grid h-full place-items-center text-5xl">{category.glyph}</div>
-                    )}
-                    <span className="absolute left-2 top-2 rounded-full bg-[color-mix(in_srgb,var(--menu-surface)_92%,transparent)] px-2 py-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
+                  {/* Absolute media so portrait photos cannot grow the card past 4:3. */}
+                  <div className="relative w-full shrink-0 bg-[var(--menu-surface-alt)] pt-[75%]">
+                    <div className="absolute inset-0">
+                      {category.coverUrl ? (
+                        <KioskImage src={category.coverUrl} alt="" className="h-full w-full" />
+                      ) : (
+                        <div className="grid h-full place-items-center text-5xl">{category.glyph}</div>
+                      )}
+                    </div>
+                    <span className="absolute left-2 top-2 z-10 rounded-full bg-[color-mix(in_srgb,var(--menu-surface)_92%,transparent)] px-2 py-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
                       {category.productCount}
                     </span>
                   </div>
-                  <div className="px-3 py-3">
-                    <p className={`${titleFont.className} text-sm font-extrabold leading-5 text-[var(--menu-text)]`}>
+                  {/* Fixed 2-line title slot so long names don't stretch neighbors / next row. */}
+                  <div className="flex h-[3.25rem] shrink-0 items-center px-3 py-2.5">
+                    <p
+                      className={`${titleFont.className} line-clamp-2 text-sm font-extrabold leading-5 text-[var(--menu-text)]`}
+                    >
                       {category.name}
                     </p>
                   </div>
@@ -467,21 +474,21 @@ export function KioskMenuExperience({
                   if (browseOnly) return;
                   onAddProduct(product.id);
                 }}
-                className={`kiosk-card flex w-full overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] ${
+                className={`kiosk-card flex w-full items-start overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] ${
                   browseOnly
                     ? 'cursor-default'
                     : 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--menu-primary)]'
                 }`}
                 style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
               >
-                <div className="h-32 w-32 shrink-0 bg-[var(--menu-surface-alt)] sm:h-36 sm:w-36">
+                <div className="h-32 w-32 shrink-0 self-start bg-[var(--menu-surface-alt)] sm:h-36 sm:w-36">
                   {product.imageUrl ? (
                     <KioskImage src={product.imageUrl} alt={product.name} className="h-full w-full" />
                   ) : (
                     <div className="grid h-full place-items-center text-3xl">{activeCategory?.glyph || '🍽️'}</div>
                   )}
                 </div>
-                <div className="flex min-w-0 flex-1 flex-col justify-between p-3.5">
+                <div className="flex min-w-0 flex-1 flex-col justify-between self-stretch p-3.5">
                   <div>
                     <h3 className={`${titleFont.className} text-base font-extrabold leading-5 text-[var(--menu-text)]`}>
                       {product.name}

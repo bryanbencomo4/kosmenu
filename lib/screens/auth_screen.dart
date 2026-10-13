@@ -165,24 +165,32 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
 
-    try {
-      return await resolveOnce();
-    } catch (_) {
-      await Future<void>.delayed(const Duration(milliseconds: 320));
+    // PostgREST can be briefly cold right after auth; retry before wiping session.
+    const delays = <Duration>[
+      Duration(milliseconds: 400),
+      Duration(milliseconds: 900),
+      Duration(milliseconds: 1600),
+    ];
+    Object? lastError;
+    for (var attempt = 0; attempt <= delays.length; attempt += 1) {
       try {
         return await resolveOnce();
       } catch (error) {
-        debugPrint('Session validation failed; clearing local session: $error');
-        try {
-          await Supabase.instance.client.auth.signOut(
-            scope: SignOutScope.local,
-          );
-        } catch (signOutError) {
-          debugPrint('Could not clear local session: $signOutError');
-        }
-        rethrow;
+        lastError = error;
+        debugPrint(
+          'Session validation attempt ${attempt + 1}/${delays.length + 1} failed: $error',
+        );
+        if (attempt >= delays.length) break;
+        await Future<void>.delayed(delays[attempt]);
       }
     }
+    debugPrint('Session validation failed; clearing local session: $lastError');
+    try {
+      await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
+    } catch (signOutError) {
+      debugPrint('Could not clear local session: $signOutError');
+    }
+    throw lastError ?? StateError('No se pudo validar el acceso.');
   }
 
   Future<PostAuthDestination> _targetFutureFor(String userId) {
@@ -615,6 +623,33 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
+  bool _isTransientAuthFailure(Object error) {
+    if (error is AuthRetryableFetchException) return true;
+    if (error is AuthException) {
+      final status = int.tryParse(error.statusCode ?? '');
+      if (status != null && status >= 500) return true;
+      return _looksLikeTransientAuthMessage(error.message);
+    }
+    return _looksLikeTransientAuthMessage(error.toString());
+  }
+
+  bool _looksLikeTransientAuthMessage(String message) {
+    final normalized = message.trim().toLowerCase();
+    return normalized.contains('authretryable') ||
+        normalized.contains('network') ||
+        normalized.contains('socket') ||
+        normalized.contains('clientexception') ||
+        normalized.contains('connection') ||
+        normalized.contains('failed host') ||
+        normalized.contains('timed out') ||
+        normalized.contains('timeout') ||
+        normalized.contains('connection closed') ||
+        normalized.contains('connection reset') ||
+        normalized.contains('503') ||
+        normalized.contains('502') ||
+        normalized.contains('504');
+  }
+
   String _translateAuthError(String message) {
     final normalized = message.trim().toLowerCase();
     if (normalized.isEmpty) {
@@ -652,7 +687,7 @@ class _AuthScreenState extends State<AuthScreen> {
     if (normalized.contains('weak password')) {
       return 'La contraseña es demasiado debil. Usa una combinacion mas segura.';
     }
-    if (normalized.contains('network')) {
+    if (_looksLikeTransientAuthMessage(normalized)) {
       return 'Problema de red. Verifica tu conexion e intentalo otra vez.';
     }
     if (normalized.contains('too many requests')) {
@@ -679,18 +714,50 @@ class _AuthScreenState extends State<AuthScreen> {
     if (!_loginFormKey.currentState!.validate() || _isLoginLoading) return;
 
     setState(() => _isLoginLoading = true);
+    final email = _loginEmailController.text.trim();
+    final password = _loginPasswordController.text;
+    const maxAttempts = 3;
     try {
-      await Supabase.instance.client.auth.signInWithPassword(
-        email: _loginEmailController.text.trim(),
-        password: _loginPasswordController.text,
-      );
-    } on AuthException catch (error) {
-      _showSnack(_translateAuthError(error.message), isError: true);
-    } catch (_) {
-      _showSnack(
-        'No se pudo iniciar sesión. Inténtalo nuevamente.',
-        isError: true,
-      );
+      for (var attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          await Supabase.instance.client.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          return;
+        } on AuthException catch (error) {
+          final canRetry =
+              attempt < maxAttempts && _isTransientAuthFailure(error);
+          debugPrint(
+            'signIn attempt $attempt/$maxAttempts failed '
+            '(${error.runtimeType}, status=${error.statusCode}): ${error.message}',
+          );
+          if (canRetry) {
+            await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+            continue;
+          }
+          _showSnack(_translateAuthError(error.message), isError: true);
+          return;
+        } catch (error) {
+          final canRetry =
+              attempt < maxAttempts && _isTransientAuthFailure(error);
+          debugPrint(
+            'signIn attempt $attempt/$maxAttempts failed '
+            '(${error.runtimeType}): $error',
+          );
+          if (canRetry) {
+            await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+            continue;
+          }
+          _showSnack(
+            _looksLikeTransientAuthMessage(error.toString())
+                ? 'Problema de red. Verifica tu conexion e intentalo otra vez.'
+                : 'No se pudo iniciar sesión. Inténtalo nuevamente.',
+            isError: true,
+          );
+          return;
+        }
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoginLoading = false);

@@ -183,7 +183,7 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
 
   Future<void> _openHelp() async {
     final uri = Uri.parse(
-      'https://wa.me/584148216433?text=${Uri.encodeComponent('Hola, necesito ayuda con Plan y facturación en elmenuxfa.com.')}',
+      'https://wa.me/584220451906?text=${Uri.encodeComponent('Hola, necesito ayuda con Plan y facturación en elmenuxfa.com.')}',
     );
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }

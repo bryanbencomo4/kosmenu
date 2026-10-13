@@ -140,19 +140,19 @@ describe('merchant comanda from stored snapshots', () => {
     const digital = { ...order, paymentProofUrl, details: { ...order.details,
       metodo_pago: { nombre: 'Pago móvil' }, comprobante_url: 'storage://comprobantes/private.png',
     } };
-    expect(buildDetailedMerchantWhatsappText(digital)).toContain(`Comprobante: ${paymentProofUrl}`);
+    expect(buildDetailedMerchantWhatsappText(digital)).toContain(`Comprobante:\n${paymentProofUrl}`);
     expect(buildDetailedMerchantWhatsappText(digital)).not.toContain('storage://');
     expect(buildDetailedMerchantWhatsappText({ ...digital, details: { ...digital.details, comprobante_url: null } })).not.toContain('Comprobante:');
     expect(buildDetailedMerchantWhatsappText({ ...digital, details: { ...digital.details, metodo_pago: { nombre: 'Efectivo' } } })).not.toContain('Comprobante:');
     expect(buildDetailedMerchantWhatsappText({ ...digital, paymentProofUrl: undefined })).not.toContain('Comprobante:');
     expect(buildDetailedMerchantWhatsappText({ ...digital, details: { ...digital.details,
       items: Array.from({ length: 500 }, () => order.details.items[0]),
-    } })).toContain(`Comprobante: ${paymentProofUrl}`);
+    } })).toContain(`Comprobante:\n${paymentProofUrl}`);
   });
   it('manual footer is read-only and preserves the exact secure link', () => {
     const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details, management_mode: 'whatsapp_manual' } });
-    expect(message).toContain('📲 Gestión: Por WhatsApp');
-    expect(message).toContain('🔗 *Ver pedido*');
+    expect(message).toContain('Canal: WhatsApp');
+    expect(message).toContain('VER PEDIDO COMPLETO');
     expect(message).not.toContain('Estado: Pendiente');
     expect(message).not.toContain('Gestionar pedido');
     expect(message).toContain(url);
@@ -164,7 +164,7 @@ describe('merchant comanda from stored snapshots', () => {
     } });
     expect(message).not.toContain('c/u');
     expect(message).not.toContain('$0');
-    expect(message).toContain('****1234');
+    expect(message).toContain('**1234');
     expect(message).not.toContain('INTERNAL_SECRET');
     expect(message).not.toContain('private-proof');
   });
@@ -174,24 +174,73 @@ describe('merchant comanda from stored snapshots', () => {
     expect(message).toContain('• Tamaño: Grande');
     expect(message).toContain('• Extras: Extra queso');
     expect(message).toContain('40.500');
+    expect(message).toContain('TOTAL A PAGAR');
     expect(message.split(url)).toHaveLength(2);
     expect(message).not.toContain('dato interno');
   });
-  it('pickup does not print address, reference or Maps', () => {
+  it('pickup does not print address, reference, Maps or delivery fee', () => {
     const message = buildDetailedMerchantWhatsappText(order);
+    expect(message).toContain('NUEVO PEDIDO #EMXFA-000156 (Retiro)');
     expect(message).toContain('RETIRO EN TIENDA');
+    expect(message).not.toContain('Costo de delivery');
     expect(message).not.toContain('Dirección:');
     expect(message).not.toContain('maps/search');
   });
-  it('delivery preserves real address, reference, instructions and valid coordinates', () => {
+  it('title order type follows Tipo notes for dine-in and takeaway', () => {
+    expect(buildDetailedMerchantWhatsappText({
+      ...order,
+      details: { ...order.details, order_notes: 'Tipo: Comer aqui' },
+    })).toContain('NUEVO PEDIDO #EMXFA-000156 (Comer aqui)');
+    expect(buildDetailedMerchantWhatsappText({
+      ...order,
+      details: { ...order.details, order_notes: 'Tipo: Para llevar. Sin cebolla' },
+    })).toContain('NUEVO PEDIDO #EMXFA-000156 (Para llevar)');
+  });
+  it('merges payment method details into the payment summary section', () => {
+    const message = buildDetailedMerchantWhatsappText({
+      ...order,
+      paymentProofUrl: 'https://elmenuxfa.com/p/AbCdEf1234',
+      details: {
+        ...order.details,
+        metodo_pago: { nombre: 'Pago móvil' },
+        referencia_pago: '3194',
+        comprobante_url: 'storage://comprobantes/private.png',
+      },
+    });
+    expect(message).toContain('RESUMEN DE PAGO');
+    expect(message).toContain('Método: Pago móvil');
+    expect(message).toContain('Referencia: **3194');
+    expect(message).toContain('Comprobante:\nhttps://elmenuxfa.com/p/AbCdEf1234');
+    expect(message).not.toContain('INFORMACIÓN DEL PAGO');
+    const summaryIdx = message.indexOf('RESUMEN DE PAGO');
+    const methodIdx = message.indexOf('Método: Pago móvil');
+    const clientIdx = message.indexOf('DATOS DEL CLIENTE');
+    expect(summaryIdx).toBeGreaterThan(-1);
+    expect(methodIdx).toBeGreaterThan(summaryIdx);
+    expect(clientIdx).toBeGreaterThan(methodIdx);
+  });
+  it('delivery prints fee in payment summary plus address details', () => {
     const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details,
+      subtotal_moneda_checkout: 35000,
+      costo_delivery_moneda_checkout: 5500,
+      total_moneda_checkout: 40500,
       delivery: { mode: 'delivery', address: 'Calle Preview 1', reference: 'Puerta azul', instructions: 'Tocar timbre', coordinates: { lat: 7.8, lng: -72.2 } },
     } });
-    for (const value of ['DELIVERY', 'Calle Preview 1', 'Puerta azul', 'Tocar timbre', 'query=7.8,-72.2']) expect(message).toContain(value);
+    for (const value of [
+      'NUEVO PEDIDO #EMXFA-000156 (Delivery)',
+      'Subtotal productos',
+      'Costo de delivery',
+      '5.500',
+      'DATOS DE ENTREGA',
+      'Calle Preview 1',
+      'Puerta azul',
+      'Tocar timbre',
+      'query=7.8,-72.2',
+    ]) expect(message).toContain(value);
   });
   it('invalid or absent coordinates never invent a Maps location', () => {
     const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details, delivery: { mode: 'delivery' } } });
-    expect(message).not.toContain('Maps:');
+    expect(message).not.toContain('Google Maps');
     expect(message).not.toContain('Dirección:');
   });
   it('simple products omit options and empty observation blocks', () => {

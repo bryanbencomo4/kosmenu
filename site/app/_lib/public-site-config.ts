@@ -3,7 +3,7 @@ const DEFAULT_BUSINESS_SITE_URL = 'https://business.elmenuxfa.com';
 const DEFAULT_ADMIN_SITE_URL = 'https://admin.elmenuxfa.com';
 const DEFAULT_APP_SITE_URL = 'https://app.elmenuxfa.com';
 const DEFAULT_SUPPORT_EMAIL = 'hola@elmenuxfa.com';
-const DEFAULT_MARKETING_WHATSAPP_DIGITS = '584148216433';
+const DEFAULT_MARKETING_WHATSAPP_DIGITS = '584220451906';
 const DEFAULT_MARKETING_WHATSAPP_MESSAGE =
   'Hola, necesito ayuda con elmenuxfa.com (soporte).';
 const DEFAULT_CHAT_WHATSAPP_DIGITS = '584220451906';

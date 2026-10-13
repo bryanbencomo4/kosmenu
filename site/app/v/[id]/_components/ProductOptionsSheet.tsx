@@ -543,7 +543,7 @@ export function ProductOptionsSheet({
           <button
             type="button"
             onClick={onClose}
-            className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur-sm"
+            className="absolute right-3 top-3 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur-sm"
             aria-label="Cerrar"
           >
             <X className="h-5 w-5" />
