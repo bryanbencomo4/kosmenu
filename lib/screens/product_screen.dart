@@ -12,6 +12,7 @@ import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
+import 'package:kosmenu_app/services/storage_image_url.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1513,25 +1514,39 @@ class _ProductThumb extends StatelessWidget {
     );
 
     Widget networkWithFallback(String url, {String? backupUrl}) {
-      return Image.network(
-        url,
-        width: 100,
-        height: 100,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          if (backupUrl != null &&
-              backupUrl.trim().isNotEmpty &&
-              backupUrl != url) {
-            return Image.network(
-              backupUrl,
-              width: 100,
-              height: 100,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => iconFallback(),
-            );
-          }
-          return iconFallback();
-        },
+      final optimized = StorageImageUrl.optimize(url, width: 200) ?? url;
+      return ColoredBox(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Image.network(
+          optimized,
+          width: 100,
+          height: 100,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            if (optimized != url) {
+              return Image.network(
+                url,
+                width: 100,
+                height: 100,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  if (backupUrl != null &&
+                      backupUrl.trim().isNotEmpty &&
+                      backupUrl != url) {
+                    return networkWithFallback(backupUrl);
+                  }
+                  return iconFallback();
+                },
+              );
+            }
+            if (backupUrl != null &&
+                backupUrl.trim().isNotEmpty &&
+                backupUrl != url) {
+              return networkWithFallback(backupUrl);
+            }
+            return iconFallback();
+          },
+        ),
       );
     }
 

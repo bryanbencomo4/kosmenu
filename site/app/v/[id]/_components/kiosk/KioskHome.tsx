@@ -147,6 +147,7 @@ export function KioskHome({
               alt={`Logo de ${businessName}`}
               priority
               fit="cover"
+              pad={false}
               className="kiosk-enter mt-1.5 h-[76px] w-[76px] rounded-[20px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)] sm:mt-3 sm:h-[118px] sm:w-[118px] sm:rounded-[22px]"
             />
           ) : (

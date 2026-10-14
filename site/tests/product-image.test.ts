@@ -56,7 +56,7 @@ describe('product image resolution', () => {
     const logo =
       'https://project.supabase.co/storage/v1/object/public/logos-comercios/shop/logo.png';
     const tile = new URL(displayProductImage(product, logo)!);
-    expect(tile.searchParams.get('width')).toBe('320');
+    expect(tile.searchParams.get('width')).toBe('288');
     const logoOnly = new URL(displayProductImage('', logo)!);
     expect(logoOnly.searchParams.get('width')).toBe('240');
   });

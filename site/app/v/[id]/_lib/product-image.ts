@@ -7,11 +7,17 @@ export type ImageableProduct = {
 /** Display widths (CSS px × ~2 for retina) used across the public menu. */
 export const MENU_IMAGE_WIDTH = {
   logo: 240,
+  /** Search / checkout thumbs (~64–80 CSS px). */
   thumb: 160,
-  tile: 320,
-  category: 400,
-  sheet: 720,
+  /** Product cards (~128–144 CSS px). */
+  tile: 288,
+  /** Category 4:3 covers (~half viewport on mobile). */
+  category: 360,
+  /** Options sheet hero. */
+  sheet: 640,
+  /** Lightbox / full-bleed heroes. */
   hero: 1200,
+  lightbox: 1200,
 } as const;
 
 /** Request a small WebP variant from Supabase Storage for menu rendering. */

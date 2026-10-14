@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { X } from 'lucide-react';
+import { Maximize2, X } from 'lucide-react';
 
 import type { CartLineSelection } from '../../../_lib/menu-product-options';
 import { KioskImage } from './kiosk/KioskImage';
@@ -340,6 +340,8 @@ type ProductOptionsSheetProps = {
   formatPrice: (amount: number) => string;
   onClose: () => void;
   onConfirm: (selection: CartLineSelection, quantity: number) => void;
+  /** Open full-screen product image lightbox. */
+  onExpandImage?: () => void;
 };
 
 export function ProductOptionsSheet({
@@ -351,6 +353,7 @@ export function ProductOptionsSheet({
   formatPrice,
   onClose,
   onConfirm,
+  onExpandImage,
   compatibleProducts = [],
   secondary = false,
 }: ProductOptionsSheetProps) {
@@ -534,16 +537,39 @@ export function ProductOptionsSheet({
       >
         <div className="relative h-40 shrink-0 bg-[var(--menu-surface-alt)] sm:h-52">
           {imageUrl ? (
-            <KioskImage src={imageUrl} alt={product.nombre} className="h-full w-full" />
+            <button
+              type="button"
+              className="block h-full w-full cursor-zoom-in border-0 bg-transparent p-0"
+              onClick={() => onExpandImage?.()}
+              aria-label={`Ver imagen ampliada de ${product.nombre}`}
+            >
+              <KioskImage
+                src={imageUrl}
+                alt={product.nombre}
+                className="h-full w-full"
+                fit="contain"
+                pad
+              />
+            </button>
           ) : (
             <div className="grid h-full place-items-center text-sm font-semibold text-[var(--menu-text-muted)]">
               Imagen no disponible
             </div>
           )}
+          {imageUrl && onExpandImage ? (
+            <button
+              type="button"
+              onClick={onExpandImage}
+              className="absolute left-3 top-3 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg"
+              aria-label="Ampliar imagen"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onClose}
-            className="absolute right-3 top-3 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur-sm"
+            className="absolute right-3 top-3 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg"
             aria-label="Cerrar"
           >
             <X className="h-5 w-5" />

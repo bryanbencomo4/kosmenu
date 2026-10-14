@@ -306,6 +306,7 @@ export function KioskMenuExperience({
               src={logoUrl}
               alt=""
               fit="cover"
+              pad={false}
               className="h-11 w-11 rounded-[14px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]"
             />
           ) : (

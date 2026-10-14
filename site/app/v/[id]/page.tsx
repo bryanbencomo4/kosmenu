@@ -3468,6 +3468,15 @@ export default function PublicMenuPage() {
   }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
 
   useEffect(() => {
+    if (!expandedProductImage) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setExpandedProductImage(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [expandedProductImage]);
+
+  useEffect(() => {
     if (!isPreCheckoutUpsellOpen || cartCount > 0) return;
     setIsPreCheckoutUpsellOpen(false);
   }, [cartCount, isPreCheckoutUpsellOpen]);
@@ -5202,6 +5211,24 @@ export default function PublicMenuPage() {
           }
           formatPrice={formatUpsellPrice}
           onClose={() => setProductOptionsSheet({ open: false, productId: null })}
+          onExpandImage={() => {
+            const productId = productOptionsSheet.productId;
+            if (!productId) return;
+            const product = productById.get(productId);
+            if (!product) return;
+            const src = displayProductImage(
+              product.imagen_url,
+              comercioLogoUrl,
+              MENU_IMAGE_WIDTH.lightbox,
+            );
+            if (!src) return;
+            setExpandedProductImage({
+              src,
+              alt: product.nombre,
+              title: product.nombre,
+              description: (product.descripcion ?? '').trim(),
+            });
+          }}
           onConfirm={(selection, quantity) => {
             if (!productOptionsSheet.productId) return;
             const addedProduct = productById.get(productOptionsSheet.productId);
@@ -5217,35 +5244,45 @@ export default function PublicMenuPage() {
 
         {expandedProductImage ? (
           <section
-            className="kos-modal-backdrop fixed inset-0 z-[57] bg-black/85 p-4"
+            className="fixed inset-0 z-[160] flex items-center justify-center bg-black/88 p-3 sm:p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label={expandedProductImage.title}
             onClick={() => setExpandedProductImage(null)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setExpandedProductImage(null);
+            }}
           >
-            <div className="mx-auto flex h-full max-w-5xl items-center justify-center">
-              <div
-                className="kos-image-modal-panel w-full max-w-4xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <img
-                  src={expandedProductImage.src}
-                  alt={expandedProductImage.alt}
-                  loading="lazy"
-                  decoding="async"
-                  className="max-h-[72vh] w-full rounded-2xl object-contain"
-                />
-                <div className="mt-3 rounded-2xl bg-black/55 px-4 py-3 text-white">
-                  <h3 className="text-base font-black md:text-lg" style={titleFontStyle}>
-                    {expandedProductImage.title}
-                  </h3>
-                  <p className="mt-1 text-sm text-white/90">{expandedProductImage.description}</p>
-                </div>
-              </div>
+            <div className="relative mx-auto flex h-full w-full max-w-5xl flex-col items-center justify-center">
               <button
                 type="button"
                 onClick={() => setExpandedProductImage(null)}
-                className="kos-surface-motion kos-pressable absolute right-5 top-5 rounded-full border border-white/30 bg-black/40 px-3 py-1 text-xs font-semibold text-white"
+                className="absolute right-0 top-0 z-10 rounded-full border border-white/30 bg-black/50 px-3 py-1.5 text-xs font-semibold text-white sm:right-2 sm:top-2"
               >
                 Cerrar
               </button>
+              <div
+                className="flex max-h-full w-full flex-col items-center"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={expandedProductImage.src}
+                  alt={expandedProductImage.alt}
+                  loading="eager"
+                  decoding="async"
+                  fetchPriority="high"
+                  className="max-h-[min(72vh,720px)] w-full object-contain"
+                />
+                <div className="mt-3 w-full max-w-2xl rounded-2xl bg-black/55 px-4 py-3 text-white">
+                  <h3 className="text-base font-black md:text-lg" style={titleFontStyle}>
+                    {expandedProductImage.title}
+                  </h3>
+                  {expandedProductImage.description ? (
+                    <p className="mt-1 text-sm text-white/90">{expandedProductImage.description}</p>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </section>
         ) : null}
