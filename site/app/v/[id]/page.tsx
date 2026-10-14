@@ -31,6 +31,7 @@ import {
 import { getOrCreateUpsellSessionId, trackUpsellEvent, type UpsellSurface } from './_lib/upsell-session';
 import { AddToCartUpsellSheet, type AddToCartSuggestion } from './_components/upsell/AddToCartUpsellSheet';
 import { ProductOptionsSheet } from './_components/ProductOptionsSheet';
+import { ProductImageLightbox } from './_components/ProductImageLightbox';
 import { KioskMenuExperience } from './_components/kiosk/KioskMenuExperience';
 import { KioskCheckout } from './_components/kiosk/KioskCheckout';
 import { KioskImage } from './_components/kiosk/KioskImage';
@@ -1695,6 +1696,7 @@ export default function PublicMenuPage() {
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [expandedProductImage, setExpandedProductImage] = useState<{
     src: string;
+    previewSrc: string | null;
     alt: string;
     title: string;
     description: string;
@@ -3468,15 +3470,6 @@ export default function PublicMenuPage() {
   }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
 
   useEffect(() => {
-    if (!expandedProductImage) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setExpandedProductImage(null);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [expandedProductImage]);
-
-  useEffect(() => {
     if (!isPreCheckoutUpsellOpen || cartCount > 0) return;
     setIsPreCheckoutUpsellOpen(false);
   }, [cartCount, isPreCheckoutUpsellOpen]);
@@ -5216,6 +5209,11 @@ export default function PublicMenuPage() {
             if (!productId) return;
             const product = productById.get(productId);
             if (!product) return;
+            const previewSrc = displayProductImage(
+              product.imagen_url,
+              comercioLogoUrl,
+              MENU_IMAGE_WIDTH.sheet,
+            );
             const src = displayProductImage(
               product.imagen_url,
               comercioLogoUrl,
@@ -5224,6 +5222,7 @@ export default function PublicMenuPage() {
             if (!src) return;
             setExpandedProductImage({
               src,
+              previewSrc,
               alt: product.nombre,
               title: product.nombre,
               description: (product.descripcion ?? '').trim(),
@@ -5243,48 +5242,15 @@ export default function PublicMenuPage() {
         />
 
         {expandedProductImage ? (
-          <section
-            className="fixed inset-0 z-[160] flex items-center justify-center bg-black/88 p-3 sm:p-6"
-            role="dialog"
-            aria-modal="true"
-            aria-label={expandedProductImage.title}
-            onClick={() => setExpandedProductImage(null)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') setExpandedProductImage(null);
-            }}
-          >
-            <div className="relative mx-auto flex h-full w-full max-w-5xl flex-col items-center justify-center">
-              <button
-                type="button"
-                onClick={() => setExpandedProductImage(null)}
-                className="absolute right-0 top-0 z-10 rounded-full border border-white/30 bg-black/50 px-3 py-1.5 text-xs font-semibold text-white sm:right-2 sm:top-2"
-              >
-                Cerrar
-              </button>
-              <div
-                className="flex max-h-full w-full flex-col items-center"
-                onClick={(event) => event.stopPropagation()}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={expandedProductImage.src}
-                  alt={expandedProductImage.alt}
-                  loading="eager"
-                  decoding="async"
-                  fetchPriority="high"
-                  className="max-h-[min(72vh,720px)] w-full object-contain"
-                />
-                <div className="mt-3 w-full max-w-2xl rounded-2xl bg-black/55 px-4 py-3 text-white">
-                  <h3 className="text-base font-black md:text-lg" style={titleFontStyle}>
-                    {expandedProductImage.title}
-                  </h3>
-                  {expandedProductImage.description ? (
-                    <p className="mt-1 text-sm text-white/90">{expandedProductImage.description}</p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </section>
+          <ProductImageLightbox
+            src={expandedProductImage.src}
+            previewSrc={expandedProductImage.previewSrc}
+            alt={expandedProductImage.alt}
+            title={expandedProductImage.title}
+            description={expandedProductImage.description}
+            titleFontStyle={titleFontStyle}
+            onClose={() => setExpandedProductImage(null)}
+          />
         ) : null}
 
         {isInfoOpen ? (

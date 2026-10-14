@@ -3,6 +3,7 @@
 import { X } from 'lucide-react';
 
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
+import { KioskImage } from '../kiosk/KioskImage';
 
 export type AddToCartSuggestion = {
   productId: string;
@@ -59,7 +60,12 @@ export function AddToCartUpsellSheet({ open, suggestions, formatPrice, onAdd, on
             >
               <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-[14px] bg-[var(--menu-surface-alt)]">
                 {suggestion.imageUrl ? (
-                  <img src={suggestion.imageUrl} alt={suggestion.name} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-0.5" />
+                  <KioskImage
+                    src={suggestion.imageUrl}
+                    alt={suggestion.name}
+                    className="h-full w-full"
+                    pad
+                  />
                 ) : null}
               </div>
               <div className="min-w-0 flex-1">

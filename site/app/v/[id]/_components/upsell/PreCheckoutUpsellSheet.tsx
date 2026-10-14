@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, CreditCard, Minus, Plus, ShoppingBag, ShoppingCa
 import type { CartLineSelection } from '../../../../_lib/menu-product-options';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import type { PreCheckoutSuggestionGroup } from '../../../../_lib/pre-checkout-upsell';
+import { KioskImage } from '../kiosk/KioskImage';
 import {
   UpsellOptionConfigurator,
   type UpsellConfigurableProduct,
@@ -173,12 +174,11 @@ function ProductCard({
           style={{ backgroundColor: 'var(--menu-background)' }}
         >
           {product.imagen_url ? (
-            <img
+            <KioskImage
               src={product.imagen_url}
               alt=""
-              loading="lazy"
-              decoding="async"
-              className="absolute inset-0 h-full w-full object-contain p-1.5"
+              className="absolute inset-0 h-full w-full"
+              pad
             />
           ) : (
             <span className="grid h-full place-items-center text-2xl" aria-hidden>

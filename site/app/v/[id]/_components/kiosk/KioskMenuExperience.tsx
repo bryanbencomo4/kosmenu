@@ -437,8 +437,8 @@ export function KioskMenuExperience({
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* Square media: keep cards uniform while contain shows full portrait/landscape photos. */}
-                  <div className="relative w-full shrink-0 bg-[var(--menu-surface-alt)] pt-[100%]">
+                  {/* Near-square media (slightly tall) — balanced for portrait food; blur fill hides letterbox. */}
+                  <div className="relative w-full shrink-0 bg-[var(--menu-surface-alt)] pt-[110%]">
                     <div className="absolute inset-0">
                       {category.coverUrl ? (
                         <KioskImage src={category.coverUrl} alt="" className="h-full w-full" />

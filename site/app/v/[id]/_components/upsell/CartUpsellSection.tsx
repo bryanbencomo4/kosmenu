@@ -2,6 +2,8 @@
 
 import { X } from 'lucide-react';
 
+import { KioskImage } from '../kiosk/KioskImage';
+
 export type CartUpsellSuggestion = {
   productId: string;
   ruleId: string;
@@ -29,7 +31,12 @@ export function CartUpsellSection({ suggestions, formatPrice, onAdd, onDismiss }
           <div key={suggestion.productId} className="flex items-center gap-3 rounded-[18px] border border-[var(--menu-border)] p-2.5">
             <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-[12px] bg-[var(--menu-surface-alt)]">
               {suggestion.imageUrl ? (
-                <img src={suggestion.imageUrl} alt={suggestion.name} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain p-0.5" />
+                <KioskImage
+                  src={suggestion.imageUrl}
+                  alt={suggestion.name}
+                  className="h-full w-full"
+                  pad
+                />
               ) : null}
             </div>
             <div className="min-w-0 flex-1">

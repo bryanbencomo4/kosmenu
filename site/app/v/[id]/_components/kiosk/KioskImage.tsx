@@ -10,15 +10,19 @@ type KioskImageProps = {
   /** Eager-load + high fetch priority (home logo / LCP). Keep false for grids. */
   priority?: boolean;
   /**
-   * `contain` (default) = full photo in frame with theme letterbox.
+   * `contain` (default) = full photo + blurred cover fill behind.
    * `cover` = fill frame (logos only).
    * `auto` = treated as `contain` (legacy alias).
    */
   fit?: 'auto' | 'contain' | 'cover';
-  /** Inner padding for contain mode (keeps cards uniform while photos breathe). */
+  /** Inner padding for the sharp contain layer. */
   pad?: boolean;
 };
 
+/**
+ * Contain-first media tile: sharp centered photo + same-URL blurred cover fill
+ * so letterbox sides never look empty. Browser cache reuses one network fetch.
+ */
 export function KioskImage({
   src,
   alt = '',
@@ -69,28 +73,44 @@ export function KioskImage({
           🍽️
         </div>
       ) : (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          ref={imageRef}
-          src={src}
-          alt={alt}
-          loading={priority ? 'eager' : 'lazy'}
-          decoding="async"
-          fetchPriority={priority ? 'high' : 'auto'}
-          className={`relative h-full w-full transition-opacity duration-200 ${
-            useContain ? 'object-contain' : 'object-cover'
-          } ${useContain && pad ? 'p-2 sm:p-2.5' : ''} ${
-            shown ? 'opacity-100' : 'opacity-0'
-          } ${imgClassName}`}
-          onLoad={() => {
-            setFailed(false);
-            setLoadedSrc(src);
-          }}
-          onError={() => {
-            setFailed(true);
-            setLoadedSrc(src);
-          }}
-        />
+        <>
+          {useContain ? (
+            // Same optimized URL as the sharp layer — cache hit, no second original download.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={src}
+              alt=""
+              aria-hidden
+              loading={priority ? 'eager' : 'lazy'}
+              decoding="async"
+              className={`pointer-events-none absolute inset-0 h-full w-full scale-[1.12] object-cover blur-2xl transition-opacity duration-200 ${
+                shown ? 'opacity-55' : 'opacity-0'
+              }`}
+            />
+          ) : null}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            ref={imageRef}
+            src={src}
+            alt={alt}
+            loading={priority ? 'eager' : 'lazy'}
+            decoding="async"
+            fetchPriority={priority ? 'high' : 'auto'}
+            className={`relative z-[1] h-full w-full transition-opacity duration-200 ${
+              useContain ? 'object-contain object-center' : 'object-cover'
+            } ${useContain && pad ? 'p-1.5 sm:p-2' : ''} ${
+              shown ? 'opacity-100' : 'opacity-0'
+            } ${imgClassName}`}
+            onLoad={() => {
+              setFailed(false);
+              setLoadedSrc(src);
+            }}
+            onError={() => {
+              setFailed(true);
+              setLoadedSrc(src);
+            }}
+          />
+        </>
       )}
     </div>
   );
