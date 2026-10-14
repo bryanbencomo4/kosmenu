@@ -437,8 +437,8 @@ export function KioskMenuExperience({
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* 3:4 media — portrait food fills width; blur cover fills any leftover letterbox. */}
-                  <div className="relative w-full shrink-0 bg-[var(--menu-surface-alt)] pt-[133.333%]">
+                  {/* 2:3 media — taller frame so portrait covers read wider; blur fills leftover letterbox. */}
+                  <div className="relative w-full shrink-0 bg-[var(--menu-surface-alt)] pt-[150%]">
                     <div className="absolute inset-0">
                       {category.coverUrl ? (
                         <KioskImage src={category.coverUrl} alt="" className="h-full w-full" />
@@ -482,11 +482,17 @@ export function KioskMenuExperience({
                 }`}
                 style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
               >
-                <div className="h-36 w-36 shrink-0 self-start overflow-hidden bg-[var(--menu-surface-alt)] sm:h-40 sm:w-40">
+                <div className="aspect-[3/4] w-[7.75rem] shrink-0 self-start overflow-hidden bg-[var(--menu-surface-alt)] sm:w-36">
                   {product.imageUrl ? (
-                    <KioskImage src={product.imageUrl} alt={product.name} className="h-full w-full" />
+                    <KioskImage
+                      src={product.imageUrl}
+                      alt={product.name}
+                      className="h-full w-full"
+                    />
                   ) : (
-                    <div className="grid h-full place-items-center text-3xl">{activeCategory?.glyph || '🍽️'}</div>
+                    <div className="grid h-full place-items-center text-3xl">
+                      {activeCategory?.glyph || '🍽️'}
+                    </div>
                   )}
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col justify-between self-stretch p-3.5">

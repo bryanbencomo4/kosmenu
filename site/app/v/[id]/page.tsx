@@ -5197,6 +5197,15 @@ export default function PublicMenuPage() {
                 )
               : null
           }
+          imagePreviewUrl={
+            productOptionsSheet.productId
+              ? displayProductImage(
+                  productById.get(productOptionsSheet.productId)?.imagen_url,
+                  comercioLogoUrl,
+                  MENU_IMAGE_WIDTH.tile,
+                )
+              : null
+          }
           category={
             productOptionsSheet.productId
               ? categoryByProductId.get(productOptionsSheet.productId) ?? null

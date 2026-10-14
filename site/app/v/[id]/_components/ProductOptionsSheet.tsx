@@ -334,6 +334,8 @@ type ProductOptionsSheetProps = {
   compatibleProducts?: ConfigurableProduct[];
   secondary?: boolean;
   imageUrl: string | null;
+  /** Cached smaller variant for blur fill while the sheet hero loads. */
+  imagePreviewUrl?: string | null;
   category: {
     opciones_menu?: unknown;
   } | null;
@@ -349,6 +351,7 @@ export function ProductOptionsSheet({
   canAdd,
   product,
   imageUrl,
+  imagePreviewUrl,
   category,
   formatPrice,
   onClose,
@@ -535,20 +538,22 @@ export function ProductOptionsSheet({
         aria-label={`Opciones de ${product.nombre}`}
         className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)] sm:max-h-[min(88vh,760px)]"
       >
-        <div className="relative h-40 shrink-0 bg-[var(--menu-surface-alt)] sm:h-52">
+        <div className="relative h-52 shrink-0 overflow-hidden bg-[var(--menu-surface-alt)] sm:h-64">
           {imageUrl ? (
             <button
               type="button"
-              className="block h-full w-full cursor-zoom-in border-0 bg-transparent p-0"
+              className="relative block h-full w-full cursor-zoom-in overflow-hidden border-0 bg-transparent p-0"
               onClick={() => onExpandImage?.()}
               aria-label={`Ver imagen ampliada de ${product.nombre}`}
             >
               <KioskImage
                 src={imageUrl}
+                previewSrc={imagePreviewUrl || imageUrl}
                 alt={product.nombre}
-                className="h-full w-full"
+                className="absolute inset-0 h-full w-full"
                 fit="contain"
                 pad
+                priority
               />
             </button>
           ) : (

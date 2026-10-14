@@ -9,10 +9,10 @@ export const MENU_IMAGE_WIDTH = {
   logo: 240,
   /** Search / checkout thumbs (~64–80 CSS px). */
   thumb: 160,
-  /** Product cards (~144–160 CSS px). */
-  tile: 320,
-  /** Category 3:4 covers (~half viewport on mobile). */
-  category: 480,
+  /** Product cards (~124–144 CSS px wide, 3:4 tall). */
+  tile: 360,
+  /** Category 2:3 covers (~half viewport on mobile). */
+  category: 520,
   /** Options sheet hero. */
   sheet: 640,
   /** Lightbox / full-bleed heroes. */
