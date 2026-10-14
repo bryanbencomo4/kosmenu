@@ -5,8 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
-import 'package:kosmenu_app/screens/billing_plan_screen.dart';
-import 'package:kosmenu_app/screens/business_setup_screen.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart' deferred as billing_screen;
+import 'package:kosmenu_app/screens/business_setup_screen.dart' deferred as setup_screen;
 import 'package:kosmenu_app/screens/pending_order_link_screen.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
@@ -14,6 +14,7 @@ import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/deferred_library_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -147,11 +148,12 @@ class _AuthGateState extends State<AuthGate> {
       hasActiveSubscription = sub != null;
 
       // If still unpaid locally, ask server to reconcile with Zeno (missing webhooks).
+      // Bound the wait so a slow edge function never holds the splash.
       if (!hasActiveSubscription) {
         try {
-          final snap = await const BillingService().reconcileCheckout(
-            comercioId: comercioId,
-          );
+          final snap = await const BillingService()
+              .reconcileCheckout(comercioId: comercioId)
+              .timeout(const Duration(seconds: 2));
           hasActiveSubscription = snap.hasActiveSubscription;
         } catch (_) {
           // Continue with local state.
@@ -224,7 +226,13 @@ class _AuthGateState extends State<AuthGate> {
             final session =
                 snapshot.data?.session ?? supabase.auth.currentSession;
 
-            if (snapshot.connectionState == ConnectionState.waiting) {
+            // Prefer the already-restored session; do not block on the first
+            // auth-stream tick when Supabase.initialize already hydrated it.
+            final waitingForAuthEvent =
+                snapshot.connectionState == ConnectionState.waiting &&
+                session == null &&
+                !snapshot.hasData;
+            if (waitingForAuthEvent) {
               return const BrandedLoadingScreen(withScaffold: true);
             }
 
@@ -269,10 +277,18 @@ class _AuthGateState extends State<AuthGate> {
                   case PostAuthDestination.dashboard:
                     return const AdminDashboardScreen();
                   case PostAuthDestination.billing:
-                    return const BillingPlanScreen();
+                    return DeferredLibraryScreen(
+                      key: const ValueKey<String>('deferred-billing'),
+                      load: billing_screen.loadLibrary,
+                      builder: () => billing_screen.BillingPlanScreen(),
+                    );
                   case PostAuthDestination.setup:
                   case null:
-                    return const BusinessSetupScreen();
+                    return DeferredLibraryScreen(
+                      key: const ValueKey<String>('deferred-setup'),
+                      load: setup_screen.loadLibrary,
+                      builder: () => setup_screen.BusinessSetupScreen(),
+                    );
                 }
               },
             );

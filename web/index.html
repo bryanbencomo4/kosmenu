@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -19,6 +19,8 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="elmenuxfa.com - Menu digital para restaurantes.">
+  <meta name="theme-color" content="#5B21B6">
+  <meta name="color-scheme" content="only light">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -31,6 +33,54 @@
 
   <title>elmenuxfa.com</title>
   <link rel="manifest" href="manifest.json">
+  <!-- Instant brand paint: preload logo before Flutter JS. -->
+  <link rel="preload" href="branding/isotipo.png" as="image" type="image/png">
+  <style>
+    /* Never show a white document while the 17MB bundle downloads. */
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #5B21B6;
+      color: #F4ECFF;
+    }
+    #elmx-boot-shell {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #5B21B6;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    }
+    #elmx-boot-shell[hidden] {
+      display: none !important;
+    }
+    #elmx-boot-shell .elmx-boot-inner {
+      text-align: center;
+      padding: 16px;
+    }
+    #elmx-boot-shell img {
+      width: min(36vw, 160px);
+      height: auto;
+      max-width: 160px;
+      display: block;
+      margin: 0 auto 18px;
+      object-fit: contain;
+    }
+    #elmx-boot-shell .elmx-boot-title {
+      font-size: clamp(28px, 8vw, 38px);
+      font-weight: 900;
+      letter-spacing: -0.8px;
+    }
+    /* Flutter host can flash white; keep host purple until first paint. */
+    flt-glass-pane,
+    flutter-view,
+    flt-scene-host {
+      background: #5B21B6 !important;
+    }
+  </style>
+  <script src="boot-fast.js"></script>
 
   <script>
     // Load Maps/Places once, only when a map or place lookup is requested.
@@ -202,7 +252,15 @@
   </script>
 </head>
 <body>
-  <script src="merchant-notifications.js"></script>
+  <!-- Static brand shell in first HTML bytes (no JS required, no animation). -->
+  <div id="elmx-boot-shell" aria-busy="true" aria-label="Cargando elmenuxfa">
+    <div class="elmx-boot-inner">
+      <img src="branding/isotipo.png" alt="" width="160" height="160" decoding="async" fetchpriority="high" />
+      <div class="elmx-boot-title">elmenuxfa.com</div>
+    </div>
+  </div>
+
+  <script src="merchant-notifications.js" defer></script>
   <!--
     Load Flutter with local CanvasKit so production does not depend on
     gstatic.com (CDN blocks / CSP / offline = black screen).
@@ -213,6 +271,9 @@
     {{flutter_build_config}}
 
     _flutter.loader.load({
+      serviceWorkerSettings: {
+        serviceWorkerVersion: {{flutter_service_worker_version}},
+      },
       config: {
         canvasKitBaseUrl: '/canvaskit/',
       },

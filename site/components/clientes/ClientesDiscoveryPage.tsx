@@ -201,7 +201,12 @@ function shuffleWithSeed<T>(items: T[], seed: string): T[] {
 }
 
 function buildCardMediaSlides(business: DirectoryBusiness): CardMediaSlide[] {
-  const dishes = shuffleWithSeed(business.showcaseDishes ?? [], business.id).slice(0, 3);
+  // Match server showcase rotation (3h buckets) so cards don't freeze on the same 3 dishes.
+  const rotationBucket = Math.floor(Date.now() / (3 * 60 * 60 * 1000));
+  const dishes = shuffleWithSeed(
+    business.showcaseDishes ?? [],
+    `${business.id}:${rotationBucket}`,
+  ).slice(0, 3);
   const slides: CardMediaSlide[] = [];
   if (business.logoUrl) {
     slides.push({ kind: 'logo', imageUrl: business.logoUrl });

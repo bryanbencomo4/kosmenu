@@ -19,6 +19,7 @@ import {
 import { tokenizeSearchText } from '../../_lib/search-text';
 import { loadPromoStatsWindow } from './directory-promo-events';
 import { rankPromotedDelivery } from './directory-promo-rank';
+import { pickRotatedShowcaseDishes } from './public-directory-showcase';
 import { normalizeDirectoryQuery } from './public-directory-text';
 import { getServiceSupabaseClient } from './supabase-server';
 
@@ -117,7 +118,8 @@ const featuredCache = new Map<number, Cached<PublicDirectoryBusiness[]>>();
 let clientDirectoryCache: Cached<ClientDirectoryCached[]> | null = null;
 const PRODUCT_NAMES_PER_BUSINESS = 48;
 const SHOWCASE_DISHES_PER_BUSINESS = 4;
-const SHOWCASE_DISHES_TOTAL_CAP = 480;
+/** Candidates pulled per commerce before beverage filter + rotation. */
+const SHOWCASE_DISHES_CANDIDATE_CAP = 20;
 
 function mergeProductNames(base: string[], extra: string[]) {
   const out = [...base];
@@ -223,42 +225,93 @@ async function loadRecentOrderCounts(comercioIds: string[]) {
   return buildOrderCountMap((data ?? []) as Array<{ comercio_id?: string | null }>);
 }
 
+type ShowcaseCategoryJoin = {
+  nombre?: string | null;
+  rol?: string | null;
+} | null;
+
 async function loadShowcaseDishes(comercioIds: string[]) {
   const dishes = new Map<string, DirectoryShowcaseDish[]>();
   if (comercioIds.length === 0) return dishes;
 
   const supabase = getServiceSupabaseClient();
-  const { data, error } = await supabase
-    .from('productos')
-    .select('comercio_id,nombre,imagen_url,precio,precio_comparacion,disponible,orden')
-    .in('comercio_id', comercioIds)
-    .not('imagen_url', 'is', null)
-    .order('orden', { ascending: true })
-    .limit(SHOWCASE_DISHES_TOTAL_CAP);
+  const candidates = new Map<
+    string,
+    Array<{
+      name: string;
+      imageUrl: string;
+      price: number;
+      compareAtPrice: number | null;
+      categoryName: string | null;
+      categoryRole: string | null;
+    }>
+  >();
 
-  if (error || !data) return dishes;
+  // Batch per commerce so each restaurant gets a fair candidate pool (not global orden).
+  const BATCH = 16;
+  for (let offset = 0; offset < comercioIds.length; offset += BATCH) {
+    const chunk = comercioIds.slice(offset, offset + BATCH);
+    let rows: Array<{
+      comercio_id?: string | null;
+      nombre?: string | null;
+      imagen_url?: string | null;
+      precio?: number | string | null;
+      precio_comparacion?: number | string | null;
+      disponible?: boolean | null;
+      categorias?: ShowcaseCategoryJoin | ShowcaseCategoryJoin[];
+    }> | null = null;
 
-  for (const row of data as Array<{
-    comercio_id?: string | null;
-    nombre?: string | null;
-    imagen_url?: string | null;
-    precio?: number | string | null;
-    precio_comparacion?: number | string | null;
-    disponible?: boolean | null;
-  }>) {
-    if (row.disponible === false) continue;
-    const id = (row.comercio_id ?? '').toString().trim();
-    const name = (row.nombre ?? '').toString().trim();
-    const imageUrl = (row.imagen_url ?? '').toString().trim();
-    const price = Number(row.precio);
-    if (!id || !name || !imageUrl || !Number.isFinite(price) || price <= 0) continue;
-    const list = dishes.get(id) ?? [];
-    if (list.length >= SHOWCASE_DISHES_PER_BUSINESS) continue;
-    const compareRaw = Number(row.precio_comparacion);
-    const compareAtPrice =
-      Number.isFinite(compareRaw) && compareRaw > price ? compareRaw : null;
-    list.push({ name, imageUrl, price, compareAtPrice });
-    dishes.set(id, list);
+    const withCategory = await supabase
+      .from('productos')
+      .select(
+        'comercio_id,nombre,imagen_url,precio,precio_comparacion,disponible,orden,categorias(nombre,rol)',
+      )
+      .in('comercio_id', chunk)
+      .not('imagen_url', 'is', null)
+      .order('orden', { ascending: true })
+      .limit(SHOWCASE_DISHES_CANDIDATE_CAP * chunk.length);
+
+    if (!withCategory.error && withCategory.data) {
+      rows = withCategory.data as typeof rows;
+    } else {
+      const fallback = await supabase
+        .from('productos')
+        .select('comercio_id,nombre,imagen_url,precio,precio_comparacion,disponible,orden')
+        .in('comercio_id', chunk)
+        .not('imagen_url', 'is', null)
+        .order('orden', { ascending: true })
+        .limit(SHOWCASE_DISHES_CANDIDATE_CAP * chunk.length);
+      if (fallback.error || !fallback.data) continue;
+      rows = fallback.data as typeof rows;
+    }
+
+    for (const row of rows ?? []) {
+      if (row.disponible === false) continue;
+      const id = (row.comercio_id ?? '').toString().trim();
+      const name = (row.nombre ?? '').toString().trim();
+      const imageUrl = (row.imagen_url ?? '').toString().trim();
+      const price = Number(row.precio);
+      if (!id || !name || !imageUrl || !Number.isFinite(price) || price <= 0) continue;
+      const list = candidates.get(id) ?? [];
+      if (list.length >= SHOWCASE_DISHES_CANDIDATE_CAP) continue;
+      const compareRaw = Number(row.precio_comparacion);
+      const compareAtPrice =
+        Number.isFinite(compareRaw) && compareRaw > price ? compareRaw : null;
+      const categoryRaw = Array.isArray(row.categorias) ? row.categorias[0] : row.categorias;
+      list.push({
+        name,
+        imageUrl,
+        price,
+        compareAtPrice,
+        categoryName: (categoryRaw?.nombre ?? '').toString().trim() || null,
+        categoryRole: (categoryRaw?.rol ?? '').toString().trim() || null,
+      });
+      candidates.set(id, list);
+    }
+  }
+
+  for (const [id, list] of candidates) {
+    dishes.set(id, pickRotatedShowcaseDishes(list, id, SHOWCASE_DISHES_PER_BUSINESS));
   }
 
   return dishes;

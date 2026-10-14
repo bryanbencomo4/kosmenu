@@ -8,14 +8,15 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
-import 'package:kosmenu_app/screens/billing_plan_screen.dart';
+import 'package:kosmenu_app/screens/billing_plan_screen.dart' deferred as billing_screen;
 import 'package:kosmenu_app/screens/mobile_camera_capture_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
-import 'package:kosmenu_app/screens/public_menu_view.dart';
+import 'package:kosmenu_app/screens/public_menu_view.dart' deferred as public_menu;
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/order_gate_handler.dart';
 import 'package:kosmenu_app/services/push_notification_service.dart';
+import 'package:kosmenu_app/widgets/deferred_library_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
@@ -349,7 +350,7 @@ class _KosmenuAppState extends State<KosmenuApp> {
     if (uri.path == '/' || uri.path.isEmpty) {
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => const _BrandedEntryScreen(),
+        builder: (_) => const AuthGate(),
       );
     }
 
@@ -364,12 +365,17 @@ class _KosmenuAppState extends State<KosmenuApp> {
 
     if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'v') {
       final comercioId = uri.pathSegments[1];
+      final assistedMode = uri.queryParameters['mode'] == 'assisted';
+      final entrySource = uri.queryParameters['source'];
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => PublicMenuView(
-          comercioId: comercioId,
-          assistedMode: uri.queryParameters['mode'] == 'assisted',
-          entrySource: uri.queryParameters['source'],
+        builder: (_) => DeferredLibraryScreen(
+          load: public_menu.loadLibrary,
+          builder: () => public_menu.PublicMenuView(
+            comercioId: comercioId,
+            assistedMode: assistedMode,
+            entrySource: entrySource,
+          ),
         ),
       );
     }
@@ -410,18 +416,25 @@ class _KosmenuAppState extends State<KosmenuApp> {
     }
 
     if (uri.path == '/payment/success' || uri.path == '/billing') {
+      final showSuccess = uri.path == '/payment/success';
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => uri.path == '/payment/success'
-            ? const BillingPaymentSuccessScreen()
-            : const BillingPlanScreen(),
+        builder: (_) => DeferredLibraryScreen(
+          load: billing_screen.loadLibrary,
+          builder: () => showSuccess
+              ? billing_screen.BillingPaymentSuccessScreen()
+              : billing_screen.BillingPlanScreen(),
+        ),
       );
     }
 
     if (uri.path == '/payment/pending') {
       return MaterialPageRoute(
         settings: settings,
-        builder: (_) => const BillingPlanScreen(),
+        builder: (_) => DeferredLibraryScreen(
+          load: billing_screen.loadLibrary,
+          builder: () => billing_screen.BillingPlanScreen(),
+        ),
       );
     }
 
@@ -445,6 +458,8 @@ class _KosmenuAppState extends State<KosmenuApp> {
       },
       onGenerateRoute: _onGenerateRoute,
       theme: AppTheme.lightTheme(),
+      // Window chrome / web host tint while the first route paints.
+      color: const Color(0xFF5B21B6),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -455,165 +470,3 @@ class _KosmenuAppState extends State<KosmenuApp> {
   }
 }
 
-class _BrandedEntryScreen extends StatefulWidget {
-  const _BrandedEntryScreen();
-
-  @override
-  State<_BrandedEntryScreen> createState() => _BrandedEntryScreenState();
-}
-
-class _BrandedEntryScreenState extends State<_BrandedEntryScreen> {
-  bool _startExit = false;
-  bool _showAuth = false;
-
-  @override
-  void initState() {
-    super.initState();
-    passwordRecoveryPending.addListener(_onPasswordRecoveryPending);
-    if (MerchantDeepLink.peekOrder() != null) {
-      _showAuth = true;
-      return;
-    }
-
-    Future<void>.delayed(const Duration(milliseconds: 880), () {
-      if (!mounted) return;
-      setState(() => _startExit = true);
-    });
-
-    Future<void>.delayed(const Duration(milliseconds: 1460), () {
-      if (!mounted) return;
-      setState(() => _showAuth = true);
-    });
-  }
-
-  @override
-  void dispose() {
-    passwordRecoveryPending.removeListener(_onPasswordRecoveryPending);
-    super.dispose();
-  }
-
-  void _onPasswordRecoveryPending() {
-    if (!mounted || !passwordRecoveryPending.value || _showAuth) return;
-    setState(() => _showAuth = true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 420),
-      switchInCurve: Curves.easeOut,
-      switchOutCurve: Curves.easeIn,
-      transitionBuilder: (child, animation) {
-        final fade = CurvedAnimation(parent: animation, curve: Curves.easeOut);
-        final slide = Tween<Offset>(
-          begin: const Offset(0, 0.08),
-          end: Offset.zero,
-        ).animate(fade);
-        return FadeTransition(
-          opacity: fade,
-          child: SlideTransition(position: slide, child: child),
-        );
-      },
-      child: _showAuth || passwordRecoveryPending.value
-          ? const AuthGate(key: ValueKey<String>('auth'))
-          : _BrandedSplash(
-              key: const ValueKey<String>('splash'),
-              exiting: _startExit,
-            ),
-    );
-  }
-}
-
-class _BrandedSplash extends StatelessWidget {
-  const _BrandedSplash({super.key, required this.exiting});
-
-  final bool exiting;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF5B21B6),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isotipoWidth = (constraints.maxWidth * 0.36)
-                .clamp(108.0, 160.0)
-                .toDouble();
-
-            return Center(
-              child: SingleChildScrollView(
-                physics: const NeverScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 0.94, end: 1),
-                  duration: const Duration(milliseconds: 760),
-                  curve: Curves.easeOutBack,
-                  builder: (context, value, child) {
-                    final introOpacity = value.clamp(0.0, 1.0).toDouble();
-                    final introScale = value;
-                    final outOpacity = exiting ? 0.0 : 1.0;
-                    final outOffset = exiting
-                        ? const Offset(0, -0.12)
-                        : Offset.zero;
-                    final outScale = exiting ? 0.9 : 1.0;
-
-                    return AnimatedSlide(
-                      duration: const Duration(milliseconds: 420),
-                      curve: Curves.easeInOutCubic,
-                      offset: outOffset,
-                      child: AnimatedScale(
-                        duration: const Duration(milliseconds: 420),
-                        curve: Curves.easeInOutCubic,
-                        scale: outScale,
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 360),
-                          curve: Curves.easeIn,
-                          opacity: outOpacity,
-                          child: Opacity(
-                            opacity: introOpacity,
-                            child: Transform.scale(
-                              scale: introScale,
-                              child: child,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Image.asset(
-                        'assets/branding/isotipo.png',
-                        width: isotipoWidth,
-                        fit: BoxFit.contain,
-                        filterQuality: FilterQuality.high,
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        'elmenuxfa.com',
-                        style: TextStyle(
-                          color: const Color(0xFFF4ECFF),
-                          fontSize: constraints.maxWidth < 380 ? 34 : 38,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.8,
-                          shadows: const [
-                            Shadow(
-                              color: Color(0x40000000),
-                              blurRadius: 12,
-                              offset: Offset(0, 5),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
