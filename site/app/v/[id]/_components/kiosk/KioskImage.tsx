@@ -33,19 +33,21 @@ export function KioskImage({
   pad = true,
 }: KioskImageProps) {
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const [sharpReady, setSharpReady] = useState(false);
+  const [fillReady, setFillReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
   const useContain = fit !== 'cover';
-  const shown = Boolean(src) && !failed && loadedSrc === src;
+  const shown = Boolean(src) && !failed && sharpReady;
 
   useLayoutEffect(() => {
     setFailed(false);
+    setFillReady(false);
     const image = imageRef.current;
     if (image?.complete && image.naturalWidth > 0) {
-      setLoadedSrc(src);
+      setSharpReady(true);
     } else {
-      setLoadedSrc(null);
+      setSharpReady(false);
     }
   }, [src]);
 
@@ -58,7 +60,7 @@ export function KioskImage({
           : undefined
       }
     >
-      {!shown && !failed ? (
+      {!fillReady && !shown && !failed ? (
         <div
           className="absolute inset-0 bg-[var(--menu-surface-alt,#e5e7eb)]"
           aria-hidden
@@ -83,9 +85,12 @@ export function KioskImage({
               aria-hidden
               loading={priority ? 'eager' : 'lazy'}
               decoding="async"
-              className={`pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover blur-xl transition-opacity duration-200 ${
-                shown ? 'opacity-80' : 'opacity-0'
+              onLoad={() => setFillReady(true)}
+              onError={() => setFillReady(false)}
+              className={`pointer-events-none absolute inset-0 h-full w-full object-cover blur-xl transition-opacity duration-200 ${
+                fillReady || shown ? 'opacity-80' : 'opacity-0'
               }`}
+              style={{ transform: 'scale(1.25)' }}
             />
           ) : null}
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -103,11 +108,12 @@ export function KioskImage({
             } ${imgClassName}`}
             onLoad={() => {
               setFailed(false);
-              setLoadedSrc(src);
+              setSharpReady(true);
+              setFillReady(true);
             }}
             onError={() => {
               setFailed(true);
-              setLoadedSrc(src);
+              setSharpReady(true);
             }}
           />
         </>
