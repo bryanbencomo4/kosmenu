@@ -949,31 +949,33 @@ export function ProductOptionsSheet({
               ) : null}
             </section>
           ) : null}
-          {!secondary && <section>
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Cantidad</p>
-            <div className="mt-3 inline-flex items-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] p-1">
-              <button
-                type="button"
-                onClick={() => setQuantity((prev) => Math.max(1, prev - 1))}
-                className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
-              >
-                −
-              </button>
-              <span className="min-w-10 px-2 text-center text-sm font-black text-[var(--menu-text)]">{quantity}</span>
-              <button
-                type="button"
-                onClick={() => setQuantity((prev) => prev + 1)}
-                className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
-              >
-                +
-              </button>
-            </div>
-          </section>}
+          {!secondary && canAdd ? (
+            <section>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Cantidad</p>
+              <div className="mt-3 inline-flex items-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] p-1">
+                <button
+                  type="button"
+                  onClick={() => setQuantity((prev) => Math.max(1, prev - 1))}
+                  className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
+                >
+                  −
+                </button>
+                <span className="min-w-10 px-2 text-center text-sm font-black text-[var(--menu-text)]">{quantity}</span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity((prev) => prev + 1)}
+                  className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
+                >
+                  +
+                </button>
+              </div>
+            </section>
+          ) : null}
           </div>
         </div>
 
         <div className="shrink-0 border-t border-[var(--menu-border)] bg-[var(--menu-surface)] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 sm:pb-4">
-          {hasGroups ? (
+          {canAdd && hasGroups ? (
             <div className="mb-2 flex items-center justify-between gap-3">
               <span className="min-w-0 truncate text-xs font-semibold text-[var(--menu-text-muted)]">
                 {groupIssues[0]?.message ?? customIssues[0] ?? partnerIssues[0] ?? 'Precio actualizado'}
@@ -983,24 +985,36 @@ export function ProductOptionsSheet({
               </span>
             </div>
           ) : null}
-          <button
-            type="button"
-            disabled={!canConfirm && !pendingGroupId}
-            aria-disabled={!canConfirm || undefined}
-            onClick={() => {
-              if (canConfirm) {
-                onConfirm(selection, quantity);
-                return;
-              }
-              const target = bodyRef.current?.querySelector(`[data-option-group="${CSS.escape(pendingGroupId)}"]`);
-              target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              setAttentionGroupId(pendingGroupId);
-            }}
-            className={`inline-flex min-h-12 w-full items-center justify-center rounded-[16px] text-sm font-bold disabled:opacity-50 ${canConfirm ? '' : 'opacity-50'}`}
-            style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
-          >
-            {secondary ? `Guardar opciones · ${formatPrice(unitPrice)}` : hasGroups ? 'Agregar al pedido' : `Agregar · ${formatPrice(unitPrice * quantity)}`}
-          </button>
+          {canAdd ? (
+            <button
+              type="button"
+              disabled={!canConfirm && !pendingGroupId}
+              aria-disabled={!canConfirm || undefined}
+              onClick={() => {
+                if (canConfirm) {
+                  onConfirm(selection, quantity);
+                  return;
+                }
+                const target = bodyRef.current?.querySelector(`[data-option-group="${CSS.escape(pendingGroupId)}"]`);
+                target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                setAttentionGroupId(pendingGroupId);
+              }}
+              className={`inline-flex min-h-12 w-full items-center justify-center rounded-[16px] text-sm font-bold disabled:opacity-50 ${canConfirm ? '' : 'opacity-50'}`}
+              style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
+            >
+              {secondary ? `Guardar opciones · ${formatPrice(unitPrice)}` : hasGroups ? 'Agregar al pedido' : `Agregar · ${formatPrice(unitPrice * quantity)}`}
+            </button>
+          ) : (
+            <div
+              className="inline-flex min-h-12 w-full items-center justify-center rounded-[16px] px-3 text-center text-sm font-bold"
+              style={{
+                backgroundColor: 'color-mix(in srgb, var(--menu-text-muted) 16%, var(--menu-surface-alt))',
+                color: 'var(--menu-text-muted)',
+              }}
+            >
+              Solo consulta · No se puede pedir ahora
+            </div>
+          )}
         </div>
       </div>
     </div>

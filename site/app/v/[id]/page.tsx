@@ -3162,13 +3162,11 @@ export default function PublicMenuPage() {
     setDeliveryMode('pickup');
     setKioskAddedPrompt(null);
     setIsConfirmOpen(false);
-    if (!catalogMode) {
-      setProductOptionsSheet({ open: false, productId: null });
-    }
+    // Keep product detail open for browse-only viewing while closed.
     if (typeof window !== 'undefined' && commerceIdentifier) {
       window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     }
-  }, [scheduleClosed, commerceIdentifier, catalogMode]);
+  }, [scheduleClosed, commerceIdentifier]);
 
   function enterCatalogMode() {
     if (!kioskHomeConfig.catalogo) return;
@@ -3196,12 +3194,9 @@ export default function PublicMenuPage() {
   }
 
   function handleKioskAddProduct(productId: string) {
-    if (catalogMode) {
-      if (!kioskHomeConfig.catalogo) return;
-      setProductOptionsSheet({ open: true, productId });
-      return;
-    }
-    if (scheduleClosed || !kioskFulfillment) return;
+    // Always allow opening product details (including when closed / browse-only).
+    // Ordering is gated by ProductOptionsSheet `canAdd`.
+    if (catalogMode && !kioskHomeConfig.catalogo) return;
     setProductOptionsSheet({ open: true, productId });
   }
 
@@ -5180,7 +5175,8 @@ export default function PublicMenuPage() {
             : []}
           open={productOptionsSheet.open && !kioskVoucher}
           canAdd={
-            (catalogMode || (!scheduleClosed && Boolean(kioskFulfillment))) &&
+            !scheduleClosed &&
+            (catalogMode || Boolean(kioskFulfillment)) &&
             productById.get(productOptionsSheet.productId ?? '')?.disponible !== false
           }
           product={

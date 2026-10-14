@@ -392,14 +392,9 @@ export function KioskMenuExperience({
                   <button
                     key={`product-${hit.product.id}`}
                     type="button"
-                    aria-label={browseOnly ? hit.product.name : `Ver detalles de ${hit.product.name}`}
-                    onClick={() => {
-                      if (browseOnly) return;
-                      onAddProduct(hit.product.id);
-                    }}
-                    className={`kiosk-card flex w-full items-center gap-3 overflow-hidden rounded-[22px] bg-[var(--menu-surface)] p-3 text-left shadow-[var(--menu-shadow)] ${
-                      browseOnly ? 'cursor-default' : ''
-                    }`}
+                    aria-label={`Ver detalles de ${hit.product.name}`}
+                    onClick={() => onAddProduct(hit.product.id)}
+                    className="kiosk-card flex w-full items-center gap-3 overflow-hidden rounded-[22px] bg-[var(--menu-surface)] p-3 text-left shadow-[var(--menu-shadow)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--menu-primary)]"
                   >
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-[16px] bg-[var(--menu-surface-alt)]">
                       {hit.product.imageUrl ? (
@@ -470,16 +465,9 @@ export function KioskMenuExperience({
               <button
                 key={product.id}
                 type="button"
-                aria-label={browseOnly ? product.name : `Ver detalles de ${product.name}`}
-                onClick={() => {
-                  if (browseOnly) return;
-                  onAddProduct(product.id);
-                }}
-                className={`kiosk-card flex w-full items-start overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] ${
-                  browseOnly
-                    ? 'cursor-default'
-                    : 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--menu-primary)]'
-                }`}
+                aria-label={`Ver detalles de ${product.name}`}
+                onClick={() => onAddProduct(product.id)}
+                className="kiosk-card flex w-full items-start overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--menu-primary)]"
                 style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
               >
                 <div className="aspect-[3/4] w-[7.75rem] shrink-0 self-start overflow-hidden bg-[var(--menu-surface-alt)] sm:w-36">

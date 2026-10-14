@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 
 type KioskImageProps = {
   src: string;
@@ -17,7 +17,7 @@ type KioskImageProps = {
    * `auto` = treated as `contain` (legacy alias).
    */
   fit?: 'auto' | 'contain' | 'cover';
-  /** Inner padding for the sharp contain layer. */
+  /** Inset the sharp photo slightly from the frame. */
   pad?: boolean;
 };
 
@@ -26,9 +26,23 @@ const MIN_WIDTH_FILL = 0.7;
 /** Cap soft-widen so we never aggressively crop. */
 const MAX_WIDEN = 1.28;
 
+type PhotoBox = { left: number; top: number; width: number; height: number };
+
+function softEdgeMask(featherPx: number): CSSProperties {
+  const f = Math.max(4, Math.round(featherPx));
+  const x = `linear-gradient(to right, transparent 0px, #000 ${f}px, #000 calc(100% - ${f}px), transparent 100%)`;
+  const y = `linear-gradient(to bottom, transparent 0px, #000 ${f}px, #000 calc(100% - ${f}px), transparent 100%)`;
+  return {
+    WebkitMaskImage: `${x}, ${y}`,
+    WebkitMaskComposite: 'source-in',
+    maskImage: `${x}, ${y}`,
+    maskComposite: 'intersect',
+  };
+}
+
 /**
- * Contain-first media tile: sharp centered photo + blurred cover fill.
- * Prefer a cached `previewSrc` for the blur layer so it paints before HD.
+ * Contain-first media tile: sharp rounded photo + blurred cover fill.
+ * Soft CSS masks feather the hard photo edges without canvas work.
  */
 export function KioskImage({
   src,
@@ -45,7 +59,7 @@ export function KioskImage({
   const [sharpReady, setSharpReady] = useState(false);
   const [fillReady, setFillReady] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [widenScale, setWidenScale] = useState(1);
+  const [photoBox, setPhotoBox] = useState<PhotoBox | null>(null);
 
   const useContain = fit !== 'cover';
   const fillSrc = (previewSrc ?? '').trim() || src;
@@ -54,7 +68,7 @@ export function KioskImage({
   useLayoutEffect(() => {
     setFailed(false);
     setFillReady(false);
-    setWidenScale(1);
+    setPhotoBox(null);
     const image = imageRef.current;
     if (image?.complete && image.naturalWidth > 0) {
       setSharpReady(true);
@@ -75,25 +89,41 @@ export function KioskImage({
       const imgW = image.naturalWidth;
       const imgH = image.naturalHeight;
       if (!boxW || !boxH || !imgW || !imgH) {
-        setWidenScale(1);
+        setPhotoBox(null);
         return;
       }
+
+      const inset = pad ? Math.min(8, Math.round(Math.min(boxW, boxH) * 0.04)) : 0;
+      const availW = Math.max(1, boxW - inset * 2);
+      const availH = Math.max(1, boxH - inset * 2);
       const imgAspect = imgW / imgH;
-      const boxAspect = boxW / boxH;
-      // Width of the contain-fitted image as a fraction of the frame.
-      const widthFill = imgAspect >= boxAspect ? 1 : imgAspect / boxAspect;
-      if (widthFill >= MIN_WIDTH_FILL) {
-        setWidenScale(1);
-        return;
+      const boxAspect = availW / availH;
+
+      let width = imgAspect > boxAspect ? availW : availH * imgAspect;
+      let height = imgAspect > boxAspect ? availW / imgAspect : availH;
+
+      const widthFill = width / availW;
+      if (widthFill < MIN_WIDTH_FILL) {
+        const scale = Math.min(MAX_WIDEN, MIN_WIDTH_FILL / widthFill);
+        width *= scale;
+        height *= scale;
       }
-      setWidenScale(Math.min(MAX_WIDEN, MIN_WIDTH_FILL / widthFill));
+
+      setPhotoBox({
+        left: inset + (availW - width) / 2,
+        top: inset + (availH - height) / 2,
+        width,
+        height,
+      });
     };
 
     update();
     const observer = new ResizeObserver(update);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [useContain, shown, src]);
+  }, [useContain, shown, src, pad]);
+
+  const feather = photoBox ? Math.min(14, Math.max(6, photoBox.width * 0.06)) : 8;
 
   return (
     <div
@@ -132,7 +162,6 @@ export function KioskImage({
               fetchPriority={priority ? 'high' : 'auto'}
               onLoad={() => setFillReady(true)}
               onError={() => {
-                // Fall back to sharp URL if preview fails.
                 if (fillSrc !== src) setFillReady(false);
               }}
               className={`pointer-events-none absolute inset-0 h-full w-full object-cover blur-xl transition-opacity duration-200 ${
@@ -141,24 +170,18 @@ export function KioskImage({
               style={{ transform: 'scale(1.28)' }}
             />
           ) : null}
+
+          {/* Hidden probe for natural size / load events when sharp is absolutely positioned. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             ref={imageRef}
             src={src}
-            alt={alt}
+            alt=""
+            aria-hidden
             loading={priority ? 'eager' : 'lazy'}
             decoding="async"
             fetchPriority={priority ? 'high' : 'auto'}
-            className={`relative z-[1] h-full w-full transition-opacity duration-300 ${
-              useContain ? 'object-contain object-center' : 'object-cover'
-            } ${useContain && pad ? 'p-1 sm:p-1.5' : ''} ${
-              shown ? 'opacity-100' : 'opacity-0'
-            } ${imgClassName}`}
-            style={
-              useContain && widenScale > 1
-                ? { transform: `scale(${widenScale})` }
-                : undefined
-            }
+            className="pointer-events-none absolute h-0 w-0 opacity-0"
             onLoad={() => {
               setFailed(false);
               setSharpReady(true);
@@ -169,6 +192,48 @@ export function KioskImage({
               setSharpReady(true);
             }}
           />
+
+          {useContain && shown && photoBox ? (
+            <div
+              className="pointer-events-none absolute z-[1] overflow-hidden rounded-2xl"
+              style={{
+                left: photoBox.left,
+                top: photoBox.top,
+                width: photoBox.width,
+                height: photoBox.height,
+                ...softEdgeMask(feather),
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={src}
+                alt={alt}
+                className={`h-full w-full object-cover transition-opacity duration-300 ${
+                  shown ? 'opacity-100' : 'opacity-0'
+                } ${imgClassName}`}
+              />
+            </div>
+          ) : !useContain ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={src}
+              alt={alt}
+              loading={priority ? 'eager' : 'lazy'}
+              decoding="async"
+              fetchPriority={priority ? 'high' : 'auto'}
+              className={`relative z-[1] h-full w-full object-cover transition-opacity duration-300 ${
+                shown ? 'opacity-100' : 'opacity-0'
+              } ${imgClassName}`}
+              onLoad={() => {
+                setFailed(false);
+                setSharpReady(true);
+              }}
+              onError={() => {
+                setFailed(true);
+                setSharpReady(true);
+              }}
+            />
+          ) : null}
         </>
       )}
     </div>
