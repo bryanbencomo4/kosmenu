@@ -13,11 +13,11 @@ type KioskImageProps = {
   priority?: boolean;
   /**
    * `contain` (default) = full photo + blurred cover fill behind.
-   * `cover` = fill frame (logos only).
+   * `cover` = fill frame (logos / discovery dishes) with blur-while-loading.
    * `auto` = treated as `contain` (legacy alias).
    */
   fit?: 'auto' | 'contain' | 'cover';
-  /** Inset the sharp photo slightly from the frame. */
+  /** Inset the sharp photo slightly from the frame (contain only). */
   pad?: boolean;
 };
 
@@ -40,9 +40,16 @@ function softEdgeMask(featherPx: number): CSSProperties {
   };
 }
 
+function markComplete(
+  image: HTMLImageElement | null,
+  onReady: () => void,
+) {
+  if (image?.complete && image.naturalWidth > 0) onReady();
+}
+
 /**
- * Contain-first media tile: sharp rounded photo + blurred cover fill.
- * Soft CSS masks feather the hard photo edges without canvas work.
+ * Contain/cover media with blurred fill while HD loads.
+ * Blur uses `previewSrc` when provided (tiny WebP) so it paints before sharp.
  */
 export function KioskImage({
   src,
@@ -56,6 +63,7 @@ export function KioskImage({
 }: KioskImageProps) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const blurRef = useRef<HTMLImageElement | null>(null);
   const [sharpReady, setSharpReady] = useState(false);
   const [fillReady, setFillReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -68,13 +76,14 @@ export function KioskImage({
   useLayoutEffect(() => {
     setFailed(false);
     setFillReady(false);
+    setSharpReady(false);
     setPhotoBox(null);
-    const image = imageRef.current;
-    if (image?.complete && image.naturalWidth > 0) {
+    // Cache hits often skip onLoad — sync from complete flags.
+    markComplete(blurRef.current, () => setFillReady(true));
+    markComplete(imageRef.current, () => {
       setSharpReady(true);
-    } else {
-      setSharpReady(false);
-    }
+      setFillReady(true);
+    });
   }, [src, fillSrc]);
 
   useLayoutEffect(() => {
@@ -129,15 +138,11 @@ export function KioskImage({
     <div
       ref={frameRef}
       className={`relative overflow-hidden ${className}`}
-      style={
-        useContain
-          ? { backgroundColor: 'var(--menu-surface-alt, #f3f4f6)' }
-          : undefined
-      }
+      style={{ backgroundColor: 'var(--menu-surface-alt, #f3f4f6)' }}
     >
       {!fillReady && !shown && !failed ? (
         <div
-          className="absolute inset-0 bg-[var(--menu-surface-alt,#e5e7eb)]"
+          className="absolute inset-0 animate-pulse bg-[var(--menu-surface-alt,#e5e7eb)]"
           aria-hidden
         />
       ) : null}
@@ -151,47 +156,53 @@ export function KioskImage({
         </div>
       ) : (
         <>
+          {/* Blur layer: eager tiny preview so it paints before HD. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            ref={blurRef}
+            src={fillSrc}
+            alt=""
+            aria-hidden
+            loading={priority || fillSrc !== src ? 'eager' : 'lazy'}
+            decoding="async"
+            fetchPriority={priority || fillSrc !== src ? 'high' : 'auto'}
+            onLoad={() => setFillReady(true)}
+            onError={() => {
+              if (fillSrc !== src) {
+                // Keep waiting for sharp; don't blank the tile.
+                return;
+              }
+              setFillReady(false);
+            }}
+            className={`pointer-events-none absolute inset-0 h-full w-full object-cover blur-xl transition-opacity duration-200 ${
+              fillReady ? (shown ? 'opacity-80' : 'opacity-90') : 'opacity-0'
+            }`}
+            style={{ transform: 'scale(1.28)' }}
+          />
+
+          {/* Probe for natural size / load (contain path). */}
           {useContain ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={fillSrc}
+              ref={imageRef}
+              src={src}
               alt=""
               aria-hidden
               loading={priority ? 'eager' : 'lazy'}
               decoding="async"
               fetchPriority={priority ? 'high' : 'auto'}
-              onLoad={() => setFillReady(true)}
-              onError={() => {
-                if (fillSrc !== src) setFillReady(false);
+              className="pointer-events-none absolute h-0 w-0 opacity-0"
+              onLoad={() => {
+                setFailed(false);
+                setSharpReady(true);
+                setFillReady(true);
               }}
-              className={`pointer-events-none absolute inset-0 h-full w-full object-cover blur-xl transition-opacity duration-200 ${
-                fillReady || shown ? 'opacity-85' : 'opacity-0'
-              }`}
-              style={{ transform: 'scale(1.28)' }}
+              onError={() => {
+                setFailed(true);
+                setSharpReady(true);
+              }}
             />
           ) : null}
-
-          {/* Hidden probe for natural size / load events when sharp is absolutely positioned. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imageRef}
-            src={src}
-            alt=""
-            aria-hidden
-            loading={priority ? 'eager' : 'lazy'}
-            decoding="async"
-            fetchPriority={priority ? 'high' : 'auto'}
-            className="pointer-events-none absolute h-0 w-0 opacity-0"
-            onLoad={() => {
-              setFailed(false);
-              setSharpReady(true);
-              setFillReady(true);
-            }}
-            onError={() => {
-              setFailed(true);
-              setSharpReady(true);
-            }}
-          />
 
           {useContain && shown && photoBox ? (
             <div
@@ -213,9 +224,12 @@ export function KioskImage({
                 } ${imgClassName}`}
               />
             </div>
-          ) : !useContain ? (
+          ) : null}
+
+          {!useContain ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
+              ref={imageRef}
               src={src}
               alt={alt}
               loading={priority ? 'eager' : 'lazy'}
@@ -227,6 +241,7 @@ export function KioskImage({
               onLoad={() => {
                 setFailed(false);
                 setSharpReady(true);
+                setFillReady(true);
               }}
               onError={() => {
                 setFailed(true);

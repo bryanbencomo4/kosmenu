@@ -1,5 +1,7 @@
 /** Product/commerce image resolution shared across the public menu. */
 
+import { optimizeStorageImageUrl } from '../../../_lib/optimize-storage-image';
+
 export type ImageableProduct = {
   imagen_url?: string | null;
 };
@@ -26,25 +28,7 @@ export function optimizeMenuImageUrl(
   width: number = MENU_IMAGE_WIDTH.tile,
   quality = 72,
 ) {
-  const raw = (imageUrl ?? '').trim();
-  if (!raw) return null;
-
-  try {
-    const url = new URL(raw);
-    const publicObjectPath = '/storage/v1/object/public/';
-    if (!url.pathname.includes(publicObjectPath)) return raw;
-
-    url.pathname = url.pathname.replace(
-      publicObjectPath,
-      '/storage/v1/render/image/public/',
-    );
-    url.searchParams.set('width', String(Math.max(1, Math.round(width))));
-    url.searchParams.set('quality', String(Math.min(90, Math.max(40, quality))));
-    url.searchParams.set('format', 'webp');
-    return url.toString();
-  } catch {
-    return raw;
-  }
+  return optimizeStorageImageUrl(imageUrl, width, quality);
 }
 
 /** Real product photo only — null when empty or identical to the commerce logo. */

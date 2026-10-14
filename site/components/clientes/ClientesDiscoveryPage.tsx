@@ -47,6 +47,8 @@ import {
   type ClientPromoPlacement,
 } from '../../app/_lib/directory-promo-client';
 import { foldSearchText } from '../../app/_lib/search-text';
+import { optimizeStorageImageUrl } from '../../app/_lib/optimize-storage-image';
+import { KioskImage } from '../../app/v/[id]/_components/kiosk/KioskImage';
 import { ClientesDirectoryMap } from './ClientesDirectoryMap';
 
 function TikTokIcon({ className }: { className?: string }) {
@@ -234,6 +236,16 @@ const CARD_MEDIA_FADE_MS = 480;
 const HERO_MEDIA_HOLD_MS = 4500;
 const preloadedImages = new Map<string, Promise<boolean>>();
 
+/** Display widths for discovery media (CSS px × ~2 for retina). */
+const DISCOVERY_IMAGE = {
+  cardLogo: 480,
+  cardDish: 720,
+  cardRowLogo: 160,
+  cardRowDish: 288,
+  preview: 96,
+  hero: 1280,
+} as const;
+
 function staggerDelayMs(seed: string) {
   let hash = 2166136261;
   for (let i = 0; i < seed.length; i += 1) {
@@ -243,8 +255,28 @@ function staggerDelayMs(seed: string) {
   return 600 + (hash >>> 0) % 3200;
 }
 
+function discoverySlideSrc(slide: CardMediaSlide, forceRow: boolean) {
+  const width =
+    slide.kind === 'logo'
+      ? forceRow
+        ? DISCOVERY_IMAGE.cardRowLogo
+        : DISCOVERY_IMAGE.cardLogo
+      : forceRow
+        ? DISCOVERY_IMAGE.cardRowDish
+        : DISCOVERY_IMAGE.cardDish;
+  return optimizeStorageImageUrl(slide.imageUrl, width) || slide.imageUrl;
+}
+
+function discoverySlidePreview(slide: CardMediaSlide) {
+  return (
+    optimizeStorageImageUrl(slide.imageUrl, DISCOVERY_IMAGE.preview, 50) ||
+    slide.imageUrl
+  );
+}
+
 function heroSlideImageUrl(business: DirectoryBusiness) {
-  return business.coverUrl || business.logoUrl || '/branding/full_logo.png';
+  const raw = business.coverUrl || business.logoUrl || '/branding/full_logo.png';
+  return optimizeStorageImageUrl(raw, DISCOVERY_IMAGE.hero) || raw;
 }
 
 function preloadCardImage(url: string): Promise<boolean> {
@@ -283,21 +315,20 @@ function CardMediaImage({
   forceRow: boolean;
   priority?: boolean;
 }) {
+  const src = discoverySlideSrc(slide, forceRow);
+  const previewSrc = discoverySlidePreview(slide);
+  const isLogo = slide.kind === 'logo';
+
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={slide.imageUrl}
+    <KioskImage
+      src={src}
+      previewSrc={previewSrc}
       alt=""
-      decoding="async"
-      loading={priority ? 'eager' : 'lazy'}
-      draggable={false}
-      className={
-        slide.kind === 'logo'
-          ? forceRow
-            ? 'h-full w-full object-contain p-1.5'
-            : 'h-full w-full object-contain p-6 sm:p-8'
-          : 'h-full w-full object-cover'
-      }
+      priority={priority}
+      fit={isLogo ? 'contain' : 'cover'}
+      pad={isLogo}
+      className="h-full w-full"
+      imgClassName="pointer-events-none select-none"
     />
   );
 }
@@ -588,8 +619,10 @@ function RestaurantCard({
   useEffect(() => {
     if (!inView || slides.length <= 1) return;
     const next = slides[(slideIndex + 1) % slides.length];
-    if (next?.imageUrl) void preloadCardImage(next.imageUrl);
-  }, [inView, slideIndex, slides]);
+    if (next?.imageUrl) {
+      void preloadCardImage(discoverySlideSrc(next, forceRow));
+    }
+  }, [inView, slideIndex, slides, forceRow]);
 
   useEffect(() => {
     if (!inView || slides.length <= 1) return;
@@ -613,7 +646,7 @@ function RestaurantCard({
       }
 
       transitioningRef.current = true;
-      const loaded = await preloadCardImage(nextSlide.imageUrl);
+      const loaded = await preloadCardImage(discoverySlideSrc(nextSlide, forceRow));
       if (cancelled) {
         transitioningRef.current = false;
         return;
@@ -648,7 +681,9 @@ function RestaurantCard({
     const onVisibility = () => {
       if (!document.hidden && !transitioningRef.current) {
         const next = slides[(slideIndexRef.current + 1) % slides.length];
-        if (next?.imageUrl) void preloadCardImage(next.imageUrl);
+        if (next?.imageUrl) {
+          void preloadCardImage(discoverySlideSrc(next, forceRow));
+        }
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -660,7 +695,7 @@ function RestaurantCard({
       document.removeEventListener('visibilitychange', onVisibility);
       transitioningRef.current = false;
     };
-  }, [business.id, inView, slides]);
+  }, [business.id, inView, slides, forceRow]);
 
   const shellClass = `group relative overflow-hidden rounded-2xl bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(109,40,217,0.12)] ${
     selected
