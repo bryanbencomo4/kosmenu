@@ -437,8 +437,8 @@ export function KioskMenuExperience({
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* Near-square media (slightly tall) — balanced for portrait food; blur fill hides letterbox. */}
-                  <div className="relative w-full shrink-0 bg-[var(--menu-surface-alt)] pt-[110%]">
+                  {/* 3:4 media — portrait food fills width; blur cover fills any leftover letterbox. */}
+                  <div className="relative w-full shrink-0 bg-[var(--menu-surface-alt)] pt-[133.333%]">
                     <div className="absolute inset-0">
                       {category.coverUrl ? (
                         <KioskImage src={category.coverUrl} alt="" className="h-full w-full" />
@@ -482,7 +482,7 @@ export function KioskMenuExperience({
                 }`}
                 style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
               >
-                <div className="h-32 w-32 shrink-0 self-start bg-[var(--menu-surface-alt)] sm:h-36 sm:w-36">
+                <div className="h-36 w-36 shrink-0 self-start overflow-hidden bg-[var(--menu-surface-alt)] sm:h-40 sm:w-40">
                   {product.imageUrl ? (
                     <KioskImage src={product.imageUrl} alt={product.name} className="h-full w-full" />
                   ) : (

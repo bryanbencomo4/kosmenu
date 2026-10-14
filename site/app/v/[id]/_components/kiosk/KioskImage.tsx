@@ -83,8 +83,8 @@ export function KioskImage({
               aria-hidden
               loading={priority ? 'eager' : 'lazy'}
               decoding="async"
-              className={`pointer-events-none absolute inset-0 h-full w-full scale-[1.12] object-cover blur-2xl transition-opacity duration-200 ${
-                shown ? 'opacity-55' : 'opacity-0'
+              className={`pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover blur-xl transition-opacity duration-200 ${
+                shown ? 'opacity-80' : 'opacity-0'
               }`}
             />
           ) : null}

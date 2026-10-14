@@ -66,8 +66,8 @@ export function ProductImageLightbox({
                 src={preview}
                 alt=""
                 aria-hidden
-                className={`pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover blur-2xl transition-opacity duration-300 ${
-                  hiResReady ? 'opacity-35' : 'opacity-55'
+                className={`pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover blur-xl transition-opacity duration-300 ${
+                  hiResReady ? 'opacity-45' : 'opacity-70'
                 }`}
               />
             ) : null}
