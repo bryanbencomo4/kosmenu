@@ -18,8 +18,8 @@ import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/category_icon_ai_service.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
-import 'package:kosmenu_app/services/storage_image_url.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/soft_media_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CategoryListScreen extends StatefulWidget {
@@ -4642,34 +4642,17 @@ class _DesktopProductsTableRow extends StatelessWidget {
 
     Widget thumb() {
       final imageUrl = product.imagenUrl?.trim();
-      final optimized = StorageImageUrl.optimize(imageUrl, width: 96);
-      if (optimized != null && optimized.isNotEmpty) {
-        return ClipRRect(
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        return SoftMediaImage(
+          imageUrl: imageUrl,
+          width: 44,
+          height: 44,
+          optimizeWidth: 120,
+          fit: BoxFit.contain,
           borderRadius: BorderRadius.circular(10),
-          child: ColoredBox(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            child: Image.network(
-              optimized,
-              width: 44,
-              height: 44,
-              fit: BoxFit.contain,
-              errorBuilder: (_, _, _) {
-                if (imageUrl != null && imageUrl != optimized) {
-                  return Image.network(
-                    imageUrl,
-                    width: 44,
-                    height: 44,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const _ProductThumbPlaceholder(
-                      icon: Icons.fastfood_rounded,
-                    ),
-                  );
-                }
-                return const _ProductThumbPlaceholder(
-                  icon: Icons.fastfood_rounded,
-                );
-              },
-            ),
+          backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+          errorBuilder: (_, _, _) => const _ProductThumbPlaceholder(
+            icon: Icons.fastfood_rounded,
           ),
         );
       }
@@ -5892,36 +5875,22 @@ class _DashboardProductCard extends StatelessWidget {
 
     Widget thumb() {
       final imageUrl = product.imagenUrl?.trim();
-      final optimized = StorageImageUrl.optimize(imageUrl, width: 160);
       final placeholder = _ProductThumbPlaceholder(
         icon: product.isAiGeneratedImage
             ? Icons.auto_awesome_rounded
             : Icons.fastfood_rounded,
       );
-      final image = optimized != null && optimized.isNotEmpty
-          ? ClipRRect(
+      final image = imageUrl != null && imageUrl.isNotEmpty
+          ? SoftMediaImage(
+              imageUrl: imageUrl,
+              width: 72,
+              height: 72,
+              optimizeWidth: 180,
+              fit: BoxFit.contain,
               borderRadius: BorderRadius.circular(14),
-              child: ColoredBox(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Image.network(
-                  optimized,
-                  width: 72,
-                  height: 72,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) {
-                    if (imageUrl != null && imageUrl != optimized) {
-                      return Image.network(
-                        imageUrl,
-                        width: 72,
-                        height: 72,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) => placeholder,
-                      );
-                    }
-                    return placeholder;
-                  },
-                ),
-              ),
+              backgroundColor:
+                  Theme.of(context).colorScheme.surfaceContainerHighest,
+              errorBuilder: (_, _, _) => placeholder,
             )
           : placeholder;
 

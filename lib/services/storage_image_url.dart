@@ -16,24 +16,25 @@ class StorageImageUrl {
 
     final uri = Uri.tryParse(raw);
     if (uri == null || !uri.hasScheme) return raw;
+
+    final safeWidth = width < 1 ? 1 : width;
+    final safeQuality = quality.clamp(40, 90);
+    final params = <String, String>{
+      ...uri.queryParameters,
+      'width': '$safeWidth',
+      'quality': '$safeQuality',
+      'format': 'webp',
+    };
+
+    if (uri.path.contains(_renderMarker)) {
+      return uri.replace(queryParameters: params).toString();
+    }
     if (!uri.path.contains(_publicMarker)) {
-      // Already a render URL or non-Supabase — return as-is.
+      // External / non-Supabase — leave unchanged.
       return raw;
     }
 
     final path = uri.path.replaceFirst(_publicMarker, _renderMarker);
-    final safeWidth = width < 1 ? 1 : width;
-    final safeQuality = quality.clamp(40, 90);
-    return uri
-        .replace(
-          path: path,
-          queryParameters: <String, String>{
-            ...uri.queryParameters,
-            'width': '$safeWidth',
-            'quality': '$safeQuality',
-            'format': 'webp',
-          },
-        )
-        .toString();
+    return uri.replace(path: path, queryParameters: params).toString();
   }
 }

@@ -1967,7 +1967,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           selected: _selectedNav,
           onSelect: _selectNav,
           onResetContent: _resetContentNavigator,
-          child: Scaffold(
+          child: SafeArea(
+            // Header paints its own top inset so the bar background reaches the
+            // status bar; keep left/right/bottom clear of system gestures.
+            top: false,
+            child: Scaffold(
             key: _scaffoldKey,
             backgroundColor: _dashboardBg,
             drawer: isWideShell ? null : Drawer(child: sidebar),
@@ -2030,9 +2034,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                               ListenableBuilder(
                                 listenable: _shellRevision,
                                 builder: (context, _) {
-                                  return SafeArea(
-                                    top: false,
-                                    child: Builder(
+                                  return Builder(
                                       builder: (context) {
                                         if (snapshot.hasError) {
                                           return Center(
@@ -3053,8 +3055,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                           },
                                         );
                                       },
-                                    ),
-                                  );
+                                    );
                                 },
                               ),
                             );
@@ -3066,6 +3067,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 ),
               ],
             ),
+          ),
           ),
         );
       },

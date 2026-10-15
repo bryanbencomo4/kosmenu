@@ -94,11 +94,12 @@ class MerchantShellHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.sizeOf(context).width < 720;
+    final topInset = MediaQuery.paddingOf(context).top;
     final name = commerceName.trim().isEmpty ? 'Negocio' : commerceName.trim();
     final initials = _initials(name);
 
     return Container(
-      padding: EdgeInsets.fromLTRB(isMobile ? 8 : 20, 12, 16, 12),
+      padding: EdgeInsets.fromLTRB(isMobile ? 8 : 20, 12 + topInset, 16, 12),
       decoration: const BoxDecoration(
         color: Color(0xFFF8F7FC),
         border: Border(bottom: BorderSide(color: Color(0xFFEEEFF5))),
