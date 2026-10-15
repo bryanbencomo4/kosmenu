@@ -94,7 +94,17 @@ where email = lower('bryanppg@gmail.com');
 5. Confirm the page stays on the admin host and never falls into `https://elmenuxfa.com` or `/v/...`.
 6. Confirm the password update returns to `/admin/login` with a success message.
 
-## G. Post-Deploy Tests
+## G. Android APK Releases (merchant app)
+
+1. Run `supabase/sql/app-releases-bucket.sql` in the production Supabase SQL editor.
+2. Confirm bucket `app-releases` exists (private, ~100 MB limit).
+3. In `https://admin.elmenuxfa.com/admin/app-android`, upload a release APK with:
+   - `versionCode` greater than the previous one (matches Flutter `pubspec` build number, e.g. `1.0.1+2` → `2`)
+   - `forceUpdate` checked for mandatory installs
+4. Confirm `GET https://elmenuxfa.com/api/app/android-release` returns the published metadata.
+5. Install an older APK on a device and verify the app blocks until the new APK is downloaded.
+
+## H. Post-Deploy Tests
 
 1. `admin.elmenuxfa.com/` redirects to login when there is no session.
 2. `admin.elmenuxfa.com/login` and `admin.elmenuxfa.com/admin/login` render the login page.

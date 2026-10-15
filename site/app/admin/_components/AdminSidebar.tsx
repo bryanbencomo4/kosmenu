@@ -13,6 +13,7 @@ import {
   Settings2,
   ShieldCheck,
   ShoppingCart,
+  Smartphone,
   Sparkles,
   Store,
   Truck,
@@ -36,6 +37,7 @@ const iconMap: Record<AdminNavIcon, typeof LayoutDashboard> = {
   customers: Users2,
   analytics: LineChart,
   sectors: Layers3,
+  android: Smartphone,
   settings: Settings2,
   security: ShieldCheck,
 };

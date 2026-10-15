@@ -22,6 +22,7 @@ export type AdminNavIcon =
   | 'customers'
   | 'analytics'
   | 'sectors'
+  | 'android'
   | 'settings'
   | 'security'
   | 'bank';
@@ -104,6 +105,12 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
     label: 'Sectores',
     href: '/admin/sectores',
     icon: 'sectors',
+    permission: 'settings.read',
+  },
+  {
+    label: 'App Android',
+    href: '/admin/app-android',
+    icon: 'android',
     permission: 'settings.read',
   },
   {

@@ -7,7 +7,9 @@ import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart' deferred as billing_screen;
 import 'package:kosmenu_app/screens/business_setup_screen.dart' deferred as setup_screen;
+import 'package:kosmenu_app/screens/force_update_screen.dart';
 import 'package:kosmenu_app/screens/pending_order_link_screen.dart';
+import 'package:kosmenu_app/services/app_update_service.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
@@ -47,6 +49,8 @@ class _AuthGateState extends State<AuthGate> {
   static const String _setupDraftKeyPrefix = 'business_setup_draft_v2';
   Future<PostAuthDestination>? _targetFuture;
   String _targetUserId = '';
+  late final Future<AndroidAppRelease?> _androidUpdateFuture =
+      AppUpdateService.checkRequiredAndroidUpdate();
 
   Future<PostAuthDestination> _resolveTargetForUser(String userId) async {
     Future<PostAuthDestination> resolveOnce() async {
@@ -211,6 +215,22 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
+    return FutureBuilder<AndroidAppRelease?>(
+      future: _androidUpdateFuture,
+      builder: (context, updateSnapshot) {
+        if (updateSnapshot.connectionState == ConnectionState.waiting) {
+          return const BrandedLoadingScreen(withScaffold: true);
+        }
+        final requiredUpdate = updateSnapshot.data;
+        if (requiredUpdate != null) {
+          return ForceUpdateScreen(release: requiredUpdate);
+        }
+        return _buildAuthGateBody(context);
+      },
+    );
+  }
+
+  Widget _buildAuthGateBody(BuildContext context) {
     final supabase = Supabase.instance.client;
 
     return ValueListenableBuilder<bool>(
