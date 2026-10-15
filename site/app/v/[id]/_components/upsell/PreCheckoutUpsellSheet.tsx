@@ -178,7 +178,8 @@ function ProductCard({
               src={product.imagen_url}
               alt=""
               className="absolute inset-0 h-full w-full"
-              pad
+              fit="contain"
+              showBlurFill
             />
           ) : (
             <span className="grid h-full place-items-center text-2xl" aria-hidden>

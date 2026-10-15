@@ -35,7 +35,7 @@ export function CartUpsellSection({ suggestions, formatPrice, onAdd, onDismiss }
                   src={suggestion.imageUrl}
                   alt={suggestion.name}
                   className="h-full w-full"
-                  pad
+                  fit="cover"
                 />
               ) : null}
             </div>

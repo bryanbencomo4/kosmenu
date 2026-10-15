@@ -1717,6 +1717,8 @@ export default function PublicMenuPage() {
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
   const shouldReturnToMenuOnEmptyCartRef = useRef(false);
   const orderSubmitLockRef = useRef(false);
+  /** True once the upsell sheet has seen a non-empty cart (avoids closing on the add→open race). */
+  const preCheckoutHadCartRef = useRef(false);
   const checkoutAttemptRef = useRef<CheckoutAttempt | null>(null);
   const [infoSections, setInfoSections] = useState({
     location: true,
@@ -3464,8 +3466,19 @@ export default function PublicMenuPage() {
   }, [isInfoOpen, isConfirmOpen, expandedProductImage, isMapPickerOpen]);
 
   useEffect(() => {
-    if (!isPreCheckoutUpsellOpen || cartCount > 0) return;
-    setIsPreCheckoutUpsellOpen(false);
+    if (!isPreCheckoutUpsellOpen) {
+      preCheckoutHadCartRef.current = false;
+      return;
+    }
+    if (cartCount > 0) {
+      preCheckoutHadCartRef.current = true;
+      return;
+    }
+    // Only auto-close after the sheet actually had items — not on the brief
+    // frame where we open right after add and React hasn't committed cart yet.
+    if (preCheckoutHadCartRef.current) {
+      setIsPreCheckoutUpsellOpen(false);
+    }
   }, [cartCount, isPreCheckoutUpsellOpen]);
 
   useEffect(() => {
@@ -5761,7 +5774,6 @@ export default function PublicMenuPage() {
                                   src={item.imageUrl}
                                   alt={item.name}
                                   fit="cover"
-                                  pad={false}
                                   className="h-20 w-20 shrink-0 rounded-[22px] bg-[var(--menu-surface-alt)]"
                                 />
                                 <div className="min-w-0 flex-1">

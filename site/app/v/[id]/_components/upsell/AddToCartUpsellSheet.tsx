@@ -64,7 +64,7 @@ export function AddToCartUpsellSheet({ open, suggestions, formatPrice, onAdd, on
                     src={suggestion.imageUrl}
                     alt={suggestion.name}
                     className="h-full w-full"
-                    pad
+                    fit="cover"
                   />
                 ) : null}
               </div>

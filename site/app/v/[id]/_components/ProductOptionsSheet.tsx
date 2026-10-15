@@ -379,6 +379,39 @@ export function ProductOptionsSheet({
   const [listSession, setListSession] = useState(0);
   const [attentionGroupId, setAttentionGroupId] = useState('');
   const bodyRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const expandBtnRef = useRef<HTMLButtonElement>(null);
+  const compactBarRef = useRef<HTMLDivElement>(null);
+  const sliverRafRef = useRef(0);
+  const sliverProgressRef = useRef(-1);
+
+  const syncHeroSliver = () => {
+    sliverRafRef.current = 0;
+    const scroller = bodyRef.current;
+    const hero = heroRef.current;
+    if (!scroller || !hero) return;
+    const range = Math.max(1, hero.offsetHeight * 0.9);
+    const next = Math.min(1, Math.max(0, scroller.scrollTop / range));
+    if (Math.abs(next - sliverProgressRef.current) < 0.012) return;
+    sliverProgressRef.current = next;
+    hero.style.setProperty('--sliver', next.toFixed(3));
+    if (expandBtnRef.current) {
+      const visible = 1 - next;
+      expandBtnRef.current.style.opacity = visible.toFixed(3);
+      expandBtnRef.current.style.pointerEvents = next > 0.55 ? 'none' : 'auto';
+    }
+    if (compactBarRef.current) {
+      const show = next > 0.5 ? Math.min(1, (next - 0.5) / 0.35) : 0;
+      compactBarRef.current.style.opacity = show.toFixed(3);
+      compactBarRef.current.style.transform = `translate3d(0, ${((1 - show) * -6).toFixed(2)}px, 0)`;
+      compactBarRef.current.style.pointerEvents = show > 0.6 ? 'auto' : 'none';
+    }
+  };
+
+  const onSheetScroll = () => {
+    if (sliverRafRef.current) return;
+    sliverRafRef.current = window.requestAnimationFrame(syncHeroSliver);
+  };
 
   useEffect(() => {
     if (!open || !product) return;
@@ -400,7 +433,25 @@ export function ProductOptionsSheet({
     setExclusionesIds([]);
     setListSession((previous) => previous + 1);
     setAttentionGroupId('');
+    sliverProgressRef.current = -1;
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+    heroRef.current?.style.setProperty('--sliver', '0');
+    if (expandBtnRef.current) {
+      expandBtnRef.current.style.opacity = '1';
+      expandBtnRef.current.style.pointerEvents = 'auto';
+    }
+    if (compactBarRef.current) {
+      compactBarRef.current.style.opacity = '0';
+      compactBarRef.current.style.transform = 'translate3d(0, -6px, 0)';
+      compactBarRef.current.style.pointerEvents = 'none';
+    }
   }, [open, product, options]);
+
+  useEffect(() => {
+    return () => {
+      if (sliverRafRef.current) window.cancelAnimationFrame(sliverRafRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!attentionGroupId) return;
@@ -536,56 +587,87 @@ export function ProductOptionsSheet({
         role="dialog"
         aria-modal="true"
         aria-label={`Opciones de ${product.nombre}`}
-        className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)] sm:max-h-[min(88vh,760px)]"
+        className="relative flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[24px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)] sm:max-h-[min(88vh,760px)]"
       >
-        <div className="relative h-52 shrink-0 overflow-hidden bg-[var(--menu-surface-alt)] sm:h-64">
-          {imageUrl ? (
-            <button
-              type="button"
-              className="relative block h-full w-full cursor-zoom-in overflow-hidden border-0 bg-transparent p-0"
-              onClick={() => onExpandImage?.()}
-              aria-label={`Ver imagen ampliada de ${product.nombre}`}
-            >
-              <KioskImage
-                src={imageUrl}
-                previewSrc={imagePreviewUrl || imageUrl}
-                alt={product.nombre}
-                className="absolute inset-0 h-full w-full"
-                fit="contain"
-                pad
-                priority
-              />
-            </button>
-          ) : (
-            <div className="grid h-full place-items-center text-sm font-semibold text-[var(--menu-text-muted)]">
-              Imagen no disponible
-            </div>
-          )}
-          {imageUrl && onExpandImage ? (
-            <button
-              type="button"
-              onClick={onExpandImage}
-              className="absolute left-3 top-3 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg"
-              aria-label="Ampliar imagen"
-            >
-              <Maximize2 className="h-4 w-4" />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute right-3 top-3 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg"
-            aria-label="Cerrar"
-          >
-            <X className="h-5 w-5" />
-          </button>
+        <div
+          ref={compactBarRef}
+          className="pointer-events-none absolute inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-[var(--menu-border)] bg-[var(--menu-surface)]/92 px-14 opacity-0 shadow-sm backdrop-blur-md"
+          style={{ transform: 'translate3d(0, -6px, 0)' }}
+          aria-hidden
+        >
+          <p className="min-w-0 flex-1 truncate text-sm font-extrabold text-[var(--menu-text)]">
+            {secondary ? `Configura ${product.nombre}` : product.nombre}
+          </p>
+          <span className="shrink-0 text-xs font-extrabold text-[var(--menu-text-muted)]">
+            {hasGroups ? formatProductPriceLabel(product, formatPrice) : formatPrice(product.precio ?? 0)}
+          </span>
         </div>
+
+        {imageUrl && onExpandImage ? (
+          <button
+            ref={expandBtnRef}
+            type="button"
+            onClick={onExpandImage}
+            className="absolute left-3 top-3 z-40 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg transition-opacity"
+            aria-label="Ampliar imagen"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-3 top-3 z-40 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg"
+          aria-label="Cerrar"
+        >
+          <X className="h-5 w-5" />
+        </button>
 
         <div
           ref={bodyRef}
           data-sheet-scroll
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 sm:px-6 [touch-action:pan-y]"
+          onScroll={onSheetScroll}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain [touch-action:pan-y]"
         >
+          <div
+            ref={heroRef}
+            className="sticky top-0 z-0 h-[min(52dvh,26rem)] w-full overflow-hidden bg-[var(--menu-surface-alt)] sm:h-[min(56dvh,30rem)]"
+            style={{ ['--sliver' as string]: 0 }}
+          >
+            <div
+              className="h-full w-full will-change-[transform,opacity]"
+              style={{
+                transform:
+                  'translate3d(0, calc(var(--sliver) * -12%), 0) scale(calc(1 + var(--sliver) * 0.07))',
+                opacity: 'calc(1 - var(--sliver) * 0.92)',
+              }}
+            >
+              {imageUrl ? (
+                <button
+                  type="button"
+                  className="relative block h-full w-full cursor-zoom-in overflow-hidden border-0 bg-transparent p-0"
+                  onClick={() => onExpandImage?.()}
+                  aria-label={`Ver imagen ampliada de ${product.nombre}`}
+                >
+                  <KioskImage
+                    src={imageUrl}
+                    previewSrc={imagePreviewUrl || imageUrl}
+                    alt={product.nombre}
+                    className="absolute inset-0 h-full w-full"
+                    fit="contain"
+                    showBlurFill
+                    priority
+                  />
+                </button>
+              ) : (
+                <div className="grid h-full place-items-center text-sm font-semibold text-[var(--menu-text-muted)]">
+                  Imagen no disponible
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="relative z-10 -mt-5 rounded-t-[28px] bg-[var(--menu-surface)] px-5 pb-5 pt-4 shadow-[0_-14px_36px_rgba(15,23,42,0.14)] sm:px-6">
           <div className="flex items-start justify-between gap-3">
             <h3 className="min-w-0 text-xl font-extrabold leading-tight text-[var(--menu-text)] sm:text-2xl">
               {secondary ? `Configura ${product.nombre}` : product.nombre}
@@ -971,6 +1053,7 @@ export function ProductOptionsSheet({
               </div>
             </section>
           ) : null}
+          </div>
           </div>
         </div>
 

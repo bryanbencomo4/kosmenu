@@ -306,7 +306,6 @@ export function KioskMenuExperience({
               src={logoUrl}
               alt=""
               fit="cover"
-              pad={false}
               className="h-11 w-11 rounded-[14px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]"
             />
           ) : (
@@ -432,11 +431,16 @@ export function KioskMenuExperience({
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* 2:3 media — taller frame so portrait covers read wider; blur fills leftover letterbox. */}
-                  <div className="relative w-full shrink-0 bg-[var(--menu-surface-alt)] pt-[150%]">
+                  {/* 2:3 media — cover crop, sharp edges clipped by card radius. */}
+                  <div className="relative w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)] pt-[150%]">
                     <div className="absolute inset-0">
                       {category.coverUrl ? (
-                        <KioskImage src={category.coverUrl} alt="" className="h-full w-full" />
+                        <KioskImage
+                          src={category.coverUrl}
+                          alt=""
+                          fit="cover"
+                          className="h-full w-full"
+                        />
                       ) : (
                         <div className="grid h-full place-items-center text-5xl">{category.glyph}</div>
                       )}
@@ -475,6 +479,7 @@ export function KioskMenuExperience({
                     <KioskImage
                       src={product.imageUrl}
                       alt={product.name}
+                      fit="cover"
                       className="h-full w-full"
                     />
                   ) : (
