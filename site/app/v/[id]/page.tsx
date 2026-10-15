@@ -1,7 +1,7 @@
 'use client';
 
 import Head from 'next/head';
-import { ArrowRight, ArrowUp, ChevronDown, Facebook, Flame, Info, Instagram, Mail, MapPin, Menu, MessageCircle, Music2, Phone, Share2, ShoppingCart, Store, Truck, User, X, Youtube } from 'lucide-react';
+import { ArrowRight, ArrowUp, Camera, ChevronDown, Facebook, Flame, ImageIcon, Info, Instagram, Mail, MapPin, Menu, MessageCircle, Music2, Phone, Share2, ShoppingCart, Store, Truck, User, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
@@ -4372,6 +4372,40 @@ export default function PublicMenuPage() {
     setIsConfirmOpen(true);
   }
 
+  function cartLinesForPreCheckoutUpsell(
+    extra?: { productId: string; categoryId?: string | null },
+  ) {
+    const lines = cartItems.map((item) => ({
+      productId: item.product.id,
+      categoryId: item.product.categoria_id,
+    }));
+    if (!extra?.productId) return lines;
+    if (lines.some((line) => line.productId === extra.productId)) return lines;
+    return [
+      ...lines,
+      { productId: extra.productId, categoryId: extra.categoryId ?? null },
+    ];
+  }
+
+  function tryOpenPreCheckoutUpsellAfterAdd(productId: string) {
+    if (catalogMode || scheduleClosed || kioskVoucher) return false;
+    if (!preCheckoutUpsellActive) return false;
+    const product = productById.get(productId);
+    const shouldShow = shouldShowPreCheckoutUpsell({
+      config: menuData?.preCheckoutUpsell ?? { upselling: false },
+      categories: menuData?.categorias ?? [],
+      products: menuData?.productos ?? [],
+      cart: cartLinesForPreCheckoutUpsell({
+        productId,
+        categoryId: product?.categoria_id,
+      }),
+    });
+    if (!shouldShow) return false;
+    setKioskAddedPrompt(null);
+    setIsPreCheckoutUpsellOpen(true);
+    return true;
+  }
+
   function openCheckoutSheet() {
     if (catalogMode) return;
     if (kioskVoucher) return;
@@ -4393,10 +4427,7 @@ export default function PublicMenuPage() {
         config: menuData?.preCheckoutUpsell ?? { upselling: false },
         categories: menuData?.categorias ?? [],
         products: menuData?.productos ?? [],
-        cart: cartItems.map((item) => ({
-          productId: item.product.id,
-          categoryId: item.product.categoria_id,
-        })),
+        cart: cartLinesForPreCheckoutUpsell(),
       })
     ) {
       setIsPreCheckoutUpsellOpen(true);
@@ -5235,10 +5266,14 @@ export default function PublicMenuPage() {
           }}
           onConfirm={(selection, quantity) => {
             if (!productOptionsSheet.productId) return;
-            const addedProduct = productById.get(productOptionsSheet.productId);
-            addConfiguredProductToCart(productOptionsSheet.productId, selection, quantity);
+            const productId = productOptionsSheet.productId;
+            const addedProduct = productById.get(productId);
+            addConfiguredProductToCart(productId, selection, quantity);
             setProductOptionsSheet({ open: false, productId: null });
-            if (!preCheckoutUpsellActive && !catalogMode) {
+            if (tryOpenPreCheckoutUpsellAfterAdd(productId)) {
+              return;
+            }
+            if (!catalogMode && !scheduleClosed) {
               setKioskAddedPrompt({
                 productName: addedProduct?.nombre ?? 'Producto',
               });
@@ -6222,27 +6257,55 @@ export default function PublicMenuPage() {
                             />
                           </label>
 
-                          <label className="block">
+                          <div className="block">
                             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
                               Cargar comprobante
                             </span>
+                            {paymentProofFile ? (
+                              <p className="mb-2 truncate text-sm font-semibold text-[var(--menu-text)]">
+                                Comprobante: {paymentProofFile.name}
+                              </p>
+                            ) : null}
                             <input
                               type="file"
                               accept="image/*"
                               className="hidden"
-                              id="payment-proof-upload"
+                              id="payment-proof-gallery"
                               onChange={(event) => {
                                 const selected = event.target.files?.[0] ?? null;
                                 setPaymentProofFile(selected);
+                                event.target.value = '';
                               }}
                             />
-                            <label
-                              htmlFor="payment-proof-upload"
-                              className="inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)]"
-                            >
-                              {paymentProofFile ? `Comprobante: ${paymentProofFile.name}` : 'Seleccionar captura'}
-                            </label>
-                          </label>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              className="hidden"
+                              id="payment-proof-camera"
+                              onChange={(event) => {
+                                const selected = event.target.files?.[0] ?? null;
+                                setPaymentProofFile(selected);
+                                event.target.value = '';
+                              }}
+                            />
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                              <label
+                                htmlFor="payment-proof-gallery"
+                                className="inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)]"
+                              >
+                                <ImageIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                Galería
+                              </label>
+                              <label
+                                htmlFor="payment-proof-camera"
+                                className="inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)]"
+                              >
+                                <Camera className="h-4 w-4 shrink-0" aria-hidden />
+                                Tomar foto
+                              </label>
+                            </div>
+                          </div>
                         </div>
                       ) : null}
 
