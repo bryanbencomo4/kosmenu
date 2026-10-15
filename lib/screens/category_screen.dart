@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/models/catalog.dart';
@@ -15,10 +16,12 @@ import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
-import 'package:kosmenu_app/services/category_icon_ai_service.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
+import 'package:kosmenu_app/services/product_image_optimizer.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
+import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
 import 'package:kosmenu_app/widgets/soft_media_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -229,7 +232,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   bool _showAppBarSearch = false;
-  int _selectedTabIndex = 0;
+  int _selectedTabIndex = 2;
   String? _selectedProductCategoryId;
   Map<String, int> _productCountByCategory = <String, int>{};
   _CategorySortOption _categorySortOption = _CategorySortOption.order;
@@ -247,8 +250,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   double _commerceExchangeRate = 0;
   Timer? _aiImageRefreshTimer;
   final AiImageService _aiImageService = const AiImageService();
-  final CategoryIconAiService _categoryIconAiService =
-      const CategoryIconAiService();
 
   String get _currentCatalogoId => widget.catalog.id.trim();
 
@@ -452,69 +453,21 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
   }
 
-  Future<bool?> _confirmCategoryAiIconGeneration() {
-    return showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final colorScheme = Theme.of(dialogContext).colorScheme;
-        return AlertDialog(
-          backgroundColor: colorScheme.surfaceContainerHigh,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          title: Text(
-            'Sugerir emoji con IA',
-            style: GoogleFonts.manrope(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          content: Text(
-            'Primero intentaremos resolver la categoría con reglas locales gratis. Si hace falta consultar IA, se descontará 1 crédito. ¿Deseas continuar?',
-            style: TextStyle(color: colorScheme.onSurfaceVariant),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(
-                'Cancelar',
-                style: TextStyle(color: colorScheme.onSurfaceVariant),
-              ),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-              style: FilledButton.styleFrom(
-                backgroundColor: colorScheme.primary,
-                foregroundColor: colorScheme.onPrimary,
-              ),
-              label: const Text('Sugerir'),
-            ),
-          ],
-        );
-      },
-    );
+  String? _firstProductImageForCategory(String? categoryId) {
+    final id = _normalizedId(categoryId);
+    if (id.isEmpty) return null;
+    for (final product in _products) {
+      if (_normalizedId(product.categoriaId) != id) continue;
+      final url = product.imagenUrl?.trim() ?? '';
+      if (url.isNotEmpty) return url;
+    }
+    return null;
   }
 
-  String _formatCategoryIconAiErrorMessage(Object error) {
-    final message = error.toString().replaceFirst('Bad state: ', '').trim();
-    final normalized = message.toLowerCase();
-    if (normalized.contains('not enough credits')) {
-      return 'No tienes créditos IA suficientes para generar un icono.';
-    }
-    if (normalized.contains('ai disabled')) {
-      return 'La IA no está habilitada para este comercio.';
-    }
-    if (normalized.contains('gemini error')) {
-      return 'No se pudo sugerir el emoji con IA en este momento.';
-    }
-    if (normalized.contains('boot_error') ||
-        normalized.contains('function failed to start') ||
-        normalized.contains('service unavailable') ||
-        normalized.contains('functionexception')) {
-      return 'El servicio de iconos IA no está disponible en este momento. Inténtalo nuevamente en unos minutos.';
-    }
-    return message.isEmpty ? 'No se pudo sugerir el emoji con IA.' : message;
+  String? _categoryCoverImageUrl(CategoryModel category) {
+    final custom = category.imagenUrl?.trim() ?? '';
+    if (custom.isNotEmpty) return custom;
+    return _firstProductImageForCategory(category.id);
   }
 
   Future<_CategoryEditorResult?> _showCategoryEditorSheet({
@@ -524,554 +477,476 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     final colorScheme = Theme.of(context).colorScheme;
     final navigator = Navigator.of(context);
     final nameController = TextEditingController(text: category?.nombre ?? '');
-    final emojiSearchController = TextEditingController();
-    var selectedIconValue = _resolveCategoryVisualIcon(
-      storedIcon: category?.icono,
-      categoryName: category?.nombre ?? '',
-    );
-    var generatedWithAi = category?.creadoPorIa == true;
-    var aiConfidence = category?.confianzaIa;
-    var isGeneratingAi = false;
-    var emojiSearchQuery = '';
-    var isSheetClosed = false;
-    String? helperMessage;
+    final webCamera = const WebCameraHandoffService();
     var selectedRol = CategoryModel.upsellKindRoles.contains(category?.rol)
         ? category?.rol
         : null;
+    var selectedImageUrl = category?.imagenUrl?.trim();
+    if (selectedImageUrl != null && selectedImageUrl.isEmpty) {
+      selectedImageUrl = null;
+    }
+    var clearImage = false;
+    var isUploadingImage = false;
+    String? helperMessage = category == null
+        ? null
+        : 'Si no subes imagen, el menú usa la foto del primer producto.';
+    final fallbackProductImage = category == null
+        ? null
+        : _firstProductImageForCategory(category.id);
 
-    final result = await showModalBottomSheet<_CategoryEditorResult>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      backgroundColor: colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (sheetContext, setSheetState) {
-            final media = MediaQuery.of(sheetContext);
-            final selectedEmojiOption = _categoryEmojiOptionByEmoji(
-              selectedIconValue,
-            );
-            final selectedIconKey = _normalizeCategoryIconKey(
-              selectedIconValue,
-            );
-            final legacyIconOption = selectedIconKey != null
-                ? _categoryIconOptionByKey(selectedIconKey)
-                : null;
-            final hasCustomImage = _isImageUrlContent(selectedIconValue);
-            final hasCustomSvg = _isSvgIconContent(selectedIconValue);
-            final isEmoji = _isEmojiContent(selectedIconValue);
-            final filteredEmojiOptions = _filterCategoryEmojiOptions(
-              name: nameController.text,
-              query: emojiSearchQuery,
-            );
-            final recommendedEmojiOptions = _recommendedCategoryEmojiOptions(
-              name: nameController.text,
-              query: emojiSearchQuery,
-            );
-            final previewLabel = hasCustomImage
-                ? 'Imagen URL antigua'
-                : hasCustomSvg
-                ? 'Icono SVG legado'
-                : isEmoji
-                ? (selectedEmojiOption?.label ?? 'Emoji personalizado')
-                : (legacyIconOption?.label ?? 'Icono legado');
+    try {
+      return await showModalBottomSheet<_CategoryEditorResult>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        backgroundColor: colorScheme.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (sheetContext) {
+          return StatefulBuilder(
+            builder: (sheetContext, setSheetState) {
+              final media = MediaQuery.of(sheetContext);
+              final previewUrl = clearImage
+                  ? null
+                  : (selectedImageUrl ?? fallbackProductImage);
+              final usingFallback = !clearImage &&
+                  (selectedImageUrl == null || selectedImageUrl!.isEmpty) &&
+                  (fallbackProductImage?.isNotEmpty ?? false);
 
-            Future<void> generateWithAi() async {
-              final categoryName = nameController.text.trim();
-              if (categoryName.isEmpty) {
-                if (isSheetClosed || !sheetContext.mounted) return;
+              Future<void> pickImage(ImageSource source) async {
+                if (isUploadingImage) return;
+                final comercioId = SupabaseConfig.currentComercioId.trim();
+                if (comercioId.isEmpty) {
+                  setSheetState(() {
+                    helperMessage =
+                        'No hay comercio activo para subir la imagen.';
+                  });
+                  return;
+                }
+
+                final photo = source == ImageSource.camera
+                    ? await webCamera.pickCameraImage(
+                        sheetContext,
+                        feature: 'category',
+                        waitingTitle: 'Toma la foto de la categoría',
+                        waitingSubtitle:
+                            'Escanea el código con tu teléfono y la cargaremos aquí.',
+                        imageQuality: 82,
+                        maxWidth: 1600,
+                      )
+                    : await ImagePicker().pickImage(
+                        source: source,
+                        imageQuality: 82,
+                        maxWidth: 1600,
+                      );
+                if (photo == null || !sheetContext.mounted) return;
+
                 setSheetState(() {
-                  helperMessage =
-                      'Escribe primero el nombre de la categoría para usar IA.';
+                  isUploadingImage = true;
+                  helperMessage = null;
                 });
-                return;
-              }
 
-              final confirmed = await _confirmCategoryAiIconGeneration();
-              if (confirmed != true ||
-                  isSheetClosed ||
-                  !mounted ||
-                  !sheetContext.mounted) {
-                return;
-              }
-
-              setSheetState(() {
-                isGeneratingAi = true;
-                helperMessage = null;
-              });
-
-              try {
-                final suggestion = await _categoryIconAiService.generateIcon(
-                  comercioId: SupabaseConfig.currentComercioId,
-                  categoryName: categoryName,
-                  context:
-                      'Sugiere un emoji estilo WhatsApp para una categoría comercial según las palabras clave del título.',
-                );
-
-                if (!mounted || isSheetClosed || !sheetContext.mounted) return;
-                setSheetState(() {
-                  selectedIconValue = suggestion.emoji;
-                  generatedWithAi = true;
-                  aiConfidence = suggestion.confidence;
-                  helperMessage = suggestion.reason.isNotEmpty
-                      ? '${suggestion.reason} · ${suggestion.creditsCharged == 0 ? 'sin costo' : '${suggestion.creditsCharged.toStringAsFixed(0)} crédito'}'
-                      : 'Emoji sugerido con IA.';
-                });
-              } catch (error) {
-                if (!mounted || isSheetClosed || !sheetContext.mounted) return;
-                setSheetState(() {
-                  helperMessage = _formatCategoryIconAiErrorMessage(error);
-                });
-              } finally {
-                if (mounted && !isSheetClosed && sheetContext.mounted) {
-                  setSheetState(() => isGeneratingAi = false);
+                try {
+                  final bytes = ProductImageOptimizer.compressToJpeg(
+                    await photo.readAsBytes(),
+                  );
+                  final fileName =
+                      '$comercioId/categories/cat_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
+                  await Supabase.instance.client.storage
+                      .from('product-images')
+                      .uploadBinary(
+                        fileName,
+                        bytes,
+                        fileOptions: const FileOptions(
+                          upsert: true,
+                          contentType: 'image/jpeg',
+                        ),
+                      );
+                  final publicUrl = Supabase.instance.client.storage
+                      .from('product-images')
+                      .getPublicUrl(fileName);
+                  if (!sheetContext.mounted) return;
+                  setSheetState(() {
+                    selectedImageUrl = publicUrl;
+                    clearImage = false;
+                    helperMessage = 'Imagen lista. Guarda para aplicarla.';
+                  });
+                } catch (error) {
+                  if (!sheetContext.mounted) return;
+                  setSheetState(() {
+                    helperMessage = 'No se pudo subir la imagen: $error';
+                  });
+                } finally {
+                  if (sheetContext.mounted) {
+                    setSheetState(() => isUploadingImage = false);
+                  }
                 }
               }
-            }
 
-            return SafeArea(
-              top: false,
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  8,
-                  20,
-                  max(4, media.viewInsets.bottom + 12),
-                ),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight:
-                        media.size.height -
-                        media.padding.top -
-                        media.padding.bottom -
-                        12,
+              Future<void> chooseImageSource() async {
+                await showModalBottomSheet<void>(
+                  context: sheetContext,
+                  showDragHandle: true,
+                  builder: (pickerContext) {
+                    return SafeArea(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.photo_library_outlined),
+                            title: const Text('Galería'),
+                            onTap: () {
+                              Navigator.pop(pickerContext);
+                              unawaited(pickImage(ImageSource.gallery));
+                            },
+                          ),
+                          ListTile(
+                            leading: const Icon(Icons.photo_camera_outlined),
+                            title: const Text('Cámara'),
+                            onTap: () {
+                              Navigator.pop(pickerContext);
+                              unawaited(pickImage(ImageSource.camera));
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              }
+
+              return SafeArea(
+                top: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    8,
+                    20,
+                    max(4, media.viewInsets.bottom + 12),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                title,
-                                style: GoogleFonts.manrope(
-                                  color: colorScheme.onSurface,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 22,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Elige un emoji manualmente o pide una sugerencia con IA.',
-                                style: GoogleFonts.manrope(
-                                  color: colorScheme.onSurfaceVariant,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              TextField(
-                                controller: nameController,
-                                autofocus: category == null,
-                                onChanged: (_) => setSheetState(() {}),
-                                textCapitalization: TextCapitalization.words,
-                                cursorColor: colorScheme.primary,
-                                decoration: InputDecoration(
-                                  labelText: 'Nombre de la categoría',
-                                  hintText:
-                                      'Ej: Hamburguesas, Postres, Bebidas',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: media.size.height -
+                          media.padding.top -
+                          media.padding.bottom -
+                          12,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  title,
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurface,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 22,
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Tipo de categoría',
-                                style: GoogleFonts.manrope(
-                                  color: colorScheme.onSurface,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 15,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Por defecto: sin función especial. Se usa solo si activas venta sugerida.',
-                                style: GoogleFonts.manrope(
-                                  color: colorScheme.onSurfaceVariant,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 12.5,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              ...CategoryModel.upsellKindRoles.map((role) {
-                                return RadioListTile<String?>(
-                                  dense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  value: role,
-                                  groupValue: selectedRol,
-                                  onChanged: (value) => setSheetState(() => selectedRol = value),
-                                  title: Text(
-                                    CategoryModel.upsellKindLabel(role),
-                                    style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
-                                  ),
-                                );
-                              }),
-                              const SizedBox(height: 16),
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: colorScheme.surfaceContainerHigh,
-                                  borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(
-                                    color: colorScheme.outlineVariant,
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Nombre, tipo y una imagen de portada para la categoría.',
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 13,
                                   ),
                                 ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 56,
-                                      height: 56,
-                                      decoration: BoxDecoration(
-                                        color: const Color(
-                                          0xFF6D28D9,
-                                        ).withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(16),
+                                const SizedBox(height: 16),
+                                TextField(
+                                  controller: nameController,
+                                  autofocus: category == null,
+                                  textCapitalization: TextCapitalization.words,
+                                  cursorColor: colorScheme.primary,
+                                  decoration: InputDecoration(
+                                    labelText: 'Nombre de la categoría',
+                                    hintText: 'Ej: Pizzas, Bebidas, Postres',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Tipo de categoría',
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurface,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Solo se usa si activas venta sugerida.',
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                ...CategoryModel.upsellKindRoles.map((role) {
+                                  return RadioListTile<String?>(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    value: role,
+                                    groupValue: selectedRol,
+                                    onChanged: (value) =>
+                                        setSheetState(() => selectedRol = value),
+                                    title: Text(
+                                      CategoryModel.upsellKindLabel(role),
+                                      style: GoogleFonts.manrope(
+                                        fontWeight: FontWeight.w600,
                                       ),
-                                      child: Center(
-                                        child: _buildCategoryIconVisual(
-                                          iconValue: selectedIconValue,
-                                          name: nameController.text.trim(),
-                                          size: 28,
+                                    ),
+                                  );
+                                }),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Imagen de la categoría',
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurface,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Opcional. Si no hay imagen propia, se usa la del primer producto.',
+                                  style: GoogleFonts.manrope(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                AspectRatio(
+                                  aspectRatio: 16 / 9,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(18),
+                                    child: ColoredBox(
+                                      color:
+                                          colorScheme.surfaceContainerHighest,
+                                      child: previewUrl == null
+                                          ? Center(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.image_outlined,
+                                                    size: 36,
+                                                    color: colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  Text(
+                                                    'Sin imagen todavía',
+                                                    style: GoogleFonts.manrope(
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: colorScheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            )
+                                          : Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                LayoutBuilder(
+                                                  builder:
+                                                      (context, constraints) {
+                                                    return SoftMediaImage(
+                                                      imageUrl: previewUrl,
+                                                      width:
+                                                          constraints.maxWidth,
+                                                      height: constraints
+                                                          .maxHeight,
+                                                      fit: BoxFit.cover,
+                                                      optimizeWidth: 720,
+                                                      backgroundColor:
+                                                          colorScheme
+                                                              .surfaceContainerHighest,
+                                                    );
+                                                  },
+                                                ),
+                                                if (usingFallback)
+                                                  Align(
+                                                    alignment:
+                                                        Alignment.bottomLeft,
+                                                    child: Container(
+                                                      margin:
+                                                          const EdgeInsets.all(
+                                                        10,
+                                                      ),
+                                                      padding:
+                                                          const EdgeInsets
+                                                              .symmetric(
+                                                        horizontal: 10,
+                                                        vertical: 6,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.black54,
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(999),
+                                                      ),
+                                                      child: Text(
+                                                        'Del primer producto',
+                                                        style:
+                                                            GoogleFonts.manrope(
+                                                          color: Colors.white,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                          fontSize: 11.5,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                if (isUploadingImage)
+                                                  const ColoredBox(
+                                                    color: Color(0x66000000),
+                                                    child: Center(
+                                                      child:
+                                                          CircularProgressIndicator(),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: FilledButton.icon(
+                                        onPressed: isUploadingImage
+                                            ? null
+                                            : chooseImageSource,
+                                        icon: const Icon(
+                                          Icons.add_photo_alternate_outlined,
+                                        ),
+                                        label: Text(
+                                          selectedImageUrl == null
+                                              ? 'Agregar imagen'
+                                              : 'Cambiar imagen',
+                                        ),
+                                        style: FilledButton.styleFrom(
+                                          minimumSize: const Size(0, 46),
+                                          backgroundColor:
+                                              const Color(0xFF6D28D9),
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            nameController.text.trim().isEmpty
-                                                ? 'Vista previa de la categoría'
-                                                : nameController.text.trim(),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: GoogleFonts.manrope(
-                                              color: colorScheme.onSurface,
-                                              fontWeight: FontWeight.w800,
-                                              fontSize: 15,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            previewLabel,
-                                            style: GoogleFonts.manrope(
-                                              color:
-                                                  colorScheme.onSurfaceVariant,
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 12.5,
-                                            ),
-                                          ),
-                                          if (generatedWithAi) ...[
-                                            const SizedBox(height: 6),
-                                            Text(
-                                              'Sugerido por IA${aiConfidence != null ? ' · ${aiConfidence!.toStringAsFixed(2)}' : ''}',
-                                              style: GoogleFonts.manrope(
-                                                color: const Color(0xFF6D28D9),
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 11.5,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
+                                    if (selectedImageUrl != null ||
+                                        (category?.imagenUrl
+                                                ?.trim()
+                                                .isNotEmpty ??
+                                            false)) ...[
+                                      const SizedBox(width: 10),
+                                      OutlinedButton(
+                                        onPressed: isUploadingImage
+                                            ? null
+                                            : () {
+                                                setSheetState(() {
+                                                  selectedImageUrl = null;
+                                                  clearImage = true;
+                                                  helperMessage =
+                                                      'Se quitará la imagen propia al guardar.';
+                                                });
+                                              },
+                                        style: OutlinedButton.styleFrom(
+                                          minimumSize: const Size(0, 46),
+                                        ),
+                                        child: const Text('Quitar'),
                                       ),
-                                    ),
+                                    ],
                                   ],
                                 ),
-                              ),
-                              const SizedBox(height: 12),
-                              OutlinedButton.icon(
-                                onPressed: isGeneratingAi
-                                    ? null
-                                    : generateWithAi,
-                                icon: isGeneratingAi
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.auto_awesome_rounded),
-                                label: Text(
-                                  isGeneratingAi
-                                      ? 'Sugiriendo...'
-                                      : 'Sugerir emoji con IA',
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  minimumSize: const Size.fromHeight(48),
-                                ),
-                              ),
-                              if (helperMessage != null) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  helperMessage!,
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
+                                if (helperMessage != null) ...[
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    helperMessage!,
+                                    style: GoogleFonts.manrope(
+                                      color: colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
                                   ),
-                                ),
+                                ],
                               ],
-                              const SizedBox(height: 16),
-                              Text(
-                                'Recomendados',
-                                style: GoogleFonts.manrope(
-                                  color: colorScheme.onSurface,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 14.5,
+                            ),
+                          ),
+                        ),
+                        SafeArea(
+                          top: false,
+                          minimum: const EdgeInsets.only(top: 14, bottom: 2),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextButton(
+                                  onPressed: isUploadingImage
+                                      ? null
+                                      : () {
+                                          FocusManager.instance.primaryFocus
+                                              ?.unfocus();
+                                          navigator.pop();
+                                        },
+                                  child: const Text('Cancelar'),
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: recommendedEmojiOptions.map((option) {
-                                  final selected =
-                                      option.emoji == selectedIconValue;
-                                  return InkWell(
-                                    onTap: () {
-                                      setSheetState(() {
-                                        selectedIconValue = option.emoji;
-                                        generatedWithAi = false;
-                                        aiConfidence = null;
-                                        helperMessage = null;
-                                      });
-                                    },
-                                    borderRadius: BorderRadius.circular(16),
-                                    child: Container(
-                                      width: 88,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 12,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: selected
-                                            ? const Color(
-                                                0xFF6D28D9,
-                                              ).withValues(alpha: 0.14)
-                                            : colorScheme.surfaceContainerHigh,
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(
-                                          color: selected
-                                              ? const Color(0xFF6D28D9)
-                                              : colorScheme.outlineVariant,
-                                        ),
-                                      ),
-                                      child: Column(
-                                        children: [
-                                          _buildCategoryEmojiGlyph(
-                                            option.emoji,
-                                            size: 26,
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            option.label,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
-                                            style: GoogleFonts.manrope(
-                                              color: colorScheme.onSurface,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w700,
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: isUploadingImage
+                                      ? null
+                                      : () {
+                                          final draft =
+                                              nameController.text.trim();
+                                          if (draft.isEmpty) {
+                                            setSheetState(() {
+                                              helperMessage =
+                                                  'Escribe un nombre para guardar la categoría.';
+                                            });
+                                            return;
+                                          }
+                                          FocusManager.instance.primaryFocus
+                                              ?.unfocus();
+                                          navigator.pop(
+                                            _CategoryEditorResult(
+                                              name: draft,
+                                              imagenUrl: selectedImageUrl,
+                                              clearImage: clearImage,
+                                              rol: selectedRol,
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                              const SizedBox(height: 16),
-                              TextField(
-                                controller: emojiSearchController,
-                                onChanged: (value) {
-                                  setSheetState(() => emojiSearchQuery = value);
-                                },
-                                decoration: InputDecoration(
-                                  prefixIcon: const Icon(Icons.search_rounded),
-                                  hintText: 'Buscar emoji por comida o negocio',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
+                                          );
+                                        },
+                                  child: const Text('Guardar categoría'),
                                 ),
                               ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Emojis disponibles',
-                                style: GoogleFonts.manrope(
-                                  color: colorScheme.onSurface,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 14.5,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              GridView.builder(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: filteredEmojiOptions.length,
-                                gridDelegate:
-                                    const SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: 4,
-                                      mainAxisSpacing: 10,
-                                      crossAxisSpacing: 10,
-                                      childAspectRatio: 0.74,
-                                    ),
-                                itemBuilder: (context, index) {
-                                  final option = filteredEmojiOptions[index];
-                                  final selected =
-                                      option.emoji == selectedIconValue;
-                                  return InkWell(
-                                    onTap: () {
-                                      setSheetState(() {
-                                        selectedIconValue = option.emoji;
-                                        generatedWithAi = false;
-                                        aiConfidence = null;
-                                        helperMessage = null;
-                                      });
-                                    },
-                                    borderRadius: BorderRadius.circular(16),
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: selected
-                                            ? const Color(
-                                                0xFF6D28D9,
-                                              ).withValues(alpha: 0.14)
-                                            : colorScheme.surfaceContainerHigh,
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(
-                                          color: selected
-                                              ? const Color(0xFF6D28D9)
-                                              : colorScheme.outlineVariant,
-                                        ),
-                                      ),
-                                      padding: const EdgeInsets.all(10),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          _buildCategoryEmojiGlyph(
-                                            option.emoji,
-                                            size: 26,
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            option.label,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
-                                            style: GoogleFonts.manrope(
-                                              color: colorScheme.onSurface,
-                                              fontSize: 10.5,
-                                              fontWeight: selected
-                                                  ? FontWeight.w800
-                                                  : FontWeight.w700,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                              if (filteredEmojiOptions.isEmpty) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  'No hay emojis para esa búsqueda. Prueba con comida, delivery, belleza o tecnología.',
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
                             ],
                           ),
                         ),
-                      ),
-                      SafeArea(
-                        top: false,
-                        minimum: const EdgeInsets.only(top: 14, bottom: 2),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextButton(
-                                onPressed: () {
-                                  isSheetClosed = true;
-                                  FocusManager.instance.primaryFocus?.unfocus();
-                                  navigator.pop();
-                                },
-                                child: const Text('Cancelar'),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: FilledButton(
-                                onPressed: () {
-                                  final draft = nameController.text.trim();
-                                  if (draft.isEmpty) {
-                                    setSheetState(() {
-                                      helperMessage =
-                                          'Escribe un nombre para guardar la categoría.';
-                                    });
-                                    return;
-                                  }
-
-                                  isSheetClosed = true;
-                                  FocusManager.instance.primaryFocus?.unfocus();
-                                  final iconToSave =
-                                      _isEmojiContent(selectedIconValue)
-                                      ? _canonicalCategoryEmoji(
-                                          selectedIconValue,
-                                        )
-                                      : selectedIconValue;
-                                  navigator.pop(
-                                    _CategoryEditorResult(
-                                      name: draft,
-                                      iconValue: iconToSave,
-                                      generatedWithAi: generatedWithAi,
-                                      aiConfidence: aiConfidence,
-                                      rol: selectedRol,
-                                    ),
-                                  );
-                                },
-                                child: const Text('Guardar categoría'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
-        );
-      },
-    );
-    isSheetClosed = true;
-    return result;
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      nameController.dispose();
+    }
   }
 
   Future<void> _createCategory() async {
@@ -1101,9 +976,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         'comercio_id': SupabaseConfig.currentComercioId,
         'catalogo_id': _currentCatalogoId,
         'nombre': draft.name,
-        'icono': draft.iconValue,
-        'creado_por_ia': draft.generatedWithAi,
-        'confianza_ia': draft.aiConfidence,
+        'imagen_url': draft.clearImage ? null : draft.imagenUrl,
         'orden': maxOrder,
         'activo': true,
         'rol': draft.rol,
@@ -1132,11 +1005,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
       return;
     }
 
+    final previousImage = category.imagenUrl?.trim() ?? '';
+    final nextImage = draft.clearImage ? '' : (draft.imagenUrl?.trim() ?? previousImage);
     final didChange =
         draft.name != category.nombre ||
-        draft.iconValue != (_normalizeStoredIconValue(category.icono) ?? '') ||
-        draft.generatedWithAi != (category.creadoPorIa == true) ||
-        (draft.aiConfidence ?? -1) != (category.confianzaIa ?? -1) ||
+        nextImage != previousImage ||
+        draft.clearImage ||
         draft.rol != category.rol;
 
     if (!didChange) {
@@ -1149,9 +1023,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           .from('categorias')
           .update({
             'nombre': draft.name,
-            'icono': draft.iconValue,
-            'creado_por_ia': draft.generatedWithAi,
-            'confianza_ia': draft.aiConfidence,
+            'imagen_url': draft.clearImage ? null : (draft.imagenUrl ?? category.imagenUrl),
             'rol': draft.rol,
           })
           .eq('comercio_id', SupabaseConfig.currentComercioId)
@@ -1808,8 +1680,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                     orden: item.orden,
                     activo: value,
                     icono: item.icono,
+                    imagenUrl: item.imagenUrl,
                     creadoPorIa: item.creadoPorIa,
                     confianzaIa: item.confianzaIa,
+                    rol: item.rol,
                   )
                 : item,
           )
@@ -1872,8 +1746,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 orden: entry.key,
                 activo: entry.value.activo,
                 icono: entry.value.icono,
+                imagenUrl: entry.value.imagenUrl,
                 creadoPorIa: entry.value.creadoPorIa,
                 confianzaIa: entry.value.confianzaIa,
+                rol: entry.value.rol,
               ),
             )
             .toList();
@@ -2245,12 +2121,19 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           label: const Text('Nueva categoría'),
         );
       case 2:
+        final selectedId = (_selectedProductCategoryId ?? '').trim();
+        final selectedName = selectedId.isEmpty
+            ? ''
+            : _categoryNameFor(selectedId);
+        final fabLabel = selectedName.isEmpty || selectedName == 'Sin categoría'
+            ? 'Agregar producto'
+            : 'Agregar producto en $selectedName';
         return FloatingActionButton.extended(
           onPressed: (_loading || _isMutating) ? null : _openProductFormDirect,
           backgroundColor: const Color(0xFF6D28D9),
           foregroundColor: Colors.white,
-          icon: const Icon(Icons.add),
-          label: const Text('Nuevo producto'),
+          icon: const Icon(Icons.add_rounded),
+          label: Text(fabLabel),
         );
       default:
         return FloatingActionButton.extended(
@@ -2300,6 +2183,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
             return _CategoryCard(
               key: ValueKey('category-${category.id}'),
               category: category,
+              coverImageUrl: _categoryCoverImageUrl(category),
               enabled: enabled,
               productCount: _productCountByCategory[category.id] ?? 0,
               onOpen: () => _openProducts(category),
@@ -2324,6 +2208,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               (category) => _CategoryCard(
                 key: ValueKey('category-${category.id}'),
                 category: category,
+                coverImageUrl: _categoryCoverImageUrl(category),
                 enabled: enabled,
                 productCount: _productCountByCategory[category.id] ?? 0,
                 onOpen: () => _openProducts(category),
@@ -2788,51 +2673,109 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         ? products
         : products.take(_productVisibleCount).toList();
     final hasMore = !canReorderProducts && products.length > pageItems.length;
+    final selectedId = (_selectedProductCategoryId ?? '').trim();
+    final selectedName = selectedId.isEmpty
+        ? 'todas'
+        : _categoryNameFor(selectedId);
+    final activeCount = products.where((p) => p.disponible).length;
+
     return [
-      _buildProductControls(),
-      const SizedBox(height: 10),
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                selected: _selectedProductCategoryId == null,
-                showCheckmark: false,
-                label: const Text('Todas'),
-                onSelected: (_) =>
-                    setState(() => _selectedProductCategoryId = null),
-              ),
-            ),
-            ..._categories.map(
-              (category) => Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  selected: _selectedProductCategoryId == category.id,
-                  showCheckmark: false,
-                  label: Text(category.nombre),
-                  onSelected: (_) =>
-                      setState(() => _selectedProductCategoryId = category.id),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      if (_productSortOption == _ProductSortOption.order &&
-          _selectedProductCategoryId == null)
-        Padding(
-          padding: const EdgeInsets.only(top: 10),
-          child: Text(
-            'Selecciona una categoría para reordenar sus productos.',
-            style: GoogleFonts.manrope(
-              color: const Color(0xFF6B7280),
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-            ),
+      if (_categories.isEmpty)
+        _EmptyMenuState(
+          icon: Icons.folder_open_outlined,
+          title: 'Crea una categoría primero',
+          subtitle: 'Las categorías organizan tus productos en el menú.',
+          actionLabel: 'Nueva categoría',
+          onAction: _createCategory,
+        )
+      else
+        SizedBox(
+          height: 108,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _categories.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
+            itemBuilder: (context, index) {
+              final category = _categories[index];
+              final selected =
+                  _normalizedId(_selectedProductCategoryId) ==
+                  _normalizedId(category.id);
+              return _MobileCategoryChipCard(
+                name: category.nombre,
+                count: _productCountByCategory[category.id] ?? 0,
+                iconValue: category.icono,
+                imageUrl: _categoryCoverImageUrl(category),
+                selected: selected,
+                onTap: () => setState(() {
+                  _selectedProductCategoryId = category.id;
+                  _productVisibleCount = 24;
+                }),
+              );
+            },
           ),
         ),
+      const SizedBox(height: 18),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  selectedId.isEmpty
+                      ? 'Productos'
+                      : 'Productos de ${selectedName.toUpperCase()}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF111827),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Filtros',
+                visualDensity: VisualDensity.compact,
+                onPressed: _openMobileProductFiltersSheet,
+                icon: const Icon(Icons.tune_rounded, color: Color(0xFF6B7280)),
+              ),
+              const SizedBox(width: 4),
+              FilledButton.icon(
+                onPressed:
+                    (_loading || _isMutating) ? null : _openProductFormDirect,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Nuevo'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF6D28D9),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 40),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  textStyle: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Text(
+            '$activeCount productos activos',
+            style: GoogleFonts.manrope(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF9CA3AF),
+            ),
+          ),
+        ],
+      ),
       const SizedBox(height: 14),
       if (products.isEmpty)
         _EmptyMenuState(
@@ -2852,7 +2795,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               _onProductReorder(pageItems, oldIndex, newIndex),
           itemBuilder: (context, index) {
             final product = pageItems[index];
-            return _buildProductCard(
+            return _buildMobileProductCard(
               product,
               dragHandle: _reorderDragStartListener(
                 index: index,
@@ -2868,7 +2811,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           },
         )
       else
-        ...pageItems.map(_buildProductCard),
+        ...pageItems.map(_buildMobileProductCard),
       if (hasMore) ...[
         const SizedBox(height: 12),
         Align(
@@ -2886,6 +2829,54 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         ),
       ],
     ];
+  }
+
+  Future<void> _openMobileProductFiltersSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Filtros de productos',
+                style: GoogleFonts.manrope(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _buildProductControls(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileProductCard(ProductModel product, {Widget? dragHandle}) {
+    return _MobileProductCard(
+      key: ValueKey('mobile-product-${product.id}'),
+      product: product,
+      categoryName: _categoryNameFor(product.categoriaId),
+      priceLabel: _formatProductPrice(product.precio),
+      dragHandle: dragHandle,
+      enabled: !_isMutating,
+      onEdit: () => _openProductFormDirect(product: product),
+      onDelete: () => _deleteProduct(product),
+      onToggleVisible: (value) {
+        if (value) {
+          unawaited(_showProduct(product));
+        } else {
+          unawaited(_hideProduct(product));
+        }
+      },
+      onImproveImage: () => _generateAiImageForProduct(product),
+    );
   }
 
   List<Widget> _buildHiddenTabSections({required bool useAdminTable}) {
@@ -3630,16 +3621,39 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       ),
                                       child: Row(
                                         children: [
-                                          SizedBox(
-                                            width: 28,
-                                            height: 28,
-                                            child: Center(
-                                              child: _buildCategoryIconVisual(
-                                                iconValue: category.icono,
-                                                name: category.nombre,
-                                                size: 22,
-                                              ),
-                                            ),
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            child: () {
+                                              final cover =
+                                                  _categoryCoverImageUrl(
+                                                    category,
+                                                  );
+                                              if (cover != null &&
+                                                  cover.isNotEmpty) {
+                                                return SoftMediaImage(
+                                                  imageUrl: cover,
+                                                  width: 28,
+                                                  height: 28,
+                                                  optimizeWidth: 80,
+                                                  fit: BoxFit.cover,
+                                                  backgroundColor:
+                                                      const Color(0xFFF3F4F6),
+                                                );
+                                              }
+                                              return SizedBox(
+                                                width: 28,
+                                                height: 28,
+                                                child: Center(
+                                                  child:
+                                                      _buildCategoryIconVisual(
+                                                    iconValue: category.icono,
+                                                    name: category.nombre,
+                                                    size: 22,
+                                                  ),
+                                                ),
+                                              );
+                                            }(),
                                           ),
                                           const SizedBox(width: 10),
                                           Expanded(
@@ -4221,24 +4235,22 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         SliverPadding(
           padding: EdgeInsets.fromLTRB(
             horizontalPadding,
-            12,
+            8,
             horizontalPadding,
             0,
           ),
-          sliver: SliverToBoxAdapter(
-            child: _buildDashboardHeaderCard(isDesktop: false),
-          ),
+          sliver: SliverToBoxAdapter(child: _buildMobileMenuHeader()),
         ),
         SliverPadding(
           padding: EdgeInsets.fromLTRB(
             horizontalPadding,
-            12,
+            14,
             horizontalPadding,
             120,
           ),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
-              _SegmentTabsContainer(
+              _MobileMenuPrimaryTabs(
                 selectedTabIndex: _selectedTabIndex,
                 onSelected: (index) {
                   if (!mounted) return;
@@ -4249,7 +4261,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   });
                 },
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               ...tabSections,
             ]),
           ),
@@ -4269,162 +4281,93 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     );
   }
 
-  Widget _buildDashboardHeaderCard({required bool isDesktop}) {
-    final activeCategories = _categories.where((item) => item.activo).length;
-    final totalProducts = _productCountByCategory.values.fold<int>(
-      0,
-      (sum, count) => sum + count,
-    );
-
-    return Container(
-      padding: EdgeInsets.all(isDesktop ? 20 : 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0D000000),
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (isDesktop)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CircleAvatar(
-                        radius: 24,
-                        backgroundColor: const Color(
-                          0xFF6D28D9,
-                        ).withValues(alpha: 0.1),
-                        child: const Icon(
-                          Icons.restaurant_menu,
-                          color: Color(0xFF6D28D9),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Estructura del menú',
-                              style: GoogleFonts.manrope(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: const Color(0xFF1F2555),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Administra categorías y productos desde un solo dashboard para reducir clicks del vendedor.',
-                              style: GoogleFonts.manrope(
-                                color: const Color(0xFF6B7280),
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w500,
-                                height: 1.45,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    minWidth: 220,
-                    maxWidth: 280,
-                  ),
-                  child: _AiGeneratorButton(onTap: _openAiMenuGenerator),
-                ),
-              ],
-            )
-          else ...[
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: const Color(
-                    0xFF6D28D9,
-                  ).withValues(alpha: 0.1),
-                  child: const Icon(
-                    Icons.restaurant_menu,
-                    color: Color(0xFF6D28D9),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Estructura del menú',
+  Widget _buildMobileMenuHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Menu principal',
                     style: GoogleFonts.manrope(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF1F2555),
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF111827),
+                      height: 1.15,
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Administra categorías y productos desde un solo dashboard para reducir clicks del vendedor.',
-              style: GoogleFonts.manrope(
-                color: const Color(0xFF6B7280),
-                fontSize: 13.5,
-                fontWeight: FontWeight.w500,
-                height: 1.45,
+                  const SizedBox(height: 4),
+                  Text(
+                    'Gestiona tus categorías y productos.',
+                    style: GoogleFonts.manrope(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF9CA3AF),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            _AiGeneratorButton(onTap: _openAiMenuGenerator),
+            const SizedBox(width: 10),
+            Material(
+              color: const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: _toggleAppBarSearch,
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  width: 46,
+                  height: 46,
+                  child: Icon(
+                    _showAppBarSearch
+                        ? Icons.close_rounded
+                        : Icons.search_rounded,
+                    color: const Color(0xFF4B5563),
+                  ),
+                ),
+              ),
+            ),
           ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _StatChip(
-                  label: 'Categorías',
-                  value: '${_categories.length}',
-                  icon: Icons.folder_rounded,
-                  tint: const Color(0xFF7C3AED),
-                  compact: isDesktop,
-                ),
+        ),
+        if (_showAppBarSearch) ...[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _searchController,
+            autofocus: true,
+            onChanged: (value) {
+              if (!mounted) return;
+              setState(() {
+                _searchQuery = value;
+                _categoryVisibleCount = 20;
+                _productVisibleCount = 24;
+              });
+            },
+            decoration: InputDecoration(
+              hintText: 'Buscar categorías y productos...',
+              filled: true,
+              fillColor: Colors.white,
+              prefixIcon: const Icon(Icons.search_rounded),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _StatChip(
-                  label: 'Activas',
-                  value: '$activeCategories',
-                  icon: Icons.check_circle_rounded,
-                  tint: const Color(0xFF16A34A),
-                  compact: isDesktop,
-                ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _StatChip(
-                  label: 'Productos',
-                  value: '$totalProducts',
-                  icon: Icons.inventory_2_rounded,
-                  tint: const Color(0xFF3B82F6),
-                  compact: isDesktop,
-                ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 12,
               ),
-            ],
+            ),
           ),
         ],
-      ),
+      ],
     );
   }
 
@@ -4440,68 +4383,44 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
     final screenWidth = MediaQuery.sizeOf(context).width;
     final isDesktopLayout = screenWidth >= 1024;
+    final embeddedInShell = MerchantShellScope.maybeOf(context) != null;
+    final showMobileAppBar = !isDesktopLayout && !embeddedInShell;
 
     return Scaffold(
       backgroundColor: isDesktopLayout
           ? const Color(0xFFF8F7FC)
           : const Color(0xFFF8F7FB),
-      appBar: AppBar(
-        backgroundColor: isDesktopLayout
-            ? const Color(0xFFF8F7FC)
-            : colorScheme.surfaceContainerHighest,
-        foregroundColor: colorScheme.onSurface,
-        elevation: isDesktopLayout ? 0 : null,
-        scrolledUnderElevation: isDesktopLayout ? 0 : null,
-        titleTextStyle: GoogleFonts.manrope(
-          color: colorScheme.onSurface,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
-        ),
-        title: isDesktopLayout
-            ? null
-            : (_showAppBarSearch
-                  ? TextField(
-                      controller: _searchController,
-                      autofocus: true,
-                      onChanged: (value) {
-                        if (!mounted) return;
-                        setState(() {
-                          _searchQuery = value;
-                          _categoryVisibleCount = 20;
-                          _productVisibleCount = 24;
-                        });
-                      },
-                      style: TextStyle(color: colorScheme.onSurface),
-                      cursorColor: colorScheme.primary,
-                      decoration: InputDecoration(
-                        hintText: 'Buscar categorías y productos...',
-                        hintStyle: TextStyle(
-                          color: colorScheme.onSurfaceVariant.withValues(
-                            alpha: 0.8,
-                          ),
-                        ),
-                        border: InputBorder.none,
-                        isDense: true,
-                      ),
-                    )
-                  : Text(
+      appBar: isDesktopLayout
+          ? AppBar(
+              backgroundColor: const Color(0xFFF8F7FC),
+              foregroundColor: colorScheme.onSurface,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              titleTextStyle: GoogleFonts.manrope(
+                color: colorScheme.onSurface,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
+              title: null,
+            )
+          : (showMobileAppBar
+                ? AppBar(
+                    backgroundColor: const Color(0xFFF8F7FB),
+                    foregroundColor: colorScheme.onSurface,
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    titleTextStyle: GoogleFonts.manrope(
+                      color: colorScheme.onSurface,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    title: Text(
                       widget.catalog.nombre,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                    )),
-        actions: [
-          if (!isDesktopLayout)
-            IconButton(
-              onPressed: _toggleAppBarSearch,
-              icon: Icon(
-                _showAppBarSearch ? Icons.close_rounded : Icons.search_rounded,
-              ),
-              tooltip: _showAppBarSearch
-                  ? 'Cerrar búsqueda'
-                  : 'Buscar en el menú',
-            ),
-        ],
-      ),
+                    ),
+                  )
+                : null),
       floatingActionButton: isDesktopLayout ? null : _buildContextualFab(),
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -4648,7 +4567,7 @@ class _DesktopProductsTableRow extends StatelessWidget {
           width: 44,
           height: 44,
           optimizeWidth: 120,
-          fit: BoxFit.contain,
+          fit: BoxFit.cover,
           borderRadius: BorderRadius.circular(10),
           backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
           errorBuilder: (_, _, _) => const _ProductThumbPlaceholder(
@@ -5207,6 +5126,7 @@ class _CategoryCard extends StatelessWidget {
   const _CategoryCard({
     super.key,
     required this.category,
+    this.coverImageUrl,
     required this.enabled,
     required this.productCount,
     required this.onOpen,
@@ -5217,6 +5137,7 @@ class _CategoryCard extends StatelessWidget {
   });
 
   final CategoryModel category;
+  final String? coverImageUrl;
   final bool enabled;
   final int productCount;
   final VoidCallback onOpen;
@@ -5227,6 +5148,7 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cover = (coverImageUrl ?? category.imagenUrl)?.trim() ?? '';
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
@@ -5246,20 +5168,29 @@ class _CategoryCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6D28D9).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: _buildCategoryIconVisual(
-                    iconValue: category.icono,
-                    name: category.nombre,
-                    size: 24,
-                  ),
-                ),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: cover.isNotEmpty
+                    ? SoftMediaImage(
+                        imageUrl: cover,
+                        width: 48,
+                        height: 48,
+                        optimizeWidth: 120,
+                        fit: BoxFit.cover,
+                        backgroundColor: const Color(0xFFF3F4F6),
+                      )
+                    : Container(
+                        width: 48,
+                        height: 48,
+                        color: const Color(0xFF6D28D9).withValues(alpha: 0.1),
+                        child: Center(
+                          child: _buildCategoryIconVisual(
+                            iconValue: category.icono,
+                            name: category.nombre,
+                            size: 24,
+                          ),
+                        ),
+                      ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -5361,92 +5292,6 @@ class _CategoryCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.tint,
-    this.compact = false,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color tint;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final iconBox = Container(
-      width: compact ? 24 : 28,
-      height: compact ? 24 : 28,
-      decoration: BoxDecoration(
-        color: tint.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Icon(icon, size: compact ? 14 : 16, color: tint),
-    );
-
-    final valueText = Text(
-      value,
-      style: GoogleFonts.manrope(
-        color: const Color(0xFF1F2555),
-        fontWeight: FontWeight.w800,
-        fontSize: compact ? 14 : 15,
-      ),
-    );
-
-    final labelText = Text(
-      label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: GoogleFonts.manrope(
-        color: const Color(0xFF6B7280),
-        fontSize: compact ? 11 : 11.5,
-        fontWeight: FontWeight.w600,
-      ),
-    );
-
-    return Container(
-      constraints: BoxConstraints(minHeight: compact ? 72 : 84),
-      padding: EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: compact ? 10 : 12,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFEAE7F2)),
-      ),
-      child: compact
-          ? Row(
-              children: [
-                iconBox,
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [valueText, labelText],
-                  ),
-                ),
-              ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                iconBox,
-                const SizedBox(height: 10),
-                valueText,
-                const SizedBox(height: 2),
-                labelText,
-              ],
-            ),
     );
   }
 }
@@ -5637,57 +5482,8 @@ class _QuickActionCard extends StatelessWidget {
   }
 }
 
-class _AiGeneratorButton extends StatelessWidget {
-  const _AiGeneratorButton({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: const LinearGradient(
-            colors: [Color(0xFF6D28D9), Color(0xFF9333EA)],
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x296D28D9),
-              blurRadius: 14,
-              offset: Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.auto_awesome, color: Colors.white),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Generar menú con IA',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.manrope(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-            const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SegmentTabsContainer extends StatelessWidget {
-  const _SegmentTabsContainer({
+class _MobileMenuPrimaryTabs extends StatelessWidget {
+  const _MobileMenuPrimaryTabs({
     required this.selectedTabIndex,
     required this.onSelected,
   });
@@ -5697,135 +5493,438 @@ class _SegmentTabsContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF1ECFB),
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0A1F2555),
-            blurRadius: 16,
-            offset: Offset(0, 6),
+    return Row(
+      children: [
+        Expanded(
+          child: _MobilePrimaryTabButton(
+            label: 'Productos',
+            icon: Icons.grid_view_rounded,
+            selected: selectedTabIndex == 2,
+            onTap: () => onSelected(2),
           ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: _DashboardTopTabs(
-          selectedIndex: selectedTabIndex,
-          tabs: const ['Todos', 'Categorías', 'Productos', 'Ocultos'],
-          onSelected: onSelected,
         ),
-      ),
-    );
-  }
-}
-
-class _DashboardTopTabs extends StatelessWidget {
-  const _DashboardTopTabs({
-    required this.tabs,
-    required this.selectedIndex,
-    required this.onSelected,
-  });
-
-  final List<String> tabs;
-  final int selectedIndex;
-  final ValueChanged<int> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 380;
-        final tabMinWidth = compact ? 88.0 : 104.0;
-
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (var index = 0; index < tabs.length; index++) ...[
-                ConstrainedBox(
-                  constraints: BoxConstraints(minWidth: tabMinWidth),
-                  child: _DashboardTopTabItem(
-                    label: tabs[index],
-                    isSelected: selectedIndex == index,
-                    compact: compact,
-                    onTap: () => onSelected(index),
-                  ),
-                ),
-                if (index != tabs.length - 1) const SizedBox(width: 8),
-              ],
-            ],
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MobilePrimaryTabButton(
+            label: 'Categorías',
+            icon: Icons.folder_outlined,
+            selected: selectedTabIndex == 1,
+            onTap: () => onSelected(1),
           ),
-        );
-      },
-    );
-  }
-}
-
-class _DashboardTopTabItem extends StatelessWidget {
-  const _DashboardTopTabItem({
-    required this.label,
-    required this.isSelected,
-    required this.compact,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool isSelected;
-  final bool compact;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: isSelected ? Colors.white : Colors.transparent,
-        boxShadow: isSelected
-            ? const [
-                BoxShadow(
-                  color: Color(0x141F2555),
-                  blurRadius: 12,
-                  offset: Offset(0, 4),
-                ),
-              ]
-            : const [],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 14 : 18,
-              vertical: compact ? 12 : 13,
+        ),
+        const SizedBox(width: 8),
+        Material(
+          color: selectedTabIndex == 3
+              ? const Color(0xFF6D28D9)
+              : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color: selectedTabIndex == 3
+                  ? const Color(0xFF6D28D9)
+                  : const Color(0xFFE5E7EB),
             ),
-            child: Center(
-              child: AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOutCubic,
-                style: GoogleFonts.manrope(
-                  fontSize: compact ? 12 : 12.5,
-                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w700,
-                  color: isSelected
-                      ? const Color(0xFF1F2555)
-                      : const Color(0xFF6B7280),
-                  letterSpacing: 0,
-                ),
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                ),
+          ),
+          child: InkWell(
+            onTap: () => onSelected(3),
+            borderRadius: BorderRadius.circular(16),
+            child: SizedBox(
+              width: 48,
+              height: 52,
+              child: Icon(
+                Icons.visibility_off_outlined,
+                color: selectedTabIndex == 3
+                    ? Colors.white
+                    : const Color(0xFF6B7280),
               ),
             ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _MobilePrimaryTabButton extends StatelessWidget {
+  const _MobilePrimaryTabButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? const Color(0xFF6D28D9) : Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: selected
+                ? null
+                : Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? Colors.white : const Color(0xFF6B7280),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: GoogleFonts.manrope(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  color: selected ? Colors.white : const Color(0xFF374151),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileCategoryChipCard extends StatelessWidget {
+  const _MobileCategoryChipCard({
+    required this.name,
+    required this.count,
+    required this.iconValue,
+    this.imageUrl,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String name;
+  final int count;
+  final String? iconValue;
+  final String? imageUrl;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = selected
+        ? const Color(0xFF6D28D9)
+        : const Color(0xFFE5E7EB);
+    final textColor = selected
+        ? const Color(0xFF6D28D9)
+        : const Color(0xFF6B7280);
+    final cover = imageUrl?.trim() ?? '';
+
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          width: 96,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: borderColor, width: selected ? 2 : 1),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: cover.isNotEmpty
+                    ? SoftMediaImage(
+                        imageUrl: cover,
+                        width: 44,
+                        height: 44,
+                        optimizeWidth: 120,
+                        fit: BoxFit.cover,
+                        backgroundColor: const Color(0xFFF3F4F6),
+                      )
+                    : Container(
+                        width: 44,
+                        height: 44,
+                        color: const Color(0xFFF3F4F6),
+                        child: Center(
+                          child: _buildCategoryIconVisual(
+                            iconValue: iconValue,
+                            name: name,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                name.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.manrope(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '$count',
+                style: GoogleFonts.manrope(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileProductCard extends StatelessWidget {
+  const _MobileProductCard({
+    super.key,
+    required this.product,
+    required this.categoryName,
+    required this.priceLabel,
+    this.dragHandle,
+    required this.enabled,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onToggleVisible,
+    required this.onImproveImage,
+  });
+
+  final ProductModel product;
+  final String categoryName;
+  final String priceLabel;
+  final Widget? dragHandle;
+  final bool enabled;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final ValueChanged<bool> onToggleVisible;
+  final VoidCallback onImproveImage;
+
+  @override
+  Widget build(BuildContext context) {
+    final placeholder = _ProductThumbPlaceholder(
+      icon: product.isAiGeneratedImage
+          ? Icons.auto_awesome_rounded
+          : Icons.fastfood_rounded,
+    );
+    final imageUrl = product.imagenUrl?.trim();
+    final thumb = imageUrl != null && imageUrl.isNotEmpty
+        ? SoftMediaImage(
+            imageUrl: imageUrl,
+            width: 72,
+            height: 72,
+            optimizeWidth: 180,
+            fit: BoxFit.cover,
+            borderRadius: BorderRadius.circular(14),
+            backgroundColor: const Color(0xFFF3F4F6),
+            errorBuilder: (_, _, _) => placeholder,
+          )
+        : SizedBox(width: 72, height: 72, child: placeholder);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F0F172A),
+            blurRadius: 14,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (dragHandle != null) ...[
+            SizedBox(width: 24, height: 72, child: Center(child: dragHandle)),
+            const SizedBox(width: 6),
+          ],
+          thumb,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.nombre,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEEE7FF),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    categoryName.toUpperCase(),
+                    style: GoogleFonts.manrope(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF6D28D9),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  priceLabel,
+                  style: GoogleFonts.manrope(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: product.disponible
+                            ? const Color(0xFF16A34A)
+                            : const Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        product.disponible ? 'En stock' : 'Agotado',
+                        style: GoogleFonts.manrope(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF6B7280),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: enabled ? onEdit : null,
+                        icon: const Icon(Icons.edit_outlined, size: 16),
+                        label: const Text('Editar'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF374151),
+                          side: const BorderSide(color: Color(0xFFE5E7EB)),
+                          backgroundColor: const Color(0xFFF9FAFB),
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          textStyle: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12.5,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Material(
+                      color: const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(10),
+                      child: InkWell(
+                        onTap: enabled ? onDelete : null,
+                        borderRadius: BorderRadius.circular(10),
+                        child: const SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: Icon(
+                            Icons.delete_outline_rounded,
+                            color: Color(0xFFDC2626),
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          Column(
+            children: [
+              Switch.adaptive(
+                value: product.disponible,
+                onChanged: enabled ? onToggleVisible : null,
+                activeThumbColor: Colors.white,
+                activeTrackColor: const Color(0xFF6D28D9),
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'Más opciones',
+                padding: EdgeInsets.zero,
+                icon: const Icon(
+                  Icons.more_vert_rounded,
+                  color: Color(0xFF9CA3AF),
+                ),
+                onSelected: (action) {
+                  switch (action) {
+                    case 'improve':
+                      onImproveImage();
+                      break;
+                    case 'edit':
+                      onEdit();
+                      break;
+                    case 'delete':
+                      onDelete();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Text('Editar'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'improve',
+                    child: Text('Mejorar imagen con IA'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Text('Eliminar'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -5886,7 +5985,7 @@ class _DashboardProductCard extends StatelessWidget {
               width: 72,
               height: 72,
               optimizeWidth: 180,
-              fit: BoxFit.contain,
+              fit: BoxFit.cover,
               borderRadius: BorderRadius.circular(14),
               backgroundColor:
                   Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -6207,16 +6306,14 @@ class _EmptyMenuState extends StatelessWidget {
 class _CategoryEditorResult {
   const _CategoryEditorResult({
     required this.name,
-    required this.iconValue,
-    required this.generatedWithAi,
-    required this.aiConfidence,
+    this.imagenUrl,
+    this.clearImage = false,
     this.rol,
   });
 
   final String name;
-  final String iconValue;
-  final bool generatedWithAi;
-  final double? aiConfidence;
+  final String? imagenUrl;
+  final bool clearImage;
   final String? rol;
 }
 

@@ -4,6 +4,7 @@ import {
   displayProductImage,
   optimizeMenuImageUrl,
   productImageUrl,
+  resolveCategoryCover,
   resolveHeroCover,
 } from '../app/v/[id]/_lib/product-image';
 
@@ -25,6 +26,20 @@ describe('product image resolution', () => {
       logo,
     );
     expect(cover).toBe('https://cdn/pizza.png');
+  });
+
+  it('uses category image, else first product photo, never commerce logo', () => {
+    const logo = 'https://x/logos-comercios/a.png';
+    expect(
+      resolveCategoryCover(null, [{ imagen_url: null }, { imagen_url: 'https://cdn/pizza.png' }], logo),
+    ).toBe('https://cdn/pizza.png');
+    expect(
+      resolveCategoryCover('https://cdn/category.png', [{ imagen_url: 'https://cdn/pizza.png' }], logo),
+    ).toBe('https://cdn/category.png');
+    expect(resolveCategoryCover(null, [{ imagen_url: null }, { imagen_url: logo }], logo)).toBeNull();
+    expect(resolveCategoryCover(logo, [{ imagen_url: 'https://cdn/pizza.png' }], logo)).toBe(
+      'https://cdn/pizza.png',
+    );
   });
 
   it('requests a resized WebP variant for public Supabase Storage images', () => {

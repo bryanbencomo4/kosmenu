@@ -705,18 +705,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     return const MenuAnalyticsSummary();
   }
 
-  Uri _ownerPreviewUri(ComercioModel comercio) {
-    final identifier = (comercio.slug ?? '').trim().isNotEmpty
-        ? comercio.slug!.trim()
-        : comercio.id.trim();
-    final token =
-        Supabase.instance.client.auth.currentSession?.accessToken ?? '';
-    return AppLinks.ownerMenuPreviewUri(
-      comercioId: identifier,
-      accessToken: token,
-    );
-  }
-
   Future<void> _openAiCredits({double balance = 0}) async {
     await _pushInShell(AiCreditsScreen(initialBalance: balance));
     if (!mounted) return;
@@ -3153,7 +3141,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         return MerchantDigitalMenuWorkspace(
           publicUrl: publicUrl,
           displayUrl: displayUrl,
-          previewUrl: _ownerPreviewUri(data.comercio),
           menuOrders: data.analytics.orders,
           visits: data.analytics.visits,
           scans: data.analytics.scans,

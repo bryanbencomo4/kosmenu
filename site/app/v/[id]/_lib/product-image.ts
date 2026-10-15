@@ -66,3 +66,22 @@ export function resolveHeroCover(
   }
   return optimizeMenuImageUrl(logoUrl, 640);
 }
+
+/**
+ * Category cover: custom image, else first real product photo.
+ * Never falls back to the commerce logo (that made every tile look identical).
+ */
+export function resolveCategoryCover(
+  categoryImageUrl: string | null | undefined,
+  products: Array<{ imagen_url?: string | null }>,
+  logoUrl?: string | null,
+  width: number = MENU_IMAGE_WIDTH.category,
+): string | null {
+  const custom = productImageUrl(categoryImageUrl, logoUrl, width);
+  if (custom) return custom;
+  for (const product of products) {
+    const url = productImageUrl(product.imagen_url, logoUrl, width);
+    if (url) return url;
+  }
+  return null;
+}

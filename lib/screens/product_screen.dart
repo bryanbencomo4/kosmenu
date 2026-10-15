@@ -1519,7 +1519,7 @@ class _ProductThumb extends StatelessWidget {
         width: 100,
         height: 100,
         optimizeWidth: 240,
-        fit: BoxFit.contain,
+        fit: BoxFit.cover,
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         errorBuilder: (context, error, stackTrace) {
           if (backupUrl != null &&

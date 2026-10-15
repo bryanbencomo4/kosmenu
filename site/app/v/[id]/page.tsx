@@ -17,6 +17,7 @@ import {
   displayProductImage,
   MENU_IMAGE_WIDTH,
   optimizeMenuImageUrl,
+  resolveCategoryCover,
   resolveHeroCover,
 } from './_lib/product-image';
 import {
@@ -103,6 +104,7 @@ type CategoriaRow = {
   nombre: string;
   orden?: number | null;
   icono?: string | null;
+  imagen_url?: string | null;
   opciones_menu?: unknown;
   rol?: string | null;
   tipo_upselling?: string | null;
@@ -3096,21 +3098,18 @@ export default function PublicMenuPage() {
     : 'Cerrado ahora';
   const kioskCategories = useMemo(
     () =>
-      categoriasConProductos.map((categoria) => {
-        const cover =
-          categoria.productos
-            .map((producto) =>
-              displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.category),
-            )
-            .find(Boolean) ?? null;
-        return {
-          id: categoria.id,
-          name: formatCategoryDisplayName(categoria.nombre),
-          glyph: resolveCategoryVisual(categoria).glyph,
-          coverUrl: cover,
-          productCount: categoria.productos.length,
-        };
-      }),
+      categoriasConProductos.map((categoria) => ({
+        id: categoria.id,
+        name: formatCategoryDisplayName(categoria.nombre),
+        glyph: resolveCategoryVisual(categoria).glyph,
+        coverUrl: resolveCategoryCover(
+          categoria.imagen_url,
+          categoria.productos,
+          comercioLogoUrl,
+          MENU_IMAGE_WIDTH.category,
+        ),
+        productCount: categoria.productos.length,
+      })),
     [categoriasConProductos, comercioLogoUrl],
   );
   const kioskProductsByCategory = useMemo(() => {

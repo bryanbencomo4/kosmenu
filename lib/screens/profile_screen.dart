@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
+import 'package:kosmenu_app/services/app_update_service.dart';
 import 'package:kosmenu_app/services/merchant_presence.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -15,15 +16,15 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  static const _appVersion = '1.0.0+1';
-
   late Future<Map<String, dynamic>?> _businessFuture;
+  late final Future<String> _versionLabelFuture;
   bool _signingOut = false;
 
   @override
   void initState() {
     super.initState();
     _businessFuture = _loadBusiness();
+    _versionLabelFuture = AppUpdateService.installedVersionLabel();
   }
 
   @override
@@ -320,14 +321,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Center(
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      '© elmenuxfa.com · v$_appVersion',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.manrope(
-                        color: colorScheme.onSurfaceVariant,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: FutureBuilder<String>(
+                      future: _versionLabelFuture,
+                      builder: (context, snapshot) {
+                        final version = snapshot.data?.trim() ?? '';
+                        final label = version.isEmpty
+                            ? '© elmenuxfa.com'
+                            : '© elmenuxfa.com · $version';
+                        return Text(
+                          label,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.manrope(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),

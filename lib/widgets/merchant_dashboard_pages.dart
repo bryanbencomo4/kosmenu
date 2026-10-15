@@ -16,7 +16,6 @@ import 'package:kosmenu_app/screens/profile_screen.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
-import 'package:kosmenu_app/widgets/next_menu_preview_frame.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class MerchantOrdersWorkspace extends StatefulWidget {
@@ -572,7 +571,6 @@ class MerchantDigitalMenuWorkspace extends StatelessWidget {
     super.key,
     required this.publicUrl,
     required this.displayUrl,
-    required this.previewUrl,
     required this.menuOrders,
     required this.visits,
     required this.scans,
@@ -583,7 +581,6 @@ class MerchantDigitalMenuWorkspace extends StatelessWidget {
 
   final String publicUrl;
   final String displayUrl;
-  final Uri previewUrl;
   final int menuOrders;
   final int visits;
   final int scans;
@@ -605,50 +602,6 @@ class MerchantDigitalMenuWorkspace extends StatelessWidget {
           onCopy: onCopy,
           onDownloadQr: onDownloadQr,
           onOpenUrl: onOpenUrl,
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'Vista previa del menú',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: 16),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Es el menú público real, embebido aquí.',
-          style: GoogleFonts.poppins(
-            fontSize: 12,
-            color: const Color(0xFF6B6F92),
-          ),
-        ),
-        const SizedBox(height: 10),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            height: 560,
-            color: const Color(0xFF0F172A),
-            child: NextMenuPreviewFrame(previewUrl: previewUrl),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            FilledButton.icon(
-              onPressed: onOpenUrl,
-              icon: const Icon(Icons.open_in_new_rounded),
-              label: const Text('Abrir menú'),
-            ),
-            OutlinedButton.icon(
-              onPressed: onCopy,
-              icon: const Icon(Icons.link_rounded),
-              label: const Text('Copiar enlace'),
-            ),
-            OutlinedButton.icon(
-              onPressed: onDownloadQr,
-              icon: const Icon(Icons.qr_code_2_rounded),
-              label: const Text('Descargar QR'),
-            ),
-          ],
         ),
       ],
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
+import 'package:kosmenu_app/services/app_update_service.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 
 enum MerchantNavDestination {
@@ -77,6 +78,8 @@ class MerchantDashboardSidebar extends StatelessWidget {
 
   static const double expandedWidth = 248;
   static const double collapsedWidth = 80;
+  static final Future<String> _versionLabelFuture =
+      AppUpdateService.installedVersionLabel();
 
   final MerchantNavDestination selected;
   final String planName;
@@ -240,9 +243,18 @@ class MerchantDashboardSidebar extends StatelessWidget {
                     color: _text,
                   ),
                 ),
-                Text(
-                  'v1.0.0',
-                  style: GoogleFonts.poppins(fontSize: 10, color: _muted),
+                FutureBuilder<String>(
+                  future: _versionLabelFuture,
+                  builder: (context, snapshot) {
+                    final label = snapshot.data?.trim() ?? '';
+                    if (label.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Text(
+                      label,
+                      style: GoogleFonts.poppins(fontSize: 10, color: _muted),
+                    );
+                  },
                 ),
               ],
             ],

@@ -36,7 +36,8 @@ const COMERCIO_SELECT = [
   'branding_ia->config_negocio',
 ].join(',');
 
-const CATEGORIA_SELECT = 'id,comercio_id,nombre,orden,icono,opciones_menu,rol';
+const CATEGORIA_SELECT =
+  'id,comercio_id,nombre,orden,icono,imagen_url,opciones_menu,rol';
 const PRODUCTO_SELECT =
   'id,comercio_id,categoria_id,nombre,descripcion,precio,imagen_url,disponible,upsell_badge,precio_comparacion,upsell_enabled,orden,opciones_menu';
 const STALE_MENU_PREFIX = 'elmenuxfa:menu-stale:';
@@ -139,7 +140,7 @@ export async function loadPublicMenuFromBrowser(comercioId: string) {
       `categorias?comercio_id=eq.${resolvedId}&select=${CATEGORIA_SELECT}&order=orden.asc`,
     ).catch(() =>
       restJson<unknown[]>(
-        `categorias?comercio_id=eq.${resolvedId}&select=id,comercio_id,nombre,orden,icono,opciones_menu&order=orden.asc`,
+        `categorias?comercio_id=eq.${resolvedId}&select=id,comercio_id,nombre,orden,icono,imagen_url,opciones_menu&order=orden.asc`,
       ).catch(() => []),
     ),
     restJson<Array<{ disponible?: boolean | null }>>(

@@ -3,7 +3,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:kosmenu_app/services/storage_image_url.dart';
 
-/// Contain photo with blurred cover fill — matches the public menu hybrid.
+/// Network image helper. Use [BoxFit.cover] for list thumbs; contain keeps a
+/// blurred cover fill behind the photo (public-menu hybrid).
 class SoftMediaImage extends StatelessWidget {
   const SoftMediaImage({
     super.key,
@@ -54,26 +55,28 @@ class SoftMediaImage extends StatelessWidget {
     final useContain = fit == BoxFit.contain || fit == BoxFit.scaleDown;
 
     Widget network(String url, {required BoxFit imageFit}) {
-      return Image.network(
-        url,
-        fit: imageFit,
-        width: width,
-        height: height,
-        gaplessPlayback: true,
-        errorBuilder: (context, error, stackTrace) {
-          if (url != raw && raw.isNotEmpty) {
-            return Image.network(
-              raw,
-              fit: imageFit,
-              width: width,
-              height: height,
-              gaplessPlayback: true,
-              errorBuilder: errorBuilder ??
-                  (context, error, stackTrace) => fallback(error, stackTrace),
-            );
-          }
-          return fallback(error, stackTrace);
-        },
+      return SizedBox.expand(
+        child: Image.network(
+          url,
+          fit: imageFit,
+          alignment: Alignment.center,
+          gaplessPlayback: true,
+          errorBuilder: (context, error, stackTrace) {
+            if (url != raw && raw.isNotEmpty) {
+              return Image.network(
+                raw,
+                fit: imageFit,
+                alignment: Alignment.center,
+                width: double.infinity,
+                height: double.infinity,
+                gaplessPlayback: true,
+                errorBuilder: errorBuilder ??
+                    (context, error, stackTrace) => fallback(error, stackTrace),
+              );
+            }
+            return fallback(error, stackTrace);
+          },
+        ),
       );
     }
 

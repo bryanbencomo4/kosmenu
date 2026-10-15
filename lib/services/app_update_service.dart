@@ -37,6 +37,20 @@ class AndroidAppRelease {
 class AppUpdateService {
   const AppUpdateService._();
 
+  /// Label like `v1.0.1+2` from the installed package (pubspec / build).
+  static Future<String> installedVersionLabel() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final version = info.version.trim();
+      if (version.isEmpty) return '';
+      final build = info.buildNumber.trim();
+      if (build.isEmpty) return 'v$version';
+      return 'v$version+$build';
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// Returns a release when the installed Android build must update.
   static Future<AndroidAppRelease?> checkRequiredAndroidUpdate() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
