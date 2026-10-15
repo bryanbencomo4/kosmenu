@@ -5761,6 +5761,8 @@ export default function PublicMenuPage() {
                                 <KioskImage
                                   src={item.imageUrl}
                                   alt={item.name}
+                                  fit="cover"
+                                  pad={false}
                                   className="h-20 w-20 shrink-0 rounded-[22px] bg-[var(--menu-surface-alt)]"
                                 />
                                 <div className="min-w-0 flex-1">
