@@ -2,9 +2,18 @@
 
 import { useLayoutEffect, useRef, useState } from 'react';
 
+import {
+  resolveMenuImageSources,
+  VARIANT_WIDTHS,
+} from '../../../../_lib/optimize-storage-image';
+
 type KioskImageProps = {
   src: string;
-  /** Smaller/cached URL shown blurred while `src` loads. */
+  /** Original Storage URL — enables cold→hot→original fallback without double-loading. */
+  sourceUrl?: string | null;
+  /** Display width hint for picking thumb/card/hero (defaults to card). */
+  displayWidth?: number;
+  /** Optional smaller URL for blur while hero loads (sheet only). */
   previewSrc?: string | null;
   alt?: string;
   className?: string;
@@ -21,11 +30,52 @@ type KioskImageProps = {
   showBlurFill?: boolean;
 };
 
+function queueLazyVariants(imageUrl: string) {
+  if (typeof window === 'undefined') return;
+  const key = `kos-var:${imageUrl}`;
+  try {
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, '1');
+  } catch {
+    // ignore quota / private mode
+  }
+  void fetch('/api/images/variants', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ imageUrl, lazy: true }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+function preferredSrc(
+  src: string,
+  sourceUrl: string | null | undefined,
+  displayWidth: number,
+): { active: string; hot: string | null; original: string | null } {
+  if (!sourceUrl) {
+    return { active: src, hot: null, original: null };
+  }
+  const sources = resolveMenuImageSources(sourceUrl, displayWidth);
+  if (!sources) {
+    return { active: src, hot: null, original: null };
+  }
+  // Cold-first: one URL, browser-cache friendly. Fallback only on error.
+  return {
+    active: sources.coldWebp || sources.hot || src,
+    hot: sources.hot,
+    original: sources.original,
+  };
+}
+
 /**
  * Cover/contain media. Parent should use `overflow-hidden` + border-radius.
+ * Loads a single preferred URL (cold WebP). On error: hot transform → original.
+ * No hot→cold upgrade after paint (that caused flicker / double fetch).
  */
 export function KioskImage({
   src,
+  sourceUrl,
+  displayWidth = VARIANT_WIDTHS.card,
   previewSrc,
   alt = '',
   className = '',
@@ -36,41 +86,70 @@ export function KioskImage({
 }: KioskImageProps) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const blurRef = useRef<HTMLImageElement | null>(null);
+  const cascadeRef = useRef<{ hot: string | null; original: string | null }>({
+    hot: null,
+    original: null,
+  });
   const [sharpReady, setSharpReady] = useState(false);
   const [fillReady, setFillReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
+  const resolved = preferredSrc(src, sourceUrl, displayWidth);
+  const [activeSrc, setActiveSrc] = useState(resolved.active);
+
   const useCover = fit !== 'contain';
   const keepBlurFill = showBlurFill ?? !useCover;
-  const fillSrc = (previewSrc ?? '').trim() || src;
-  const shown = Boolean(src) && !failed && sharpReady;
+  // Only load a blur layer when letterboxing (contain). Cover tiles use one <img> only.
+  const fillSrc = keepBlurFill ? (previewSrc ?? '').trim() || activeSrc : '';
+  const shown = Boolean(activeSrc) && !failed && sharpReady;
 
   useLayoutEffect(() => {
+    const next = preferredSrc(src, sourceUrl, displayWidth);
+    cascadeRef.current = { hot: next.hot, original: next.original };
+    setActiveSrc(next.active);
     setFailed(false);
     setFillReady(false);
     setSharpReady(false);
     const blur = blurRef.current;
     const image = imageRef.current;
-    if (blur?.complete && blur.naturalWidth > 0) setFillReady(true);
-    if (image?.complete && image.naturalWidth > 0) {
+    // If the browser already has the image decoded (bfcache / same URL remount), skip fade-in.
+    if (blur?.complete && blur.naturalWidth > 0 && blur.currentSrc) setFillReady(true);
+    if (image?.complete && image.naturalWidth > 0 && image.currentSrc) {
       setSharpReady(true);
       setFillReady(true);
     }
-  }, [src, fillSrc]);
+  }, [src, sourceUrl, displayWidth]);
+
+  function handleSharpError() {
+    const { hot, original } = cascadeRef.current;
+    if (hot && activeSrc !== hot && activeSrc !== original) {
+      setActiveSrc(hot);
+      setSharpReady(false);
+      if (sourceUrl) queueLazyVariants(sourceUrl);
+      return;
+    }
+    if (original && activeSrc !== original) {
+      setActiveSrc(original);
+      setSharpReady(false);
+      return;
+    }
+    setFailed(true);
+    setSharpReady(true);
+  }
 
   return (
     <div
       className={`relative overflow-hidden ${className}`}
       style={{ backgroundColor: 'var(--menu-surface-alt, #f3f4f6)' }}
     >
-      {!fillReady && !shown && !failed ? (
+      {!shown && !failed ? (
         <div
           className="absolute inset-0 animate-pulse bg-[var(--menu-surface-alt,#e5e7eb)]"
           aria-hidden
         />
       ) : null}
 
-      {failed || !src ? (
+      {failed || !activeSrc ? (
         <div
           className="grid h-full w-full place-items-center text-2xl text-[var(--menu-text-muted)]"
           aria-hidden
@@ -79,44 +158,34 @@ export function KioskImage({
         </div>
       ) : (
         <>
-          {/* Blur fill: loading placeholder for cover; permanent letterbox fill for contain. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={blurRef}
-            src={fillSrc}
-            alt=""
-            aria-hidden
-            loading={priority || fillSrc !== src ? 'eager' : 'lazy'}
-            decoding="async"
-            fetchPriority={priority || fillSrc !== src ? 'high' : 'auto'}
-            onLoad={() => setFillReady(true)}
-            onError={() => {
-              if (fillSrc !== src) return;
-              setFillReady(false);
-            }}
-            className={`pointer-events-none absolute inset-0 h-full w-full object-cover blur-xl transition-opacity duration-200 ${
-              !fillReady
-                ? 'opacity-0'
-                : keepBlurFill
-                  ? shown
-                    ? 'opacity-80'
-                    : 'opacity-90'
-                  : shown
-                    ? 'opacity-0'
-                    : 'opacity-90'
-            }`}
-            style={{ transform: 'scale(1.28)' }}
-          />
+          {keepBlurFill && fillSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              ref={blurRef}
+              src={fillSrc}
+              alt=""
+              aria-hidden
+              loading={priority ? 'eager' : 'lazy'}
+              decoding="async"
+              fetchPriority={priority ? 'high' : 'auto'}
+              onLoad={() => setFillReady(true)}
+              onError={() => setFillReady(false)}
+              className={`pointer-events-none absolute inset-0 h-full w-full object-cover blur-xl transition-opacity duration-200 ${
+                fillReady ? (shown ? 'opacity-80' : 'opacity-90') : 'opacity-0'
+              }`}
+              style={{ transform: 'scale(1.28)' }}
+            />
+          ) : null}
 
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             ref={imageRef}
-            src={src}
+            src={activeSrc}
             alt={alt}
             loading={priority ? 'eager' : 'lazy'}
             decoding="async"
             fetchPriority={priority ? 'high' : 'auto'}
-            className={`relative z-[1] h-full w-full transition-opacity duration-300 ${
+            className={`relative z-[1] h-full w-full transition-opacity duration-150 ${
               useCover ? 'object-cover' : 'object-contain'
             } ${shown ? 'opacity-100' : 'opacity-0'} ${imgClassName}`}
             onLoad={() => {
@@ -124,10 +193,7 @@ export function KioskImage({
               setSharpReady(true);
               setFillReady(true);
             }}
-            onError={() => {
-              setFailed(true);
-              setSharpReady(true);
-            }}
+            onError={handleSharpError}
           />
         </>
       )}

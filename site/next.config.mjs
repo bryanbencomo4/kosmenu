@@ -39,8 +39,9 @@ function buildSecurityHeaders({ allowAppFrame = false } = {}) {
     },
     {
       key: 'Permissions-Policy',
+      // camera=(self) allows <input capture> / native camera handoff for payment proofs.
       value:
-        'accelerometer=(), autoplay=(), camera=(), geolocation=(self), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()',
+        'accelerometer=(), autoplay=(), camera=(self), geolocation=(self), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()',
     },
     {
       key: 'Content-Security-Policy',

@@ -398,6 +398,9 @@ function OrderTrackingPageInner() {
   const trackingToken = (searchParams.get('t') ?? searchParams.get('token') ?? '').trim();
   const shortCode = (searchParams.get('s') ?? '').trim();
   const trackingCredential = trackingToken || shortCode;
+  const wantRepeatFromQuery = (searchParams.get('repeat') ?? '').trim() === '1';
+  const wantRateFromQuery = (searchParams.get('rate') ?? '').trim() === '1';
+  const repeatIntentConsumedRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -965,10 +968,79 @@ function OrderTrackingPageInner() {
     displayStatus !== 'cancelado' &&
     displayStatus !== 'entregado';
   const cancellationMeta = order?.detalles?.cancellation ?? null;
+  const pathSlugMatch = pathname?.match(/\/v\/([^/]+)\/orders\//i);
+  const earlyMenuSlug = (
+    resolvedComercio.slug ??
+    decodeURIComponent(pathSlugMatch?.[1] ?? '')
+  ).trim();
+  const earlyMenuHref = earlyMenuSlug ? `/v/${encodeURIComponent(earlyMenuSlug)}` : null;
+  const scheduleStatus = resolveBusinessScheduleStatus(resolvedComercio.horarios);
+  const businessAcceptingOrders =
+    resolvedComercio.en_linea !== false &&
+    (!scheduleStatus.configured || scheduleStatus.isOpen);
+  const repeatableItems = useMemo(() => {
+    return (order?.detalles?.items ?? [])
+      .map((item): RepeatOrderLine | null => {
+        const productId = (item.product_id ?? '').toString().trim();
+        const quantity = Number(item.cantidad);
+        if (!productId || !Number.isFinite(quantity) || quantity <= 0) return null;
+        return {
+          productId,
+          quantity: Math.min(99, Math.round(quantity)),
+          selection: item.opciones,
+        };
+      })
+      .filter((item): item is RepeatOrderLine => item !== null);
+  }, [order?.detalles?.items]);
+  const canRepeatOrder = Boolean(
+    earlyMenuHref && earlyMenuSlug && repeatableItems.length > 0 && businessAcceptingOrders && order,
+  );
+  const repeatClosedReason =
+    earlyMenuHref && earlyMenuSlug && repeatableItems.length > 0 && !businessAcceptingOrders
+      ? scheduleStatus.nextOpenLabel
+        ? `El negocio está cerrado. Abrimos ${scheduleStatus.nextOpenLabel}`
+        : 'El negocio está cerrado ahora'
+      : null;
+
+  function handleRepeatOrder() {
+    if (!canRepeatOrder || !earlyMenuHref || !earlyMenuSlug || repeatableItems.length === 0) return;
+    const fulfillment: 'dine_in' | 'takeaway' | 'delivery' = isDelivery
+      ? 'delivery'
+      : /comer\s*aqui|dine/i.test((order?.detalles?.order_notes ?? '').toString())
+        ? 'dine_in'
+        : 'takeaway';
+    writeRepeatOrder(earlyMenuSlug, {
+      items: repeatableItems,
+      fulfillment,
+    });
+    router.push(earlyMenuHref);
+  }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const fromHash = window.location.hash === '#repetir';
+    if ((!wantRepeatFromQuery && !fromHash) || repeatIntentConsumedRef.current || loading || !order) {
+      return;
+    }
+    if (!canRepeatOrder) return;
+    repeatIntentConsumedRef.current = true;
+    handleRepeatOrder();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional auto-repeat once when ready
+  }, [wantRepeatFromQuery, canRepeatOrder, loading, order]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || loading || !order) return;
+    const fromHash = window.location.hash === '#calificar';
+    if (!wantRateFromQuery && !fromHash) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById('calificar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [wantRateFromQuery, loading, order]);
 
   if (loading) {
     return (
-      <OrderReceiptFrame background={trackingBackground} bodyFont={bodyFontFamily}>
+      <OrderReceiptFrame background="#F8FAFC" bodyFont={bodyFontFamily}>
         <div className="text-center">
           <div className="mx-auto h-9 w-9 animate-spin rounded-full border-2 border-slate-300" style={{ borderTopColor: trackingPrimary }} />
           <p className="mt-3 text-sm text-slate-500">Cargando tu pedido...</p>
@@ -979,7 +1051,7 @@ function OrderTrackingPageInner() {
 
   if (requiresCustomerVerification) {
     return (
-      <OrderReceiptFrame background={trackingBackground} bodyFont={bodyFontFamily}>
+      <OrderReceiptFrame background="#F8FAFC" bodyFont={bodyFontFamily}>
         <form
           onSubmit={(event) => void verifyCustomerEmail(event)}
           className="w-full max-w-md rounded-[22px] bg-white p-7 shadow-[0_8px_30px_rgba(15,23,42,0.06)]"
@@ -1007,6 +1079,21 @@ function OrderTrackingPageInner() {
           >
             {verificationLoading ? 'Verificando...' : 'Ver mi pedido'}
           </button>
+          {earlyMenuHref ? (
+            <Link
+              href={earlyMenuHref}
+              className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700"
+            >
+              Volver al menú
+            </Link>
+          ) : (
+            <Link
+              href="/"
+              className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700"
+            >
+              Ir al inicio
+            </Link>
+          )}
         </form>
       </OrderReceiptFrame>
     );
@@ -1014,8 +1101,26 @@ function OrderTrackingPageInner() {
 
   if (error) {
     return (
-      <OrderReceiptFrame background={trackingBackground} bodyFont={bodyFontFamily}>
-        <p className="max-w-md text-center text-sm text-slate-600">{error}</p>
+      <OrderReceiptFrame background="#F8FAFC" bodyFont={bodyFontFamily}>
+        <section className="w-full max-w-md rounded-[22px] bg-white p-7 text-center shadow-[0_8px_30px_rgba(15,23,42,0.06)]">
+          <p className="text-sm leading-6 text-slate-600">{error}</p>
+          {earlyMenuHref ? (
+            <Link
+              href={earlyMenuHref}
+              className="mt-5 inline-flex rounded-full px-5 py-3 text-sm font-bold text-white"
+              style={{ backgroundColor: trackingPrimary }}
+            >
+              Volver al menú
+            </Link>
+          ) : (
+            <Link
+              href="/"
+              className="mt-5 inline-flex rounded-full bg-slate-900 px-5 py-3 text-sm font-bold text-white"
+            >
+              Ir al inicio
+            </Link>
+          )}
+        </section>
       </OrderReceiptFrame>
     );
   }
@@ -1061,47 +1166,12 @@ function OrderTrackingPageInner() {
       : cancellationMeta?.reason === 'cancelado_por_cliente'
         ? 'Cancelaste este pedido.'
         : '';
-  const pathSlugMatch = pathname?.match(/\/v\/([^/]+)\/orders\//i);
-  const menuSlug = (
-    resolvedComercio.slug ??
-    decodeURIComponent(pathSlugMatch?.[1] ?? '')
-  ).trim();
-  const menuHref = menuSlug ? `/v/${encodeURIComponent(menuSlug)}` : null;
-  const scheduleStatus = resolveBusinessScheduleStatus(resolvedComercio.horarios);
-  const businessAcceptingOrders =
-    resolvedComercio.en_linea !== false &&
-    (!scheduleStatus.configured || scheduleStatus.isOpen);
-  const repeatableItems = (order?.detalles?.items ?? [])
-    .map((item): RepeatOrderLine | null => {
-      const productId = (item.product_id ?? '').toString().trim();
-      const quantity = Number(item.cantidad);
-      if (!productId || !Number.isFinite(quantity) || quantity <= 0) return null;
-      return {
-        productId,
-        quantity: Math.min(99, Math.round(quantity)),
-        selection: item.opciones,
-      };
-    })
-    .filter((item): item is RepeatOrderLine => item !== null);
-  const canRepeatOrder = Boolean(menuHref && menuIdentity && repeatableItems.length > 0 && businessAcceptingOrders);
-  const repeatClosedReason =
-    menuHref && menuIdentity && repeatableItems.length > 0 && !businessAcceptingOrders
-      ? scheduleStatus.nextOpenLabel
-        ? `El negocio está cerrado. Abrimos ${scheduleStatus.nextOpenLabel}`
-        : 'El negocio está cerrado ahora'
-      : null;
+  const menuSlug = earlyMenuSlug;
+  const menuHref = earlyMenuHref;
   const formatStamp = (value: string) => {
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? new Date(parsed).toLocaleString('es-CO') : '';
   };
-  function handleRepeatOrder() {
-    if (!canRepeatOrder || !menuHref || !menuSlug || repeatableItems.length === 0) return;
-    writeRepeatOrder(menuSlug, {
-      items: repeatableItems,
-      fulfillment: isDelivery ? 'delivery' : 'takeaway',
-    });
-    router.push(menuHref);
-  }
 
   return (
     <OrderReceipt
@@ -1186,8 +1256,10 @@ function OrderTrackingPageInner() {
       onCancelOrder={(reason) => void cancelOrder(reason)}
       showPendingCancelHint={!manualManagement && displayStatus === 'pendiente'}
       canCustomerRateService={
-        !manualManagement && (displayStatus === 'entregado' || displayStatus === 'cancelado') &&
-        order?.detalles?.customer_service_rating == null
+        manualManagement ||
+        displayStatus === 'entregado' ||
+        displayStatus === 'cancelado' ||
+        deliveryDelegateStatus === 'completed'
       }
       customerServiceRating={order?.detalles?.customer_service_rating ?? null}
       serviceRatingLoading={serviceRatingLoading}

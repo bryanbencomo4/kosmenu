@@ -84,6 +84,20 @@ describe('GET /o/[code]', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
 
+  it('forwards repeat and rate intents from email short links', async () => {
+    const repeatRequest = new NextRequest('https://elmenuxfa.com/o/AbCdEf1234?repeat=1');
+    const repeatResponse = await GET(repeatRequest, { params: Promise.resolve({ code: 'AbCdEf1234' }) });
+    expect(repeatResponse.headers.get('location')).toBe(
+      'https://elmenuxfa.com/orders/EMXFA-000027?s=AbCdEf1234&repeat=1',
+    );
+
+    const rateRequest = new NextRequest('https://elmenuxfa.com/o/AbCdEf1234?rate=1');
+    const rateResponse = await GET(rateRequest, { params: Promise.resolve({ code: 'AbCdEf1234' }) });
+    expect(rateResponse.headers.get('location')).toBe(
+      'https://elmenuxfa.com/orders/EMXFA-000027?s=AbCdEf1234&rate=1',
+    );
+  });
+
   it('sends the accepted courier to the courier screen', async () => {
     const response = await open('AbCdEf1234', `elmenuxfa_courier=${TOKEN}`);
     expect(response.status).toBe(302);

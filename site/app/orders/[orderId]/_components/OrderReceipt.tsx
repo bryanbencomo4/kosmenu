@@ -3,7 +3,7 @@
 import { Manrope } from 'next/font/google';
 import Link from 'next/link';
 import { ArrowLeft, Check, CheckCircle2, Clock3, MapPin, Package, RotateCcw, Star, Truck } from 'lucide-react';
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 
 const headingFont = Manrope({
   subsets: ['latin'],
@@ -202,6 +202,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [selectedServiceRating, setSelectedServiceRating] = useState(0);
+  const [editingServiceRating, setEditingServiceRating] = useState(false);
 
   const manualManagement = props.managementMode === 'whatsapp_manual';
   const copy = manualManagement ? {
@@ -218,6 +219,27 @@ export function OrderReceipt(props: OrderReceiptProps) {
   );
   const stepCount = Math.max(props.timeline.length - 1, 1);
   const progressRatio = isCancelled ? 0 : Math.min(1, Math.max(0, props.currentStep) / stepCount);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.hash !== '#calificar') return;
+    const timer = window.setTimeout(() => {
+      document.getElementById('calificar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [props.canCustomerRateService, props.customerServiceRating]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.hash !== '#repetir') return;
+    if (!props.canRepeatOrder) return;
+    const timer = window.setTimeout(() => {
+      props.onRepeatOrder();
+    }, 160);
+    return () => window.clearTimeout(timer);
+    // Intentionally run once when arriving with #repetir and repeat is available.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.canRepeatOrder]);
 
   return (
     <main
@@ -378,37 +400,58 @@ export function OrderReceipt(props: OrderReceiptProps) {
           ) : null}
         </section>
 
-        {!manualManagement && (props.canCustomerRateService || props.customerServiceRating !== null) ? (
-          <section className="mt-4 rounded-[20px] border border-amber-200 bg-amber-50 p-4 sm:p-5">
+        {props.canCustomerRateService || props.customerServiceRating !== null ? (
+          <section
+            id="calificar"
+            className="mt-4 scroll-mt-24 rounded-[20px] border border-amber-200 bg-amber-50 p-4 sm:p-5"
+          >
             <div className="flex items-start gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-amber-600 shadow-sm">
                 <Star className="h-5 w-5 fill-amber-400" />
               </span>
               <div className="min-w-0 flex-1">
                 <h2 className={`${headingFont.className} text-base font-extrabold text-slate-900`}>
-                  {props.customerServiceRating !== null ? 'Gracias por calificar' : '¿Cómo fue el servicio?'}
+                  {props.customerServiceRating !== null && !editingServiceRating
+                    ? 'Gracias por calificar'
+                    : '¿Cómo fue el servicio?'}
                 </h2>
                 <p className="mt-1 text-sm leading-5 text-slate-600">
-                  {props.customerServiceRating !== null
-                    ? 'Tu opinión ayuda a mejorar la experiencia.'
+                  {props.customerServiceRating !== null && !editingServiceRating
+                    ? 'Tu opinión ayuda a mejorar la experiencia. Puedes cambiarla si lo deseas.'
                     : isCancelled
                       ? 'Califica la atención recibida en este pedido.'
-                      : 'Califica tu experiencia con el comercio.'}
+                      : manualManagement
+                        ? 'Este pedido se gestiona por WhatsApp. Califica tu experiencia con el restaurante.'
+                        : 'Califica tu experiencia con el comercio.'}
                 </p>
               </div>
             </div>
-            {props.customerServiceRating !== null ? (
-              <div className="mt-3 flex items-center gap-1" aria-label={`Tu calificación: ${props.customerServiceRating} de 5 estrellas`}>
-                {Array.from({ length: 5 }, (_, index) => (
-                  <Star
-                    key={index}
-                    className={`h-6 w-6 ${index < props.customerServiceRating! ? 'fill-amber-400 text-amber-500' : 'text-amber-200'}`}
-                  />
-                ))}
-                <span className="ml-2 text-sm font-bold text-slate-700">
-                  {props.customerServiceRating} de 5
-                </span>
-              </div>
+            {props.customerServiceRating !== null && !editingServiceRating ? (
+              <>
+                <div className="mt-3 flex items-center gap-1" aria-label={`Tu calificación: ${props.customerServiceRating} de 5 estrellas`}>
+                  {Array.from({ length: 5 }, (_, index) => (
+                    <Star
+                      key={index}
+                      className={`h-6 w-6 ${index < props.customerServiceRating! ? 'fill-amber-400 text-amber-500' : 'text-amber-200'}`}
+                    />
+                  ))}
+                  <span className="ml-2 text-sm font-bold text-slate-700">
+                    {props.customerServiceRating} de 5
+                  </span>
+                </div>
+                {props.canCustomerRateService ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedServiceRating(props.customerServiceRating ?? 0);
+                      setEditingServiceRating(true);
+                    }}
+                    className="mt-3 text-sm font-bold text-amber-700 underline-offset-2 hover:underline"
+                  >
+                    Cambiar calificación
+                  </button>
+                ) : null}
+              </>
             ) : (
               <>
                 <div className="mt-3 flex items-center gap-1" role="group" aria-label="Selecciona de 1 a 5 estrellas">
@@ -433,14 +476,36 @@ export function OrderReceipt(props: OrderReceiptProps) {
                     {selectedServiceRating ? `${selectedServiceRating}/5` : 'Elige una calificación'}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  disabled={selectedServiceRating === 0 || props.serviceRatingLoading}
-                  onClick={() => props.onRateService(selectedServiceRating)}
-                  className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {props.serviceRatingLoading ? 'Guardando…' : 'Enviar calificación'}
-                </button>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    disabled={selectedServiceRating === 0 || props.serviceRatingLoading}
+                    onClick={() => {
+                      props.onRateService(selectedServiceRating);
+                      setEditingServiceRating(false);
+                    }}
+                    className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {props.serviceRatingLoading
+                      ? 'Guardando…'
+                      : props.customerServiceRating !== null
+                        ? 'Actualizar calificación'
+                        : 'Enviar calificación'}
+                  </button>
+                  {editingServiceRating ? (
+                    <button
+                      type="button"
+                      disabled={props.serviceRatingLoading}
+                      onClick={() => {
+                        setEditingServiceRating(false);
+                        setSelectedServiceRating(0);
+                      }}
+                      className="inline-flex min-h-11 items-center justify-center rounded-xl border border-amber-200 bg-white px-4 text-sm font-bold text-slate-700"
+                    >
+                      Cancelar
+                    </button>
+                  ) : null}
+                </div>
               </>
             )}
             {props.serviceRatingMessage ? (

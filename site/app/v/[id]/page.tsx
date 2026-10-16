@@ -98,6 +98,18 @@ import {
   resolveCheckoutAttempt,
   type CheckoutAttempt,
 } from './_lib/checkout-idempotency';
+import { prepareComprobanteFile } from '../../_lib/prepare-comprobante-file';
+import {
+  readCachedCheckoutCustomer,
+  writeCachedCheckoutCustomer,
+} from '../../_lib/checkout-customer-cache';
+import {
+  clearCachedCheckoutCart,
+  readCachedCheckoutCart,
+  writeCachedCheckoutCart,
+  type CachedCheckoutCart,
+} from '../../_lib/checkout-cart-cache';
+import { AbandonedCartResumeDialog } from './_components/AbandonedCartResumeDialog';
 
 type CategoriaRow = {
   id: string;
@@ -347,7 +359,6 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const publicBaseUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(/\/$/, '');
 const appBaseUrl = (process.env.NEXT_PUBLIC_APP_SITE_URL ?? 'https://app.elmenuxfa.com').replace(/\/$/, '');
-const checkoutDraftStorageKey = 'elmenuxfa:checkout-customer-v1';
 const kioskVoucherStorageKeyPrefix = 'elmenuxfa:order-success:';
 const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
 const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';
@@ -1662,6 +1673,8 @@ export default function PublicMenuPage() {
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
   const [digitalPaymentReference, setDigitalPaymentReference] = useState('');
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
+  const [paymentProofBusy, setPaymentProofBusy] = useState(false);
+  const [paymentProofError, setPaymentProofError] = useState('');
   const [deliveryMode, setDeliveryMode] = useState<OrderDeliveryMode>('pickup');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryReference, setDeliveryReference] = useState('');
@@ -1693,6 +1706,12 @@ export default function PublicMenuPage() {
   >(new Map());
   const trackedImpressionsRef = useRef<Set<string>>(new Set());
   const repeatOrderConsumedRef = useRef(false);
+  const cartHydratedRef = useRef(false);
+  const leaveGuardArmedRef = useRef(false);
+  const allowLeaveRef = useRef(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const [cartCacheReady, setCartCacheReady] = useState(false);
+  const [abandonedCartPrompt, setAbandonedCartPrompt] = useState<CachedCheckoutCart | null>(null);
   const menuReadyRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -2077,31 +2096,68 @@ export default function PublicMenuPage() {
   }, [categoryByProductId, productById]);
 
   useEffect(() => {
-    if (repeatOrderConsumedRef.current || productById.size === 0) return;
-    const payload = consumeRepeatOrder(commerceIdentifier);
-    repeatOrderConsumedRef.current = true;
-    if (!payload) return;
+    if (cartHydratedRef.current || productById.size === 0) return;
+    cartHydratedRef.current = true;
 
-    const nextCart: Record<string, number> = {};
-    for (const item of payload.items) {
-      if (!productById.has(item.productId)) continue;
-      const key = buildCartLineKey(item.productId, item.selection ?? {});
-      nextCart[key] = (nextCart[key] ?? 0) + item.quantity;
-    }
-    if (Object.keys(nextCart).length === 0) return;
+    const applyCartItems = (
+      items: Array<{ productId: string; quantity: number; selection?: CartLineSelection }>,
+      fulfillment?: KioskFulfillment | null,
+    ) => {
+      const nextCart: Record<string, number> = {};
+      for (const item of items) {
+        if (!productById.has(item.productId)) continue;
+        const key = buildCartLineKey(item.productId, item.selection ?? {});
+        nextCart[key] = (nextCart[key] ?? 0) + item.quantity;
+      }
+      if (Object.keys(nextCart).length === 0) return false;
+      setCart(nextCart);
+      if (fulfillment) {
+        setKioskFulfillment(fulfillment);
+        setDeliveryMode(fulfillment === 'delivery' ? 'delivery' : 'pickup');
+        if (typeof window !== 'undefined' && commerceIdentifier) {
+          window.sessionStorage.setItem(
+            `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+            fulfillment,
+          );
+        }
+      }
+      return true;
+    };
 
-    setCart(nextCart);
-    if (payload.fulfillment) {
-      setKioskFulfillment(payload.fulfillment);
-      setDeliveryMode(payload.fulfillment === 'delivery' ? 'delivery' : 'pickup');
-      if (typeof window !== 'undefined' && commerceIdentifier) {
-        window.sessionStorage.setItem(
-          `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
-          payload.fulfillment,
-        );
+    if (!repeatOrderConsumedRef.current) {
+      repeatOrderConsumedRef.current = true;
+      const payload = consumeRepeatOrder(commerceIdentifier);
+      if (payload && applyCartItems(payload.items, payload.fulfillment ?? null)) {
+        setCartCacheReady(true);
+        return;
       }
     }
-  }, [commerceIdentifier, productById]);
+
+    const cachedCart = readCachedCheckoutCart(commerceIdentifier);
+    if (cachedCart) {
+      const hasValidItems = cachedCart.items.some((item) => {
+        if (!productById.has(item.productId)) return false;
+        const product = productById.get(item.productId);
+        if (!product) return false;
+        const selection = item.selection ?? {};
+        if (menuLineInvalid(product, selection, productById)) return false;
+        const unitPrice = menuLinePrice(
+          product,
+          categoryByProductId.get(item.productId) ?? null,
+          selection,
+          productById,
+          categoryByProductId,
+        );
+        return unitPrice > 0;
+      });
+      if (hasValidItems) {
+        setAbandonedCartPrompt(cachedCart);
+      } else {
+        clearCachedCheckoutCart(commerceIdentifier);
+      }
+    }
+    setCartCacheReady(true);
+  }, [categoryByProductId, commerceIdentifier, productById]);
 
   const cartItems = useMemo(() => {
     return Object.entries(cart)
@@ -2129,6 +2185,113 @@ export default function PublicMenuPage() {
     () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems],
   );
+
+  useEffect(() => {
+    if (!commerceIdentifier || !cartCacheReady || abandonedCartPrompt) return;
+    if (kioskVoucher) {
+      clearCachedCheckoutCart(commerceIdentifier);
+      return;
+    }
+    if (cartItems.length === 0) {
+      clearCachedCheckoutCart(commerceIdentifier);
+      return;
+    }
+    writeCachedCheckoutCart(commerceIdentifier, {
+      items: cartItems.map((item) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+        selection: item.selection,
+      })),
+      fulfillment: kioskFulfillment,
+    });
+  }, [abandonedCartPrompt, cartCacheReady, cartItems, commerceIdentifier, kioskFulfillment, kioskVoucher]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hasActiveCart = cartCount > 0 && !kioskVoucher;
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasActiveCart || allowLeaveRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+
+    if (hasActiveCart && !leaveGuardArmedRef.current) {
+      window.history.pushState({ elmenuxfaCartGuard: true }, '');
+      leaveGuardArmedRef.current = true;
+    }
+    if (!hasActiveCart) {
+      leaveGuardArmedRef.current = false;
+    }
+
+    const onPopState = () => {
+      if (allowLeaveRef.current) {
+        allowLeaveRef.current = false;
+        leaveGuardArmedRef.current = false;
+        return;
+      }
+
+      // Prefer closing nested UI layers before asking to abandon the purchase.
+      if (isMapPickerOpen) {
+        window.history.pushState({ elmenuxfaCartGuard: true }, '');
+        leaveGuardArmedRef.current = true;
+        setIsMapPickerOpen(false);
+        return;
+      }
+      if (productOptionsSheet.open) {
+        window.history.pushState({ elmenuxfaCartGuard: true }, '');
+        leaveGuardArmedRef.current = true;
+        setProductOptionsSheet({ open: false, productId: null });
+        return;
+      }
+      if (isPreCheckoutUpsellOpen) {
+        window.history.pushState({ elmenuxfaCartGuard: true }, '');
+        leaveGuardArmedRef.current = true;
+        setIsPreCheckoutUpsellOpen(false);
+        return;
+      }
+      if (isConfirmOpen) {
+        window.history.pushState({ elmenuxfaCartGuard: true }, '');
+        leaveGuardArmedRef.current = true;
+        if (checkoutStep > 0) {
+          if (checkoutStep === 3 && deliveryMode !== 'delivery') {
+            setCheckoutStep(1);
+          } else {
+            setCheckoutStep((prev) => Math.max(0, prev - 1));
+          }
+        } else {
+          setIsConfirmOpen(false);
+        }
+        return;
+      }
+
+      if (!hasActiveCart) {
+        leaveGuardArmedRef.current = false;
+        return;
+      }
+
+      window.history.pushState({ elmenuxfaCartGuard: true }, '');
+      leaveGuardArmedRef.current = true;
+      setLeaveConfirmOpen(true);
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('popstate', onPopState);
+    };
+  }, [
+    cartCount,
+    checkoutStep,
+    deliveryMode,
+    isConfirmOpen,
+    isMapPickerOpen,
+    isPreCheckoutUpsellOpen,
+    kioskVoucher,
+    productOptionsSheet.open,
+  ]);
 
   function getProductCartQuantity(productId: string) {
     return Object.entries(cart).reduce((sum, [cartKey, quantity]) => {
@@ -2755,6 +2918,108 @@ export default function PublicMenuPage() {
     selectedCurrencyCode,
     selectedExchangeRate,
   );
+
+  const abandonedCartPreview = useMemo(() => {
+    if (!abandonedCartPrompt) {
+      return {
+        items: [] as Array<{
+          id: string;
+          name: string;
+          quantity: number;
+          imageUrl: string | null;
+          lineTotalLabel: string;
+        }>,
+        itemCount: 0,
+        totalLabel: formatAmountByCurrency(0, selectedCurrencyCode),
+        fulfillmentLabel: null as string | null,
+        savedLabel: null as string | null,
+      };
+    }
+
+    let totalBase = 0;
+    let itemCount = 0;
+    const items: Array<{
+      id: string;
+      name: string;
+      quantity: number;
+      imageUrl: string | null;
+      lineTotalLabel: string;
+    }> = [];
+
+    for (const [index, line] of abandonedCartPrompt.items.entries()) {
+      const product = productById.get(line.productId);
+      if (!product) continue;
+      const selection = line.selection ?? {};
+      if (menuLineInvalid(product, selection, productById)) continue;
+      const category = categoryByProductId.get(line.productId) ?? null;
+      const unitPrice = menuLinePrice(product, category, selection, productById, categoryByProductId);
+      if (unitPrice <= 0) continue;
+      const lineTotal = unitPrice * line.quantity;
+      totalBase += lineTotal;
+      itemCount += line.quantity;
+      const lineTotalConverted = convertFromBaseCurrency(
+        lineTotal,
+        businessBaseCurrency,
+        selectedCurrencyCode,
+        selectedExchangeRate,
+      );
+      items.push({
+        id: `${line.productId}-${index}`,
+        name: menuLineLabel(product, selection, category, productById),
+        quantity: line.quantity,
+        imageUrl: displayProductImage(product.imagen_url) || null,
+        lineTotalLabel: formatAmountByCurrency(lineTotalConverted, selectedCurrencyCode),
+      });
+    }
+
+    const totalConverted = convertFromBaseCurrency(
+      totalBase,
+      businessBaseCurrency,
+      selectedCurrencyCode,
+      selectedExchangeRate,
+    );
+
+    let savedLabel: string | null = null;
+    if (abandonedCartPrompt.savedAt) {
+      const savedAtMs = Date.parse(abandonedCartPrompt.savedAt);
+      if (Number.isFinite(savedAtMs)) {
+        const minutes = Math.max(0, Math.round((Date.now() - savedAtMs) / 60000));
+        if (minutes < 1) savedLabel = 'Guardado hace un momento';
+        else if (minutes < 60) savedLabel = `Guardado hace ${minutes} min`;
+        else if (minutes < 60 * 24) {
+          const hours = Math.round(minutes / 60);
+          savedLabel = hours === 1 ? 'Guardado hace 1 h' : `Guardado hace ${hours} h`;
+        } else {
+          const days = Math.round(minutes / (60 * 24));
+          savedLabel = days === 1 ? 'Guardado ayer' : `Guardado hace ${days} días`;
+        }
+      }
+    }
+
+    return {
+      items,
+      itemCount,
+      totalLabel: formatAmountByCurrency(totalConverted, selectedCurrencyCode),
+      fulfillmentLabel: abandonedCartPrompt.fulfillment
+        ? FULFILLMENT_LABEL[abandonedCartPrompt.fulfillment]
+        : null,
+      savedLabel,
+    };
+  }, [
+    abandonedCartPrompt,
+    businessBaseCurrency,
+    categoryByProductId,
+    productById,
+    selectedCurrencyCode,
+    selectedExchangeRate,
+  ]);
+
+  useEffect(() => {
+    if (!abandonedCartPrompt || abandonedCartPreview.itemCount > 0) return;
+    clearCachedCheckoutCart(commerceIdentifier);
+    setAbandonedCartPrompt(null);
+  }, [abandonedCartPreview.itemCount, abandonedCartPrompt, commerceIdentifier]);
+
   const summaryCategoryCount = filteredCategorias.length;
   const summaryProductCount = categoriasConProductos.reduce((sum, categoria) => sum + categoria.productos.length, 0);
   const statsMotionEnabled = isExperienceReady || statsCardsVisible;
@@ -3065,6 +3330,7 @@ export default function PublicMenuPage() {
           name: menuLineLabel(product, selection, category, productById),
           description: optionSummary || (selection.combinacion ? '' : (product.descripcion ?? '').trim()),
           imageUrl: safeImageSrc(product.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.thumb),
+          imageSourceUrl: (product.imagen_url ?? '').trim() || null,
           quantity,
           canIncrease: baseUnitPrice > 0,
           unitPrice,
@@ -3100,18 +3366,28 @@ export default function PublicMenuPage() {
     : 'Cerrado ahora';
   const kioskCategories = useMemo(
     () =>
-      categoriasConProductos.map((categoria) => ({
-        id: categoria.id,
-        name: formatCategoryDisplayName(categoria.nombre),
-        glyph: resolveCategoryVisual(categoria).glyph,
-        coverUrl: resolveCategoryCover(
-          categoria.imagen_url,
-          categoria.productos,
-          comercioLogoUrl,
-          MENU_IMAGE_WIDTH.category,
-        ),
-        productCount: categoria.productos.length,
-      })),
+      categoriasConProductos.map((categoria) => {
+        const customCover = (categoria.imagen_url ?? '').trim();
+        const firstProductCover =
+          categoria.productos.find((product) => {
+            const url = (product.imagen_url ?? '').trim();
+            return Boolean(url) && url !== (comercioLogoUrl ?? '').trim();
+          })?.imagen_url ?? null;
+        const coverSource = customCover || firstProductCover;
+        return {
+          id: categoria.id,
+          name: formatCategoryDisplayName(categoria.nombre),
+          glyph: resolveCategoryVisual(categoria).glyph,
+          coverUrl: resolveCategoryCover(
+            categoria.imagen_url,
+            categoria.productos,
+            comercioLogoUrl,
+            MENU_IMAGE_WIDTH.category,
+          ),
+          coverSourceUrl: coverSource,
+          productCount: categoria.productos.length,
+        };
+      }),
     [categoriasConProductos, comercioLogoUrl],
   );
   const kioskProductsByCategory = useMemo(() => {
@@ -3121,6 +3397,7 @@ export default function PublicMenuPage() {
       description: string;
       priceLabel: string;
       imageUrl: string | null;
+      imageSourceUrl: string | null;
       available: boolean;
       optionsSummary: string | null;
     }>> = {};
@@ -3131,6 +3408,7 @@ export default function PublicMenuPage() {
         description: (producto.descripcion ?? '').trim(),
         priceLabel: formatProductPriceLabel(producto, formatUpsellPrice),
         imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.tile),
+        imageSourceUrl: (producto.imagen_url ?? '').trim() || null,
         available: producto.disponible !== false,
         optionsSummary: getProductOptionsSummary(producto),
       }));
@@ -3388,33 +3666,18 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const cached = readCachedCheckoutCustomer();
+    if (!cached) return;
 
-    try {
-      const raw = window.localStorage.getItem(checkoutDraftStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        clientName?: string;
-        clientWhatsapp?: string;
-        clientEmail?: string;
-        selectedCurrency?: string;
-      };
+    if (cached.clientName.length >= 3) setClientName(cached.clientName);
+    if (cached.clientEmail) setClientEmail(cached.clientEmail);
 
-      const savedName = (parsed.clientName ?? '').trim();
-      const savedEmail = (parsed.clientEmail ?? '').trim();
-      const savedWhatsapp = (parsed.clientWhatsapp ?? '').trim();
-
-      if (savedName && /\s/.test(savedName)) setClientName(savedName);
-      if (savedEmail) setClientEmail(savedEmail);
-
-      if (savedWhatsapp) {
-        const parsedPhone = parsePhoneNumber(savedWhatsapp);
-        if (parsedPhone?.country) {
-          setClientWhatsappCountry(parsedPhone.country as Country);
-        }
-        setClientWhatsapp(savedWhatsapp);
+    if (cached.clientWhatsapp) {
+      const parsedPhone = parsePhoneNumber(cached.clientWhatsapp);
+      if (parsedPhone?.country) {
+        setClientWhatsappCountry(parsedPhone.country as Country);
       }
-    } catch {
-      // Ignore malformed stored checkout draft.
+      setClientWhatsapp(cached.clientWhatsapp);
     }
   }, []);
 
@@ -3422,8 +3685,32 @@ export default function PublicMenuPage() {
     if (!isDigitalPayment) {
       setDigitalPaymentReference('');
       setPaymentProofFile(null);
+      setPaymentProofError('');
+      setPaymentProofBusy(false);
     }
   }, [isDigitalPayment]);
+
+  async function handlePaymentProofSelected(file: File | null) {
+    setPaymentProofError('');
+    if (!file) {
+      setPaymentProofFile(null);
+      return;
+    }
+    setPaymentProofBusy(true);
+    try {
+      const prepared = await prepareComprobanteFile(file);
+      setPaymentProofFile(prepared);
+    } catch (error) {
+      setPaymentProofFile(null);
+      setPaymentProofError(
+        error instanceof Error
+          ? error.message
+          : 'Ese comprobante no se pudo cargar. Prueba otra foto en JPEG o PNG.',
+      );
+    } finally {
+      setPaymentProofBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (paymentMethodsByCurrency.length === 0 && kioskCurrencyOptions.length === 0) {
@@ -3456,7 +3743,12 @@ export default function PublicMenuPage() {
   }
 
   useLockBodyScroll(Boolean(
-    isInfoOpen || expandedProductImage || isMapPickerOpen || isQuickActionsOpen,
+    isInfoOpen ||
+      expandedProductImage ||
+      isMapPickerOpen ||
+      isQuickActionsOpen ||
+      Boolean(abandonedCartPrompt) ||
+      leaveConfirmOpen,
   ));
 
   useEffect(() => {
@@ -4150,7 +4442,9 @@ export default function PublicMenuPage() {
         throw new Error(
           code === 'File too large.'
             ? 'El comprobante supera el tamano maximo (5 MB).'
-            : 'No se pudo subir el comprobante de pago.',
+            : code === 'MIME type not allowed.'
+              ? 'Ese comprobante no se pudo cargar. Usa una foto JPEG o PNG.'
+              : 'Ese comprobante no se pudo cargar. Intentalo de nuevo.',
         );
       }
       // Opaque storage ref (storage://comprobantes/...). Not a permanent public URL.
@@ -4532,19 +4826,12 @@ export default function PublicMenuPage() {
         } catch {
           // The submitted voucher is kept in memory even if browser storage is blocked.
         }
-        try {
-          window.localStorage.setItem(
-            checkoutDraftStorageKey,
-            JSON.stringify({
-              clientName: normalizedClientName,
-              clientWhatsapp: normalizedClientWhatsapp,
-              clientEmail: normalizedClientEmail,
-              selectedCurrency: selectedCurrencyCode,
-            }),
-          );
-        } catch {
-          // Draft recovery is optional after an order has been submitted.
-        }
+        writeCachedCheckoutCustomer({
+          clientName: normalizedClientName,
+          clientWhatsapp: normalizedClientWhatsapp,
+          clientEmail: normalizedClientEmail,
+          selectedCurrency: selectedCurrencyCode,
+        });
       }
 
       const voucherItems = cartItems.map((item) => ({
@@ -4580,6 +4867,7 @@ export default function PublicMenuPage() {
         }
       }
       setCart({});
+      clearCachedCheckoutCart(commerceIdentifier);
       const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
       void trackMenuFunnelEvent(comercioKey, 'order_completed', {}, persisted.orderId);
       setClientName('');
@@ -4587,6 +4875,8 @@ export default function PublicMenuPage() {
       setClientEmail('');
       setDigitalPaymentReference('');
       setPaymentProofFile(null);
+      setPaymentProofError('');
+      setPaymentProofBusy(false);
       setDeliveryAddress('');
       setDeliveryReference('');
       setDeliveryInstructions('');
@@ -4611,6 +4901,86 @@ export default function PublicMenuPage() {
     }
   }
 
+  function applyRestoredCart(
+    items: Array<{ productId: string; quantity: number; selection?: CartLineSelection }>,
+    fulfillment?: KioskFulfillment | null,
+  ) {
+    const nextCart: Record<string, number> = {};
+    for (const item of items) {
+      if (!productById.has(item.productId)) continue;
+      const product = productById.get(item.productId);
+      if (!product) continue;
+      const selection = item.selection ?? {};
+      if (menuLineInvalid(product, selection, productById)) continue;
+      const unitPrice = menuLinePrice(
+        product,
+        categoryByProductId.get(item.productId) ?? null,
+        selection,
+        productById,
+        categoryByProductId,
+      );
+      if (unitPrice <= 0) continue;
+      const key = buildCartLineKey(item.productId, selection);
+      nextCart[key] = (nextCart[key] ?? 0) + item.quantity;
+    }
+    if (Object.keys(nextCart).length === 0) return false;
+    setCart(nextCart);
+    if (fulfillment) {
+      setKioskFulfillment(fulfillment);
+      setDeliveryMode(fulfillment === 'delivery' ? 'delivery' : 'pickup');
+      if (typeof window !== 'undefined' && commerceIdentifier) {
+        window.sessionStorage.setItem(
+          `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+          fulfillment,
+        );
+      }
+    }
+    return true;
+  }
+
+  function resumeAbandonedCart() {
+    const pending = abandonedCartPrompt;
+    if (!pending) return;
+    const restored = applyRestoredCart(pending.items, pending.fulfillment ?? null);
+    setAbandonedCartPrompt(null);
+    if (!restored) {
+      clearCachedCheckoutCart(commerceIdentifier);
+      return;
+    }
+    setCheckoutStep(0);
+    setIsConfirmOpen(true);
+  }
+
+  function startFreshAfterAbandonedCart() {
+    setAbandonedCartPrompt(null);
+    setCart({});
+    clearCachedCheckoutCart(commerceIdentifier);
+    setCheckoutStep(0);
+    setIsConfirmOpen(false);
+  }
+
+  function cancelLeavePurchase() {
+    setLeaveConfirmOpen(false);
+  }
+
+  function confirmLeavePurchase() {
+    allowLeaveRef.current = true;
+    leaveGuardArmedRef.current = false;
+    setLeaveConfirmOpen(false);
+    setIsConfirmOpen(false);
+    if (typeof window === 'undefined') return;
+    // Pop the guard entry, then leave the menu page.
+    window.history.back();
+    window.setTimeout(() => {
+      allowLeaveRef.current = true;
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.location.assign(publicBaseUrl);
+      }
+    }, 0);
+  }
+
   function goToNextStep() {
     if (checkoutStep === 0 && !canGoNextFromStep0) {
       setCheckoutError('Agrega al menos un producto para continuar con el pedido.');
@@ -4625,6 +4995,16 @@ export default function PublicMenuPage() {
       return;
     }
     setCheckoutError(null);
+    if (checkoutStep === 1 && canGoNextFromStep1) {
+      // Cache as soon as "Tus datos" is completed so the next visit is prefilled
+      // even if payment is abandoned; last successful order overwrites this later.
+      writeCachedCheckoutCustomer({
+        clientName: normalizedClientName,
+        clientWhatsapp: normalizedClientWhatsapp,
+        clientEmail: normalizedClientEmail,
+        selectedCurrency: selectedCurrencyCode,
+      });
+    }
     if (checkoutStep === 1 && !isDeliveryOrder) {
       setCheckoutStep(3);
       return;
@@ -5236,6 +5616,11 @@ export default function PublicMenuPage() {
                 )
               : null
           }
+          imageSourceUrl={
+            productOptionsSheet.productId
+              ? productById.get(productOptionsSheet.productId)?.imagen_url?.trim() || null
+              : null
+          }
           imagePreviewUrl={
             productOptionsSheet.productId
               ? displayProductImage(
@@ -5772,6 +6157,8 @@ export default function PublicMenuPage() {
                               <div className="flex items-start gap-4">
                                 <KioskImage
                                   src={item.imageUrl}
+                                  sourceUrl={item.imageSourceUrl || item.imageUrl}
+                                  displayWidth={160}
                                   alt={item.name}
                                   fit="cover"
                                   className="h-20 w-20 shrink-0 rounded-[22px] bg-[var(--menu-surface-alt)]"
@@ -6279,14 +6666,23 @@ export default function PublicMenuPage() {
                                 Comprobante: {paymentProofFile.name}
                               </p>
                             ) : null}
+                            {paymentProofBusy ? (
+                              <p className="mb-2 text-sm font-semibold text-[var(--menu-text-muted)]">
+                                Preparando comprobante…
+                              </p>
+                            ) : null}
+                            {paymentProofError ? (
+                              <p className="mb-2 text-sm font-semibold text-[#F43F5E]">{paymentProofError}</p>
+                            ) : null}
                             <input
                               type="file"
                               accept="image/*"
                               className="hidden"
                               id="payment-proof-gallery"
+                              disabled={paymentProofBusy}
                               onChange={(event) => {
                                 const selected = event.target.files?.[0] ?? null;
-                                setPaymentProofFile(selected);
+                                void handlePaymentProofSelected(selected);
                                 event.target.value = '';
                               }}
                             />
@@ -6296,23 +6692,30 @@ export default function PublicMenuPage() {
                               capture="environment"
                               className="hidden"
                               id="payment-proof-camera"
+                              disabled={paymentProofBusy}
                               onChange={(event) => {
                                 const selected = event.target.files?.[0] ?? null;
-                                setPaymentProofFile(selected);
+                                void handlePaymentProofSelected(selected);
                                 event.target.value = '';
                               }}
                             />
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                               <label
                                 htmlFor="payment-proof-gallery"
-                                className="inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)]"
+                                aria-disabled={paymentProofBusy || undefined}
+                                className={`inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)] ${
+                                  paymentProofBusy ? 'pointer-events-none opacity-60' : ''
+                                }`}
                               >
                                 <ImageIcon className="h-4 w-4 shrink-0" aria-hidden />
                                 Galería
                               </label>
                               <label
                                 htmlFor="payment-proof-camera"
-                                className="inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)]"
+                                aria-disabled={paymentProofBusy || undefined}
+                                className={`inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)] ${
+                                  paymentProofBusy ? 'pointer-events-none opacity-60' : ''
+                                }`}
                               >
                                 <Camera className="h-4 w-4 shrink-0" aria-hidden />
                                 Tomar foto
@@ -6358,6 +6761,68 @@ export default function PublicMenuPage() {
                     </div>
                   ) : null}
           </KioskCheckout>
+        ) : null}
+
+        <AbandonedCartResumeDialog
+          open={Boolean(abandonedCartPrompt) && abandonedCartPreview.itemCount > 0}
+          businessName={comercioNombre}
+          itemCount={abandonedCartPreview.itemCount}
+          totalLabel={abandonedCartPreview.totalLabel}
+          fulfillmentLabel={abandonedCartPreview.fulfillmentLabel}
+          savedLabel={abandonedCartPreview.savedLabel}
+          items={abandonedCartPreview.items}
+          titleFontStyle={titleFontStyle}
+          onResume={resumeAbandonedCart}
+          onStartFresh={startFreshAfterAbandonedCart}
+        />
+
+        {leaveConfirmOpen ? (
+          <div
+            className="fixed inset-0 z-[80] flex items-end justify-center bg-black/55 px-4 pb-[calc(20px+env(safe-area-inset-bottom))] pt-6 sm:items-center"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-purchase-title"
+            onClick={cancelLeavePurchase}
+          >
+            <div
+              className="w-full max-w-md rounded-[28px] bg-[var(--menu-surface)] p-5 shadow-[0_24px_64px_rgba(15,23,42,0.35)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
+                Pedido en curso
+              </p>
+              <h3
+                id="leave-purchase-title"
+                className="mt-2 text-xl font-black tracking-[-0.03em] text-[var(--menu-text)]"
+                style={titleFontStyle}
+              >
+                ¿Seguro que deseas abandonar la compra?
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-[var(--menu-text-muted)]">
+                Si sales ahora, guardaremos tu carrito en este teléfono para cuando vuelvas.
+              </p>
+              <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={cancelLeavePurchase}
+                  className="min-h-12 rounded-2xl px-4 py-3 text-sm font-black shadow-[0_12px_28px_rgba(15,23,42,0.12)]"
+                  style={{
+                    backgroundColor: 'var(--primary-color)',
+                    color: 'var(--text-on-primary)',
+                  }}
+                >
+                  Seguir comprando
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmLeavePurchase}
+                  className="min-h-12 rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3 text-sm font-bold text-[var(--menu-text)]"
+                >
+                  Sí, abandonar
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
 
       </main>

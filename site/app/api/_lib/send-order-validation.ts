@@ -82,8 +82,10 @@ export function buildOrderTrackingUrl(
 }
 
 /**
- * Only same-origin tracking URLs under /orders or /v/.../orders with a token are accepted.
- * Token-less paths are rejected (they are not usable credentials after H04).
+ * Same-origin tracking URLs accepted:
+ * - /orders/{id}?t=… or /v/{slug}/orders/{id}?t=…
+ * - /o/{shortCode} public short links (cookie minted on redirect)
+ * Token-less long paths are rejected (not usable credentials after H04).
  * Arbitrary absolute URLs (open redirects / phishing) are rejected.
  */
 export function resolveSafeTrackingUrl(
@@ -103,6 +105,11 @@ export function resolveSafeTrackingUrl(
     if (url.username || url.password) return null;
 
     const path = url.pathname;
+    // Public short links: /o/{base64url code}
+    if (/^\/o\/[A-Za-z0-9_-]{8,24}$/.test(path)) {
+      return `${url.origin}${path}`;
+    }
+
     const isOrdersPath =
       path === `/orders/${encodeURIComponent(orderId)}` ||
       path === `/orders/${orderId}` ||
@@ -119,6 +126,18 @@ export function resolveSafeTrackingUrl(
     const safe = new URL(`${url.origin}${url.pathname}`);
     safe.searchParams.set('t', token);
     return safe.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Same-origin public menu URL for a comercio slug. */
+export function resolveSafeMenuUrl(comercioSlug?: string | null): string | null {
+  const slug = (comercioSlug ?? '').trim();
+  if (!slug || !/^[A-Za-z0-9._~-]+$/.test(slug) || slug.length > 120) return null;
+  try {
+    const site = new URL(publicSiteUrl);
+    return `${site.origin}/v/${encodeURIComponent(slug)}`;
   } catch {
     return null;
   }

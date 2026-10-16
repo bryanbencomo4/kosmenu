@@ -752,12 +752,35 @@ export async function POST(request: Request) {
 
     if (clientEmail && canSendOrderEmail()) {
       emailStatus = 'queued';
+      const tipoMatch = orderNotes.match(/^Tipo:\s*(Comer aqui|Para llevar|Delivery)\b/i);
+      const fulfillmentLabel =
+        tipoMatch?.[1] ||
+        (delivery.mode === 'delivery' ? 'Delivery' : 'Retiro / para llevar');
       void sendOrderEmail({
         clientEmail,
+        clientName,
         comercioNombre,
         orderId,
         orderTrackingUrl: publicOrderUrl,
         comercioSlug: resolvedComercioSlug,
+        currency,
+        subtotal: subtotalCheckout,
+        deliveryFee: costoDeliveryCheckout,
+        total: totalCheckout,
+        fulfillmentLabel,
+        managementMode: detalles.management_mode,
+        items: storedItems.map((item) => {
+          const unitBase = Number(item.precio_final ?? item.precio) || 0;
+          const qty = Math.max(1, Math.round(Number(item.cantidad) || 1));
+          const lineBase = unitBase * qty;
+          const lineCheckout =
+            convertOrderAmount(lineBase, baseCurrency, currency, exchangeRate) ?? lineBase;
+          return {
+            name: (item.nombre || item.producto || 'Producto').toString(),
+            quantity: qty,
+            lineTotal: lineCheckout,
+          };
+        }),
       }).catch(() => {
         // Keep response fast; email failures are handled asynchronously.
       });

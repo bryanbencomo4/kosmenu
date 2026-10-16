@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  coldVariantUrl,
+  resolveMenuImageSources,
+  resolveMenuImageUrl,
+} from '../app/_lib/optimize-storage-image';
+import {
   displayProductImage,
   optimizeMenuImageUrl,
   productImageUrl,
@@ -42,21 +47,26 @@ describe('product image resolution', () => {
     );
   });
 
-  it('requests a resized WebP variant for public Supabase Storage images', () => {
-    const optimized = optimizeMenuImageUrl(
-      'https://project.supabase.co/storage/v1/object/public/product-images/shop/pizza.png?download=0',
-      320,
-      70,
+  it('prefers cold WebP variant paths for public Supabase Storage images', () => {
+    const original =
+      'https://project.supabase.co/storage/v1/object/public/product-images/shop/pizza.png?download=0';
+    const optimized = optimizeMenuImageUrl(original, 320, 70);
+    expect(optimized).toBe(
+      'https://project.supabase.co/storage/v1/object/public/product-images/shop/.variants/pizza/card.webp',
     );
-    const url = new URL(optimized!);
+    expect(coldVariantUrl(original, 'thumb', 'avif')).toBe(
+      'https://project.supabase.co/storage/v1/object/public/product-images/shop/.variants/pizza/thumb.avif',
+    );
+  });
 
-    expect(url.pathname).toBe(
-      '/storage/v1/render/image/public/product-images/shop/pizza.png',
-    );
-    expect(url.searchParams.get('download')).toBe('0');
-    expect(url.searchParams.get('width')).toBe('320');
-    expect(url.searchParams.get('quality')).toBe('70');
-    expect(url.searchParams.get('format')).toBe('webp');
+  it('exposes hot transform as fallback source', () => {
+    const original =
+      'https://project.supabase.co/storage/v1/object/public/product-images/shop/pizza.png';
+    const sources = resolveMenuImageSources(original, 360)!;
+    expect(sources.coldWebp).toContain('/.variants/pizza/card.webp');
+    expect(sources.hot).toContain('/storage/v1/render/image/public/product-images/shop/pizza.png');
+    expect(sources.hot).toContain('width=360');
+    expect(resolveMenuImageUrl(original, 160)).toContain('/thumb.webp');
   });
 
   it('leaves external image URLs unchanged', () => {
@@ -70,9 +80,9 @@ describe('product image resolution', () => {
       'https://project.supabase.co/storage/v1/object/public/product-images/shop/pizza.png';
     const logo =
       'https://project.supabase.co/storage/v1/object/public/logos-comercios/shop/logo.png';
-    const tile = new URL(displayProductImage(product, logo)!);
-    expect(tile.searchParams.get('width')).toBe('360');
-    const logoOnly = new URL(displayProductImage('', logo)!);
-    expect(logoOnly.searchParams.get('width')).toBe('240');
+    const tile = displayProductImage(product, logo)!;
+    expect(tile).toContain('/.variants/pizza/card.webp');
+    const logoOnly = displayProductImage('', logo)!;
+    expect(logoOnly).toContain('/.variants/logo/card.webp');
   });
 });

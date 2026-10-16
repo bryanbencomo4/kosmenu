@@ -14,6 +14,7 @@ import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
+import 'package:kosmenu_app/services/product_image_variants_client.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/product_options_editor.dart';
@@ -990,9 +991,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             fileOptions: FileOptions(upsert: true, contentType: 'image/jpeg'),
           );
 
-      return Supabase.instance.client.storage
+      final publicUrl = Supabase.instance.client.storage
           .from(_bucketName)
           .getPublicUrl(fileName);
+      const ProductImageVariantsClient().ensureInBackground(publicUrl);
+      return publicUrl;
     } finally {
       if (mounted) {
         setState(() => _isUploadingImage = false);

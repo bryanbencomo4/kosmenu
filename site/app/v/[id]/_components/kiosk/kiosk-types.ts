@@ -7,6 +7,8 @@ export type KioskCategory = {
   name: string;
   glyph: string;
   coverUrl: string | null;
+  /** Original Storage URL for cold-variant upgrade / hot fallback. */
+  coverSourceUrl?: string | null;
   productCount: number;
 };
 
@@ -16,6 +18,8 @@ export type KioskProduct = {
   description: string;
   priceLabel: string;
   imageUrl: string | null;
+  /** Original Storage URL for cold-variant upgrade / hot fallback. */
+  imageSourceUrl?: string | null;
   available: boolean;
   /** Only set for products with option groups enabled ("3 tamaños disponibles"). */
   optionsSummary?: string | null;

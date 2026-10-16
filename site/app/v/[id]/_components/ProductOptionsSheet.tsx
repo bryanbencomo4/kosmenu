@@ -334,6 +334,8 @@ type ProductOptionsSheetProps = {
   compatibleProducts?: ConfigurableProduct[];
   secondary?: boolean;
   imageUrl: string | null;
+  /** Original Storage URL for cold-variant upgrade / hot fallback. */
+  imageSourceUrl?: string | null;
   /** Cached smaller variant for blur fill while the sheet hero loads. */
   imagePreviewUrl?: string | null;
   category: {
@@ -351,6 +353,7 @@ export function ProductOptionsSheet({
   canAdd,
   product,
   imageUrl,
+  imageSourceUrl,
   imagePreviewUrl,
   category,
   formatPrice,
@@ -651,6 +654,8 @@ export function ProductOptionsSheet({
                 >
                   <KioskImage
                     src={imageUrl}
+                    sourceUrl={imageSourceUrl || product.imagen_url || imageUrl}
+                    displayWidth={640}
                     previewSrc={imagePreviewUrl || imageUrl}
                     alt={product.nombre}
                     className="absolute inset-0 h-full w-full"

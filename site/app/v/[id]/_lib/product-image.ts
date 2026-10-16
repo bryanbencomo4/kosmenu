@@ -1,6 +1,10 @@
 /** Product/commerce image resolution shared across the public menu. */
 
-import { optimizeStorageImageUrl } from '../../../_lib/optimize-storage-image';
+import {
+  optimizeStorageImageUrl,
+  resolveMenuImageSources,
+  resolveMenuImageUrl,
+} from '../../../_lib/optimize-storage-image';
 
 export type ImageableProduct = {
   imagen_url?: string | null;
@@ -22,13 +26,18 @@ export const MENU_IMAGE_WIDTH = {
   lightbox: 1200,
 } as const;
 
-/** Request a small WebP variant from Supabase Storage for menu rendering. */
+export { optimizeStorageImageUrl, resolveMenuImageSources, resolveMenuImageUrl };
+
+/**
+ * Preferred menu URL: cold WebP variant when possible, else hot transform.
+ * Use `resolveMenuImageSources` + KioskImage for full cold→hot→original cascade.
+ */
 export function optimizeMenuImageUrl(
   imageUrl: string | null | undefined,
   width: number = MENU_IMAGE_WIDTH.tile,
   quality = 72,
 ) {
-  return optimizeStorageImageUrl(imageUrl, width, quality);
+  return resolveMenuImageUrl(imageUrl, width, quality);
 }
 
 /** Real product photo only — null when empty or identical to the commerce logo. */

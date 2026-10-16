@@ -144,6 +144,8 @@ export function KioskHome({
           {logoUrl ? (
             <KioskImage
               src={logoUrl}
+              sourceUrl={logoUrl}
+              displayWidth={240}
               alt={`Logo de ${businessName}`}
               priority
               fit="cover"

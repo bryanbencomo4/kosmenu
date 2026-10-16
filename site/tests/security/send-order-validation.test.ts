@@ -78,6 +78,15 @@ describe('tracking URL safety', () => {
     const candidate = `${site}/orders/ORDER-1?t=secret-token`;
     expect(resolveSafeTrackingUrl(candidate, 'ORDER-1', null)).toBe(candidate);
   });
+
+  it('accepts same-origin short tracking links', () => {
+    const site = (process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(
+      /\/$/,
+      '',
+    );
+    const candidate = `${site}/o/AbCdEfGh12`;
+    expect(resolveSafeTrackingUrl(candidate, 'ORDER-1', null)).toBe(candidate);
+  });
 });
 
 describe('html / display sanitization', () => {

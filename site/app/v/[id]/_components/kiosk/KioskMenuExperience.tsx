@@ -304,6 +304,8 @@ export function KioskMenuExperience({
           {logoUrl ? (
             <KioskImage
               src={logoUrl}
+              sourceUrl={logoUrl}
+              displayWidth={240}
               alt=""
               fit="cover"
               className="h-11 w-11 rounded-[14px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]"
@@ -374,7 +376,13 @@ export function KioskMenuExperience({
                   >
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-[16px] bg-[var(--menu-surface-alt)]">
                       {hit.category.coverUrl ? (
-                        <KioskImage src={hit.category.coverUrl} alt="" className="h-full w-full" />
+                        <KioskImage
+                          src={hit.category.coverUrl}
+                          sourceUrl={hit.category.coverSourceUrl || hit.category.coverUrl}
+                          displayWidth={160}
+                          alt=""
+                          className="h-full w-full"
+                        />
                       ) : (
                         <div className="grid h-full place-items-center text-2xl">{hit.category.glyph}</div>
                       )}
@@ -397,7 +405,13 @@ export function KioskMenuExperience({
                   >
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-[16px] bg-[var(--menu-surface-alt)]">
                       {hit.product.imageUrl ? (
-                        <KioskImage src={hit.product.imageUrl} alt={hit.product.name} className="h-full w-full" />
+                        <KioskImage
+                          src={hit.product.imageUrl}
+                          sourceUrl={hit.product.imageSourceUrl || hit.product.imageUrl}
+                          displayWidth={160}
+                          alt={hit.product.name}
+                          className="h-full w-full"
+                        />
                       ) : (
                         <div className="grid h-full place-items-center text-2xl">{hit.category.glyph || '🍽️'}</div>
                       )}
@@ -437,6 +451,8 @@ export function KioskMenuExperience({
                       {category.coverUrl ? (
                         <KioskImage
                           src={category.coverUrl}
+                          sourceUrl={category.coverSourceUrl || category.coverUrl}
+                          displayWidth={520}
                           alt=""
                           fit="cover"
                           className="h-full w-full"
@@ -478,6 +494,8 @@ export function KioskMenuExperience({
                   {product.imageUrl ? (
                     <KioskImage
                       src={product.imageUrl}
+                      sourceUrl={product.imageSourceUrl || product.imageUrl}
+                      displayWidth={360}
                       alt={product.name}
                       fit="cover"
                       className="h-full w-full"

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { verifyComprobantePermit } from '../../_lib/comprobante-permit';
-import { COMPROBANTE_MAX_BYTES } from '../../_lib/comprobante-upload';
+import { COMPROBANTE_MAX_BYTES, resolveComprobanteMime } from '../../_lib/comprobante-upload';
 import { uploadComprobanteObject } from '../../_lib/comprobante-storage';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
 
@@ -48,10 +48,12 @@ export async function POST(request: Request) {
     }
 
     const bytes = await file.arrayBuffer();
+    // Camera picks often omit File.type; sniff magic bytes before validating.
+    const mimeType = resolveComprobanteMime({ declaredMime: file.type, bytes });
     const uploaded = await uploadComprobanteObject({
       comercioId,
       fileName: file.name,
-      mimeType: file.type || 'application/octet-stream',
+      mimeType,
       bytes,
     });
 

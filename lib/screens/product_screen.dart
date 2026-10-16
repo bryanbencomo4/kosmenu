@@ -12,6 +12,7 @@ import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
+import 'package:kosmenu_app/services/product_image_variants_client.dart';
 import 'package:kosmenu_app/widgets/soft_media_image.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
@@ -382,6 +383,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
       final publicUrl = Supabase.instance.client.storage
           .from(_bucketName)
           .getPublicUrl(fileName);
+      const ProductImageVariantsClient().ensureInBackground(publicUrl);
 
       await Supabase.instance.client
           .from('productos')

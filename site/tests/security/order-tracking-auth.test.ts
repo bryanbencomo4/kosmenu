@@ -13,7 +13,11 @@ import {
   customerOrderActionSchema,
 } from '../../app/api/_lib/order-customer-actions';
 import { toPublicOrderTrackingResponse } from '../../app/api/_lib/public-order';
-import { validateComprobanteFile } from '../../app/api/_lib/comprobante-upload';
+import {
+  resolveComprobanteMime,
+  sniffComprobanteMime,
+  validateComprobanteFile,
+} from '../../app/api/_lib/comprobante-upload';
 import { resetRateLimitStoreForTests } from '../../app/api/_lib/rate-limit';
 import {
   resolveSafeTrackingUrl,
@@ -360,13 +364,24 @@ describe('GET/PATCH /api/orders/[orderId] authorization', () => {
     for (const action of [
       { action: 'cancel', source: 'cliente', reason: 'Cambio de planes' },
       { action: 'confirm_received' },
-      { action: 'submit_rating', rating: 5 },
     ]) {
       const mutation = await PATCH(new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
         method: 'PATCH', headers, body: JSON.stringify(action),
       }), { params: Promise.resolve({ orderId }) });
       expect(mutation.status).toBe(409);
     }
+
+    // WhatsApp-managed orders can rate (and later update) from the tracking link.
+    const rating = await PATCH(
+      new Request(`http://localhost/api/orders/${orderId}?t=${encodeURIComponent(pedido.token)}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ action: 'submit_rating', rating: 5 }),
+      }),
+      { params: Promise.resolve({ orderId }) },
+    );
+    expect(rating.status).toBe(200);
+    expect((await rating.json()).rating).toBe(5);
   });
 
   it('rejects GET without token', async () => {
@@ -583,6 +598,23 @@ describe('comprobante upload validation', () => {
         storagePath: 'comercio/ok.jpg',
       }).ok,
     ).toBe(true);
+  });
+
+  it('sniffs JPEG magic bytes when camera omits MIME', () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    expect(sniffComprobanteMime(jpeg)).toBe('image/jpeg');
+    expect(
+      resolveComprobanteMime({
+        declaredMime: '',
+        bytes: jpeg,
+      }),
+    ).toBe('image/jpeg');
+    expect(
+      resolveComprobanteMime({
+        declaredMime: 'application/octet-stream',
+        bytes: jpeg,
+      }),
+    ).toBe('image/jpeg');
   });
 });
 

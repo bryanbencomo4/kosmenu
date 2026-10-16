@@ -233,6 +233,7 @@ const CARD_MEDIA_HOLD_MS = 4200;
 const CARD_MEDIA_FADE_MS = 480;
 const HERO_MEDIA_HOLD_MS = 4500;
 const preloadedImages = new Map<string, Promise<boolean>>();
+const preloadedImageResults = new Map<string, boolean>();
 
 function staggerDelayMs(seed: string) {
   let hash = 2166136261;
@@ -247,6 +248,10 @@ function heroSlideImageUrl(business: DirectoryBusiness) {
   return business.coverUrl || business.logoUrl || '/branding/full_logo.png';
 }
 
+function isImageReady(url: string) {
+  return preloadedImageResults.get(url) === true;
+}
+
 function preloadCardImage(url: string): Promise<boolean> {
   const cached = preloadedImages.get(url);
   if (cached) return cached;
@@ -256,7 +261,10 @@ function preloadCardImage(url: string): Promise<boolean> {
   const promise = new Promise<boolean>((resolve) => {
     const img = new window.Image();
     img.decoding = 'async';
-    const finish = (ok: boolean) => resolve(ok);
+    const finish = (ok: boolean) => {
+      preloadedImageResults.set(url, ok);
+      resolve(ok);
+    };
     img.onload = () => {
       if (typeof img.decode === 'function') {
         img
@@ -274,6 +282,73 @@ function preloadCardImage(url: string): Promise<boolean> {
   return promise;
 }
 
+function MediaShimmer({ tone = 'light' }: { tone?: 'light' | 'dark' }) {
+  return (
+    <div
+      className={`absolute inset-0 animate-pulse ${
+        tone === 'dark'
+          ? 'bg-gradient-to-br from-slate-800 via-slate-700 to-slate-900'
+          : 'bg-gradient-to-br from-[#f3eefe] via-[#ebe4ff] to-[#e8eefc]'
+      }`}
+      aria-hidden
+    >
+      <div className="absolute inset-0 grid place-items-center">
+        <LoaderCircle
+          className={`h-7 w-7 animate-spin ${tone === 'dark' ? 'text-white/35' : 'text-[#6D28D9]/55'}`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FadeInMediaImage({
+  src,
+  className,
+  priority = false,
+  tone = 'light',
+}: {
+  src: string;
+  className: string;
+  priority?: boolean;
+  tone?: 'light' | 'dark';
+}) {
+  const [loaded, setLoaded] = useState(() => isImageReady(src));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isImageReady(src)) {
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    void preloadCardImage(src).then((ok) => {
+      if (!cancelled && ok) setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  return (
+    <>
+      {!loaded ? <MediaShimmer tone={tone} /> : null}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt=""
+        decoding="async"
+        loading={priority ? 'eager' : 'lazy'}
+        fetchPriority={priority ? 'high' : 'auto'}
+        draggable={false}
+        onLoad={() => setLoaded(true)}
+        className={`${className} transition-opacity duration-300 ${
+          loaded ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
+    </>
+  );
+}
+
 function CardMediaImage({
   slide,
   forceRow,
@@ -283,21 +358,45 @@ function CardMediaImage({
   forceRow: boolean;
   priority?: boolean;
 }) {
+  if (slide.kind === 'logo') {
+    // Blur fill behind; foreground logo stays a smaller centered square so
+    // square logo files aren't cropped by the 16:10 frame.
+    const logoFrame = forceRow
+      ? 'h-[78%] w-[78%] max-h-[3.35rem] max-w-[3.35rem] rounded-[0.65rem]'
+      : 'h-[68%] w-[68%] max-h-[8.75rem] max-w-[8.75rem] rounded-2xl sm:h-[70%] sm:w-[70%] sm:max-h-[9.5rem] sm:max-w-[9.5rem] sm:rounded-[1.15rem]';
+    return (
+      <div className="absolute inset-0 overflow-hidden">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={slide.imageUrl}
+          alt=""
+          aria-hidden
+          decoding="async"
+          loading={priority ? 'eager' : 'lazy'}
+          draggable={false}
+          className="pointer-events-none absolute inset-0 h-full w-full scale-[1.35] object-cover blur-2xl"
+        />
+        <div className="absolute inset-0 bg-slate-900/10" aria-hidden />
+        <div className="absolute inset-0 grid place-items-center">
+          <div className={`relative overflow-hidden shadow-sm ${logoFrame}`}>
+            <FadeInMediaImage
+              src={slide.imageUrl}
+              priority={priority}
+              tone="light"
+              className="absolute inset-0 h-full w-full object-contain"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <FadeInMediaImage
       src={slide.imageUrl}
-      alt=""
-      decoding="async"
-      loading={priority ? 'eager' : 'lazy'}
-      draggable={false}
-      className={
-        slide.kind === 'logo'
-          ? forceRow
-            ? 'h-full w-full object-contain p-1.5'
-            : 'h-full w-full object-contain p-6 sm:p-8'
-          : 'h-full w-full object-cover'
-      }
+      className="absolute inset-0 h-full w-full object-cover"
+      priority={priority}
+      tone="dark"
     />
   );
 }
@@ -396,6 +495,11 @@ function normalizeRegionStats(raw: unknown): DirectoryRegionStat[] {
     if (!name || !Number.isFinite(count) || count <= 0) continue;
     out.push({ name, count });
   }
+  // Highest restaurant count first for "Explora por región".
+  out.sort((left, right) => {
+    if (right.count !== left.count) return right.count - left.count;
+    return left.name.localeCompare(right.name, 'es');
+  });
   return out;
 }
 
@@ -769,9 +873,7 @@ function RestaurantCard({
     ? 'relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-100'
     : 'relative block aspect-[16/10] w-full overflow-hidden';
   const mediaBg =
-    visibleSlide?.kind === 'dish'
-      ? 'bg-slate-900'
-      : 'bg-[linear-gradient(160deg,#f8f7fc_0%,#f1eefe_55%,#eef2ff_100%)]';
+    visibleSlide?.kind === 'dish' ? 'bg-slate-900' : 'bg-slate-200';
   const indicatorIndex =
     fadeIn && incomingIndex != null ? incomingIndex : slideIndex;
 
@@ -790,8 +892,8 @@ function RestaurantCard({
           <CardMediaImage slide={activeSlide} forceRow={forceRow} priority />
         </div>
       ) : (
-        <div className="grid h-full place-items-center bg-[#f5f3ff] text-violet-300">
-          <Store className={forceRow ? 'h-6 w-6' : 'h-8 w-8'} />
+        <div className="relative h-full w-full">
+          <MediaShimmer tone="light" />
         </div>
       )}
       {incomingSlide ? (
@@ -804,9 +906,7 @@ function RestaurantCard({
         >
           <div
             className={`absolute inset-0 ${
-              incomingSlide.kind === 'dish'
-                ? 'bg-slate-900'
-                : 'bg-[linear-gradient(160deg,#f8f7fc_0%,#f1eefe_55%,#eef2ff_100%)]'
+              incomingSlide.kind === 'dish' ? 'bg-slate-900' : 'bg-slate-200'
             }`}
           >
             <CardMediaImage slide={incomingSlide} forceRow={forceRow} priority />
@@ -902,12 +1002,14 @@ export function ClientesDiscoveryPage() {
   const [urlReady, setUrlReady] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ready' | 'denied'>('idle');
+  const [geoHint, setGeoHint] = useState<string | null>(null);
+  const [geoHelpVisible, setGeoHelpVisible] = useState(false);
   const [zoneLabel, setZoneLabel] = useState<string | null>(null);
   const [radiusKm, setRadiusKm] = useState<(typeof RADIUS_OPTIONS)[number] | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [whereMenuOpen, setWhereMenuOpen] = useState(false);
   const [audienceGateOpen, setAudienceGateOpen] = useState(false);
-  const [audienceDontShowAgain, setAudienceDontShowAgain] = useState(false);
+  const [audienceDontShowAgain, setAudienceDontShowAgain] = useState(true);
   const [draftQuery, setDraftQuery] = useState('');
   const [draftRegion, setDraftRegion] = useState('');
   const [draftCategory, setDraftCategory] = useState('');
@@ -915,6 +1017,7 @@ export function ClientesDiscoveryPage() {
   const [draftRadiusKm, setDraftRadiusKm] = useState<(typeof RADIUS_OPTIONS)[number] | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [payload, setPayload] = useState<DirectoryPayload>({});
   const [browseIndex, setBrowseIndex] = useState<DirectoryBusiness[]>([]);
@@ -924,6 +1027,9 @@ export function ClientesDiscoveryPage() {
   const [heroIndex, setHeroIndex] = useState(0);
   const [heroIncomingIndex, setHeroIncomingIndex] = useState<number | null>(null);
   const [heroFadeIn, setHeroFadeIn] = useState(false);
+  const [heroNextReady, setHeroNextReady] = useState(false);
+  const [heroPrevReady, setHeroPrevReady] = useState(false);
+  const [heroNavBusy, setHeroNavBusy] = useState(false);
   const [heroInView, setHeroInView] = useState(false);
   const [heroCycleToken, setHeroCycleToken] = useState(0);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -934,8 +1040,10 @@ export function ClientesDiscoveryPage() {
   const heroRootRef = useRef<HTMLDivElement | null>(null);
   const heroIndexRef = useRef(0);
   const heroBusyRef = useRef(false);
-  const hasLoadedOnce = useRef(false);
+  const hasLoadedOnceRef = useRef(false);
   const geoAskedRef = useRef(false);
+  const geoInFlightRef = useRef(false);
+  const geoFailsafeRef = useRef(0);
 
   const scrollPromoCarousel = useCallback((direction: -1 | 1) => {
     const el = promoCarouselRef.current;
@@ -964,32 +1072,114 @@ export function ClientesDiscoveryPage() {
   const requestLocation = useCallback((opts?: { switchToNear?: boolean; forcePrompt?: boolean }) => {
     if (!navigator.geolocation) {
       setGeoStatus('denied');
+      setGeoHelpVisible(true);
+      setGeoHint('Tu navegador no permite geolocalización.');
       return;
     }
-    setGeoStatus('loading');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const next = { lat: position.coords.latitude, lng: position.coords.longitude };
-        setCoords(next);
-        setGeoStatus('ready');
-        // Default to a local radius so far-away restaurants don't flood the feed.
-        setRadiusKm((prev) => prev ?? DEFAULT_NEAR_RADIUS_KM);
-        // Only flip sort when explicitly requested — never override an active text search.
-        if (opts?.switchToNear) setSortMode('near');
-        void resolveZoneLabel(next.lat, next.lng).then((label) => {
-          if (label) setZoneLabel(label);
+    // Ignore double-taps while a request is already in flight.
+    if (geoInFlightRef.current) return;
+
+    const finishDenied = (hint: string) => {
+      geoInFlightRef.current = false;
+      if (geoFailsafeRef.current) {
+        window.clearTimeout(geoFailsafeRef.current);
+        geoFailsafeRef.current = 0;
+      }
+      setGeoStatus('denied');
+      setGeoHelpVisible(true);
+      setZoneLabel(null);
+      setGeoHint(hint);
+    };
+
+    const finishReady = (next: { lat: number; lng: number }) => {
+      geoInFlightRef.current = false;
+      if (geoFailsafeRef.current) {
+        window.clearTimeout(geoFailsafeRef.current);
+        geoFailsafeRef.current = 0;
+      }
+      setCoords(next);
+      setGeoStatus('ready');
+      setGeoHelpVisible(false);
+      setGeoHint(null);
+      // Default to a local radius so far-away restaurants don't flood the feed.
+      setRadiusKm((prev) => prev ?? DEFAULT_NEAR_RADIUS_KM);
+      // Only flip sort when explicitly requested — never override an active text search.
+      if (opts?.switchToNear) setSortMode('near');
+      void resolveZoneLabel(next.lat, next.lng).then((label) => {
+        if (label) setZoneLabel(label);
+      });
+    };
+
+    const startGetPosition = () => {
+      geoInFlightRef.current = true;
+      setGeoStatus('loading');
+      setGeoHint(null);
+      // Some browsers never resolve when the prompt is dismissed oddly — don't hang forever.
+      if (geoFailsafeRef.current) window.clearTimeout(geoFailsafeRef.current);
+      geoFailsafeRef.current = window.setTimeout(() => {
+        if (!geoInFlightRef.current) return;
+        finishDenied(
+          'La ubicación tardó demasiado. Revisa el permiso en la barra del navegador e inténtalo de nuevo.',
+        );
+      }, 16000);
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          finishReady({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+        },
+        (error) => {
+          if (error.code === error.PERMISSION_DENIED) {
+            finishDenied(
+              'El navegador bloqueó la ubicación. Toca el candado/ícono de sitio en la barra de direcciones, permite la ubicación y pulsa de nuevo.',
+            );
+            return;
+          }
+          if (error.code === error.TIMEOUT) {
+            finishDenied('La ubicación tardó demasiado. Inténtalo de nuevo.');
+            return;
+          }
+          finishDenied('No pudimos obtener tu ubicación. Inténtalo de nuevo.');
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: opts?.forcePrompt ? 0 : 120000,
+        },
+      );
+    };
+
+    // If permission is already denied, getCurrentPosition fails instantly with no UI —
+    // surface that immediately so the button never feels "stuck".
+    const permissions = navigator.permissions;
+    if (opts?.forcePrompt && permissions?.query) {
+      geoInFlightRef.current = true;
+      setGeoStatus('loading');
+      setGeoHint(null);
+      void permissions
+        .query({ name: 'geolocation' as PermissionName })
+        .then((result) => {
+          if (result.state === 'denied') {
+            finishDenied(
+              'El navegador bloqueó la ubicación. Toca el candado/ícono de sitio en la barra de direcciones, permite la ubicación y pulsa de nuevo.',
+            );
+            return;
+          }
+          // startGetPosition re-arms the in-flight flag + failsafe.
+          geoInFlightRef.current = false;
+          startGetPosition();
+        })
+        .catch(() => {
+          // Safari / older browsers: Permissions API may reject — fall through.
+          geoInFlightRef.current = false;
+          startGetPosition();
         });
-      },
-      () => {
-        setGeoStatus('denied');
-        setZoneLabel(null);
-      },
-      {
-        enableHighAccuracy: false,
-        timeout: 12000,
-        maximumAge: opts?.forcePrompt ? 0 : 120000,
-      },
-    );
+      return;
+    }
+
+    startGetPosition();
   }, []);
 
   useEffect(() => {
@@ -1165,7 +1355,7 @@ export function ClientesDiscoveryPage() {
     fetchAbortRef.current = controller;
 
     const run = async () => {
-      if (hasLoadedOnce.current) setRefreshing(true);
+      if (hasLoadedOnceRef.current) setRefreshing(true);
       else setLoading(true);
       setError(null);
       try {
@@ -1192,6 +1382,8 @@ export function ClientesDiscoveryPage() {
         };
         if (!response.ok) throw new Error(json.error ?? 'No se pudo cargar el directorio.');
         const nextPayload = json.data ?? {};
+        hasLoadedOnceRef.current = true;
+        setHasLoadedOnce(true);
         startTransition(() => {
           setPayload(nextPayload);
           const nextResults = nextPayload.results ?? [];
@@ -1211,11 +1403,12 @@ export function ClientesDiscoveryPage() {
               return [...map.values()];
             });
           }
-          hasLoadedOnce.current = true;
         });
       } catch (fetchError) {
         if (controller.signal.aborted) return;
         setError(fetchError instanceof Error ? fetchError.message : 'Error de carga');
+        hasLoadedOnceRef.current = true;
+        setHasLoadedOnce(true);
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -1251,7 +1444,7 @@ export function ClientesDiscoveryPage() {
     const serverResults = payload.results ?? [];
     if (liveQueryFolded.length < 2) return serverResults;
     const serverSettled =
-      liveQueryFolded === settledQueryFolded && !refreshing && hasLoadedOnce.current;
+      liveQueryFolded === settledQueryFolded && !refreshing && hasLoadedOnce;
     if (serverSettled) {
       // Server extras can include restaurants outside the warm browse index.
       return serverResults.length > 0 ? serverResults : (instantSearchResults ?? serverResults);
@@ -1259,6 +1452,7 @@ export function ClientesDiscoveryPage() {
     // Typing ahead / waiting on network: show local ranked hits immediately.
     return instantSearchResults ?? serverResults;
   }, [
+    hasLoadedOnce,
     instantSearchResults,
     liveQueryFolded,
     payload.results,
@@ -1315,10 +1509,32 @@ export function ClientesDiscoveryPage() {
   }, []);
 
   useEffect(() => {
-    if (!heroInView || heroSlides.length <= 1) return;
-    const next = heroSlides[(heroIndex + 1) % heroSlides.length];
-    if (next) void preloadCardImage(heroSlideImageUrl(next));
-  }, [heroInView, heroIndex, heroSlides]);
+    if (heroSlides.length <= 1) {
+      setHeroNextReady(false);
+      setHeroPrevReady(false);
+      return;
+    }
+    let cancelled = false;
+    const nextSlide = heroSlides[(heroIndex + 1) % heroSlides.length];
+    const prevSlide = heroSlides[(heroIndex - 1 + heroSlides.length) % heroSlides.length];
+    const nextUrl = nextSlide ? heroSlideImageUrl(nextSlide) : '';
+    const prevUrl = prevSlide ? heroSlideImageUrl(prevSlide) : '';
+    setHeroNextReady(Boolean(nextUrl && isImageReady(nextUrl)));
+    setHeroPrevReady(Boolean(prevUrl && isImageReady(prevUrl)));
+    if (nextUrl) {
+      void preloadCardImage(nextUrl).then((ok) => {
+        if (!cancelled) setHeroNextReady(ok);
+      });
+    }
+    if (prevUrl) {
+      void preloadCardImage(prevUrl).then((ok) => {
+        if (!cancelled) setHeroPrevReady(ok);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [heroIndex, heroSlides]);
 
   const goToHeroSlide = useCallback(
     async (nextIndex: number, opts?: { manual?: boolean }) => {
@@ -1334,9 +1550,11 @@ export function ClientesDiscoveryPage() {
 
       if (opts?.manual) setHeroCycleToken((token) => token + 1);
       heroBusyRef.current = true;
+      setHeroNavBusy(true);
       const loaded = await preloadCardImage(heroSlideImageUrl(slide));
       if (!loaded) {
         heroBusyRef.current = false;
+        setHeroNavBusy(false);
         return;
       }
 
@@ -1347,6 +1565,7 @@ export function ClientesDiscoveryPage() {
         setHeroIncomingIndex(null);
         setHeroFadeIn(false);
         heroBusyRef.current = false;
+        setHeroNavBusy(false);
         return;
       }
 
@@ -1365,6 +1584,7 @@ export function ClientesDiscoveryPage() {
       setHeroIncomingIndex(null);
       setHeroFadeIn(false);
       heroBusyRef.current = false;
+      setHeroNavBusy(false);
     },
     [heroSlides],
   );
@@ -1502,7 +1722,7 @@ export function ClientesDiscoveryPage() {
   );
 
   const statusLine = useMemo(() => {
-    if (loading && !hasLoadedOnce.current) return 'Buscando restaurantes…';
+    if (loading && !hasLoadedOnce) return 'Buscando restaurantes…';
     const count = filteredResults.length;
     const parts = [`${count} lugar${count === 1 ? '' : 'es'}`];
     if (debouncedQuery.trim()) {
@@ -1564,12 +1784,12 @@ export function ClientesDiscoveryPage() {
 
   const locationLabel =
     region || zoneLabel || (geoStatus === 'ready' ? 'Cerca de ti' : 'Tu zona');
+  const directorySettled = hasLoadedOnce && !loading;
   const areaEmpty =
     Boolean(coords) &&
     radiusKm != null &&
     filteredResults.length === 0 &&
-    !loading &&
-    hasLoadedOnce.current &&
+    directorySettled &&
     !query.trim() &&
     !category.trim() &&
     !favoritesOnly;
@@ -1578,7 +1798,7 @@ export function ClientesDiscoveryPage() {
       ? null
       : filteredResults.length > 0
         ? `${filteredResults.length} resultado${filteredResults.length === 1 ? '' : 's'}`
-        : refreshing || query.trim() !== debouncedQuery.trim() || !hasLoadedOnce.current
+        : refreshing || query.trim() !== debouncedQuery.trim() || !hasLoadedOnce
           ? 'Buscando…'
           : 'Sin resultados';
 
@@ -1697,20 +1917,30 @@ export function ClientesDiscoveryPage() {
               <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
                 <button
                   type="button"
-                  onClick={() => requestLocation({ switchToNear: true })}
-                  className={`hidden max-w-[14rem] items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold sm:inline-flex ${
+                  disabled={geoStatus === 'loading'}
+                  onClick={() =>
+                    requestLocation({
+                      switchToNear: true,
+                      forcePrompt: geoStatus !== 'ready',
+                    })
+                  }
+                  className={`hidden max-w-[14rem] items-center gap-1.5 rounded-full px-3 py-2 text-xs font-bold sm:inline-flex disabled:cursor-wait disabled:opacity-80 ${
                     geoStatus === 'ready'
                       ? 'bg-violet-100 text-[#6D28D9]'
                       : 'bg-slate-100 text-slate-700'
                   }`}
-                  title={zoneLabel || undefined}
+                  title={zoneLabel || geoHint || undefined}
                 >
-                  <MapPin className="h-3.5 w-3.5 shrink-0 text-[#6D28D9]" />
+                  {geoStatus === 'loading' ? (
+                    <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[#6D28D9]" />
+                  ) : (
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-[#6D28D9]" />
+                  )}
                   <span className="truncate">
                     {geoStatus === 'ready'
                       ? zoneLabel || 'Cerca de ti'
                       : geoStatus === 'loading'
-                        ? 'Ubicando...'
+                        ? 'Ubicando…'
                         : geoStatus === 'denied'
                           ? 'Sin ubicación'
                           : 'Ubicarme'}
@@ -1817,18 +2047,29 @@ export function ClientesDiscoveryPage() {
       </header>
 
       <main>
-        {geoStatus === 'denied' ? (
+        {geoHelpVisible && geoStatus !== 'ready' ? (
           <div className="border-b border-amber-200 bg-amber-50 px-3 py-2.5 sm:px-4">
             <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 text-sm">
-              <p className="text-amber-900">
-                Activa tu ubicación para ordenar por cercanía y ver qué hay cerca de ti.
+              <p className="min-w-0 flex-1 text-amber-900">
+                {geoStatus === 'loading'
+                  ? 'Obteniendo tu ubicación… si el navegador pide permiso, acéptalo.'
+                  : geoHint ||
+                    'Activa tu ubicación para ordenar por cercanía y ver qué hay cerca de ti.'}
               </p>
               <button
                 type="button"
+                disabled={geoStatus === 'loading'}
                 onClick={() => requestLocation({ switchToNear: true, forcePrompt: true })}
-                className="rounded-full bg-amber-900 px-3 py-1.5 text-xs font-bold text-white"
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-amber-900 px-3 py-1.5 text-xs font-bold text-white disabled:cursor-wait disabled:opacity-80"
               >
-                Permitir ubicación
+                {geoStatus === 'loading' ? (
+                  <>
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    Obteniendo…
+                  </>
+                ) : (
+                  'Permitir ubicación'
+                )}
               </button>
             </div>
           </div>
@@ -2046,12 +2287,17 @@ export function ClientesDiscoveryPage() {
                 {geoStatus !== 'ready' ? (
                   <button
                     type="button"
+                    disabled={geoStatus === 'loading'}
                     onClick={() => {
                       requestLocation({ switchToNear: true, forcePrompt: true });
                     }}
-                    className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-bold text-[#6D28D9] sm:mt-3"
+                    className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-bold text-[#6D28D9] disabled:cursor-wait disabled:opacity-70 sm:mt-3"
                   >
-                    <Navigation className="h-3.5 w-3.5" />
+                    {geoStatus === 'loading' ? (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Navigation className="h-3.5 w-3.5" />
+                    )}
                     {geoStatus === 'loading' ? 'Obteniendo ubicación…' : 'Usar mi ubicación'}
                   </button>
                 ) : null}
@@ -2061,7 +2307,48 @@ export function ClientesDiscoveryPage() {
               ref={heroRootRef}
               className="relative mx-auto h-[260px] w-full max-w-[420px] overflow-hidden rounded-[22px] bg-slate-900 shadow-xl sm:mx-0 sm:h-[340px] sm:max-w-none sm:rounded-[32px] sm:shadow-2xl lg:h-[400px]"
             >
-              {hero ? (
+              {areaEmpty ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[linear-gradient(165deg,#1e1b4b_0%,#312e81_45%,#0f172a_100%)] px-5 text-center sm:px-8">
+                  <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-violet-200 ring-1 ring-white/15">
+                    <MapPin className="h-6 w-6" />
+                  </div>
+                  <p className="mt-3 font-[var(--font-display)] text-lg font-black tracking-tight text-white sm:text-xl">
+                    No hay restaurantes cerca de ti
+                  </p>
+                  <p className="mt-2 max-w-sm text-sm leading-relaxed text-white/75">
+                    En{' '}
+                    <span className="font-semibold text-white">
+                      {zoneLabel || 'tu zona'}
+                    </span>
+                    {radiusKm != null ? ` (≤ ${radiusKm} km)` : ''} aún no hay menús publicados.
+                  </p>
+                  <Link
+                    href={BENEFITS_HREF}
+                    className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[#6D28D9] px-4 text-sm font-bold text-white shadow-[0_12px_28px_rgba(109,40,217,0.35)]"
+                  >
+                    Registrar un restaurante aquí
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                    {radiusKm != null && radiusKm < 50 ? (
+                      <button
+                        type="button"
+                        onClick={() => setRadiusKm(50)}
+                        className="rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-white ring-1 ring-white/20 hover:bg-white/15"
+                      >
+                        Ampliar a 50 km
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setRadiusKm(null)}
+                      className="rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-white ring-1 ring-white/20 hover:bg-white/15"
+                    >
+                      Ver todos
+                    </button>
+                  </div>
+                </div>
+              ) : hero ? (
                 <Link
                   href={
                     (heroVisible ?? hero).promovido
@@ -2079,26 +2366,27 @@ export function ClientesDiscoveryPage() {
                     });
                   }}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <FadeInMediaImage
                     src={heroSlideImageUrl(hero)}
-                    alt=""
-                    decoding="async"
-                    fetchPriority="high"
-                    className="absolute inset-0 h-full w-full object-cover opacity-90"
+                    priority
+                    tone="dark"
+                    className="absolute inset-0 h-full w-full object-cover"
                   />
                   {heroIncoming ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={heroSlideImageUrl(heroIncoming)}
-                      alt=""
-                      decoding="async"
-                      aria-hidden={!heroFadeIn}
-                      className={`absolute inset-0 h-full w-full object-cover transition-opacity ease-out ${
-                        heroFadeIn ? 'opacity-90' : 'opacity-0'
+                    <div
+                      className={`absolute inset-0 transition-opacity ease-out ${
+                        heroFadeIn ? 'opacity-100' : 'opacity-0'
                       }`}
                       style={{ transitionDuration: `${CARD_MEDIA_FADE_MS}ms` }}
-                    />
+                      aria-hidden={!heroFadeIn}
+                    >
+                      <FadeInMediaImage
+                        src={heroSlideImageUrl(heroIncoming)}
+                        priority
+                        tone="dark"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    </div>
                   ) : null}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-3.5 text-white sm:p-6">
@@ -2123,41 +2411,66 @@ export function ClientesDiscoveryPage() {
                     </span>
                   </div>
                 </Link>
+              ) : directorySettled ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[linear-gradient(165deg,#1e1b4b_0%,#312e81_45%,#0f172a_100%)] px-5 text-center sm:px-8">
+                  <p
+                    className={`${script.className} text-2xl text-white/90 sm:text-3xl`}
+                  >
+                    Apoyemos el talento local ♥
+                  </p>
+                  <p className="mt-3 max-w-xs text-sm text-white/70">
+                    Explora regiones o amplía tu zona para descubrir menús cerca.
+                  </p>
+                </div>
               ) : (
-                <div className="grid h-full place-items-center text-violet-200">
-                  <Store className="h-12 w-12" />
+                <div className="relative h-full">
+                  <MediaShimmer tone="dark" />
                 </div>
               )}
+              {!areaEmpty && hero ? (
               <p
                 className={`${script.className} pointer-events-none absolute right-3 top-3 z-10 hidden text-2xl text-white/90 sm:right-6 sm:top-6 sm:block sm:text-3xl`}
               >
                 Apoyemos el talento local ♥
               </p>
-              {heroSlides.length > 1 ? (
+              ) : null}
+              {!areaEmpty && heroSlides.length > 1 ? (
                 <>
                   <button
                     type="button"
-                    aria-label="Anterior"
+                    aria-label={heroPrevReady && !heroNavBusy ? 'Anterior' : 'Cargando imagen anterior'}
+                    disabled={!heroPrevReady || heroNavBusy}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
+                      if (!heroPrevReady || heroNavBusy) return;
                       void goToHeroSlide(heroIndexRef.current - 1, { manual: true });
                     }}
-                    className="absolute left-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg hover:bg-white sm:left-3 sm:h-10 sm:w-10"
+                    className="absolute left-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg transition enabled:hover:bg-white disabled:cursor-wait sm:left-3 sm:h-10 sm:w-10"
                   >
-                    <ChevronLeft className="h-5 w-5" />
+                    {!heroPrevReady || heroNavBusy ? (
+                      <LoaderCircle className="h-5 w-5 animate-spin text-[#6D28D9]" />
+                    ) : (
+                      <ChevronLeft className="h-5 w-5" />
+                    )}
                   </button>
                   <button
                     type="button"
-                    aria-label="Siguiente"
+                    aria-label={heroNextReady && !heroNavBusy ? 'Siguiente' : 'Cargando siguiente imagen'}
+                    disabled={!heroNextReady || heroNavBusy}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
+                      if (!heroNextReady || heroNavBusy) return;
                       void goToHeroSlide(heroIndexRef.current + 1, { manual: true });
                     }}
-                    className="absolute right-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg hover:bg-white sm:right-3 sm:h-10 sm:w-10"
+                    className="absolute right-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-slate-800 shadow-lg transition enabled:hover:bg-white disabled:cursor-wait sm:right-3 sm:h-10 sm:w-10"
                   >
-                    <ChevronRight className="h-5 w-5" />
+                    {!heroNextReady || heroNavBusy ? (
+                      <LoaderCircle className="h-5 w-5 animate-spin text-[#6D28D9]" />
+                    ) : (
+                      <ChevronRight className="h-5 w-5" />
+                    )}
                   </button>
                   <div className="absolute bottom-3 right-3 z-10 flex gap-1.5 sm:bottom-4 sm:right-6">
                     {heroSlides.map((slide, index) => (
@@ -2442,7 +2755,7 @@ export function ClientesDiscoveryPage() {
               } ${searchMode ? '' : 'lg:order-2'}`}
             >
               {error ? <p className="mb-3 text-sm text-rose-600">{error}</p> : null}
-              {loading && !hasLoadedOnce.current ? (
+              {loading && !hasLoadedOnce ? (
                 <ResultSkeleton />
               ) : filteredResults.length === 0 ? (
                 <div className="rounded-[22px] bg-white p-6 text-center ring-1 ring-slate-100 sm:p-8">
