@@ -165,7 +165,8 @@ export async function POST(request: Request) {
         actionUrl = `${appSiteUrl}/`;
       } else {
         existingUser = false;
-        actionUrl = `${appSiteUrl}/invite?t=${encodeURIComponent(pendingInvite.token)}`;
+        // Hash route so Flutter (HashUrlStrategy) receives path + token together.
+        actionUrl = `${appSiteUrl}/#/invite?t=${encodeURIComponent(pendingInvite.token)}`;
       }
     } else {
       // Already activated as member on invite (existing auth user path).

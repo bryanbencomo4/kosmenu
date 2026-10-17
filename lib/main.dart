@@ -251,10 +251,67 @@ class _KosmenuAppState extends State<KosmenuApp> {
         // `/orders/view/{id}` into `/orders/view` and treat "view" as an order.
         return '/';
       }
-      return uri.path.isEmpty ? '/' : uri.path;
+      // Keep query (e.g. /invite?t=…) — path alone drops the token and AuthGate wins.
+      final fromPath = _webDeepLinkRoute(uri.path, uri.query);
+      if (fromPath != null) return fromPath;
+
+      // HashUrlStrategy: app.elmenuxfa.com/#/invite?t=…
+      final fragment = uri.fragment.trim();
+      if (fragment.isNotEmpty) {
+        final fragUri = Uri.parse(
+          fragment.startsWith('/') ? fragment : '/$fragment',
+        );
+        final fromFrag = _webDeepLinkRoute(fragUri.path, fragUri.query);
+        if (fromFrag != null) return fromFrag;
+      }
+
+      return '/';
     }
 
     return '/';
+  }
+
+  /// Builds a named route that preserves query params for deep links.
+  String? _webDeepLinkRoute(String path, String query) {
+    final normalized = path.isEmpty ? '/' : path;
+    if (normalized == '/') return null;
+    final segments =
+        normalized.split('/').where((segment) => segment.isNotEmpty).toList();
+    if (segments.isEmpty) return null;
+    const known = <String>{
+      'invite',
+      'v',
+      'orders',
+      'order',
+      'capture',
+      'payment',
+      'billing',
+      'auth',
+    };
+    if (!known.contains(segments.first)) return null;
+    if (query.isEmpty) return normalized;
+    return '$normalized?$query';
+  }
+
+  String _inviteTokenFrom(Uri uri) {
+    final direct =
+        (uri.queryParameters['t'] ?? uri.queryParameters['token'] ?? '').trim();
+    if (direct.isNotEmpty) return direct;
+    if (!kIsWeb) return '';
+    final base = Uri.base;
+    final fromSearch =
+        (base.queryParameters['t'] ?? base.queryParameters['token'] ?? '')
+            .trim();
+    if (fromSearch.isNotEmpty) return fromSearch;
+    final fragment = base.fragment.trim();
+    if (fragment.isEmpty) return '';
+    final fragUri = Uri.tryParse(
+      fragment.startsWith('/') ? fragment : '/$fragment',
+    );
+    return (fragUri?.queryParameters['t'] ??
+            fragUri?.queryParameters['token'] ??
+            '')
+        .trim();
   }
 
   Uri? _fallbackOrderUri(Uri uri, String orderId) {
@@ -350,8 +407,9 @@ class _KosmenuAppState extends State<KosmenuApp> {
       );
     }
 
-    if (uri.path == '/invite' || uri.pathSegments.isNotEmpty && uri.pathSegments.first == 'invite') {
-      final token = (uri.queryParameters['t'] ?? uri.queryParameters['token'] ?? '').trim();
+    if (uri.path == '/invite' ||
+        (uri.pathSegments.isNotEmpty && uri.pathSegments.first == 'invite')) {
+      final token = _inviteTokenFrom(uri);
       if (token.isNotEmpty) {
         return MaterialPageRoute(
           settings: settings,
