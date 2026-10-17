@@ -13,6 +13,7 @@ import 'package:kosmenu_app/screens/mobile_camera_capture_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/screens/order_gate_screen.dart';
 import 'package:kosmenu_app/screens/public_menu_view.dart' deferred as public_menu;
+import 'package:kosmenu_app/screens/staff_invite_accept_screen.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
 import 'package:kosmenu_app/services/order_gate_handler.dart';
 import 'package:kosmenu_app/services/push_notification_service.dart';
@@ -347,6 +348,16 @@ class _KosmenuAppState extends State<KosmenuApp> {
         settings: settings,
         builder: (_) => const AuthGate(),
       );
+    }
+
+    if (uri.path == '/invite' || uri.pathSegments.isNotEmpty && uri.pathSegments.first == 'invite') {
+      final token = (uri.queryParameters['t'] ?? uri.queryParameters['token'] ?? '').trim();
+      if (token.isNotEmpty) {
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => StaffInviteAcceptScreen(token: token),
+        );
+      }
     }
 
     if (uri.pathSegments.length == 2 && uri.pathSegments.first == 'capture') {

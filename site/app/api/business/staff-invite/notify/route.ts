@@ -129,55 +129,48 @@ export async function POST(request: Request) {
       return jsonResponse(request, { error: 'Forbidden.' }, { status: 403 });
     }
 
-    const redirectTo = `${appSiteUrl}/`;
+    const { data: pendingInvite } = await supabase
+      .from('comercio_member_invites')
+      .select('token')
+      .eq('comercio_id', comercioId)
+      .eq('email', email)
+      .eq('status', 'pending')
+      .maybeSingle();
+
     const roleLabel = ROLE_LABELS[role] ?? role;
     const comercioNombre =
       (comercio.nombre?.toString().trim() || 'tu restaurante').slice(0, 120);
 
-    // Prefer branded Resend + Auth action link (invite for new, magiclink for existing).
     let existingUser = false;
-    let actionUrl = redirectTo;
+    let actionUrl = `${appSiteUrl}/`;
 
-    const inviteLink = await supabase.auth.admin.generateLink({
-      type: 'invite',
-      email,
-      options: {
-        redirectTo,
-        data: {
-          invited_comercio_id: comercioId,
-          invited_role: role,
-        },
-      },
-    });
-
-    if (inviteLink.error) {
-      const message = (inviteLink.error.message ?? '').toLowerCase();
-      const alreadyExists =
-        message.includes('already') ||
-        message.includes('registered') ||
-        message.includes('exists') ||
-        inviteLink.error.status === 422;
-
-      if (!alreadyExists) {
-        console.error('staff-invite generateLink(invite)', inviteLink.error);
-        return jsonResponse(request, GENERIC_ERROR, { status: 500 });
-      }
-
-      existingUser = true;
-      const magic = await supabase.auth.admin.generateLink({
-        type: 'magiclink',
-        email,
-        options: { redirectTo },
+    if (pendingInvite?.token) {
+      const { data: pub } = await supabase.rpc('get_staff_invite_public', {
+        p_token: pendingInvite.token,
       });
-      if (magic.error) {
-        // Still email a plain "open the app" link if magic link fails.
-        console.error('staff-invite generateLink(magiclink)', magic.error);
-        actionUrl = redirectTo;
+      if (pub && typeof pub === 'object' && (pub as { error?: string }).error === 'owner') {
+        return jsonResponse(
+          request,
+          { error: 'Esta persona ya tiene una cuenta de restaurante.' },
+          { status: 409 },
+        );
+      }
+      const existingAccount =
+        pub &&
+        typeof pub === 'object' &&
+        (pub as { existing_account?: boolean }).existing_account === true;
+      if (existingAccount) {
+        // Already has auth account (staff elsewhere): ask them to sign in.
+        existingUser = true;
+        actionUrl = `${appSiteUrl}/`;
       } else {
-        actionUrl = (magic.data.properties?.action_link ?? redirectTo).trim();
+        existingUser = false;
+        actionUrl = `${appSiteUrl}/invite?t=${encodeURIComponent(pendingInvite.token)}`;
       }
     } else {
-      actionUrl = (inviteLink.data.properties?.action_link ?? redirectTo).trim();
+      // Already activated as member on invite (existing auth user path).
+      existingUser = true;
+      actionUrl = `${appSiteUrl}/`;
     }
 
     const sent = await sendStaffInviteEmail({

@@ -8,6 +8,7 @@ import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart' deferred as billing_screen;
 import 'package:kosmenu_app/screens/business_setup_screen.dart' deferred as setup_screen;
 import 'package:kosmenu_app/screens/force_update_screen.dart';
+import 'package:kosmenu_app/screens/merchant_access_picker_screen.dart';
 import 'package:kosmenu_app/screens/pending_order_link_screen.dart';
 import 'package:kosmenu_app/services/app_update_service.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
@@ -38,6 +39,16 @@ void returnToAuthGate(BuildContext context) {
 
 final ValueNotifier<bool> passwordRecoveryPending = ValueNotifier(false);
 
+class _AuthBootResult {
+  const _AuthBootResult({this.destination, this.options});
+
+  final PostAuthDestination? destination;
+  final List<MerchantAccessOption>? options;
+
+  bool get needsPicker =>
+      options != null && options!.length > 1 && destination == null;
+}
+
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
@@ -47,127 +58,106 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   static const String _setupDraftKeyPrefix = 'business_setup_draft_v2';
-  Future<PostAuthDestination>? _targetFuture;
+  static const String _lastComercioKeyPrefix = 'merchant_last_comercio_v1';
+  Future<_AuthBootResult>? _targetFuture;
   String _targetUserId = '';
+  MerchantAccessOption? _forcedAccess;
   late final Future<AndroidAppRelease?> _androidUpdateFuture =
       AppUpdateService.checkRequiredAndroidUpdate();
 
-  Future<PostAuthDestination> _resolveTargetForUser(String userId) async {
-    Future<PostAuthDestination> resolveOnce() async {
-      final owned = await Supabase.instance.client
+  Future<_AuthBootResult> _resolveTargetForUser(String userId) async {
+    Future<_AuthBootResult> resolveOnce() async {
+      try {
+        await Supabase.instance.client.rpc('accept_pending_comercio_invites');
+      } catch (_) {}
+
+      final ownedRows = await Supabase.instance.client
           .from('comercios')
           .select('id, slug, nombre, logo_url')
-          .eq('owner_id', userId)
-          .limit(1)
-          .maybeSingle();
+          .eq('owner_id', userId);
+      final memberRows = await Supabase.instance.client
+          .from('comercio_members')
+          .select('comercio_id, role, comercios(id, slug, nombre, logo_url)')
+          .eq('user_id', userId)
+          .eq('status', 'active');
 
-      Map<String, dynamic>? row = owned;
-      var isOwner = owned != null;
-      var role = MerchantStaffRole.administrador;
+      final options = <MerchantAccessOption>[];
+      final seen = <String>{};
 
-      if (row == null) {
-        try {
-          await Supabase.instance.client.rpc('accept_pending_comercio_invites');
-        } catch (_) {}
-        final member = await Supabase.instance.client
-            .from('comercio_members')
-            .select('comercio_id, role, comercios(id, slug, nombre, logo_url)')
-            .eq('user_id', userId)
-            .eq('status', 'active')
-            .limit(1)
-            .maybeSingle();
-        if (member != null) {
-          role = MerchantStaffRoleUi.fromRaw(member['role']?.toString());
-          final nested = member['comercios'];
-          if (nested is Map) {
-            row = Map<String, dynamic>.from(nested);
-          } else if (member['comercio_id'] != null) {
-            row = {'id': member['comercio_id']};
-          }
-        }
-      }
-
-      MerchantSession.set(role: role, isOwner: isOwner);
-
-      if (row == null) {
-        SupabaseConfig.clearCurrentComercioId();
-        syncMerchantPresence(name: 'Tu cuenta');
-        return resolvePostAuthDestination(
-          hasCommerce: false,
-          hasCatalog: false,
-          hasActiveSubscription: false,
+      for (final raw in ownedRows as List? ?? const []) {
+        if (raw is! Map) continue;
+        final map = Map<String, dynamic>.from(raw);
+        final id = (map['id'] ?? '').toString().trim();
+        if (id.isEmpty || !seen.add(id)) continue;
+        options.add(
+          MerchantAccessOption(
+            comercioId: id,
+            nombre: (map['nombre'] ?? 'Tu restaurante').toString(),
+            slug: map['slug']?.toString(),
+            logoUrl: map['logo_url']?.toString(),
+            role: MerchantStaffRole.administrador,
+            isOwner: true,
+          ),
         );
       }
 
-      final comercioId = row['id']?.toString().trim() ?? '';
-      final comercioSlug = row['slug']?.toString().trim();
-      if (comercioId.isEmpty) {
-        SupabaseConfig.clearCurrentComercioId();
-        syncMerchantPresence(name: 'Tu cuenta');
-        return resolvePostAuthDestination(
-          hasCommerce: false,
-          hasCatalog: false,
-          hasActiveSubscription: false,
+      for (final raw in memberRows as List? ?? const []) {
+        if (raw is! Map) continue;
+        final map = Map<String, dynamic>.from(raw);
+        final nested = map['comercios'];
+        final comercio = nested is Map
+            ? Map<String, dynamic>.from(nested)
+            : <String, dynamic>{'id': map['comercio_id']};
+        final id = (comercio['id'] ?? map['comercio_id'] ?? '').toString().trim();
+        if (id.isEmpty || !seen.add(id)) continue;
+        options.add(
+          MerchantAccessOption(
+            comercioId: id,
+            nombre: (comercio['nombre'] ?? 'Tu restaurante').toString(),
+            slug: comercio['slug']?.toString(),
+            logoUrl: comercio['logo_url']?.toString(),
+            role: MerchantStaffRoleUi.fromRaw(map['role']?.toString()),
+            isOwner: false,
+          ),
         );
       }
 
-      final comercioNombre = row['nombre']?.toString().trim();
-      final comercioLogoUrl = row['logo_url']?.toString().trim();
-      syncMerchantPresence(
-        name: (comercioNombre == null || comercioNombre.isEmpty)
-            ? 'Tu cuenta'
-            : comercioNombre,
-        logoUrl: comercioLogoUrl,
-        slug: comercioSlug,
-      );
-
-      final firstCatalog = await Supabase.instance.client
-          .from('catalogos')
-          .select('id')
-          .eq('comercio_id', comercioId)
-          .limit(1)
-          .maybeSingle();
-      if (firstCatalog == null) {
-        SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
-        return resolvePostAuthDestination(
-          hasCommerce: true,
-          hasCatalog: false,
-          hasActiveSubscription: false,
+      if (options.isEmpty) {
+        SupabaseConfig.clearCurrentComercioId();
+        clearMerchantPresence();
+        MerchantSession.clear();
+        return _AuthBootResult(
+          destination: resolvePostAuthDestination(
+            hasCommerce: false,
+            hasCatalog: false,
+            hasActiveSubscription: false,
+          ),
         );
       }
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('$_setupDraftKeyPrefix:$userId');
-
-      SupabaseConfig.setCurrentComercioId(comercioId, slug: comercioSlug);
-
-      var hasActiveSubscription = false;
-      final sub = await Supabase.instance.client
-          .from('subscriptions')
-          .select('id, status')
-          .eq('business_id', comercioId)
-          .eq('status', 'active')
-          .limit(1)
-          .maybeSingle();
-      hasActiveSubscription = sub != null;
-
-      // If still unpaid locally, ask server to reconcile with Zeno (missing webhooks).
-      // Bound the wait so a slow edge function never holds the splash.
-      if (!hasActiveSubscription) {
-        try {
-          final snap = await const BillingService()
-              .reconcileCheckout(comercioId: comercioId)
-              .timeout(const Duration(seconds: 2));
-          hasActiveSubscription = snap.hasActiveSubscription;
-        } catch (_) {
-          // Continue with local state.
-        }
+      final lastId = prefs.getString('$_lastComercioKeyPrefix:$userId');
+      MerchantAccessOption selected;
+      if (_forcedAccess != null &&
+          options.any((o) => o.comercioId == _forcedAccess!.comercioId)) {
+        selected = options.firstWhere(
+          (o) => o.comercioId == _forcedAccess!.comercioId,
+        );
+      } else if (options.length > 1 &&
+          (lastId == null ||
+              !options.any((o) => o.comercioId == lastId))) {
+        return _AuthBootResult(options: options);
+      } else if (lastId != null &&
+          options.any((o) => o.comercioId == lastId)) {
+        selected = options.firstWhere((o) => o.comercioId == lastId);
+      } else {
+        selected = options.first;
       }
 
-      return resolvePostAuthDestination(
-        hasCommerce: true,
-        hasCatalog: true,
-        hasActiveSubscription: hasActiveSubscription,
+      return _finishAccessSelection(
+        userId: userId,
+        selected: selected,
+        prefs: prefs,
       );
     }
 
@@ -199,7 +189,80 @@ class _AuthGateState extends State<AuthGate> {
     throw lastError ?? StateError('No se pudo validar el acceso.');
   }
 
-  Future<PostAuthDestination> _targetFutureFor(String userId) {
+  Future<_AuthBootResult> _finishAccessSelection({
+    required String userId,
+    required MerchantAccessOption selected,
+    required SharedPreferences prefs,
+  }) async {
+    MerchantSession.set(role: selected.role, isOwner: selected.isOwner);
+    await prefs.setString(
+      '$_lastComercioKeyPrefix:$userId',
+      selected.comercioId,
+    );
+
+    syncMerchantPresence(
+      name: selected.nombre.trim().isEmpty ? 'Tu cuenta' : selected.nombre,
+      logoUrl: selected.logoUrl,
+      slug: selected.slug,
+    );
+    SupabaseConfig.setCurrentComercioId(
+      selected.comercioId,
+      slug: selected.slug,
+    );
+
+    // Invited staff never enter onboarding/billing for someone else's restaurant.
+    if (!selected.isOwner && selected.role != MerchantStaffRole.administrador) {
+      await prefs.remove('$_setupDraftKeyPrefix:$userId');
+      return _AuthBootResult(destination: PostAuthDestination.dashboard);
+    }
+
+    final firstCatalog = await Supabase.instance.client
+        .from('catalogos')
+        .select('id')
+        .eq('comercio_id', selected.comercioId)
+        .limit(1)
+        .maybeSingle();
+    if (firstCatalog == null) {
+      return _AuthBootResult(
+        destination: resolvePostAuthDestination(
+          hasCommerce: true,
+          hasCatalog: false,
+          hasActiveSubscription: false,
+        ),
+      );
+    }
+
+    await prefs.remove('$_setupDraftKeyPrefix:$userId');
+
+    var hasActiveSubscription = false;
+    final sub = await Supabase.instance.client
+        .from('subscriptions')
+        .select('id, status')
+        .eq('business_id', selected.comercioId)
+        .eq('status', 'active')
+        .limit(1)
+        .maybeSingle();
+    hasActiveSubscription = sub != null;
+
+    if (!hasActiveSubscription) {
+      try {
+        final snap = await const BillingService()
+            .reconcileCheckout(comercioId: selected.comercioId)
+            .timeout(const Duration(seconds: 2));
+        hasActiveSubscription = snap.hasActiveSubscription;
+      } catch (_) {}
+    }
+
+    return _AuthBootResult(
+      destination: resolvePostAuthDestination(
+        hasCommerce: true,
+        hasCatalog: true,
+        hasActiveSubscription: hasActiveSubscription,
+      ),
+    );
+  }
+
+  Future<_AuthBootResult> _targetFutureFor(String userId) {
     if (_targetFuture != null && _targetUserId == userId) {
       return _targetFuture!;
     }
@@ -272,7 +335,7 @@ class _AuthGateState extends State<AuthGate> {
             }
 
             final userId = session.user.id;
-            return FutureBuilder<PostAuthDestination>(
+            return FutureBuilder<_AuthBootResult>(
               future: _targetFutureFor(userId),
               builder: (context, targetSnapshot) {
                 if (targetSnapshot.connectionState == ConnectionState.waiting) {
@@ -293,7 +356,28 @@ class _AuthGateState extends State<AuthGate> {
                   );
                 }
 
-                switch (targetSnapshot.data) {
+                final boot = targetSnapshot.data;
+                if (boot == null) {
+                  return DeferredLibraryScreen(
+                    key: const ValueKey<String>('deferred-setup'),
+                    load: setup_screen.loadLibrary,
+                    builder: () => setup_screen.BusinessSetupScreen(),
+                  );
+                }
+
+                if (boot.needsPicker) {
+                  return MerchantAccessPickerScreen(
+                    options: boot.options!,
+                    onSelected: (option) {
+                      setState(() {
+                        _forcedAccess = option;
+                        _resetTargetCache();
+                      });
+                    },
+                  );
+                }
+
+                switch (boot.destination) {
                   case PostAuthDestination.dashboard:
                     return const AdminDashboardScreen();
                   case PostAuthDestination.billing:
