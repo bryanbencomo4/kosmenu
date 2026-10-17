@@ -258,6 +258,7 @@ class PublicOrderApiService {
   Future<PublicOrderCreateResult> createOrder({
     required PublicOrderCreateRequest request,
     required String idempotencyKey,
+    String? accessToken,
   }) async {
     final key = idempotencyKey.trim();
     if (key.isEmpty || key.length < 8 || key.length > 128) {
@@ -268,6 +269,7 @@ class PublicOrderApiService {
     }
 
     final uri = ElmenuxfaApiConfig.uri('/api/orders');
+    final token = (accessToken ?? '').trim();
     late http.Response response;
     try {
       response = await _client
@@ -277,6 +279,7 @@ class PublicOrderApiService {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
               'X-Idempotency-Key': key,
+              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
             },
             body: jsonEncode(request.toJson()),
           )
@@ -291,14 +294,21 @@ class PublicOrderApiService {
     return _parseCreateOrderResponse(response);
   }
 
-  Future<String> _issueComprobantePermit(String comercioId) async {
+  Future<String> _issueComprobantePermit(
+    String comercioId, {
+    String? accessToken,
+  }) async {
     final uri = ElmenuxfaApiConfig.uri('/api/orders/comprobantes/permit');
+    final token = (accessToken ?? '').trim();
     late http.Response response;
     try {
       response = await _client
           .post(
             uri,
-            headers: const {'Content-Type': 'application/json'},
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+            },
             body: jsonEncode({'comercioId': comercioId, 'slug': comercioId}),
           )
           .timeout(_timeout);
@@ -333,6 +343,7 @@ class PublicOrderApiService {
     required String fileName,
     required String mimeType,
     required Uint8List bytes,
+    String? accessToken,
     void Function(double progress)? onProgress,
   }) async {
     final validationError = ComprobanteClientValidator.validate(
@@ -344,7 +355,10 @@ class PublicOrderApiService {
       throw PublicOrderApiException(message: validationError, statusCode: 422);
     }
 
-    final permit = await _issueComprobantePermit(comercioId.trim());
+    final permit = await _issueComprobantePermit(
+      comercioId.trim(),
+      accessToken: accessToken,
+    );
     final uri = ElmenuxfaApiConfig.uri('/api/orders/comprobantes');
     final request = http.MultipartRequest('POST', uri)
       ..fields['comercioId'] = comercioId.trim()

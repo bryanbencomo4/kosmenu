@@ -52,8 +52,28 @@ import {
   PROMO_ATTR_COOKIE,
   recordDirectoryPromoEvents,
 } from '../_lib/directory-promo-events';
+import {
+  appCorsPreflight,
+  withAppCors,
+} from '../_lib/app-cors';
+import { userCanOperateComercio } from '../_lib/comercio-staff-access';
+import { getUserFromBearerRequest } from '../_lib/supabase-user-auth';
 
 export const maxDuration = 10;
+
+const ORDERS_CORS = {
+  methods: 'POST, OPTIONS',
+  headers:
+    'authorization, content-type, accept, x-idempotency-key',
+} as const;
+
+export async function OPTIONS(request: Request) {
+  return appCorsPreflight(request, ORDERS_CORS);
+}
+
+export async function POST(request: Request) {
+  return withAppCors(request, await postOrder(request), ORDERS_CORS);
+}
 
 function hashCustomerAccessToken(token: string) {
   return createHash('sha256').update(token.trim(), 'utf8').digest('hex');
@@ -235,7 +255,7 @@ function normalizeDelivery(value: unknown) {
   };
 }
 
-export async function POST(request: Request) {
+async function postOrder(request: Request): Promise<NextResponse> {
   try {
     const ip = getClientIp(request);
     const rate = consumeRateLimit(`orders:ip:${ip}`, 20, 60_000);
@@ -589,11 +609,18 @@ export async function POST(request: Request) {
       await createCustomerRatingKey(clientWhatsapp),
     );
 
+    const staffUser = await getUserFromBearerRequest(request);
+    const staffAssisted =
+      staffUser?.id != null
+        ? await userCanOperateComercio(staffUser.id, resolvedComercioId)
+        : false;
+
     const ordering = evaluateBusinessOrdering({
       enLinea: comercioRow?.en_linea,
       horarios: comercioRow?.horarios,
     });
-    if (ordering.allowed === false) {
+    // Staff / mesero taking assisted orders from the app may operate offline.
+    if (ordering.allowed === false && !staffAssisted) {
       return NextResponse.json(
         { error: ordering.error, message: ordering.message },
         { status: 403 },

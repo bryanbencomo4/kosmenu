@@ -1,10 +1,29 @@
 import { NextResponse } from 'next/server';
 
+import {
+  appCorsPreflight,
+  withAppCors,
+} from '../../../_lib/app-cors';
+import { userCanOperateComercio } from '../../../_lib/comercio-staff-access';
 import { issueComprobantePermit, isComercioUuid } from '../../../_lib/comprobante-permit';
 import { consumeRateLimit, getClientIp } from '../../../_lib/rate-limit';
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
+import { getUserFromBearerRequest } from '../../../_lib/supabase-user-auth';
+
+const CORS = {
+  methods: 'POST, OPTIONS',
+  headers: 'authorization, content-type, accept',
+} as const;
+
+export async function OPTIONS(request: Request) {
+  return appCorsPreflight(request, CORS);
+}
 
 export async function POST(request: Request) {
+  return withAppCors(request, await postPermit(request), CORS);
+}
+
+async function postPermit(request: Request): Promise<NextResponse> {
   try {
     const ip = getClientIp(request);
     const limit = consumeRateLimit(`comprobantes:permit:${ip}`, 10, 60_000);
@@ -36,8 +55,19 @@ export async function POST(request: Request) {
     }
 
     const row = (data ?? [])[0] as { id?: string; en_linea?: boolean } | undefined;
-    if (!row?.id || row.en_linea !== true) {
+    if (!row?.id) {
       return NextResponse.json({ error: 'Not found.' }, { status: 404 });
+    }
+
+    if (row.en_linea !== true) {
+      const user = await getUserFromBearerRequest(request);
+      const staffOk =
+        user?.id != null
+          ? await userCanOperateComercio(user.id, String(row.id))
+          : false;
+      if (!staffOk) {
+        return NextResponse.json({ error: 'Not found.' }, { status: 404 });
+      }
     }
 
     const issued = issueComprobantePermit(String(row.id));

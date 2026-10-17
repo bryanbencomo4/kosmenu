@@ -1,16 +1,33 @@
 import { NextResponse } from 'next/server';
 
+import {
+  appCorsPreflight,
+  withAppCors,
+} from '../../_lib/app-cors';
 import { verifyComprobantePermit } from '../../_lib/comprobante-permit';
 import { COMPROBANTE_MAX_BYTES, resolveComprobanteMime } from '../../_lib/comprobante-upload';
 import { uploadComprobanteObject } from '../../_lib/comprobante-storage';
 import { consumeRateLimit, getClientIp } from '../../_lib/rate-limit';
+
+const CORS = {
+  methods: 'POST, OPTIONS',
+  headers: 'authorization, content-type, accept, x-comprobante-permit',
+} as const;
 
 /**
  * Server-side comprobante upload (service role).
  * Requires a short-lived HMAC permit issued for an online comercio.
  * Returns an opaque storage ref — never a permanent public URL.
  */
+export async function OPTIONS(request: Request) {
+  return appCorsPreflight(request, CORS);
+}
+
 export async function POST(request: Request) {
+  return withAppCors(request, await postUpload(request), CORS);
+}
+
+async function postUpload(request: Request): Promise<NextResponse> {
   try {
     const ip = getClientIp(request);
     const ipLimit = consumeRateLimit(`comprobantes:upload:${ip}`, 8, 60_000);

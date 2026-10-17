@@ -17,6 +17,7 @@ import 'package:kosmenu_app/services/public_menu_api_service.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class PublicMenuView extends StatefulWidget {
@@ -113,7 +114,17 @@ class _PublicMenuViewState extends State<PublicMenuView> {
   }
 
   Future<_PublicMenuData> _fetchMenuData() async {
-    final payload = await PublicMenuApiService().fetchMenu(widget.comercioId);
+    String? accessToken;
+    if (_isAssistedMode) {
+      try {
+        accessToken =
+            Supabase.instance.client.auth.currentSession?.accessToken;
+      } catch (_) {}
+    }
+    final payload = await PublicMenuApiService().fetchMenu(
+      widget.comercioId,
+      accessToken: accessToken,
+    );
     final data = _parseMenuPayload(
       payload,
       fallbackComercioId: widget.comercioId,
@@ -490,9 +501,17 @@ class _PublicMenuViewState extends State<PublicMenuView> {
       orderNotes: orderNotes,
     );
 
+    String? accessToken;
+    if (_isAssistedMode) {
+      try {
+        accessToken =
+            Supabase.instance.client.auth.currentSession?.accessToken;
+      } catch (_) {}
+    }
     return PublicOrderApiService().createOrder(
       request: request,
       idempotencyKey: idempotencyKey,
+      accessToken: accessToken,
     );
   }
 
@@ -1521,12 +1540,24 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                     if (pendingBytes != null &&
                                         pendingName.isNotEmpty &&
                                         pendingMime != null) {
+                                      String? uploadToken;
+                                      if (_isAssistedMode) {
+                                        try {
+                                          uploadToken = Supabase
+                                              .instance
+                                              .client
+                                              .auth
+                                              .currentSession
+                                              ?.accessToken;
+                                        } catch (_) {}
+                                      }
                                       final uploaded = await api
                                           .uploadComprobante(
                                             comercioId: data.comercioId,
                                             fileName: pendingName,
                                             mimeType: pendingMime,
                                             bytes: pendingBytes,
+                                            accessToken: uploadToken,
                                             onProgress: (value) {
                                               if (!mounted) return;
                                               setModalState(
