@@ -36,6 +36,8 @@ class PublicOrderCreateRequest {
     required this.items,
     required this.delivery,
     this.comercioNombre,
+    this.clientEmail,
+    this.mesa,
     this.paymentMethod,
     this.paymentProofUrl,
     this.orderNotes,
@@ -50,6 +52,8 @@ class PublicOrderCreateRequest {
   final List<PublicOrderItemDto> items;
   final PublicOrderDeliveryDto delivery;
   final String? comercioNombre;
+  final String? clientEmail;
+  final String? mesa;
   final PublicOrderPaymentMethodDto? paymentMethod;
   final String? paymentProofUrl;
   final String? orderNotes;
@@ -61,6 +65,9 @@ class PublicOrderCreateRequest {
         'comercioNombre': comercioNombre!.trim(),
       'clientName': clientName.trim(),
       'clientWhatsapp': clientWhatsapp.trim(),
+      if (clientEmail != null && clientEmail!.trim().isNotEmpty)
+        'clientEmail': clientEmail!.trim().toLowerCase(),
+      if (mesa != null && mesa!.trim().isNotEmpty) 'mesa': mesa!.trim(),
       'currency': currency,
       'exchangeRate': exchangeRate,
       'costoDelivery': costoDelivery,

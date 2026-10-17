@@ -92,6 +92,8 @@ type CreateOrderPayload = {
   clientEmail?: string;
   clientName?: string;
   clientWhatsapp?: string;
+  /** Table number for dine-in / waiter-assisted orders. */
+  mesa?: string;
   currency?: string;
   exchangeRate?: number;
   comercioNombre?: string;
@@ -287,10 +289,19 @@ async function postOrder(request: Request): Promise<NextResponse> {
     const rawClientEmail = (body.clientEmail ?? '').trim().toLowerCase();
     const rawClientName = normalizeText(body.clientName ?? incomingDetalles.cliente_nombre);
     const rawClientWhatsapp = normalizeDigits(body.clientWhatsapp ?? incomingDetalles.telefono_cliente);
+    const rawMesa = normalizeText(body.mesa ?? incomingDetalles.mesa);
     const rawCurrency = normalizeOrderCurrency(body.currency ?? incomingDetalles.moneda_checkout?.toString());
     const rawExchangeRate = Number(body.exchangeRate ?? incomingDetalles.tasa_cambio_snapshot);
     const rawCostDelivery = Number(body.costoDelivery ?? incomingDetalles.costo_delivery ?? 0);
     const rawDelivery = normalizeDelivery(body.delivery ?? incomingDetalles.delivery);
+    // Waiter-assisted checkout may omit phone; placeholder satisfies schema until staff is verified.
+    const staffUserEarly = await getUserFromBearerRequest(request);
+    const ASSISTED_PHONE_PLACEHOLDER = '0000000000';
+    const optionalAssistedPhone =
+      Boolean(staffUserEarly?.id) && rawClientWhatsapp.length < 10;
+    const phoneForValidation = optionalAssistedPhone
+      ? ASSISTED_PHONE_PLACEHOLDER
+      : rawClientWhatsapp;
     const rawItems = Array.isArray(body.items)
       ? body.items.map((item) => ({
           product_id: normalizeText((item as CreateOrderItemInput)?.product_id ?? (item as CreateOrderItemInput)?.productId),
@@ -310,7 +321,7 @@ async function postOrder(request: Request): Promise<NextResponse> {
     const validationResult = OrderSchema.safeParse({
       comercioId: rawComercioId,
       cliente_nombre: rawClientName,
-      telefono_cliente: rawClientWhatsapp,
+      telefono_cliente: phoneForValidation,
       moneda_checkout: rawCurrency,
       tasa_cambio_snapshot: rawExchangeRate,
       costo_delivery: Number.isFinite(rawCostDelivery) ? Math.max(rawCostDelivery, 0) : 0,
@@ -406,12 +417,13 @@ async function postOrder(request: Request): Promise<NextResponse> {
     const comercioId = validated.comercioId;
     const clientEmail = rawClientEmail;
     const clientName = validated.cliente_nombre;
-    const clientWhatsapp = validated.telefono_cliente;
+    // Cleared below when a verified waiter omits the optional phone.
+    let clientWhatsapp = validated.telefono_cliente;
     const comercioNombre = (body.comercioNombre ?? 'Kosmenu').trim() || 'Kosmenu';
     let costoDelivery = validated.costo_delivery;
     const currency = validated.moneda_checkout;
     const exchangeRate = validated.tasa_cambio_snapshot;
-    const delivery = validated.delivery;
+    let delivery = validated.delivery;
     const items = validated.items.map((item) => ({
       product_id: item.product_id,
       nombre: item.nombre || 'Producto',
@@ -609,11 +621,35 @@ async function postOrder(request: Request): Promise<NextResponse> {
       await createCustomerRatingKey(clientWhatsapp),
     );
 
-    const staffUser = await getUserFromBearerRequest(request);
+    const staffUser = staffUserEarly;
     const staffAssisted =
       staffUser?.id != null
         ? await userCanOperateComercio(staffUser.id, resolvedComercioId)
         : false;
+
+    if (optionalAssistedPhone && !staffAssisted) {
+      return NextResponse.json(
+        {
+          error: 'Bad Request',
+          details: [
+            {
+              path: 'telefono_cliente',
+              message: 'telefono_cliente es requerido.',
+            },
+          ],
+        },
+        { status: 400 },
+      );
+    }
+    if (optionalAssistedPhone && staffAssisted) {
+      clientWhatsapp = '';
+    }
+    // Waiters only take dine-in ("comer aquí") — never delivery.
+    if (staffAssisted && delivery.mode === 'delivery') {
+      delivery = { mode: 'pickup' };
+      costoDelivery = 0;
+      total = subtotal;
+    }
 
     const ordering = evaluateBusinessOrdering({
       enLinea: comercioRow?.en_linea,
@@ -665,6 +701,8 @@ async function postOrder(request: Request): Promise<NextResponse> {
       cliente_nombre: clientName,
       cliente_email: clientEmail || null,
       telefono_cliente: clientWhatsapp,
+      mesa: rawMesa || null,
+      order_source: staffAssisted ? 'assisted_waiter' : null,
       moneda_base: baseCurrency,
       moneda_checkout: currency,
       tasa_cambio_snapshot: exchangeRate,
