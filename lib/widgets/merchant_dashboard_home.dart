@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
+import 'package:kosmenu_app/models/merchant_panel.dart';
 import 'package:kosmenu_app/services/app_update_service.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 
@@ -640,7 +641,7 @@ class MerchantHomeHeader extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Administrador',
+                        MerchantSession.role.label,
                         style: GoogleFonts.poppins(fontSize: 10, color: _muted),
                       ),
                     ],
@@ -829,7 +830,7 @@ class MerchantQuickActions extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Acciones rápidas',
+          MerchantSession.isMesero ? 'Tu turno' : 'Acciones rápidas',
           style: GoogleFonts.poppins(
             fontSize: 16,
             fontWeight: FontWeight.w800,
@@ -838,7 +839,9 @@ class MerchantQuickActions extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Todo lo que necesitas, en un solo lugar.',
+          MerchantSession.isMesero
+              ? 'Toma el pedido del cliente y envíalo a cocina.'
+              : 'Todo lo que necesitas, en un solo lugar.',
           style: GoogleFonts.poppins(
             fontSize: 12,
             color: const Color(0xFF6B6F92),

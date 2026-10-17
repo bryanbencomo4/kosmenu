@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 
 class MerchantShellScope extends InheritedWidget {
@@ -125,8 +126,11 @@ class MerchantShellHeader extends StatelessWidget {
             ),
           ),
           PopupMenuButton<bool>(
-            enabled: !isUpdatingOnline,
-            tooltip: 'Estado del negocio',
+            enabled:
+                !isUpdatingOnline && MerchantSession.canManageSettings,
+            tooltip: MerchantSession.canManageSettings
+                ? 'Estado del negocio'
+                : 'Estado del negocio (solo lectura)',
             onSelected: onToggleOnline,
             itemBuilder: (context) => const [
               PopupMenuItem(value: true, child: Text('Negocio abierto')),
@@ -162,7 +166,8 @@ class MerchantShellHeader extends StatelessWidget {
                         color: _text,
                       ),
                     ),
-                    const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                    if (MerchantSession.canManageSettings)
+                      const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
                   ],
                 ],
               ),

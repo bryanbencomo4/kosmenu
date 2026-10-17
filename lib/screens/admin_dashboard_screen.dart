@@ -1232,6 +1232,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Future<void> _refreshBillingGate() async {
+    // Staff without billing access must never see owner paywall / plan prompts.
+    if (!MerchantSession.canManageBilling) {
+      if (!mounted) return;
+      setState(() {
+        _requiresPaymentToPublish = false;
+        _didLoadBillingGate = true;
+      });
+      return;
+    }
     try {
       // If payment completed on Zeno but webhook never arrived, activate now.
       var snap = await const BillingService().loadSnapshot();
@@ -1996,7 +2005,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     onPressed: () =>
                         _openAssistedPublicMenu(dashboardData!.comercio),
                     icon: const Icon(Icons.point_of_sale_rounded, size: 20),
-                    label: const Text('Nuevo pedido'),
+                    label: Text(
+                      MerchantSession.isMesero
+                          ? 'Tomar pedido'
+                          : 'Nuevo pedido',
+                    ),
                   ),
             floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
             body: Row(
@@ -2029,7 +2042,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                           onToggleOnline: _updateBusinessOnline,
                           onOpenNotifications: _openNotificationsSheet,
                           onOpenProfile: _openProfile,
-                          onScanWithAi: _openMagicOnboarding,
+                          onScanWithAi: MerchantSession.canManageCatalog
+                              ? _openMagicOnboarding
+                              : null,
                           showMenuButton: !isWideShell,
                           onOpenMenu: () =>
                               _scaffoldKey.currentState?.openDrawer(),
@@ -2376,10 +2391,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                 _openNotificationsSheet,
                                                             onOpenProfile:
                                                                 _openProfile,
-                                                            hoursCaption: data
-                                                                .schedule
-                                                                .statusAt()
-                                                                .caption,
+                                                            hoursCaption:
+                                                                MerchantSession
+                                                                        .isMesero
+                                                                    ? 'Listo para tomar pedidos asistidos.'
+                                                                    : data
+                                                                        .schedule
+                                                                        .statusAt()
+                                                                        .caption,
                                                             showActions: false,
                                                           ),
                                                           const SizedBox(
@@ -2391,7 +2410,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                               result:
                                                                   _recentCatalogResult!,
                                                             ),
-                                                          if (_didLoadBillingGate &&
+                                                          if (MerchantSession
+                                                                  .canManageBilling &&
+                                                              _didLoadBillingGate &&
                                                               _requiresPaymentToPublish) ...[
                                                             _PublishPaywallBanner(
                                                               onActivate:
