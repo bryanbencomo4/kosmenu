@@ -3,7 +3,7 @@
 import Head from 'next/head';
 import { ArrowRight, ArrowUp, Camera, ChevronDown, Facebook, Flame, ImageIcon, Info, Instagram, Mail, MapPin, Menu, MessageCircle, Music2, Phone, Share2, ShoppingCart, Store, Truck, User, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, usePathname, useRouter } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
 import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
 import type { Country } from 'react-phone-number-input';
@@ -1661,10 +1661,14 @@ export default function PublicMenuPage() {
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
   const [shareMessage, setShareMessage] = useState('');
+  const searchParams = useSearchParams();
+  const isAssistedMode = (searchParams.get('mode') ?? '').trim().toLowerCase() === 'assisted';
   const [clientName, setClientName] = useState('');
   const [clientWhatsappCountry, setClientWhatsappCountry] = useState<Country>('VE');
   const [clientWhatsapp, setClientWhatsapp] = useState('');
   const [clientEmail, setClientEmail] = useState('');
+  const [clientTable, setClientTable] = useState('');
+  const [payLater, setPayLater] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [cashPaymentInput, setCashPaymentInput] = useState('');
@@ -1767,11 +1771,22 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !commerceIdentifier) return;
+    // Waiters skip the home picker and go straight to categories (comer aquí).
+    if (isAssistedMode) {
+      setKioskFulfillment('dine_in');
+      setDeliveryMode('pickup');
+      setCatalogMode(false);
+      window.sessionStorage.setItem(
+        `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
+        'dine_in',
+      );
+      return;
+    }
     const saved = window.sessionStorage.getItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     if (!isKioskFulfillment(saved)) return;
     setKioskFulfillment(saved);
     setDeliveryMode(saved === 'delivery' ? 'delivery' : 'pickup');
-  }, [commerceIdentifier]);
+  }, [commerceIdentifier, isAssistedMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !commerceIdentifier) return;
@@ -2669,9 +2684,17 @@ export default function PublicMenuPage() {
     ? (parsePhoneNumber(normalizedClientWhatsapp)?.formatInternational() ?? normalizedClientWhatsapp)
     : '';
   const normalizedClientEmail = clientEmail.trim().toLowerCase();
+  const normalizedClientTable = clientTable.trim();
   const isClientNameValid = normalizedClientName.length >= 3;
-  const isClientWhatsappValid = normalizedClientWhatsapp.length > 0 && isValidPhoneNumber(normalizedClientWhatsapp);
-  const isClientEmailValid = normalizedClientEmail.length > 0 && emailRegex.test(normalizedClientEmail);
+  const isClientTableValid = !isAssistedMode || normalizedClientTable.length > 0;
+  const isClientWhatsappValid = isAssistedMode
+    ? normalizedClientWhatsapp.length === 0 ||
+      isValidPhoneNumber(normalizedClientWhatsapp) ||
+      normalizePhone(normalizedClientWhatsapp).length >= 10
+    : normalizedClientWhatsapp.length > 0 && isValidPhoneNumber(normalizedClientWhatsapp);
+  const isClientEmailValid = isAssistedMode
+    ? normalizedClientEmail.length === 0 || emailRegex.test(normalizedClientEmail)
+    : normalizedClientEmail.length > 0 && emailRegex.test(normalizedClientEmail);
   const orderSubtotal = cartTotal;
   const businessBaseCurrency = normalizeCurrencyCode(menuData?.comercio.moneda ?? 'COP');
   const businessQuoteCurrencyRaw = (menuData?.comercio.exchange_rate_quote_currency ?? '').toString().trim();
@@ -3281,16 +3304,17 @@ export default function PublicMenuPage() {
     return active.length ? active : source;
   }, [activeCategoryId, formatUpsellPrice, visibleCategorias]);
   const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
+  const clientStepTitle = isAssistedMode ? 'Datos del cliente' : 'Tus datos';
   const checkoutFlowSteps = isDeliveryOrder
     ? [
         { id: 0, title: 'Pedido' },
-        { id: 1, title: 'Tus datos' },
+        { id: 1, title: clientStepTitle },
         { id: 2, title: 'Direccion' },
         { id: 3, title: 'Pago' },
       ]
     : [
         { id: 0, title: 'Pedido' },
-        { id: 1, title: 'Tus datos' },
+        { id: 1, title: clientStepTitle },
         { id: 3, title: 'Pago' },
       ];
   const selectedMethod = selectedPaymentMethod();
@@ -3348,7 +3372,11 @@ export default function PublicMenuPage() {
   );
   const checkoutItemsCount = checkoutSummaryItems.reduce((sum, item) => sum + item.quantity, 0);
   const canGoNextFromStep0 = checkoutItemsCount > 0;
-  const canGoNextFromStep1 = isClientNameValid && isClientWhatsappValid && isClientEmailValid;
+  const canGoNextFromStep1 =
+    isClientNameValid &&
+    isClientTableValid &&
+    isClientWhatsappValid &&
+    isClientEmailValid;
   const canGoNextFromStep2 = isDeliveryReady && !deliveryQuote.blocked;
   const scheduleStatus = useMemo(
     () => resolveBusinessScheduleStatus(menuData?.comercio?.horarios),
@@ -3418,15 +3446,23 @@ export default function PublicMenuPage() {
 
   function selectKioskFulfillment(next: KioskFulfillment) {
     if (scheduleClosed) return;
-    setKioskFulfillment(next);
-    setDeliveryMode(next === 'delivery' ? 'delivery' : 'pickup');
+    // Waiters only serve dine-in at the table.
+    const resolved = isAssistedMode ? 'dine_in' : next;
+    setKioskFulfillment(resolved);
+    setDeliveryMode(resolved === 'delivery' ? 'delivery' : 'pickup');
     setSearchQuery('');
     if (typeof window !== 'undefined' && commerceIdentifier) {
-      window.sessionStorage.setItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`, next);
+      window.sessionStorage.setItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`, resolved);
     }
   }
 
   function resetKioskFulfillment() {
+    if (isAssistedMode) {
+      setKioskFulfillment('dine_in');
+      setDeliveryMode('pickup');
+      setSearchQuery('');
+      return;
+    }
     setKioskFulfillment(null);
     setDeliveryMode('pickup');
     setSearchQuery('');
@@ -3437,6 +3473,11 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (!scheduleClosed) return;
+    if (isAssistedMode) {
+      setKioskFulfillment('dine_in');
+      setDeliveryMode('pickup');
+      return;
+    }
     setKioskFulfillment(null);
     setDeliveryMode('pickup');
     setKioskAddedPrompt(null);
@@ -3445,10 +3486,11 @@ export default function PublicMenuPage() {
     if (typeof window !== 'undefined' && commerceIdentifier) {
       window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     }
-  }, [scheduleClosed, commerceIdentifier]);
+  }, [scheduleClosed, commerceIdentifier, isAssistedMode]);
 
   function enterCatalogMode() {
     if (!kioskHomeConfig.catalogo) return;
+    if (isAssistedMode) return;
     setCatalogMode(true);
     setKioskFulfillment(null);
     setDeliveryMode('pickup');
@@ -3480,9 +3522,10 @@ export default function PublicMenuPage() {
   }
 
   const canSubmitStep3 =
-    ((menuData?.metodosPago.length ?? 0) === 0 ||
+    (isAssistedMode && payLater) ||
+    (((menuData?.metodosPago.length ?? 0) === 0 ||
       (selectedPaymentMethodId !== null && isPaymentReferenceValid && hasPaymentProof)) &&
-    isCashTenderValid;
+      isCashTenderValid);
   const canAdvanceCurrentStep =
     checkoutStep === 0
       ? canGoNextFromStep0
@@ -4410,7 +4453,11 @@ export default function PublicMenuPage() {
       throw new Error('Faltan variables de entorno para guardar tu pedido.');
     }
 
-    const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : 'No especificado';
+    const paymentLabel = paymentMethod
+      ? paymentMethodLabel(paymentMethod)
+      : isAssistedMode && payLater
+        ? 'Pagar despues'
+        : 'No especificado';
     let paymentProofUrl = '';
 
     if (paymentMeta.proofFile) {
@@ -4482,10 +4529,21 @@ export default function PublicMenuPage() {
       opciones: item.selection,
     }));
 
+    const assistedOrderNotes = [
+      kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
+      isAssistedMode && normalizedClientTable ? `Mesa: ${normalizedClientTable}` : '',
+      isAssistedMode && payLater ? 'Pago: despues' : '',
+      normalizedOrderNotes,
+    ]
+      .filter(Boolean)
+      .join('. ');
+
     const detalles = {
       cliente_nombre: customerName,
       cliente_email: email || null,
       telefono_cliente: customerWhatsapp,
+      mesa: isAssistedMode ? normalizedClientTable || null : null,
+      order_source: isAssistedMode ? 'assisted_waiter' : null,
       moneda_checkout: normalizeCurrencyCode(paymentMeta.currency),
       tasa_cambio_snapshot: paymentMeta.exchangeRate,
       exchange_rate_source: paymentMeta.exchangeRateSource,
@@ -4495,16 +4553,13 @@ export default function PublicMenuPage() {
             nombre: paymentLabel,
             datos: paymentMethodDetails(paymentMethod),
           }
-        : null,
+        : isAssistedMode && payLater
+          ? { nombre: 'Pagar despues', datos: [] as string[] }
+          : null,
       referencia_pago: paymentMeta.referenceLast4 || null,
       comprobante_url: paymentProofUrl || null,
       delivery,
-      order_notes: [
-        kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
-        normalizedOrderNotes,
-      ]
-        .filter(Boolean)
-        .join('. '),
+      order_notes: assistedOrderNotes,
       pago_con: isCashPayment && isCashTenderValid && paymentWithAmount !== null ? paymentWithAmount : null,
       cambio_de: isCashPayment && isCashTenderValid ? changeAmount : 0,
       subtotal: orderSubtotal,
@@ -4522,6 +4577,8 @@ export default function PublicMenuPage() {
       clientName: customerName,
       clientWhatsapp: customerWhatsapp,
       clientEmail: email,
+      mesa: isAssistedMode ? normalizedClientTable : undefined,
+      assisted: isAssistedMode || undefined,
       currency: normalizeCurrencyCode(paymentMeta.currency),
       exchangeRate: paymentMeta.exchangeRate,
       costoDelivery: deliveryCost,
@@ -4533,17 +4590,14 @@ export default function PublicMenuPage() {
             nombre: paymentLabel,
             datos: paymentMethodDetails(paymentMethod),
           }
-        : null,
+        : isAssistedMode && payLater
+          ? { nombre: 'Pagar despues', datos: [] as string[] }
+          : null,
       paymentReferenceLast4: paymentMeta.referenceLast4 || null,
       paymentProofUrl: paymentProofUrl || null,
       cashPaymentAmount: isCashPayment && isCashTenderValid && paymentWithAmount !== null ? paymentWithAmount : null,
       cashChangeAmount: isCashPayment && isCashTenderValid ? changeAmount : 0,
-      orderNotes: [
-        kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
-        normalizedOrderNotes,
-      ]
-        .filter(Boolean)
-        .join('. '),
+      orderNotes: assistedOrderNotes,
       detalles,
     };
 
@@ -4761,6 +4815,7 @@ export default function PublicMenuPage() {
       orderSubmitLockRef.current ||
       kioskVoucher !== null ||
       !isClientNameValid ||
+      !isClientTableValid ||
       !isClientWhatsappValid ||
       !isClientEmailValid ||
       !isDeliveryReady ||
@@ -4791,13 +4846,13 @@ export default function PublicMenuPage() {
         normalizedClientEmail,
         normalizedClientName,
         normalizedClientWhatsapp,
-        selectedMethod,
+        isAssistedMode && payLater ? null : selectedMethod,
         {
           currency: selectedCurrencyCode,
           exchangeRate: selectedExchangeRate,
           exchangeRateSource: selectedExchangeSource,
-          referenceLast4: paymentReferenceLast4,
-          proofFile: paymentProofFile,
+          referenceLast4: isAssistedMode && payLater ? '' : paymentReferenceLast4,
+          proofFile: isAssistedMode && payLater ? null : paymentProofFile,
         },
         deliveryPayload,
       );
@@ -4873,6 +4928,8 @@ export default function PublicMenuPage() {
       setClientName('');
       setClientWhatsapp('');
       setClientEmail('');
+      setClientTable('');
+      setPayLater(false);
       setDigitalPaymentReference('');
       setPaymentProofFile(null);
       setPaymentProofError('');
@@ -5472,6 +5529,7 @@ export default function PublicMenuPage() {
           paymentGroups={publicPaymentGroups}
           fulfillment={kioskFulfillment}
           catalogMode={catalogMode}
+          assistedMode={isAssistedMode}
           onSelectFulfillment={selectKioskFulfillment}
           onResetFulfillment={resetKioskFulfillment}
           onEnterCatalog={enterCatalogMode}
@@ -6104,21 +6162,29 @@ export default function PublicMenuPage() {
             currentStepId={checkoutStep}
             title={
               checkoutStep === 0
-                ? 'Tu pedido'
+                ? isAssistedMode
+                  ? 'Pedido en mesa'
+                  : 'Tu pedido'
                 : checkoutStep === 1
-                  ? 'Tus datos'
+                  ? clientStepTitle
                   : checkoutStep === 2
                     ? 'Direccion'
                     : 'Pago'
             }
             subtitle={
               checkoutStep === 0
-                ? 'Revisa cantidades. El tipo de pedido ya esta elegido.'
+                ? isAssistedMode
+                  ? 'Revisa el pedido antes de enviarlo a cocina.'
+                  : 'Revisa cantidades. El tipo de pedido ya esta elegido.'
                 : checkoutStep === 1
-                  ? 'Te avisamos cuando el pedido este listo.'
+                  ? isAssistedMode
+                    ? 'Nombre, mesa y contacto opcional para el resumen.'
+                    : 'Te avisamos cuando el pedido este listo.'
                   : checkoutStep === 2
                     ? 'Indica a donde enviamos tu pedido.'
-                    : 'Elige como vas a pagar.'
+                    : isAssistedMode
+                      ? 'Pagar ahora o dejar el pago para después.'
+                      : 'Elige como vas a pagar.'
             }
             totalLabel={formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
             itemsLabel={`${checkoutItemsCount} unid. · ${selectedCurrencyCode}`}
@@ -6297,12 +6363,95 @@ export default function PublicMenuPage() {
                           Pedido
                         </p>
                         <p className="mt-1 text-base font-black">
-                          {kioskFulfillment ? FULFILLMENT_LABEL[kioskFulfillment] : 'Pedido en local'}
+                          {isAssistedMode
+                            ? 'Comer aquí'
+                            : kioskFulfillment
+                              ? FULFILLMENT_LABEL[kioskFulfillment]
+                              : 'Pedido en local'}
                           {' · '}
                           {checkoutItemsCount} unid.
+                          {isAssistedMode && normalizedClientTable
+                            ? ` · Mesa ${normalizedClientTable}`
+                            : ''}
                         </p>
                       </div>
 
+                      {isAssistedMode ? (
+                        <div className="grid gap-3">
+                          <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
+                            <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                              <User className="h-3.5 w-3.5" strokeWidth={2.4} />
+                              Nombre del cliente
+                            </span>
+                            <input
+                              id="client-full-name"
+                              name="name"
+                              type="text"
+                              value={clientName}
+                              onChange={(event) => setClientName(event.target.value)}
+                              placeholder="Nombre del cliente"
+                              autoComplete="name"
+                              className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                              style={{
+                                borderColor:
+                                  isClientNameValid || clientName.trim().length === 0
+                                    ? 'var(--menu-border)'
+                                    : '#F43F5E',
+                              }}
+                              required
+                            />
+                          </label>
+                          <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
+                            <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                              Número de mesa
+                            </span>
+                            <input
+                              id="client-table"
+                              name="table"
+                              type="text"
+                              value={clientTable}
+                              onChange={(event) => setClientTable(event.target.value)}
+                              placeholder="Ej. 12"
+                              className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                              style={{
+                                borderColor:
+                                  isClientTableValid || clientTable.trim().length === 0
+                                    ? 'var(--menu-border)'
+                                    : '#F43F5E',
+                              }}
+                              required
+                            />
+                          </label>
+                          <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
+                            <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                              <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
+                              WhatsApp o correo (opcional)
+                            </span>
+                            <input
+                              id="client-contact-optional"
+                              type="text"
+                              inputMode="email"
+                              value={clientEmail || clientWhatsapp}
+                              onChange={(event) => {
+                                const value = event.target.value.trim();
+                                if (value.includes('@')) {
+                                  setClientEmail(value);
+                                  setClientWhatsapp('');
+                                } else {
+                                  setClientWhatsapp(value);
+                                  setClientEmail('');
+                                }
+                              }}
+                              placeholder="Para enviar el resumen del pedido"
+                              className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                              style={{ borderColor: 'var(--menu-border)' }}
+                            />
+                            <p className="mt-2 text-[11px] font-medium text-[var(--menu-text-muted)]">
+                              Opcional. Si lo dejas vacío, el pedido igual se registra.
+                            </p>
+                          </label>
+                        </div>
+                      ) : (
                       <div className="grid gap-3 md:grid-cols-2">
                         <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '40ms' }}>
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
@@ -6349,7 +6498,9 @@ export default function PublicMenuPage() {
                           ) : null}
                         </label>
                       </div>
+                      )}
 
+                      {!isAssistedMode ? (
                       <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '140ms' }}>
                         <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                           <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
@@ -6380,6 +6531,7 @@ export default function PublicMenuPage() {
                           />
                         </div>
                       </label>
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -6460,13 +6612,72 @@ export default function PublicMenuPage() {
                           Resumen
                         </p>
                         <p className="mt-1 text-base font-black">
-                          {kioskFulfillment ? FULFILLMENT_LABEL[kioskFulfillment] : 'Pedido en local'}
+                          {isAssistedMode
+                            ? 'Comer aquí'
+                            : kioskFulfillment
+                              ? FULFILLMENT_LABEL[kioskFulfillment]
+                              : 'Pedido en local'}
                         </p>
                         <p className="mt-1 text-sm font-medium text-[var(--menu-text-muted)]">
-                          {normalizedClientName || 'Cliente'} · {checkoutItemsCount} unid.
+                          {normalizedClientName || 'Cliente'}
+                          {isAssistedMode && normalizedClientTable
+                            ? ` · Mesa ${normalizedClientTable}`
+                            : ''}
+                          {' · '}
+                          {checkoutItemsCount} unid.
                         </p>
                       </div>
-                      {checkoutUpsellSuggestions.length > 0 && !preCheckoutUpsellActive ? (
+                      {isAssistedMode ? (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPayLater(false)}
+                            className="min-h-11 flex-1 rounded-xl px-3 text-sm font-bold"
+                            style={
+                              !payLater
+                                ? {
+                                    backgroundColor: 'var(--menu-primary)',
+                                    color: 'var(--menu-on-primary, #fff)',
+                                  }
+                                : {
+                                    backgroundColor: 'var(--menu-surface)',
+                                    color: 'var(--menu-text)',
+                                    boxShadow: 'var(--menu-shadow)',
+                                  }
+                            }
+                          >
+                            Pagar ahora
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPayLater(true);
+                              setSelectedPaymentMethodId(null);
+                            }}
+                            className="min-h-11 flex-1 rounded-xl px-3 text-sm font-bold"
+                            style={
+                              payLater
+                                ? {
+                                    backgroundColor: 'var(--menu-primary)',
+                                    color: 'var(--menu-on-primary, #fff)',
+                                  }
+                                : {
+                                    backgroundColor: 'var(--menu-surface)',
+                                    color: 'var(--menu-text)',
+                                    boxShadow: 'var(--menu-shadow)',
+                                  }
+                            }
+                          >
+                            Pagar después
+                          </button>
+                        </div>
+                      ) : null}
+                      {isAssistedMode && payLater ? (
+                        <div className="rounded-[22px] bg-[var(--menu-surface)] p-4 text-sm font-medium text-[var(--menu-text-muted)] shadow-[var(--menu-shadow)]">
+                          El pedido se registra sin cobrar ahora. Puedes cobrar en mesa después.
+                        </div>
+                      ) : null}
+                      {(!isAssistedMode || !payLater) && checkoutUpsellSuggestions.length > 0 && !preCheckoutUpsellActive ? (
                         <div className="checkout-item-enter">
                           <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
                             Antes de terminar
@@ -6480,11 +6691,13 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
+                      {(!isAssistedMode || !payLater) ? (
                       <p className="checkout-item-enter text-[11px] font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
                         Como vas a pagar
                       </p>
+                      ) : null}
 
-                      {kioskCurrencyOptions.length > 1 ? (
+                      {(!isAssistedMode || !payLater) && kioskCurrencyOptions.length > 1 ? (
                         <div
                           className="checkout-item-enter rounded-[18px] bg-[var(--menu-surface)] p-3 shadow-[var(--menu-shadow)]"
                           role="group"
@@ -6523,7 +6736,8 @@ export default function PublicMenuPage() {
                         </div>
                       ) : null}
 
-                      {selectedCurrencyGroup?.methods.length ? (
+                      {(!isAssistedMode || !payLater) ? (
+                      selectedCurrencyGroup?.methods.length ? (
                         <div className="space-y-2">
                           {selectedCurrencyGroup.methods.map((method, index) => {
                             const isSelected = selectedPaymentMethodId === method.id;
@@ -6563,9 +6777,10 @@ export default function PublicMenuPage() {
                         <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-3 text-sm text-[var(--menu-text-muted)] shadow-[var(--menu-shadow)]">
                           Este comercio no tiene metodos de pago configurados.
                         </div>
-                      )}
+                      )
+                      ) : null}
 
-                      {isCashPayment ? (
+                      {(!isAssistedMode || !payLater) && isCashPayment ? (
                         <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
                           <label className="block">
                             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">

@@ -53,6 +53,8 @@ type KioskMenuExperienceProps = {
   }>;
   fulfillment: KioskFulfillment | null;
   catalogMode?: boolean;
+  /** Waiter mode: skip home picker, stay on dine-in categories. */
+  assistedMode?: boolean;
   onSelectFulfillment: (fulfillment: KioskFulfillment) => void;
   onResetFulfillment: () => void;
   onEnterCatalog: () => void;
@@ -98,6 +100,7 @@ export function KioskMenuExperience({
   paymentGroups = [],
   fulfillment,
   catalogMode = false,
+  assistedMode = false,
   onSelectFulfillment,
   onResetFulfillment,
   onEnterCatalog,
@@ -127,13 +130,16 @@ export function KioskMenuExperience({
 }: KioskMenuExperienceProps) {
   const browseOnly = !catalogMode && (!fulfillment || !isOpen);
   useLockBodyScroll(Boolean(addedPrompt && !browseOnly));
-  const [screen, setScreen] = useState<KioskScreen>(fulfillment ? 'categories' : 'home');
+  const [screen, setScreen] = useState<KioskScreen>(
+    assistedMode || fulfillment ? 'categories' : 'home',
+  );
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!fulfillment) return;
-    setScreen((current) => (current === 'home' ? 'categories' : current));
-  }, [fulfillment]);
+    if (assistedMode || fulfillment) {
+      setScreen((current) => (current === 'home' ? 'categories' : current));
+    }
+  }, [assistedMode, fulfillment]);
 
   useEffect(() => {
     const whatsappUrl = voucher?.whatsappUrl?.trim();
@@ -211,7 +217,7 @@ export function KioskMenuExperience({
     );
   }
 
-  if (!fulfillment && screen === 'home') {
+  if (!assistedMode && !fulfillment && screen === 'home') {
     return (
       <div className="relative flex h-[100svh] max-h-[100svh] flex-col overflow-hidden bg-[var(--menu-background)] text-[var(--menu-text)]">
         <div className={stickyChromeClass}>{topBar}</div>
@@ -269,6 +275,12 @@ export function KioskMenuExperience({
             onClick={() => {
               onSearchChange('');
               if (screen === 'products') {
+                setScreen('categories');
+                setActiveCategoryId(null);
+                return;
+              }
+              // Waiters stay in categories (no home with delivery / para llevar).
+              if (assistedMode) {
                 setScreen('categories');
                 setActiveCategoryId(null);
                 return;

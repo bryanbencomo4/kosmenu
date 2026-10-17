@@ -94,6 +94,8 @@ type CreateOrderPayload = {
   clientWhatsapp?: string;
   /** Table number for dine-in / waiter-assisted orders. */
   mesa?: string;
+  /** Waiter-assisted checkout from the public menu (?mode=assisted). */
+  assisted?: boolean;
   currency?: string;
   exchangeRate?: number;
   comercioNombre?: string;
@@ -294,11 +296,17 @@ async function postOrder(request: Request): Promise<NextResponse> {
     const rawExchangeRate = Number(body.exchangeRate ?? incomingDetalles.tasa_cambio_snapshot);
     const rawCostDelivery = Number(body.costoDelivery ?? incomingDetalles.costo_delivery ?? 0);
     const rawDelivery = normalizeDelivery(body.delivery ?? incomingDetalles.delivery);
-    // Waiter-assisted checkout may omit phone; placeholder satisfies schema until staff is verified.
+    // Waiter-assisted checkout may omit phone; placeholder satisfies schema until verified.
     const staffUserEarly = await getUserFromBearerRequest(request);
     const ASSISTED_PHONE_PLACEHOLDER = '0000000000';
+    const assistedFlag = body.assisted === true || incomingDetalles.order_source === 'assisted_waiter';
+    const assistedDineIn =
+      assistedFlag &&
+      rawMesa.length > 0 &&
+      (rawDelivery.mode === 'pickup' || !rawDelivery.mode);
     const optionalAssistedPhone =
-      Boolean(staffUserEarly?.id) && rawClientWhatsapp.length < 10;
+      rawClientWhatsapp.length < 10 &&
+      (Boolean(staffUserEarly?.id) || assistedDineIn);
     const phoneForValidation = optionalAssistedPhone
       ? ASSISTED_PHONE_PLACEHOLDER
       : rawClientWhatsapp;
@@ -627,7 +635,7 @@ async function postOrder(request: Request): Promise<NextResponse> {
         ? await userCanOperateComercio(staffUser.id, resolvedComercioId)
         : false;
 
-    if (optionalAssistedPhone && !staffAssisted) {
+    if (optionalAssistedPhone && !staffAssisted && !assistedDineIn) {
       return NextResponse.json(
         {
           error: 'Bad Request',
@@ -641,11 +649,11 @@ async function postOrder(request: Request): Promise<NextResponse> {
         { status: 400 },
       );
     }
-    if (optionalAssistedPhone && staffAssisted) {
+    if (optionalAssistedPhone && (staffAssisted || assistedDineIn)) {
       clientWhatsapp = '';
     }
     // Waiters only take dine-in ("comer aquí") — never delivery.
-    if (staffAssisted && delivery.mode === 'delivery') {
+    if ((staffAssisted || assistedDineIn) && delivery.mode === 'delivery') {
       delivery = { mode: 'pickup' };
       costoDelivery = 0;
       total = subtotal;
@@ -702,7 +710,7 @@ async function postOrder(request: Request): Promise<NextResponse> {
       cliente_email: clientEmail || null,
       telefono_cliente: clientWhatsapp,
       mesa: rawMesa || null,
-      order_source: staffAssisted ? 'assisted_waiter' : null,
+      order_source: staffAssisted || assistedDineIn ? 'assisted_waiter' : null,
       moneda_base: baseCurrency,
       moneda_checkout: currency,
       tasa_cambio_snapshot: exchangeRate,

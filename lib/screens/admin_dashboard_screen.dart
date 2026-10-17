@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -901,44 +902,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Future<void> _openAssistedPublicMenu(ComercioModel comercio) async {
-    final slug = comercio.slug?.trim();
-    final identifier = (slug != null && slug.isNotEmpty)
-        ? slug
-        : comercio.id.trim();
-    if (identifier.isEmpty) {
+    // Same Next.js public menu clients use (elmenuxfa.com/v/...), with waiter mode.
+    final baseUrl = _buildPublicUrl(comercio).trim();
+    if (baseUrl.isEmpty) {
       _showInfo('No hay una URL pública disponible para este comercio.');
       return;
     }
-
-    // Stay inside the same Flutter app (mobile + app.elmenuxfa.com).
-    final routeName =
-        '/v/${Uri.encodeComponent(identifier)}?mode=assisted&source=dashboard';
-    try {
-      await Navigator.of(context, rootNavigator: true).pushNamed(routeName);
-    } catch (_) {
-      // Fallback: open public site if in-app route is unavailable.
-      final baseUrl = _buildPublicUrl(comercio).trim();
-      if (baseUrl.isEmpty) {
-        if (mounted) {
-          _showInfo('No se pudo abrir el menú de venta asistida.');
-        }
-        return;
-      }
-      final uri = Uri.parse(baseUrl);
-      final assistedUri = uri.replace(
-        queryParameters: <String, String>{
-          ...uri.queryParameters,
-          'mode': 'assisted',
-          'source': 'dashboard',
-        },
-      );
-      final launched = await launchUrl(
-        assistedUri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!launched && mounted) {
-        _showInfo('No se pudo abrir el menú de venta asistida.');
-      }
+    final uri = Uri.parse(baseUrl);
+    final assistedUri = uri.replace(
+      queryParameters: <String, String>{
+        ...uri.queryParameters,
+        'mode': 'assisted',
+        'source': 'dashboard',
+      },
+    );
+    final launched = await launchUrl(
+      assistedUri,
+      mode: kIsWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.inAppBrowserView,
+    );
+    if (!launched && mounted) {
+      _showInfo('No se pudo abrir el menú de venta asistida.');
     }
   }
 
