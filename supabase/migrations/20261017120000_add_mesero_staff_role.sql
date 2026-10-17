@@ -15,6 +15,8 @@ alter table public.comercio_member_invites
   add constraint comercio_member_invites_role_check
   check (role in ('administrador', 'caja', 'cocina', 'marketing', 'mesero'));
 
+create extension if not exists pgcrypto with schema extensions;
+
 create or replace function public.invite_comercio_member(
   p_comercio_id uuid,
   p_email text,
@@ -23,13 +25,14 @@ create or replace function public.invite_comercio_member(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_email text := lower(trim(coalesce(p_email, '')));
   v_role text := lower(trim(coalesce(p_role, '')));
   v_existing uuid;
   v_invite public.comercio_member_invites;
+  v_token text := encode(extensions.gen_random_bytes(24), 'hex');
 begin
   if auth.uid() is null then
     raise exception 'not authenticated';
@@ -79,7 +82,7 @@ begin
 
   update public.comercio_member_invites
   set role = v_role,
-      token = encode(gen_random_bytes(24), 'hex'),
+      token = v_token,
       status = 'pending',
       invited_by = auth.uid(),
       accepted_at = null
@@ -96,7 +99,7 @@ begin
       p_comercio_id,
       v_email,
       v_role,
-      encode(gen_random_bytes(24), 'hex'),
+      v_token,
       auth.uid(),
       'pending'
     )
