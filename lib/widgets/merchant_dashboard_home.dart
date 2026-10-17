@@ -760,6 +760,7 @@ class MerchantQuickActions extends StatelessWidget {
     required this.onShareQr,
     required this.onImprovePhotos,
     required this.onConfigureHours,
+    this.onTakeAssistedOrder,
   });
 
   final VoidCallback onAddProduct;
@@ -767,11 +768,20 @@ class MerchantQuickActions extends StatelessWidget {
   final VoidCallback onShareQr;
   final VoidCallback onImprovePhotos;
   final VoidCallback onConfigureHours;
+  final VoidCallback? onTakeAssistedOrder;
 
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.sizeOf(context).width < 720;
     final actions = <_QuickActionData>[
+      if (onTakeAssistedOrder != null && MerchantSession.canTakeAssistedOrders)
+        _QuickActionData(
+          title: MerchantSession.isMesero ? 'Tomar pedido' : 'Nuevo pedido',
+          icon: Icons.point_of_sale_rounded,
+          color: const Color(0xFF6D28D9),
+          background: const Color(0xFFEDE9FE),
+          onTap: onTakeAssistedOrder!,
+        ),
       if (MerchantSession.canManageCatalog)
         _QuickActionData(
           title: 'Agregar producto',

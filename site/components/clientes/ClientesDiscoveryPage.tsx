@@ -359,11 +359,11 @@ function CardMediaImage({
   priority?: boolean;
 }) {
   if (slide.kind === 'logo') {
-    // Blur fill behind; foreground logo stays a smaller centered square so
-    // square logo files aren't cropped by the 16:10 frame.
+    // Blur fill behind. Foreground must be a true square: a 16:10 % box leaves
+    // square logo PNGs with sharp corners floating inside a wider frame.
     const logoFrame = forceRow
-      ? 'h-[78%] w-[78%] max-h-[3.35rem] max-w-[3.35rem] rounded-[0.65rem]'
-      : 'h-[68%] w-[68%] max-h-[8.75rem] max-w-[8.75rem] rounded-2xl sm:h-[70%] sm:w-[70%] sm:max-h-[9.5rem] sm:max-w-[9.5rem] sm:rounded-[1.15rem]';
+      ? 'aspect-square w-[78%] max-w-[3.35rem] rounded-[0.65rem]'
+      : 'aspect-square w-[52%] max-w-[8.75rem] rounded-2xl sm:w-[48%] sm:max-w-[9.25rem] sm:rounded-[1.15rem]';
     return (
       <div className="absolute inset-0 overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -377,13 +377,15 @@ function CardMediaImage({
           className="pointer-events-none absolute inset-0 h-full w-full scale-[1.35] object-cover blur-2xl"
         />
         <div className="absolute inset-0 bg-slate-900/10" aria-hidden />
-        <div className="absolute inset-0 grid place-items-center">
-          <div className={`relative overflow-hidden shadow-sm ${logoFrame}`}>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div
+            className={`relative isolate overflow-hidden bg-white/90 shadow-sm ring-1 ring-black/5 ${logoFrame}`}
+          >
             <FadeInMediaImage
               src={slide.imageUrl}
               priority={priority}
               tone="light"
-              className="absolute inset-0 h-full w-full object-contain"
+              className="absolute inset-0 h-full w-full rounded-[inherit] object-contain"
             />
           </div>
         </div>

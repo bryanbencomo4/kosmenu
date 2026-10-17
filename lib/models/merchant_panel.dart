@@ -231,7 +231,7 @@ class AiCreditTransaction {
   }
 }
 
-enum MerchantStaffRole { administrador, caja, cocina, marketing }
+enum MerchantStaffRole { administrador, caja, cocina, marketing, mesero }
 
 extension MerchantStaffRoleUi on MerchantStaffRole {
   String get label {
@@ -244,6 +244,8 @@ extension MerchantStaffRoleUi on MerchantStaffRole {
         return 'Cocina';
       case MerchantStaffRole.marketing:
         return 'Marketing';
+      case MerchantStaffRole.mesero:
+        return 'Mesero';
     }
   }
 
@@ -257,6 +259,8 @@ extension MerchantStaffRoleUi on MerchantStaffRole {
         return 'Pedidos';
       case MerchantStaffRole.marketing:
         return 'Herramientas de venta y estadísticas';
+      case MerchantStaffRole.mesero:
+        return 'Solo tomar pedidos asistidos';
     }
   }
 
@@ -268,8 +272,15 @@ extension MerchantStaffRoleUi on MerchantStaffRole {
         return MerchantStaffRole.cocina;
       case 'marketing':
         return MerchantStaffRole.marketing;
-      default:
+      case 'mesero':
+        return MerchantStaffRole.mesero;
+      case 'administrador':
+      case 'admin':
+      case 'owner':
         return MerchantStaffRole.administrador;
+      default:
+        // Unknown future roles stay least-privileged (not admin).
+        return MerchantStaffRole.mesero;
     }
   }
 }

@@ -125,10 +125,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     _DashboardSnapshot? dashboardData,
     double screenWidth,
   ) {
-    return dashboardData != null &&
-        screenWidth < 720 &&
-        _selectedNav == MerchantNavDestination.home &&
-        !_shellHasPushedRoute;
+    if (dashboardData == null ||
+        _selectedNav != MerchantNavDestination.home ||
+        _shellHasPushedRoute) {
+      return false;
+    }
+    // Mesero: always show (phone + tablet/web) — it's their only job.
+    if (MerchantSession.isMesero) return true;
+    // Existing restaurants: keep the mobile FAB for every staff role.
+    return screenWidth < 720;
   }
 
   @override
@@ -896,28 +901,44 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Future<void> _openAssistedPublicMenu(ComercioModel comercio) async {
-    final baseUrl = _buildPublicUrl(comercio).trim();
-    if (baseUrl.isEmpty) {
+    final slug = comercio.slug?.trim();
+    final identifier = (slug != null && slug.isNotEmpty)
+        ? slug
+        : comercio.id.trim();
+    if (identifier.isEmpty) {
       _showInfo('No hay una URL pública disponible para este comercio.');
       return;
     }
 
-    final uri = Uri.parse(baseUrl);
-    final assistedUri = uri.replace(
-      queryParameters: <String, String>{
-        ...uri.queryParameters,
-        'mode': 'assisted',
-        'source': 'dashboard',
-      },
-    );
-
-    final launched = await launchUrl(
-      assistedUri,
-      mode: LaunchMode.externalApplication,
-    );
-
-    if (!launched && mounted) {
-      _showInfo('No se pudo abrir el menú de venta asistida.');
+    // Stay inside the same Flutter app (mobile + app.elmenuxfa.com).
+    final routeName =
+        '/v/${Uri.encodeComponent(identifier)}?mode=assisted&source=dashboard';
+    try {
+      await Navigator.of(context, rootNavigator: true).pushNamed(routeName);
+    } catch (_) {
+      // Fallback: open public site if in-app route is unavailable.
+      final baseUrl = _buildPublicUrl(comercio).trim();
+      if (baseUrl.isEmpty) {
+        if (mounted) {
+          _showInfo('No se pudo abrir el menú de venta asistida.');
+        }
+        return;
+      }
+      final uri = Uri.parse(baseUrl);
+      final assistedUri = uri.replace(
+        queryParameters: <String, String>{
+          ...uri.queryParameters,
+          'mode': 'assisted',
+          'source': 'dashboard',
+        },
+      );
+      final launched = await launchUrl(
+        assistedUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        _showInfo('No se pudo abrir el menú de venta asistida.');
+      }
     }
   }
 
@@ -2380,19 +2401,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                               height: 16,
                                                             ),
                                                           ],
-                                                          _DashboardKpiGrid(
-                                                            cards: kpiCards,
-                                                            columns: isDesktop
-                                                                ? 4
-                                                                : 2,
-                                                            useVerticalLayout:
-                                                                isMobile,
-                                                          ),
-                                                          SizedBox(
-                                                            height: isDesktop
-                                                                ? 18
-                                                                : 14,
-                                                          ),
+                                                          if (!MerchantSession
+                                                              .isMesero) ...[
+                                                            _DashboardKpiGrid(
+                                                              cards: kpiCards,
+                                                              columns: isDesktop
+                                                                  ? 4
+                                                                  : 2,
+                                                              useVerticalLayout:
+                                                                  isMobile,
+                                                            ),
+                                                            SizedBox(
+                                                              height: isDesktop
+                                                                  ? 18
+                                                                  : 14,
+                                                            ),
+                                                          ],
                                                           MerchantQuickActions(
                                                             onAddProduct:
                                                                 _openAddProduct,
@@ -2415,13 +2439,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                 () => _openHours(
                                                                   data.schedule,
                                                                 ),
+                                                            onTakeAssistedOrder:
+                                                                () => _openAssistedPublicMenu(
+                                                                  data.comercio,
+                                                                ),
                                                           ),
-                                                          SizedBox(
-                                                            height: isDesktop
-                                                                ? 18
-                                                                : 14,
-                                                          ),
-                                                          if (isDesktop)
+                                                          if (!MerchantSession
+                                                              .isMesero)
+                                                            const SizedBox(
+                                                              height: 14,
+                                                            ),
+                                                          if (!MerchantSession
+                                                                  .isMesero &&
+                                                              isDesktop)
                                                             Row(
                                                               crossAxisAlignment:
                                                                   CrossAxisAlignment
@@ -2749,7 +2779,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                 ],
                                                               ],
                                                             )
-                                                          else ...[
+                                                          else if (!MerchantSession
+                                                              .isMesero) ...[
                                                             MerchantSmartMenuCard(
                                                               publicUrl:
                                                                   publicUrl,

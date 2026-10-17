@@ -995,7 +995,7 @@ class MerchantSettingsHub extends StatelessWidget {
           (
             icon: Icons.group_outlined,
             title: 'Usuarios',
-            subtitle: 'Invita caja, cocina o marketing',
+            subtitle: 'Invita caja, cocina, marketing o mesero',
             onTap: onOpenUsers,
           ),
           (

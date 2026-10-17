@@ -195,7 +195,23 @@ void main() {
     expect(MerchantSession.canManageStaff, isFalse);
     expect(MerchantSession.canOpen(MerchantNavDestination.digitalMenu), isTrue);
 
+    MerchantSession.set(role: MerchantStaffRole.mesero, isOwner: false);
+    expect(MerchantSession.isMesero, isTrue);
+    expect(MerchantSession.canTakeAssistedOrders, isTrue);
+    expect(MerchantSession.canManageCatalog, isFalse);
+    expect(MerchantSession.canManageStaff, isFalse);
+    expect(MerchantSession.canSeeClients, isFalse);
+    expect(MerchantSession.canSeeSalesKpis, isFalse);
+    expect(MerchantSession.canOpen(MerchantNavDestination.home), isTrue);
+    expect(MerchantSession.canOpen(MerchantNavDestination.orders), isFalse);
+    expect(MerchantSession.canOpen(MerchantNavDestination.settings), isFalse);
+    expect(MerchantSession.canOpen(MerchantNavDestination.products), isFalse);
+
+    expect(MerchantStaffRoleUi.fromRaw('mesero'), MerchantStaffRole.mesero);
+    expect(MerchantStaffRoleUi.fromRaw('mesero').hint, contains('asistidos'));
+
     MerchantSession.clear();
     expect(MerchantSession.canManageCatalog, isTrue);
+    expect(MerchantSession.canTakeAssistedOrders, isTrue);
   });
 }
