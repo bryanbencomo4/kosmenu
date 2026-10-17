@@ -89,9 +89,7 @@ export async function POST(request: Request) {
       },
     });
 
-    let userId = created.data.user?.id ?? '';
-
-    if (created.error || !userId) {
+    if (created.error || !created.data.user?.id) {
       const message = (created.error?.message ?? '').toLowerCase();
       const already =
         message.includes('already') ||
@@ -118,6 +116,8 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+
+    const userId = created.data.user.id;
 
     const { data: owned } = await supabase
       .from('comercios')
