@@ -5,7 +5,7 @@ class WhatsappOrderFormatSelector extends StatelessWidget {
     super.key,
     this.value,
     this.onChanged,
-    this.managementMode = 'platform',
+    this.managementMode = 'whatsapp_manual',
     this.onManagementModeChanged,
     this.showManagementMode = false,
     required this.titleColor,

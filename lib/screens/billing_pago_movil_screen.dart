@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/payment_catalog.dart';
+import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/payment_method_mark.dart';
 
 class BillingPagoMovilScreen extends StatefulWidget {
@@ -15,12 +17,19 @@ class BillingPagoMovilScreen extends StatefulWidget {
     required this.plan,
     required this.bcvRate,
     this.hasPendingSubmission = false,
+    this.planCode = 'menu_monthly',
+    this.months = 1,
+    this.chargeUsd,
   });
 
   final PaymentMethodCatalog method;
   final BillingPlan? plan;
   final double? bcvRate;
   final bool hasPendingSubmission;
+  final String planCode;
+  final int months;
+  /// Total the merchant should transfer (plan + kit extras).
+  final double? chargeUsd;
 
   @override
   State<BillingPagoMovilScreen> createState() => _BillingPagoMovilScreenState();
@@ -28,10 +37,14 @@ class BillingPagoMovilScreen extends StatefulWidget {
 
 class _BillingPagoMovilScreenState extends State<BillingPagoMovilScreen> {
   final _billing = const BillingService();
+  final _webCamera = const WebCameraHandoffService();
   final _reference = TextEditingController();
   final _focus = FocusNode();
   bool _submitting = false;
+  bool _uploading = false;
   String? _error;
+  String? _receiptPath;
+  String? _receiptLabel;
   late PaymentMethodCatalog _method;
 
   @override
@@ -62,7 +75,7 @@ class _BillingPagoMovilScreenState extends State<BillingPagoMovilScreen> {
   }
 
   double get _usd {
-    return widget.plan?.priceAmount ?? 10;
+    return widget.chargeUsd ?? widget.plan?.priceAmount ?? 10;
   }
 
   double? get _ves {
@@ -77,15 +90,105 @@ class _BillingPagoMovilScreenState extends State<BillingPagoMovilScreen> {
     ).showSnackBar(const SnackBar(content: Text('Dato copiado.')));
   }
 
+  Future<void> _uploadReceiptBytes({
+    required Uint8List bytes,
+    required String name,
+    required String mime,
+  }) async {
+    setState(() {
+      _error = null;
+      _uploading = true;
+    });
+    try {
+      final path = await _billing.uploadSubscriptionReceipt(
+        bytes: bytes,
+        fileName: name,
+        mimeType: mime,
+      );
+      if (!mounted) return;
+      setState(() {
+        _receiptPath = path;
+        _receiptLabel = name;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error'.replaceFirst('Bad state: ', ''));
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _pickReceiptFromCamera() async {
+    if (_uploading || _submitting) return;
+    setState(() => _error = null);
+    if (!mounted) return;
+
+    final shot = await _webCamera.pickCameraImage(
+      context,
+      feature: 'billing_receipt',
+      waitingTitle: 'Toma la foto del comprobante desde tu celular',
+      waitingSubtitle:
+          'Escanea el código con tu teléfono y la cargaremos aquí en cuanto la subas.',
+      imageQuality: 85,
+      maxWidth: 1600,
+    );
+    if (shot == null || !mounted) return;
+
+    final bytes = await shot.readAsBytes();
+    if (!mounted) return;
+    await _uploadReceiptBytes(
+      bytes: bytes,
+      name: shot.name.isEmpty ? 'comprobante.jpg' : shot.name,
+      mime: shot.mimeType?.trim().isNotEmpty == true
+          ? shot.mimeType!
+          : _mimeForName(shot.name),
+    );
+  }
+
+  Future<void> _pickReceiptFromFile() async {
+    if (_uploading || _submitting) return;
+    setState(() => _error = null);
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const <String>[
+          'jpg',
+          'jpeg',
+          'png',
+          'webp',
+          'pdf',
+        ],
+        withData: true,
+      );
+      final file = picked?.files.single;
+      if (file == null) return;
+      final data = file.bytes;
+      if (data == null) {
+        throw StateError('No se pudo leer el archivo. Intenta con otro.');
+      }
+      if (!mounted) return;
+      await _uploadReceiptBytes(
+        bytes: data,
+        name: file.name,
+        mime: _mimeForName(file.name),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error'.replaceFirst('Bad state: ', ''));
+    }
+  }
+
   Future<void> _submit() async {
-    if (_submitting || widget.hasPendingSubmission) return;
+    if (_submitting || _uploading || widget.hasPendingSubmission) return;
     final tail = normalizePagoMovilReferenceTail(_reference.text);
     final ves = _ves;
     final draft = ManualPaymentDraft(
-      months: 1,
+      months: widget.months,
+      planCode: widget.planCode,
       reference: tail,
       declaredAmount: ves,
       declaredCurrency: 'VES',
+      receiptPath: _receiptPath,
     );
     final validation = validateManualPaymentDraft(
       method: _method,
@@ -117,6 +220,8 @@ class _BillingPagoMovilScreenState extends State<BillingPagoMovilScreen> {
     final method = _method;
     final ves = _ves;
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final receiptMissing = method.requiresReceipt &&
+        (_receiptPath == null || _receiptPath!.isEmpty);
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -142,7 +247,7 @@ class _BillingPagoMovilScreenState extends State<BillingPagoMovilScreen> {
                           const SizedBox(width: 14),
                           Expanded(
                             child: Text(
-                              'Transfiere el monto exacto y confirma con los últimos 4 dígitos.',
+                              'Transfiere el monto exacto, sube el comprobante y confirma con los últimos 4 dígitos.',
                               style: GoogleFonts.manrope(
                                 color: AppColors.textSoft,
                                 height: 1.4,
@@ -266,7 +371,7 @@ class _BillingPagoMovilScreenState extends State<BillingPagoMovilScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Aparecen en el comprobante de Pago Móvil. Con eso confirmamos el pago automáticamente.',
+                        'Aparecen en el comprobante de Pago Móvil. Los usamos junto con el comprobante para verificar tu pago.',
                         style: GoogleFonts.manrope(
                           color: AppColors.textSoft,
                           height: 1.4,
@@ -309,6 +414,79 @@ class _BillingPagoMovilScreenState extends State<BillingPagoMovilScreen> {
                         },
                         onSubmitted: (_) => _submit(),
                       ),
+                      if (method.requiresReceipt) ...[
+                        const SizedBox(height: 22),
+                        Text(
+                          'Comprobante',
+                          style: GoogleFonts.manrope(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Sube la captura o el PDF del Pago Móvil. Es obligatorio para verificar el pago.',
+                          style: GoogleFonts.manrope(
+                            color: AppColors.textSoft,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (_receiptLabel != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Text(
+                              'Listo: $_receiptLabel',
+                              style: GoogleFonts.manrope(
+                                color: AppColors.success,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed:
+                                    _uploading ? null : _pickReceiptFromFile,
+                                icon: _uploading
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.attach_file_rounded),
+                                label: Text(
+                                  _uploading ? 'Subiendo…' : 'Galería o PDF',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _uploading
+                                    ? null
+                                    : _pickReceiptFromCamera,
+                                icon: const Icon(Icons.photo_camera_outlined),
+                                label: const Text('Cámara'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (receiptMissing && _error != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Obligatorio para continuar.',
+                            style: GoogleFonts.manrope(
+                              color: AppColors.danger,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ],
                       if (_error != null) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -343,6 +521,7 @@ class _BillingPagoMovilScreenState extends State<BillingPagoMovilScreen> {
                   child: FilledButton(
                     onPressed:
                         _submitting ||
+                            _uploading ||
                             widget.hasPendingSubmission ||
                             ves == null ||
                             method.accountFields.isEmpty
@@ -439,4 +618,12 @@ class _CopyRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String _mimeForName(String name) {
+  final lower = name.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  return 'image/jpeg';
 }

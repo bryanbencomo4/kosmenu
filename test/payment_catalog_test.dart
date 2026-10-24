@@ -21,7 +21,7 @@ void main() {
       expect(methods.any((item) => item.code == 'bancolombia'), isFalse);
     });
 
-    test('un metodo manual con cuenta lista si aparece', () {
+    test('un metodo manual con cuenta lista no entra al checkout general', () {
       final bancolombia = fallbackPaymentMethods().firstWhere(
         (item) => item.code == 'bancolombia',
       );
@@ -73,39 +73,46 @@ void main() {
       );
     });
 
-    test('es checkout automatico y no pide comprobante', () {
+    test('es revision manual con comprobante y sigue en checkout', () {
       expect(pagoMovil.isPagoMovil, isTrue);
-      expect(pagoMovil.isAutomatedCheckout, isTrue);
-      expect(pagoMovil.requiresReceipt, isFalse);
+      expect(pagoMovil.isAutomatedCheckout, isFalse);
+      expect(pagoMovil.requiresReceipt, isTrue);
       expect(pagoMovil.isReadyForCheckout, isTrue);
+      expect(
+        checkoutPaymentMethods([pagoMovil]).map((item) => item.code),
+        ['pago_movil'],
+      );
     });
 
-    test('exige exactamente 4 digitos de referencia', () {
+    test('exige referencia y comprobante', () {
       expect(
         validateManualPaymentDraft(
           method: pagoMovil,
           draft: const ManualPaymentDraft(),
         ),
-        contains('4 dígitos'),
+        contains('referencia'),
       );
       expect(
         validateManualPaymentDraft(
           method: pagoMovil,
           draft: const ManualPaymentDraft(reference: '875'),
         ),
-        contains('4 dígitos'),
-      );
-      expect(
-        validateManualPaymentDraft(
-          method: pagoMovil,
-          draft: const ManualPaymentDraft(reference: '001122'),
-        ),
-        contains('4 dígitos'),
+        contains('referencia'),
       );
       expect(
         validateManualPaymentDraft(
           method: pagoMovil,
           draft: const ManualPaymentDraft(reference: '8754'),
+        ),
+        contains('comprobante'),
+      );
+      expect(
+        validateManualPaymentDraft(
+          method: pagoMovil,
+          draft: const ManualPaymentDraft(
+            reference: '0011223344',
+            receiptPath: 'biz/file.jpg',
+          ),
         ),
         isNull,
       );

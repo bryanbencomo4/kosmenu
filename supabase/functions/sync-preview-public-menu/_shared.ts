@@ -34,6 +34,7 @@ const PUBLIC_COMMERCE_FIELDS = [
   'horarios',
   'categoria',
   'negocio_virtual',
+  'estados_operacion',
   'mostrar_en_directorio_publico',
 ] as const;
 

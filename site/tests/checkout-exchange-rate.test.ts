@@ -265,6 +265,48 @@ describe('derivedExchangeRateForCurrency', () => {
 
     expect(rate).toBeCloseTo((1100 * 1.006) / 3257.79, 5);
   });
+
+  it('uses official BCV EUR (not a USD cross) for USD/VES when source is bcv_eur', () => {
+    const rate = derivedExchangeRateForCurrency('USD', 'VES', 'bcv_eur', {
+      bcv_rate: 886.23,
+      p2p_binance_rate: null,
+      payload: {
+        bcv_rates: { USD: 886.23, EUR: 993.08836371 },
+        google_rates: { 'USD/EUR': 0.891 },
+      },
+    });
+
+    expect(rate).toBeCloseTo(993.08836371, 5);
+    expect(rate).not.toBeCloseTo(886.23, 0);
+    // Regression: old bug multiplied EUR * USD/EUR ≈ USD.
+    expect(rate).not.toBeCloseTo(993.08836371 * 0.891, 0);
+  });
+
+  it('uses official BCV EUR for EUR/VES when source is bcv_eur', () => {
+    const rate = derivedExchangeRateForCurrency('EUR', 'VES', 'bcv_eur', {
+      bcv_rate: 886.23,
+      p2p_binance_rate: null,
+      payload: {
+        bcv_rates: { USD: 886.23, EUR: 993.08836371 },
+        google_rates: { 'USD/EUR': 0.891 },
+      },
+    });
+
+    expect(rate).toBeCloseTo(993.08836371, 5);
+  });
+
+  it('uses official BCV USD for USD/VES when source is bcv_usd', () => {
+    const rate = derivedExchangeRateForCurrency('USD', 'VES', 'bcv_usd', {
+      bcv_rate: 886.23,
+      p2p_binance_rate: null,
+      payload: {
+        bcv_rates: { USD: 886.23, EUR: 993.08836371 },
+        google_rates: { 'USD/EUR': 0.891 },
+      },
+    });
+
+    expect(rate).toBeCloseTo(886.23, 5);
+  });
 });
 
 describe('resolveCheckoutCurrencySource', () => {

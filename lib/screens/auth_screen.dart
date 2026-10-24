@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -161,7 +163,9 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
 
-    // PostgREST can be briefly cold right after auth; retry before wiping session.
+    // PostgREST can be briefly cold (or hang on Cloudflare 525) after auth.
+    // Cap each attempt so the purple spinner never waits forever.
+    const attemptTimeout = Duration(seconds: 12);
     const delays = <Duration>[
       Duration(milliseconds: 400),
       Duration(milliseconds: 900),
@@ -170,7 +174,7 @@ class _AuthGateState extends State<AuthGate> {
     Object? lastError;
     for (var attempt = 0; attempt <= delays.length; attempt += 1) {
       try {
-        return await resolveOnce();
+        return await resolveOnce().timeout(attemptTimeout);
       } catch (error) {
         lastError = error;
         debugPrint(
@@ -180,6 +184,14 @@ class _AuthGateState extends State<AuthGate> {
         await Future<void>.delayed(delays[attempt]);
       }
     }
+    // Keep the session on transient network blips — show retry UI instead of
+    // signing the merchant out while Supabase is flapping.
+    if (_isTransientBootFailure(lastError)) {
+      throw TimeoutException(
+        'La conexión con el servidor está lenta o intermitente. Reintenta en unos segundos.',
+        attemptTimeout,
+      );
+    }
     debugPrint('Session validation failed; clearing local session: $lastError');
     try {
       await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
@@ -187,6 +199,23 @@ class _AuthGateState extends State<AuthGate> {
       debugPrint('Could not clear local session: $signOutError');
     }
     throw lastError ?? StateError('No se pudo validar el acceso.');
+  }
+
+  bool _isTransientBootFailure(Object? error) {
+    if (error is TimeoutException) return true;
+    final message = (error?.toString() ?? '').toLowerCase();
+    return message.contains('timeout') ||
+        message.contains('timed out') ||
+        message.contains('socketexception') ||
+        message.contains('failed host lookup') ||
+        message.contains('connection reset') ||
+        message.contains('connection closed') ||
+        message.contains('clientexception') ||
+        message.contains('525') ||
+        message.contains('502') ||
+        message.contains('503') ||
+        message.contains('504') ||
+        message.contains('ssl');
   }
 
   Future<_AuthBootResult> _finishAccessSelection({
@@ -343,13 +372,45 @@ class _AuthGateState extends State<AuthGate> {
                 }
 
                 if (targetSnapshot.hasError) {
+                  final message = targetSnapshot.error is TimeoutException
+                      ? 'La conexión está lenta o intermitente. Reintenta en unos segundos.'
+                      : 'No se pudo validar el acceso. Reintenta en unos segundos.';
                   return Scaffold(
+                    backgroundColor: const Color(0xFF5B21B6),
                     body: Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          'No se pudo validar el acceso: ${targetSnapshot.error}',
-                          textAlign: TextAlign.center,
+                        padding: const EdgeInsets.all(28),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.wifi_off_rounded,
+                              color: Color(0xFFF4ECFF),
+                              size: 40,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              message,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Color(0xFFF8F5FF),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                height: 1.35,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFF4ECFF),
+                                foregroundColor: const Color(0xFF5B21B6),
+                              ),
+                              onPressed: () {
+                                setState(_resetTargetCache);
+                              },
+                              child: const Text('Reintentar'),
+                            ),
+                          ],
                         ),
                       ),
                     ),

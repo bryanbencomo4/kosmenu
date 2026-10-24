@@ -102,3 +102,21 @@ export function kioskHomeConfigToJson(config: KioskHomeConfig) {
     ver_metodos_pago: config.verMetodosPago,
   };
 }
+
+/**
+ * Table QR / shared link can force catalog-only browsing when the merchant
+ * enabled `inicio_menu.catalogo`. Missing or unknown params keep normal flow.
+ */
+export function isCatalogModeQueryValue(raw: string | null | undefined): boolean {
+  const value = (raw ?? '').trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || value === 'catalogo';
+}
+
+export function shouldForceCatalogModeFromQuery(params: {
+  catalogo?: string | null;
+  modo?: string | null;
+}): boolean {
+  if (isCatalogModeQueryValue(params.catalogo)) return true;
+  const modo = (params.modo ?? '').trim().toLowerCase();
+  return modo === 'catalogo' || modo === 'catalog';
+}

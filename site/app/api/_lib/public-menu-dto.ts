@@ -5,6 +5,10 @@
 
 import { toPublicDeliveryConfig } from '../../_lib/delivery-config';
 import { toPublicKioskHomeConfig } from '../../_lib/kiosk-home-config';
+import {
+  formatVenezuelaOperatingStates,
+  sanitizeVenezuelaStateSlugs,
+} from '../../_lib/venezuela-states';
 
 const PUBLIC_COMERCIO_KEYS = [
   'id',
@@ -17,6 +21,8 @@ const PUBLIC_COMERCIO_KEYS = [
   'longitud',
   'permite_delivery',
   'recibe_pedidos_whatsapp',
+  'negocio_virtual',
+  'estados_operacion',
   'en_linea',
   'menu_palette',
   'menu_palette_primary',
@@ -107,6 +113,18 @@ function omitKeys(source: Record<string, unknown>, keys: readonly string[]) {
 export function toPublicComercioDto(row: Record<string, unknown> | null | undefined) {
   if (!row) return null;
   const picked = pickKeys(row, PUBLIC_COMERCIO_KEYS);
+  const estadosOperacion = sanitizeVenezuelaStateSlugs(picked.estados_operacion);
+  picked.estados_operacion = estadosOperacion;
+  picked.negocio_virtual = row.negocio_virtual === true;
+  if (picked.negocio_virtual === true && estadosOperacion.length > 0) {
+    picked.zona_operacion = formatVenezuelaOperatingStates(estadosOperacion);
+  }
+  // Virtual shops must not leak a stale street address in the public menu.
+  if (picked.negocio_virtual === true) {
+    picked.direccion = null;
+    picked.latitud = null;
+    picked.longitud = null;
+  }
   const branding = row.branding_ia;
   const brandingConfig = branding && typeof branding === 'object'
     ? (branding as Record<string, unknown>).config_negocio

@@ -13,9 +13,14 @@ import { resolveBusinessScheduleStatus } from './business-hours';
 import {
   categoryChipMatches,
   DIRECTORY_REGIONS,
+  directoryEntryMatchesRegion,
   distanceKm,
   toFiniteCoord,
 } from './public-directory-geo';
+import {
+  formatVenezuelaOperatingStates,
+  sanitizeVenezuelaStateSlugs,
+} from '../../_lib/venezuela-states';
 import { tokenizeSearchText } from '../../_lib/search-text';
 import { loadPromoStatsWindow } from './directory-promo-events';
 import { rankPromotedDelivery } from './directory-promo-rank';
@@ -36,6 +41,10 @@ export type PublicDirectoryBusiness = {
   categoria: string | null;
   direccion: string | null;
   negocioVirtual: boolean;
+  /** Canonical Venezuela state slugs (virtual / multi-state operators). */
+  estadosOperacion: string[];
+  /** Human-readable operating area for cards (virtual businesses). */
+  zonaOperacion: string | null;
   menuUrl: string;
 };
 
@@ -78,6 +87,7 @@ type RawComercioRow = {
   categoria?: string | null;
   direccion?: string | null;
   negocio_virtual?: boolean | null;
+  estados_operacion?: string[] | null;
   owner_id?: string | null;
   updated_at?: string | null;
   latitud?: number | string | null;
@@ -88,7 +98,7 @@ type RawComercioRow = {
 };
 
 const DIRECTORY_SELECT =
-  'id,slug,nombre,logo_url,categoria,direccion,negocio_virtual,owner_id,updated_at,latitud,longitud,branding_ia,horarios,mostrar_en_directorio_publico';
+  'id,slug,nombre,logo_url,categoria,direccion,negocio_virtual,estados_operacion,owner_id,updated_at,latitud,longitud,branding_ia,horarios,mostrar_en_directorio_publico';
 
 /** Demo / QA restaurants — never list in public discovery. */
 const DIRECTORY_EXCLUDED_SLUGS = new Set([
@@ -174,6 +184,12 @@ function toDirectoryBusiness(row: RawComercioRow): PublicDirectoryBusiness | nul
   if (isExcludedDirectorySlug(slug)) return null;
 
   const site = publicSiteUrl.replace(/\/$/, '');
+  const estadosOperacion = sanitizeVenezuelaStateSlugs(row.estados_operacion);
+  const negocioVirtual = row.negocio_virtual === true;
+  const zonaOperacion =
+    negocioVirtual && estadosOperacion.length > 0
+      ? formatVenezuelaOperatingStates(estadosOperacion)
+      : null;
   return {
     id,
     slug,
@@ -181,7 +197,9 @@ function toDirectoryBusiness(row: RawComercioRow): PublicDirectoryBusiness | nul
     logoUrl: (row.logo_url ?? '').toString().trim() || null,
     categoria: (row.categoria ?? '').toString().trim() || null,
     direccion: (row.direccion ?? '').toString().trim() || null,
-    negocioVirtual: row.negocio_virtual === true,
+    negocioVirtual,
+    estadosOperacion,
+    zonaOperacion,
     menuUrl: `${site}/v/${encodeURIComponent(slug)}`,
   };
 }
@@ -755,18 +773,14 @@ function sortByDiscoveryRelevance(
 }
 
 function buildRegionStats(entries: ClientDirectoryCached[]): DirectoryRegionStat[] {
-  const normalizedRegions = DIRECTORY_REGIONS.map((name) => ({
-    name,
-    key: normalizeDirectoryQuery(name),
-  }));
   const counts = new Map<string, number>(DIRECTORY_REGIONS.map((name) => [name, 0]));
 
   for (const entry of entries) {
-    const address = normalizeDirectoryQuery(entry.direccion ?? '');
-    if (!address) continue;
-    const matched = normalizedRegions.find((region) => address.includes(region.key));
-    if (!matched) continue;
-    counts.set(matched.name, (counts.get(matched.name) ?? 0) + 1);
+    for (const name of DIRECTORY_REGIONS) {
+      if (directoryEntryMatchesRegion(entry, name)) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+    }
   }
 
   return DIRECTORY_REGIONS.map((name) => ({
@@ -823,8 +837,15 @@ export async function listClientDirectory(options: {
   }
 
   if (region) {
+    // `region` is already normalized; match against original labels via helper.
+    const regionLabel =
+      DIRECTORY_REGIONS.find(
+        (name) => normalizeDirectoryQuery(name) === region,
+      ) ??
+      options.region ??
+      region;
     entries = entries.filter((entry) =>
-      normalizeDirectoryQuery(entry.direccion ?? '').includes(region),
+      directoryEntryMatchesRegion(entry, regionLabel),
     );
   }
 

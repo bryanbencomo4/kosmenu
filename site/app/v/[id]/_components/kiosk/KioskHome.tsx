@@ -12,6 +12,7 @@ import {
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskImage } from './KioskImage';
 import { pickKioskGreeting } from './kiosk-greetings';
+import { OperatingCoverage } from './OperatingCoverage';
 import type { KioskFulfillment } from './kiosk-types';
 import type { MenuThemeMode } from '../../_lib/menu-theme';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
@@ -36,6 +37,8 @@ type KioskHomeProps = {
   closedCaption: string;
   openCaption: string;
   locationLabel: string | null;
+  /** Resolved Venezuela state labels for virtual businesses (e.g. "Miranda"). */
+  operatingStateLabels?: string[];
   socialLinks?: Array<{ network: string; href: string }>;
   tagline?: string | null;
   supportsDelivery: boolean;
@@ -49,6 +52,8 @@ type KioskHomeProps = {
   onSelect: (fulfillment: KioskFulfillment) => void;
   onBrowseMenu: () => void;
   onOpenCatalog: () => void;
+  /** Mesa QR (?catalogo=1): only catalog (+ payments), no dine-in / takeaway / delivery. */
+  catalogOnlySession?: boolean;
 };
 
 export function KioskHome({
@@ -61,6 +66,7 @@ export function KioskHome({
   closedCaption,
   openCaption,
   locationLabel,
+  operatingStateLabels = [],
   socialLinks = [],
   supportsDelivery,
   themeMode,
@@ -70,17 +76,26 @@ export function KioskHome({
   onSelect,
   onBrowseMenu,
   onOpenCatalog,
+  catalogOnlySession = false,
 }: KioskHomeProps) {
   const [greeting, setGreeting] = useState<string | null>(null);
   const homeRef = useRef<HTMLElement>(null);
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
   const [sheetTheme, setSheetTheme] = useState<CSSProperties>({});
   const payableGroups = paymentGroups.filter((group) => group.methods.length > 0);
-  const showComerAqui = homeConfig.comerAqui;
-  const showParaLlevar = homeConfig.paraLlevar;
-  const showDelivery = homeConfig.delivery;
+  const coverageLabels = operatingStateLabels
+    .map((label) => label.trim())
+    .filter(Boolean);
+  const showComerAqui = !catalogOnlySession && homeConfig.comerAqui;
+  const showParaLlevar = !catalogOnlySession && homeConfig.paraLlevar;
+  const showDelivery = !catalogOnlySession && homeConfig.delivery;
   const fulfillmentCount = Number(showComerAqui) + Number(showParaLlevar) + Number(showDelivery);
-  const showBrowse = !isOpen || homeConfig.verMenu || (fulfillmentCount === 0 && !homeConfig.catalogo);
+  // "Ver catálogo" only on mesa QR (?catalogo=1), never on the normal menu URL.
+  const showCatalogButton = catalogOnlySession && homeConfig.catalogo;
+  // Catalog session: no "Ver menú". Normal URL keeps closed/browse behavior.
+  const showBrowse = catalogOnlySession
+    ? false
+    : !isOpen || homeConfig.verMenu || fulfillmentCount === 0;
   const mobileCols = fulfillmentCount <= 1 ? 1 : fulfillmentCount === 2 ? 2 : 3;
 
   useEffect(() => {
@@ -88,7 +103,8 @@ export function KioskHome({
   }, []);
 
   useEffect(() => {
-    if (!paymentSheetOpen || !homeRef.current) return;
+    if (!homeRef.current) return;
+    if (!paymentSheetOpen && coverageLabels.length === 0) return;
     const computed = getComputedStyle(homeRef.current);
     const names = [
       '--menu-background',
@@ -107,7 +123,7 @@ export function KioskHome({
       if (value) next[name] = value;
     }
     setSheetTheme(next);
-  }, [paymentSheetOpen]);
+  }, [paymentSheetOpen, coverageLabels.length]);
 
   return (
     <section ref={homeRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--menu-background)] text-[var(--menu-text)] overscroll-none">
@@ -193,7 +209,9 @@ export function KioskHome({
           </p>
           ) : null}
 
-          {homeConfig.ubicacion && locationLabel ? (
+          {coverageLabels.length > 0 ? (
+            <OperatingCoverage stateLabels={coverageLabels} themeStyle={sheetTheme} />
+          ) : homeConfig.ubicacion && locationLabel ? (
             <p className="mt-1.5 flex max-w-sm items-start justify-center gap-1 text-[12px] font-medium leading-4 text-[var(--menu-text-muted)] sm:mt-2 sm:gap-1.5 sm:text-[13px] sm:leading-5">
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'var(--menu-primary)' }} />
               <span className="line-clamp-2">{locationLabel}</span>
@@ -271,7 +289,7 @@ export function KioskHome({
             </button>
           ) : null}
 
-          {homeConfig.catalogo ? (
+          {showCatalogButton ? (
             <button
               type="button"
               onClick={onOpenCatalog}

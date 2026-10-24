@@ -80,8 +80,8 @@ class PaymentMethodCatalog {
   bool get isCash => kind == 'cash';
   bool get isPagoMovil => code == 'pago_movil';
 
-  /// Binance Pay, gift cards and Pago Móvil (BDV) are the live checkout.
-  bool get isAutomatedCheckout => isAutomatic || isPagoMovil;
+  /// Instant activation methods (Binance Pay, gift cards). Pago Móvil is manual.
+  bool get isAutomatedCheckout => isAutomatic;
 
   /// Manual methods with no destination yet must not be offered: the merchant
   /// would send money nowhere and the review queue would have nothing to match.
@@ -89,6 +89,8 @@ class PaymentMethodCatalog {
     if (!isActive) return false;
     if (isAutomatedCheckout) return true;
     if (requiresAdvisorCode) return true;
+    // Pago Móvil stays visible when active; account fields come from admin.
+    if (isPagoMovil) return true;
     return accountFields.any((field) => field.value.isNotEmpty);
   }
 
@@ -176,6 +178,7 @@ class PaymentSubmission {
 class ManualPaymentDraft {
   const ManualPaymentDraft({
     this.months = 1,
+    this.planCode = 'menu_monthly',
     this.reference = '',
     this.payerName = '',
     this.advisorCode = '',
@@ -185,6 +188,7 @@ class ManualPaymentDraft {
   });
 
   final int months;
+  final String planCode;
   final String reference;
   final String payerName;
   final String advisorCode;
@@ -214,7 +218,7 @@ List<PaymentMethodCatalog> fallbackPaymentMethods() {
       id: 'crypto_usdt',
       code: 'crypto_usdt',
       name: 'Binance Pay',
-      tagline: 'Pago con cripto · se activa al confirmar la red',
+      tagline: 'Transfiere USDT · se activa al confirmar la red',
       verification: 'automatic',
       kind: 'crypto_checkout',
       isActive: true,
@@ -222,7 +226,7 @@ List<PaymentMethodCatalog> fallbackPaymentMethods() {
       localCurrency: 'USDT',
       brandColor: Color(0xFFF3BA2F),
       instructions:
-          'Te llevamos al checkout seguro de Binance Pay. La activacion es automatica en cuanto la red confirma la transaccion.',
+          'Te llevamos al checkout seguro de Binance Pay para transferir USDT. La activacion es automatica en cuanto la red confirma la transaccion.',
       reviewSlaMinutes: 5,
     ),
     PaymentMethodCatalog(
@@ -243,7 +247,7 @@ List<PaymentMethodCatalog> fallbackPaymentMethods() {
       id: 'pago_movil',
       code: 'pago_movil',
       name: 'Pago Móvil',
-      tagline: 'Paga desde tu banco de Venezuela. Confirmación automática.',
+      tagline: 'Paga desde tu banco de Venezuela. Revisamos tu comprobante.',
       verification: 'manual',
       kind: 'bank_transfer',
       isActive: true,
@@ -252,9 +256,10 @@ List<PaymentMethodCatalog> fallbackPaymentMethods() {
       localCurrency: 'VES',
       brandColor: Color(0xFF2563EB),
       instructions:
-          'Transfiere el monto exacto en bolívares (tasa BCV) y escribe los últimos 4 dígitos de la referencia. El sistema lo confirma solo.',
+          'Transfiere el monto exacto en bolívares (tasa BCV del día). Sube el comprobante e indica el número de referencia. Te avisamos por correo cuando lo verifiquemos.',
       requiresReference: true,
-      requiresReceipt: false,
+      requiresReceipt: true,
+      reviewSlaMinutes: 240,
     ),
     PaymentMethodCatalog(
       id: 'bancolombia',
@@ -359,12 +364,13 @@ List<PaymentMethodCatalog> manualPaymentMethods(
   return methods.where((method) => method.isManual).toList(growable: false);
 }
 
-/// Methods shown on Plan y facturación. Cash and other manual review stay hidden.
+/// Methods shown on Plan y facturación: instant (crypto/gift) + Pago Móvil manual.
+/// Other bank manuals (Bancolombia, Nequi, …) stay hidden until explicitly enabled.
 List<PaymentMethodCatalog> checkoutPaymentMethods(
   List<PaymentMethodCatalog> methods,
 ) {
   return methods
-      .where((method) => method.isAutomatedCheckout)
+      .where((method) => method.isAutomatedCheckout || method.isPagoMovil)
       .toList(growable: false);
 }
 
@@ -447,12 +453,16 @@ String? validateManualPaymentDraft({
   if (draft.months < 1 || draft.months > 24) {
     return 'Elige entre 1 y 24 meses.';
   }
-  if (method.isPagoMovil) {
-    if (!isPagoMovilReferenceTail(draft.reference)) {
-      return 'Escribe los últimos 4 dígitos de la referencia.';
+  if (method.requiresReference) {
+    final ref = draft.reference.trim();
+    if (method.isPagoMovil) {
+      final digits = normalizePagoMovilReferenceTail(ref);
+      if (digits.length < 4) {
+        return 'Escribe el número de referencia del Pago Móvil (al menos 4 dígitos).';
+      }
+    } else if (ref.length < 4) {
+      return 'Escribe el numero de referencia de la transferencia.';
     }
-  } else if (method.requiresReference && draft.reference.trim().length < 4) {
-    return 'Escribe el numero de referencia de la transferencia.';
   }
   if (method.requiresReceipt &&
       (draft.receiptPath == null || draft.receiptPath!.isEmpty)) {

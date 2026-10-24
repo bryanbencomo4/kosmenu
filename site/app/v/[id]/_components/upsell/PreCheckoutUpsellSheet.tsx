@@ -2,7 +2,7 @@
 
 import { Caveat } from 'next/font/google';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, CreditCard, Minus, Plus, ShoppingBag, ShoppingCart, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CreditCard, Minus, Plus, ShoppingBag, ShoppingCart, Trash2, X } from 'lucide-react';
 
 import type { CartLineSelection } from '../../../../_lib/menu-product-options';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
@@ -66,6 +66,8 @@ type PreCheckoutUpsellSheetProps = {
   onRemove?: (cartKey: string) => void;
   onKeepShopping: () => void;
   onContinue: () => void;
+  /** Catalog mode: finish after viewing payment methods → ready-for-waiter screen. */
+  onCatalogReady?: () => void;
   resolveConfigurableProduct: (productId: string) => UpsellConfigurableProduct | null;
   onConfirmConfigured: (productId: string, selection: CartLineSelection, quantity: number) => void;
   canConfigure?: boolean;
@@ -361,6 +363,7 @@ export function PreCheckoutUpsellSheet({
   onRemove,
   onKeepShopping,
   onContinue,
+  onCatalogReady,
   resolveConfigurableProduct,
   onConfirmConfigured,
   canConfigure = true,
@@ -614,8 +617,8 @@ export function PreCheckoutUpsellSheet({
           <button
             type="button"
             onClick={() => {
-              if (showPayments) {
-                setShowPayments(false);
+              if (catalogMode && showPayments) {
+                onCatalogReady?.();
                 return;
               }
               if (catalogMode) {
@@ -629,18 +632,24 @@ export function PreCheckoutUpsellSheet({
             style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
           >
             <span className="inline-flex items-center gap-1 text-[13px] font-black">
-              {showPayments ? (
-                <ArrowLeft className="h-4 w-4" />
+              {catalogMode && showPayments ? (
+                <Check className="h-4 w-4" strokeWidth={2.6} />
               ) : catalogMode ? (
                 <CreditCard className="h-4 w-4" />
               ) : (
                 <ShoppingBag className="h-4 w-4" />
               )}
-              {catalogMode && !showPayments ? 'Ver métodos de pago' : showPayments ? 'Volver' : 'Ir a pagar'}
+              {catalogMode && !showPayments
+                ? 'Ver métodos de pago'
+                : catalogMode && showPayments
+                  ? 'Listo'
+                  : 'Ir a pagar'}
             </span>
             {catalogMode && !showPayments ? null : (
               <span className="mt-0.5 text-[10px] font-medium opacity-80">
-                {showPayments ? 'Regresar a las sugerencias' : 'Continuar con el checkout'}
+                {catalogMode && showPayments
+                  ? 'Mostrar resumen al mesero'
+                  : 'Continuar con el checkout'}
               </span>
             )}
           </button>

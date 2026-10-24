@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
 import 'package:kosmenu_app/core/constants.dart';
+import 'package:kosmenu_app/models/kit_shipping_draft.dart';
+import 'package:kosmenu_app/services/elmenuxfa_api_config.dart';
 import 'package:kosmenu_app/services/payment_catalog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -139,16 +144,25 @@ class BillingCheckoutContext {
   const BillingCheckoutContext({
     required this.snapshot,
     required this.methods,
+    this.yearlyPlan,
     this.pendingSubmission,
     this.latestSubmission,
     this.bcvRate,
+    this.businessWhatsapp,
+    this.businessName,
   });
 
   final BillingSnapshot snapshot;
   final List<PaymentMethodCatalog> methods;
+  final BillingPlan? yearlyPlan;
   final PaymentSubmission? pendingSubmission;
   final PaymentSubmission? latestSubmission;
   final double? bcvRate;
+  /// Comercio WhatsApp (E.164) for checkout prefill.
+  final String? businessWhatsapp;
+  final String? businessName;
+
+  BillingPlan? get monthlyPlan => snapshot.plan;
 
   double? vesAmountForUsd(double usd) {
     return vesAmountFromUsd(usd: usd, bcvRate: bcvRate);
@@ -426,12 +440,53 @@ class BillingService {
       bcvRate = null;
     }
 
+    BillingPlan? yearlyPlan;
+    try {
+      final yearlyRow = await client
+          .from('plans')
+          .select()
+          .eq('code', 'menu_yearly')
+          .eq('is_active', true)
+          .maybeSingle();
+      if (yearlyRow != null) {
+        yearlyPlan = BillingPlan.fromRow(Map<String, dynamic>.from(yearlyRow));
+      }
+    } catch (_) {
+      yearlyPlan = null;
+    }
+
+    String? businessWhatsapp;
+    String? businessName;
+    try {
+      if (businessId.isNotEmpty) {
+        final comercio = await client
+            .from('comercios')
+            .select('whatsapp, nombre')
+            .eq('id', businessId)
+            .maybeSingle();
+        businessWhatsapp = comercio?['whatsapp']?.toString().trim();
+        businessName = comercio?['nombre']?.toString().trim();
+        if (businessWhatsapp != null && businessWhatsapp.isEmpty) {
+          businessWhatsapp = null;
+        }
+        if (businessName != null && businessName.isEmpty) {
+          businessName = null;
+        }
+      }
+    } catch (_) {
+      businessWhatsapp = null;
+      businessName = null;
+    }
+
     return BillingCheckoutContext(
       snapshot: snapshot,
       methods: mergePaymentCatalog(methods),
+      yearlyPlan: yearlyPlan,
       pendingSubmission: pending,
       latestSubmission: latest,
       bcvRate: bcvRate,
+      businessWhatsapp: businessWhatsapp,
+      businessName: businessName,
     );
   }
 
@@ -479,6 +534,9 @@ class BillingService {
           'p_business_id': businessId,
           'p_method_code': method.code,
           'p_months': draft.months,
+          'p_plan_code': draft.planCode.trim().isEmpty
+              ? 'menu_monthly'
+              : draft.planCode.trim(),
           'p_reference': draft.reference.trim().isEmpty ? null : draft.reference.trim(),
           'p_payer_name': draft.payerName.trim().isEmpty ? null : draft.payerName.trim(),
           'p_receipt_path': draft.receiptPath,
@@ -490,7 +548,7 @@ class BillingService {
         },
       );
       final data = _asMap(response);
-      return PaymentSubmission(
+      final submission = PaymentSubmission(
         id: '${data['submission_id'] ?? ''}',
         methodCode: method.code,
         status: '${data['status'] ?? 'pending'}',
@@ -498,8 +556,70 @@ class BillingService {
         months: draft.months,
         reference: draft.reference.trim().isEmpty ? null : draft.reference.trim(),
       );
+      // Fire-and-forget status email ("recibimos tu pago").
+      if (submission.id.isNotEmpty) {
+        unawaited(notifyPaymentReceivedEmail(submission.id));
+      }
+      return submission;
     } catch (error) {
       throw StateError(mapBillingRpcError(error));
+    }
+  }
+
+  /// Saves Zoom destination for the Kit Portamenú included with the plan.
+  Future<void> submitKitShipping(KitShippingDraft draft) async {
+    final validation = draft.validationError;
+    if (validation != null) {
+      throw StateError(validation);
+    }
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken.trim() ?? '';
+    if (token.isEmpty) {
+      throw StateError('Inicia sesión para guardar el envío del kit.');
+    }
+    final response = await http.post(
+      ElmenuxfaApiConfig.uri('/api/kit/merchant-ship'),
+      headers: <String, String>{
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(draft.toJson()),
+    );
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return;
+    }
+    try {
+      final body = jsonDecode(response.body);
+      if (body is Map && body['error'] != null) {
+        throw StateError('${body['error']}');
+      }
+    } catch (error) {
+      if (error is StateError) rethrow;
+    }
+    throw StateError('No se pudo guardar el envío del kit.');
+  }
+
+  /// Asks the site to email the merchant that their payment is under review.
+  Future<void> notifyPaymentReceivedEmail(String submissionId) async {
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken.trim() ?? '';
+    if (token.isEmpty || submissionId.trim().isEmpty) return;
+    try {
+      await http.post(
+        ElmenuxfaApiConfig.uri('/api/billing/payment-notify'),
+        headers: <String, String>{
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(<String, String>{
+          'submissionId': submissionId.trim(),
+          'kind': 'received',
+        }),
+      );
+    } catch (_) {
+      // Email is best-effort; submission already succeeded.
     }
   }
 

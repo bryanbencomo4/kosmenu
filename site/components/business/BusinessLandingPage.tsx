@@ -9,6 +9,7 @@ import {
   appLoginHref,
   appSignupHref,
   appSiteUrl,
+  kitCheckoutHref,
   marketingWhatsappHref,
   publicSiteUrl,
 } from '../../app/_lib/public-site-config';
@@ -56,7 +57,11 @@ export async function BusinessLandingPage() {
             <ProblemSection />
             <Features signupHref={signupHref} />
             <Steps />
-            <PricingSection signupHref={signupHref} supportHref={supportHref} />
+            <PricingSection
+              signupHref={signupHref}
+              supportHref={supportHref}
+              kitHref={kitCheckoutHref}
+            />
             <DemoSection signupHref={signupHref} />
             <TargetSection />
             <CTASection signupHref={signupHref} supportHref={supportHref} />

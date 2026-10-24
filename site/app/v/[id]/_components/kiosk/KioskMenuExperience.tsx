@@ -40,6 +40,7 @@ type KioskMenuExperienceProps = {
   ratingCount: number;
   initialLetter: string;
   locationLabel: string | null;
+  operatingStateLabels?: string[];
   socialLinks?: Array<{ network: string; href: string }>;
   tagline?: string | null;
   isOpen: boolean;
@@ -53,6 +54,8 @@ type KioskMenuExperienceProps = {
   }>;
   fulfillment: KioskFulfillment | null;
   catalogMode?: boolean;
+  /** Mesa QR (?catalogo=1): hide fulfillment actions on home. */
+  catalogOnlySession?: boolean;
   /** Waiter mode: skip home picker, stay on dine-in categories. */
   assistedMode?: boolean;
   onSelectFulfillment: (fulfillment: KioskFulfillment) => void;
@@ -90,6 +93,7 @@ export function KioskMenuExperience({
   ratingCount,
   initialLetter,
   locationLabel,
+  operatingStateLabels = [],
   socialLinks,
   tagline,
   isOpen,
@@ -100,6 +104,7 @@ export function KioskMenuExperience({
   paymentGroups = [],
   fulfillment,
   catalogMode = false,
+  catalogOnlySession = false,
   assistedMode = false,
   onSelectFulfillment,
   onResetFulfillment,
@@ -140,6 +145,12 @@ export function KioskMenuExperience({
       setScreen((current) => (current === 'home' ? 'categories' : current));
     }
   }, [assistedMode, fulfillment]);
+
+  // Catalog from home button or ?catalogo=1 should open categories, not stay on home.
+  useEffect(() => {
+    if (!catalogMode || assistedMode || fulfillment) return;
+    setScreen((current) => (current === 'home' ? 'categories' : current));
+  }, [catalogMode, assistedMode, fulfillment]);
 
   useEffect(() => {
     const whatsappUrl = voucher?.whatsappUrl?.trim();
@@ -231,14 +242,17 @@ export function KioskMenuExperience({
           closedCaption={closedCaption}
           openCaption={openCaption}
           locationLabel={locationLabel}
+          operatingStateLabels={operatingStateLabels}
           socialLinks={socialLinks}
           tagline={tagline}
           supportsDelivery={supportsDelivery}
           homeConfig={homeConfig}
           paymentGroups={paymentGroups}
           themeMode={themeMode}
+          catalogOnlySession={catalogOnlySession}
           onToggleTheme={onToggleTheme}
           onSelect={(next) => {
+            if (catalogOnlySession) return;
             onLeaveCatalog();
             onSelectFulfillment(next);
             onSearchChange('');
@@ -246,6 +260,10 @@ export function KioskMenuExperience({
             setScreen('categories');
           }}
           onBrowseMenu={() => {
+            // Only mesa QR (?catalogo=1) skips "Ver menú". Merchant flag
+            // homeConfig.catalogo enables that QR flow — it must not block browse
+            // on the normal URL when the restaurant is closed.
+            if (catalogOnlySession) return;
             onLeaveCatalog();
             onSearchChange('');
             setActiveCategoryId(null);
@@ -270,6 +288,7 @@ export function KioskMenuExperience({
         {topBar}
         <header className="bg-[color-mix(in_srgb,var(--menu-background)_88%,var(--menu-surface))] px-5 py-3 backdrop-blur-[6px]">
         <div className="mx-auto flex w-full max-w-5xl items-center gap-3">
+          {catalogOnlySession && catalogMode && screen === 'categories' ? null : (
           <button
             type="button"
             onClick={() => {
@@ -285,6 +304,12 @@ export function KioskMenuExperience({
                 setActiveCategoryId(null);
                 return;
               }
+              // Mesa QR catalog stays in catalog — no WhatsApp fulfillment home.
+              if (catalogOnlySession && catalogMode) {
+                setScreen('categories');
+                setActiveCategoryId(null);
+                return;
+              }
               setScreen('home');
               setActiveCategoryId(null);
               if (fulfillment) onResetFulfillment();
@@ -295,6 +320,7 @@ export function KioskMenuExperience({
           >
             <ArrowLeft className="h-5 w-5" strokeWidth={2.2} />
           </button>
+          )}
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--menu-text-muted)]">
               {catalogMode ? 'Catálogo' : fulfillment ? FULFILLMENT_LABEL[fulfillment] : 'Solo consulta'}

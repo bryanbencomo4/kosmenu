@@ -363,7 +363,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     setState(() => _updatingImageProductIds.add(product.id));
 
     try {
-      final bytes = ProductImageOptimizer.compressToJpeg(
+      final bytes = await ProductImageOptimizer.compressToJpegAsync(
         await photo.readAsBytes(),
       );
       final fileName =
@@ -377,6 +377,12 @@ class _ProductListScreenState extends State<ProductListScreen> {
             fileOptions: FileOptions(
               upsert: true,
               contentType: 'image/jpeg',
+            ),
+          )
+          .timeout(
+            const Duration(seconds: 45),
+            onTimeout: () => throw TimeoutException(
+              'La subida de la imagen tardó demasiado. Reintenta.',
             ),
           );
 

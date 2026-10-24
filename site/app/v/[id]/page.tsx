@@ -36,8 +36,15 @@ import { ProductImageLightbox } from './_components/ProductImageLightbox';
 import { KioskMenuExperience } from './_components/kiosk/KioskMenuExperience';
 import { KioskCheckout } from './_components/kiosk/KioskCheckout';
 import { KioskImage } from './_components/kiosk/KioskImage';
+import {
+  KioskCatalogReady,
+  type CatalogReadyItem,
+} from './_components/kiosk/KioskCatalogReady';
 import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
-import { parseKioskHomeConfig } from '../../_lib/kiosk-home-config';
+import {
+  parseKioskHomeConfig,
+  shouldForceCatalogModeFromQuery,
+} from '../../_lib/kiosk-home-config';
 import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
 import { parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
@@ -65,6 +72,7 @@ import {
   resolveCheckoutCurrencySource,
   type ExchangeRateAdjustment,
 } from '../../_lib/checkout-exchange-rate';
+import { venezuelaOperatingStateLabels } from '../../_lib/venezuela-states';
 import {
   buildCartLineKey,
   buildOrderLineLabel,
@@ -275,6 +283,9 @@ type ComercioRow = {
   delivery_tarifas?: unknown;
   direccion?: string | null;
   ciudad?: string | null;
+  negocio_virtual?: boolean | null;
+  estados_operacion?: string[] | null;
+  zona_operacion?: string | null;
   descripcion?: string | null;
   menu_palette_primary?: number | string | null;
   menu_palette_accent?: number | string | null;
@@ -400,7 +411,12 @@ type GoogleMapHandle = {
 
 type GoogleGeocoder = {
   geocode(
-    request: { location?: DeliveryPoint; address?: string },
+    request: {
+      location?: DeliveryPoint;
+      address?: string;
+      componentRestrictions?: { country: string };
+      region?: string;
+    },
     callback: (results: GooglePlaceResult[] | null, status: string) => void,
   ): void;
 };
@@ -416,10 +432,19 @@ type GoogleMapsApi = {
     Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMapHandle;
     Geocoder: new () => GoogleGeocoder;
     places?: {
-      Autocomplete?: new (input: HTMLInputElement, options: { fields: string[] }) => GoogleAutocomplete;
+      Autocomplete?: new (
+        input: HTMLInputElement,
+        options: {
+          fields: string[];
+          componentRestrictions?: { country: string };
+        },
+      ) => GoogleAutocomplete;
     };
   };
 };
+
+/** Bias/restrict all public-menu map search to Venezuela. */
+const GOOGLE_MAPS_VE_COUNTRY = 've' as const;
 
 type LeafletCenter = {
   lat: number;
@@ -1150,18 +1175,43 @@ function usdToCurrencyRateForSource(source: string, currency: string, marketRate
 
   const googleRates = googleRatesFromPayload(marketRates?.payload ?? null);
   if (normalizedCurrency === 'VES') {
-    let liveRate =
+    // BCV EUR is VES per 1 EUR. Do not multiply by USD/EUR — that made
+    // BCV EUR collapse to nearly the same value as BCV USD.
+    const liveRate =
       source === 'p2p_binance'
         ? adjustedP2pRateForBuyer(parseExchangeRate(marketRates?.p2p_binance_rate) ?? 0)
         : bcvVesRateForSource(source, marketRates);
-    if (canonicalizeBcvSource(source) === 'bcv_eur') {
-      liveRate *= googleRates.get('USD/EUR') ?? 0;
-    }
     if (liveRate > 0) return liveRate;
     return (googleRates.get('VES/USD') ?? 0) > 0 ? 1 / (googleRates.get('VES/USD') ?? 0) : 0;
   }
   if (normalizedCurrency === 'COP') return googleRates.get('USD/COP') ?? 0;
   if (normalizedCurrency === 'EUR') return googleRates.get('USD/EUR') ?? 0;
+  return 0;
+}
+
+/** Official BCV EUR (VES/EUR) for tracked VES pairs; never cross via USD/EUR. */
+function bcvEurRateForPair(
+  baseCurrency: string,
+  quoteCurrency: string,
+  marketRates: MarketRatesRow | null | undefined,
+) {
+  const eurVes = parseExchangeRate(marketRates?.payload?.bcv_rates?.EUR) ?? 0;
+  if (eurVes <= 0) return 0;
+
+  const base = normalizeCurrencyCode(baseCurrency);
+  const quote = normalizeCurrencyCode(quoteCurrency);
+  if (base === quote) return 1;
+
+  if (base === 'EUR' && quote === 'VES') return eurVes;
+  if (base === 'VES' && quote === 'EUR') return 1 / eurVes;
+  if (base === 'USD' && quote === 'VES') return eurVes;
+  if (base === 'VES' && quote === 'USD') return 1 / eurVes;
+
+  const googleRates = googleRatesFromPayload(marketRates?.payload ?? null);
+  const usdCop = googleRates.get('USD/COP') ?? 0;
+  if (usdCop <= 0) return 0;
+  if (base === 'COP' && quote === 'VES') return eurVes / usdCop;
+  if (base === 'VES' && quote === 'COP') return usdCop / eurVes;
   return 0;
 }
 
@@ -1184,6 +1234,11 @@ function derivedExchangeRateForCurrency(
   if (source === 'google') {
     const rate = googleRateForPair(base, quote, googleRatesFromPayload(marketRates?.payload ?? null));
     if (rate > 0) return rate;
+  }
+
+  if (canonicalizeBcvSource(source) === 'bcv_eur' && isTrackedVesPair(base, quote)) {
+    const eurDerived = bcvEurRateForPair(base, quote, marketRates);
+    if (eurDerived > 0) return eurDerived;
   }
 
   if (
@@ -1663,6 +1718,10 @@ export default function PublicMenuPage() {
   const [shareMessage, setShareMessage] = useState('');
   const searchParams = useSearchParams();
   const isAssistedMode = (searchParams.get('mode') ?? '').trim().toLowerCase() === 'assisted';
+  const catalogFromUrl = shouldForceCatalogModeFromQuery({
+    catalogo: searchParams.get('catalogo'),
+    modo: searchParams.get('modo'),
+  });
   const [clientName, setClientName] = useState('');
   const [clientWhatsappCountry, setClientWhatsappCountry] = useState<Country>('VE');
   const [clientWhatsapp, setClientWhatsapp] = useState('');
@@ -1694,6 +1753,11 @@ export default function PublicMenuPage() {
   const [orderNotes, setOrderNotes] = useState('');
   const [kioskFulfillment, setKioskFulfillment] = useState<KioskFulfillment | null>(null);
   const [catalogMode, setCatalogMode] = useState(false);
+  const [catalogReady, setCatalogReady] = useState<{
+    items: CatalogReadyItem[];
+    itemCount: number;
+    totalLabel: string;
+  } | null>(null);
   const [kioskAddedPrompt, setKioskAddedPrompt] = useState<{ productName: string } | null>(null);
   const [kioskVoucher, setKioskVoucher] = useState<KioskVoucherData | null>(null);
   const [dismissedUpsellIds, setDismissedUpsellIds] = useState<Set<string>>(() => new Set());
@@ -1782,11 +1846,30 @@ export default function PublicMenuPage() {
       );
       return;
     }
+    // Mesa QR with ?catalogo=1 starts in catalog-only mode (no WhatsApp send).
+    if (catalogFromUrl) {
+      return;
+    }
     const saved = window.sessionStorage.getItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     if (!isKioskFulfillment(saved)) return;
     setKioskFulfillment(saved);
     setDeliveryMode(saved === 'delivery' ? 'delivery' : 'pickup');
-  }, [commerceIdentifier, isAssistedMode]);
+  }, [commerceIdentifier, isAssistedMode, catalogFromUrl]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !commerceIdentifier) return;
+    if (isAssistedMode || !catalogFromUrl) return;
+    if (!menuData) return;
+    const catalogEnabled = parseKioskHomeConfig(menuData.comercio.inicio_menu).catalogo;
+    if (!catalogEnabled) return;
+    setCatalogMode(true);
+    setKioskFulfillment(null);
+    setDeliveryMode('pickup');
+    setKioskAddedPrompt(null);
+    setIsConfirmOpen(false);
+    setIsPreCheckoutUpsellOpen(false);
+    window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
+  }, [commerceIdentifier, isAssistedMode, catalogFromUrl, menuData]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !commerceIdentifier) return;
@@ -2652,6 +2735,7 @@ export default function PublicMenuPage() {
     .map(([network, value]) => ({ network, href: normalizeSocialUrl(value) }))
     .filter((item) => item.href);
   const kioskHomeConfig = parseKioskHomeConfig(menuData?.comercio.inicio_menu);
+  const catalogUrlLocked = catalogFromUrl && kioskHomeConfig.catalogo && !isAssistedMode;
   const supportsDelivery = menuData?.comercio.permite_delivery === true;
   const normalizedDeliveryAddress = deliveryAddress.trim();
   const normalizedDeliveryReference = deliveryReference.trim();
@@ -3057,10 +3141,15 @@ export default function PublicMenuPage() {
     prefersReducedMotion ? MOTION_TOKENS.duration.instant : 1250,
   );
   const heroImageSrc = safeImageSrc(heroProduct?.imagen_url, comercioLogoUrl, 1200);
-  const heroLocation = [menuData?.comercio.ciudad, menuData?.comercio.direccion]
-    .map((item) => (item ?? '').trim())
-    .filter(Boolean)
-    .join(', ');
+  const heroLocation = menuData?.comercio.negocio_virtual
+    ? ''
+    : [menuData?.comercio.ciudad, menuData?.comercio.direccion]
+        .map((item) => (item ?? '').trim())
+        .filter(Boolean)
+        .join(', ');
+  const operatingStateLabels = menuData?.comercio.negocio_virtual
+    ? venezuelaOperatingStateLabels(menuData.comercio.estados_operacion)
+    : [];
   const heroSubtitle =
     menuData?.comercio.descripcion?.trim() ||
     (visibleCategorias[0]?.displayName
@@ -3446,6 +3535,8 @@ export default function PublicMenuPage() {
 
   function selectKioskFulfillment(next: KioskFulfillment) {
     if (scheduleClosed) return;
+    // Mesa QR (?catalogo=1) stays catalog-only; do not open WhatsApp checkout paths.
+    if (catalogUrlLocked) return;
     // Waiters only serve dine-in at the table.
     const resolved = isAssistedMode ? 'dine_in' : next;
     setKioskFulfillment(resolved);
@@ -3459,6 +3550,13 @@ export default function PublicMenuPage() {
   function resetKioskFulfillment() {
     if (isAssistedMode) {
       setKioskFulfillment('dine_in');
+      setDeliveryMode('pickup');
+      setSearchQuery('');
+      return;
+    }
+    if (catalogUrlLocked) {
+      setCatalogMode(true);
+      setKioskFulfillment(null);
       setDeliveryMode('pickup');
       setSearchQuery('');
       return;
@@ -3503,6 +3601,13 @@ export default function PublicMenuPage() {
   }
 
   function leaveCatalogMode() {
+    // Mesa QR catalog links must not fall back into WhatsApp checkout.
+    if (catalogUrlLocked) {
+      setIsPreCheckoutUpsellOpen(false);
+      setKioskAddedPrompt(null);
+      setCatalogMode(true);
+      return;
+    }
     setCatalogMode(false);
     setIsPreCheckoutUpsellOpen(false);
     setKioskAddedPrompt(null);
@@ -3511,7 +3616,31 @@ export default function PublicMenuPage() {
   function openCatalogSummary() {
     if (!catalogMode || cartCount <= 0) return;
     setKioskAddedPrompt(null);
+    setCatalogReady(null);
     setIsPreCheckoutUpsellOpen(true);
+  }
+
+  function finishCatalogOrder() {
+    if (!catalogMode || cartCount <= 0) return;
+    setCatalogReady({
+      items: cartItems.map((item) => ({
+        name: menuLineLabel(item.product, item.selection, item.category, productById),
+        quantity: item.quantity,
+        priceLabel: formatUpsellPrice(item.unitPrice * item.quantity),
+      })),
+      itemCount: cartCount,
+      totalLabel: formatUpsellPrice(cartTotal),
+    });
+    setIsPreCheckoutUpsellOpen(false);
+    setKioskAddedPrompt(null);
+  }
+
+  function startNewCatalogOrder() {
+    setCatalogReady(null);
+    setCart({});
+    setIsPreCheckoutUpsellOpen(false);
+    setKioskAddedPrompt(null);
+    setIsConfirmOpen(false);
   }
 
   function handleKioskAddProduct(productId: string) {
@@ -4117,6 +4246,7 @@ export default function PublicMenuPage() {
         if (mapPickerSearchInputRef.current && google.maps.places?.Autocomplete) {
           const autocomplete = new google.maps.places.Autocomplete(mapPickerSearchInputRef.current, {
             fields: ['geometry', 'formatted_address', 'name'],
+            componentRestrictions: { country: GOOGLE_MAPS_VE_COUNTRY },
           });
           autocomplete.bindTo('bounds', map);
           autocomplete.addListener('place_changed', () => {
@@ -5512,6 +5642,20 @@ export default function PublicMenuPage() {
             Vista previa. Este menú aún no está publicado.
           </div>
         ) : null}
+        {catalogReady ? (
+          <KioskCatalogReady
+            businessName={comercioNombre}
+            logoUrl={comercioLogoUrl || null}
+            initialLetter={comercioInitialLetter}
+            items={catalogReady.items}
+            itemCount={catalogReady.itemCount}
+            totalLabel={catalogReady.totalLabel}
+            paymentGroups={publicPaymentGroups}
+            selectedPaymentCurrency={selectedCurrencyCode}
+            onSelectPaymentCurrency={selectMenuCurrency}
+            onNewOrder={startNewCatalogOrder}
+          />
+        ) : (
         <KioskMenuExperience
           businessName={comercioNombre}
           logoUrl={comercioLogoUrl || null}
@@ -5519,6 +5663,7 @@ export default function PublicMenuPage() {
           ratingCount={toNumberOrNull(menuData.comercio.rating_count) ?? 0}
           initialLetter={comercioInitialLetter}
           locationLabel={heroLocation || null}
+          operatingStateLabels={operatingStateLabels}
           socialLinks={socialLinks}
           tagline={menuData?.comercio.descripcion?.trim() || null}
           isOpen={!scheduleClosed}
@@ -5529,6 +5674,7 @@ export default function PublicMenuPage() {
           paymentGroups={publicPaymentGroups}
           fulfillment={kioskFulfillment}
           catalogMode={catalogMode}
+          catalogOnlySession={catalogUrlLocked}
           assistedMode={isAssistedMode}
           onSelectFulfillment={selectKioskFulfillment}
           onResetFulfillment={resetKioskFulfillment}
@@ -5587,6 +5733,7 @@ export default function PublicMenuPage() {
           onToggleTheme={toggleKioskTheme}
           stickyOffsetClass={isOwnerPreview ? 'top-12' : 'top-0'}
         />
+        )}
 
         <PreCheckoutUpsellSheet
           open={isPreCheckoutUpsellOpen}
@@ -5613,6 +5760,7 @@ export default function PublicMenuPage() {
             }
             proceedToCheckoutSheet();
           }}
+          onCatalogReady={finishCatalogOrder}
           canConfigure={catalogMode || !scheduleClosed}
           catalogMode={catalogMode}
           paymentGroups={publicPaymentGroups}
@@ -6030,7 +6178,13 @@ export default function PublicMenuPage() {
                       const map = mapPickerMapRef.current;
                       if (!geocoder || !map) return;
                       setIsMapPickerLoading(true);
-                      geocoder.geocode({ address: query }, (results: GooglePlaceResult[] | null, status: string) => {
+                      geocoder.geocode(
+                        {
+                          address: query,
+                          componentRestrictions: { country: GOOGLE_MAPS_VE_COUNTRY },
+                          region: GOOGLE_MAPS_VE_COUNTRY,
+                        },
+                        (results: GooglePlaceResult[] | null, status: string) => {
                         if (status !== 'OK' || !results?.[0]?.geometry?.location) {
                           setIsMapPickerLoading(false);
                           return;
@@ -6057,7 +6211,13 @@ export default function PublicMenuPage() {
                       const map = mapPickerMapRef.current;
                       if (!geocoder || !map) return;
                       setIsMapPickerLoading(true);
-                      geocoder.geocode({ address: query }, (results: GooglePlaceResult[] | null, status: string) => {
+                      geocoder.geocode(
+                        {
+                          address: query,
+                          componentRestrictions: { country: GOOGLE_MAPS_VE_COUNTRY },
+                          region: GOOGLE_MAPS_VE_COUNTRY,
+                        },
+                        (results: GooglePlaceResult[] | null, status: string) => {
                         if (status !== 'OK' || !results?.[0]?.geometry?.location) {
                           setIsMapPickerLoading(false);
                           return;

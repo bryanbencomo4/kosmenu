@@ -148,4 +148,6 @@ export function merchantPanelOrderHref(orderId: string) {
 
 export const termsPagePath = '/terminos';
 export const privacyPagePath = '/privacidad';
+export const kitPagePath = '/kit';
+export const kitCheckoutHref = `${businessSiteUrl.replace(/\/$/, '')}${kitPagePath}`;
 export const legalPagePaths = [termsPagePath, privacyPagePath] as const;

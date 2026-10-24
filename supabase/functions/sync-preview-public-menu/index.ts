@@ -53,6 +53,7 @@ const COMMERCE_SELECT = [
   'horarios',
   'categoria',
   'negocio_virtual',
+  'estados_operacion',
   'mostrar_en_directorio_publico',
   'checkout_currencies:branding_ia->config_negocio->checkout_currencies',
   'exchange_rates:branding_ia->config_negocio->exchange_rates',

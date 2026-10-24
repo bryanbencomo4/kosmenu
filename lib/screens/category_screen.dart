@@ -550,7 +550,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 });
 
                 try {
-                  final bytes = ProductImageOptimizer.compressToJpeg(
+                  final bytes = await ProductImageOptimizer.compressToJpegAsync(
                     await photo.readAsBytes(),
                   );
                   final fileName =
@@ -563,6 +563,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                         fileOptions: const FileOptions(
                           upsert: true,
                           contentType: 'image/jpeg',
+                        ),
+                      )
+                      .timeout(
+                        const Duration(seconds: 45),
+                        onTimeout: () => throw TimeoutException(
+                          'La subida de la imagen tardó demasiado. Reintenta.',
                         ),
                       );
                   final publicUrl = Supabase.instance.client.storage

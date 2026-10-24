@@ -91,6 +91,8 @@ const COMERCIO_COLUMNS = [
   'longitud',
   'permite_delivery',
   'recibe_pedidos_whatsapp',
+  'negocio_virtual',
+  'estados_operacion',
   'en_linea',
   'owner_id',
   'menu_palette',

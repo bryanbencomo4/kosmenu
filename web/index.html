@@ -144,7 +144,11 @@
         return self.whenReady().then(function () {
           return new Promise(function (resolve, reject) {
             var service = new google.maps.places.AutocompleteService();
-            var request = { input: input, language: 'es' };
+            var request = {
+              input: input,
+              language: 'es',
+              componentRestrictions: { country: 've' },
+            };
             if (typeof lat === 'number' && typeof lng === 'number') {
               request.location = new google.maps.LatLng(lat, lng);
               request.radius = typeof radiusMeters === 'number' ? radiusMeters : 30000;

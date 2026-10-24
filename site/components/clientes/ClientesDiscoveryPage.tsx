@@ -81,7 +81,29 @@ const script = Caveat({
 
 const FAVORITES_KEY = 'elmenuxfa_clientes_favorites_v1';
 const AUDIENCE_GATE_KEY = 'elmenuxfa_clientes_audience_gate_v1';
+const MERCHANT_BANNER_HIDDEN_KEY = 'elmenuxfa_merchant_banner_hidden_v1';
+const MERCHANT_BANNER_MSG_KEY = 'elmenuxfa_merchant_banner_msg_v1';
 const BENEFITS_HREF = businessBenefitsHref;
+
+const MERCHANT_BANNER_MESSAGES = [
+  '¿Deseas compartir tu menú con miles de personas? Súmate hoy por $10',
+  '¿Listo para que te pidan desde el celular? Publica tu menú por $10 al mes',
+  'Miles de personas buscan dónde comer. ¿Compartes tu menú hoy por $10?',
+  'Haz visible tu restaurante. Menú digital y pedidos por solo $10',
+  '¿Tu menú aún no está en línea? Súmate a elmenuxfa por $10',
+  'Llega a más clientes cerca de ti. Publica tu menú hoy por $10',
+] as const;
+
+function nextMerchantBannerMessage(): string {
+  if (typeof window === 'undefined') return MERCHANT_BANNER_MESSAGES[0];
+  const last = Number.parseInt(window.localStorage.getItem(MERCHANT_BANNER_MSG_KEY) ?? '-1', 10);
+  const next =
+    Number.isFinite(last) && last >= 0
+      ? (last + 1) % MERCHANT_BANNER_MESSAGES.length
+      : Math.floor(Math.random() * MERCHANT_BANNER_MESSAGES.length);
+  window.localStorage.setItem(MERCHANT_BANNER_MSG_KEY, String(next));
+  return MERCHANT_BANNER_MESSAGES[next] ?? MERCHANT_BANNER_MESSAGES[0];
+}
 const RADIUS_OPTIONS = [5, 10, 25, 50] as const;
 const DEFAULT_NEAR_RADIUS_KM = 25;
 const PAGE_SIZE = 12;
@@ -103,6 +125,9 @@ type DirectoryBusiness = {
   coverUrl: string | null;
   categoria: string | null;
   direccion: string | null;
+  negocioVirtual?: boolean;
+  estadosOperacion?: string[];
+  zonaOperacion?: string | null;
   ratingAverage: number;
   ratingCount: number;
   promovido: boolean;
@@ -841,7 +866,15 @@ function RestaurantCard({
         <p className="mt-0.5 truncate text-[11px] font-semibold text-violet-700 sm:mt-1 sm:text-[12px]">
           Sirve: {business.matchedDish}
         </p>
-      ) : business.direccion ? (
+      ) : business.negocioVirtual && business.zonaOperacion ? (
+        <p
+          className={`mt-0.5 truncate text-[11px] text-slate-400 sm:mt-1 sm:text-[12px] ${
+            forceRow ? 'hidden sm:block' : ''
+          }`}
+        >
+          Opera en {business.zonaOperacion}
+        </p>
+      ) : business.direccion && !business.negocioVirtual ? (
         <p
           className={`mt-0.5 truncate text-[11px] text-slate-400 sm:mt-1 sm:text-[12px] ${
             forceRow ? 'hidden sm:block' : ''
@@ -1070,6 +1103,42 @@ export function ClientesDiscoveryPage() {
   const pendingHeaderFocusRef = useRef(false);
   const [searchMode, setSearchMode] = useState(false);
   const [showSearchMap, setShowSearchMap] = useState(false);
+  const [merchantBannerHidden, setMerchantBannerHidden] = useState(true);
+  const [merchantBannerMessage, setMerchantBannerMessage] = useState<string>(
+    MERCHANT_BANNER_MESSAGES[0],
+  );
+
+  useEffect(() => {
+    try {
+      const hidden = window.localStorage.getItem(MERCHANT_BANNER_HIDDEN_KEY) === '1';
+      setMerchantBannerHidden(hidden);
+      if (!hidden) {
+        setMerchantBannerMessage(nextMerchantBannerMessage());
+      }
+    } catch {
+      setMerchantBannerHidden(false);
+      setMerchantBannerMessage(MERCHANT_BANNER_MESSAGES[0]);
+    }
+  }, []);
+
+  const hideMerchantBanner = useCallback(() => {
+    setMerchantBannerHidden(true);
+    try {
+      window.localStorage.setItem(MERCHANT_BANNER_HIDDEN_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const showMerchantBanner = useCallback(() => {
+    setMerchantBannerMessage(nextMerchantBannerMessage());
+    setMerchantBannerHidden(false);
+    try {
+      window.localStorage.removeItem(MERCHANT_BANNER_HIDDEN_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const requestLocation = useCallback((opts?: { switchToNear?: boolean; forcePrompt?: boolean }) => {
     if (!navigator.geolocation) {
@@ -1806,8 +1875,38 @@ export function ClientesDiscoveryPage() {
 
   return (
     <div className={`${body.className} min-h-screen bg-[#FAFAFC] text-slate-900`}>
+      <div className="sticky top-0 z-40">
+        {!searchMode && !merchantBannerHidden ? (
+          <div className="border-b border-violet-200/70 bg-[linear-gradient(90deg,#F7F3FF_0%,#EDE9FE_48%,#FBF9FF_100%)]">
+            <div className="mx-auto flex max-w-6xl items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5">
+              <p
+                className={`${script.className} min-w-0 flex-1 text-[1.2rem] leading-snug tracking-wide text-[#4C1D95] sm:text-[1.65rem] sm:leading-tight`}
+              >
+                {merchantBannerMessage}
+              </p>
+              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+                <Link
+                  href={BENEFITS_HREF}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-[#6D28D9] px-3 py-1.5 text-[12px] font-bold text-white shadow-sm shadow-violet-500/20 transition hover:bg-[#5b21b6] sm:px-4 sm:py-2 sm:text-[13px]"
+                >
+                  Comenzar
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+                <button
+                  type="button"
+                  onClick={hideMerchantBanner}
+                  aria-label="Ocultar anuncio"
+                  title="Ocultar"
+                  className="grid h-8 w-8 place-items-center rounded-full text-violet-700/70 transition hover:bg-violet-200/60 hover:text-violet-900 sm:h-9 sm:w-9"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       <header
-        className={`sticky top-0 z-40 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90 ${
+        className={`border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/90 ${
           searchMode
             ? 'border-slate-200 shadow-[0_8px_30px_rgba(15,23,42,0.06)]'
             : 'border-slate-200/70'
@@ -1948,6 +2047,16 @@ export function ClientesDiscoveryPage() {
                           : 'Ubicarme'}
                   </span>
                 </button>
+                {merchantBannerHidden ? (
+                  <button
+                    type="button"
+                    onClick={showMerchantBanner}
+                    className="hidden items-center rounded-full bg-violet-100 px-3 py-2 text-[11px] font-bold text-[#6D28D9] sm:inline-flex"
+                    title="Mostrar oferta para restaurantes"
+                  >
+                    Oferta restaurantes
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setFavoritesOnly((value) => !value)}
@@ -2043,10 +2152,23 @@ export function ClientesDiscoveryPage() {
               <a href="#para-negocios" onClick={() => setMobileNavOpen(false)}>
                 Registra tu restaurante
               </a>
+              {merchantBannerHidden ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    showMerchantBanner();
+                  }}
+                  className="text-left font-bold text-[#6D28D9]"
+                >
+                  Mostrar oferta para restaurantes
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
       </header>
+      </div>
 
       <main>
         {geoHelpVisible && geoStatus !== 'ready' ? (

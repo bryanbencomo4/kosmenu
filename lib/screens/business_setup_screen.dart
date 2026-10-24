@@ -18,7 +18,9 @@ import 'package:kosmenu_app/core/color_argb_codec.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/exchange_rate_adjustment.dart';
 import 'package:kosmenu_app/core/search_text.dart';
+import 'package:kosmenu_app/core/venezuela_states.dart';
 import 'package:kosmenu_app/models/comercio.dart';
+import 'package:kosmenu_app/models/kiosk_home_config.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
@@ -31,6 +33,7 @@ import 'package:kosmenu_app/services/logo_image_guard.dart';
 import 'package:kosmenu_app/services/logo_palette.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
+import 'package:kosmenu_app/utils/phone_national_normalize.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/exchange_adjustment_panel.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
@@ -315,9 +318,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
   String _selectedFooter = 'Simple';
   bool _allowDelivery = false;
   bool _receiveOrdersOnWhatsapp = true;
-  String _whatsappOrderFormat = 'summary';
-  String _orderManagementMode = 'platform';
+  /// Catalog browsing (cart + payments, no WhatsApp send). Default off;
+  /// auto-on when there is no WhatsApp number.
+  bool _catalogModeEnabled = false;
+  /// Shown on public home when catalog is on. Defaults to on with catalog.
+  bool _showPaymentMethodsOnHome = true;
+  /// New businesses default to WhatsApp manual + full comanda; merchants can
+  /// switch to platform / summary later in settings.
+  String _whatsappOrderFormat = 'detailed';
+  String _orderManagementMode = 'whatsapp_manual';
   bool _isVirtualBusiness = false;
+
+  /// Venezuela state slugs where a virtual business operates (directory + delivery area).
+  final Set<String> _operatingStateSlugs = <String>{};
 
   /// Directory discovery at /clientes — merchants opt in and can promote manually.
   static const bool _publicDirectoryUiEnabled = true;
@@ -721,14 +734,25 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     final seedBusinessConfig = _toStringDynamicMap(
       seedBranding['config_negocio'],
     );
-    _orderManagementMode =
-        seedBusinessConfig['order_management_mode'] == 'whatsapp_manual'
-        ? 'whatsapp_manual'
-        : 'platform';
-    _whatsappOrderFormat =
-        seedBusinessConfig['whatsapp_order_format'] == 'detailed'
-        ? 'detailed'
-        : 'summary';
+    // Explicit saved values win; missing keys keep the new-registration defaults.
+    if (seedBusinessConfig.containsKey('order_management_mode')) {
+      _orderManagementMode =
+          seedBusinessConfig['order_management_mode'] == 'whatsapp_manual'
+          ? 'whatsapp_manual'
+          : 'platform';
+    } else {
+      _orderManagementMode = 'whatsapp_manual';
+    }
+    if (seedBusinessConfig.containsKey('whatsapp_order_format')) {
+      _whatsappOrderFormat =
+          seedBusinessConfig['whatsapp_order_format'] == 'detailed'
+          ? 'detailed'
+          : 'summary';
+    } else if (_orderManagementMode == 'whatsapp_manual') {
+      _whatsappOrderFormat = 'detailed';
+    } else {
+      _whatsappOrderFormat = 'summary';
+    }
     final seedSocialLinks = _toStringDynamicMap(
       seedBusinessConfig['social_links'],
     );
@@ -741,6 +765,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _tiktokController.text = seedSocialLinks['tiktok']?.toString().trim() ?? '';
     final seedAddress = (raw?['direccion']?.toString() ?? '').trim();
     _isVirtualBusiness = raw?['negocio_virtual'] == true;
+    _operatingStateSlugs
+      ..clear()
+      ..addAll(sanitizeVenezuelaStateSlugs(raw?['estados_operacion'] as List?));
     if (_isVirtualBusiness) {
       _addressController.clear();
       _locationNoteController.clear();
@@ -758,6 +785,17 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
     _allowDelivery = raw?['permite_delivery'] == true;
     _receiveOrdersOnWhatsapp = raw?['recibe_pedidos_whatsapp'] == true;
+    final seedHome = KioskHomeConfig.fromConfigNegocio(seedBusinessConfig);
+    _catalogModeEnabled = seedHome.catalogo;
+    _showPaymentMethodsOnHome = seedHome.catalogo
+        ? seedHome.verMetodosPago
+        : true;
+    if (_whatsappE164.isEmpty) {
+      _catalogModeEnabled = true;
+      if (!seedHome.catalogo) {
+        _showPaymentMethodsOnHome = true;
+      }
+    }
     _showOnPublicDirectory =
         _publicDirectoryUiEnabled &&
         (raw?['mostrar_en_directorio_publico'] is bool
@@ -766,9 +804,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     _directoryPromoted =
         seedBusinessConfig['destacado_directorio'] == true ||
         seedBusinessConfig['promovido'] == true;
-    if (_isVirtualBusiness) {
-      _allowDelivery = false;
-    }
 
     final layout = (raw?['menu_layout']?.toString().trim() ?? '');
     if (_layouts.any((item) => item.id == layout)) {
@@ -1757,14 +1792,22 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       _allowDelivery = map['allowDelivery'] as bool? ?? false;
       _receiveOrdersOnWhatsapp =
           map['receiveOrdersOnWhatsapp'] as bool? ?? true;
+      _catalogModeEnabled = map['catalogModeEnabled'] as bool? ?? false;
+      _showPaymentMethodsOnHome =
+          map['showPaymentMethodsOnHome'] as bool? ?? true;
+      if (_whatsappE164.isEmpty) {
+        _catalogModeEnabled = true;
+      }
       _isVirtualBusiness = map['isVirtualBusiness'] as bool? ?? false;
+      _operatingStateSlugs
+        ..clear()
+        ..addAll(
+          sanitizeVenezuelaStateSlugs(map['operatingStateSlugs'] as List?),
+        );
       _showOnPublicDirectory =
           _publicDirectoryUiEnabled &&
           (map['showOnPublicDirectory'] as bool? ?? true);
       _directoryPromoted = map['directoryPromoted'] as bool? ?? false;
-      if (_isVirtualBusiness) {
-        _allowDelivery = false;
-      }
       _menuScanCompleted = map['menuScanCompleted'] as bool? ?? false;
       _menuAiSetupMode = (map['menuAiSetupMode'] as String? ?? '').trim();
       _manualMenuSetupSelected =
@@ -1949,7 +1992,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'businessLongitude': _businessLongitude,
       'allowDelivery': _allowDelivery,
       'receiveOrdersOnWhatsapp': _receiveOrdersOnWhatsapp,
+      'catalogModeEnabled': _effectiveCatalogModeEnabled,
+      'showPaymentMethodsOnHome': _showPaymentMethodsOnHome,
       'isVirtualBusiness': _isVirtualBusiness,
+      'operatingStateSlugs': sanitizeVenezuelaStateSlugs(_operatingStateSlugs),
       'showOnPublicDirectory': _publicDirectoryUiEnabled
           ? _showOnPublicDirectory
           : false,
@@ -3353,10 +3399,31 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     }
   }
 
+  bool get _hasLogoSelected =>
+      _selectedLogo != null || _selectedLogoUrl.trim().isNotEmpty;
+
   bool _canContinueIdentity() {
     final name = _nameController.text.trim();
     final slug = _normalizeSlug(_slugController.text);
-    return name.length >= 3 && slug.length >= 3 && _isSlugAvailable;
+    return name.length >= 3 &&
+        slug.length >= 3 &&
+        _isSlugAvailable &&
+        _hasLogoSelected;
+  }
+
+  String? _identityContinueBlocker() {
+    final name = _nameController.text.trim();
+    final slug = _normalizeSlug(_slugController.text);
+    if (name.length < 3) {
+      return 'Escribe el nombre de tu negocio (mínimo 3 caracteres).';
+    }
+    if (slug.length < 3 || !_isSlugAvailable) {
+      return 'Elige una URL disponible para tu menú.';
+    }
+    if (!_hasLogoSelected) {
+      return 'Sube el logo de tu negocio para continuar.';
+    }
+    return null;
   }
 
   double? _toDoubleOrNull(dynamic value) {
@@ -3419,26 +3486,73 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       final dialDigits = country.fullCountryCode;
       if (digitsToMatch.startsWith(dialDigits) &&
           digitsToMatch.length > dialDigits.length) {
+        final national = normalizeNationalPhoneDigits(
+          digitsToMatch.substring(dialDigits.length),
+          iso: country.code,
+        );
         return _ParsedPhoneNumber(
           countryIso: country.code,
-          nationalNumber: digitsToMatch.substring(dialDigits.length),
+          nationalNumber: national,
         );
       }
     }
 
     return _ParsedPhoneNumber(
       countryIso: fallbackCountry,
-      nationalNumber: normalizedDigits,
+      nationalNumber: normalizeNationalPhoneDigits(
+        normalizedDigits,
+        iso: fallbackCountry,
+      ),
     );
   }
 
   String get _whatsappE164 {
-    final local = _whatsappController.text.replaceAll(RegExp(r'\D'), '');
+    final local = normalizeNationalPhoneDigits(
+      _whatsappController.text,
+      iso: _selectedPhoneCountryIso,
+    );
     if (local.isEmpty) {
       return '';
     }
     final country = _countryByIso(_selectedPhoneCountryIso);
     return '+${country.fullCountryCode}$local';
+  }
+
+  void _syncWhatsappControllerNational(String iso, String nationalRaw) {
+    final normalized = normalizeNationalPhoneDigits(nationalRaw, iso: iso);
+    if (normalized == _whatsappController.text) return;
+    _whatsappController.value = TextEditingValue(
+      text: normalized,
+      selection: TextSelection.collapsed(offset: normalized.length),
+    );
+  }
+
+  /// Without WhatsApp, catalog must stay on so clients can still browse totals.
+  bool get _effectiveCatalogModeEnabled =>
+      _whatsappE164.isEmpty ? true : _catalogModeEnabled;
+
+  String get _publicCatalogMenuUrl {
+    final slug = _normalizeSlug(_slugController.text);
+    final id = (_editingComercioId ?? '').trim();
+    final identifier = slug.isNotEmpty
+        ? slug
+        : (id.isNotEmpty
+              ? id
+              : (SupabaseConfig.currentComercioSlug ??
+                    SupabaseConfig.currentComercioId));
+    if (identifier.trim().isEmpty) {
+      return '${AppLinks.productionUrl}/v/tu-slug?catalogo=1';
+    }
+    return AppLinks.publicMenuCatalogByComercio(identifier.trim());
+  }
+
+  Future<void> _copyPublicCatalogMenuUrl() async {
+    final url = _publicCatalogMenuUrl;
+    await Clipboard.setData(ClipboardData(text: url));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Enlace de catálogo copiado.')),
+    );
   }
 
   String? _operationValidationMessage() {
@@ -3470,7 +3584,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return 'Selecciona la ubicacion exacta del negocio en el mapa.';
     }
 
+    if (_isVirtualBusiness && _operatingStateSlugs.isEmpty) {
+      return 'Selecciona al menos un estado donde opera tu negocio.';
+    }
+
     return null;
+  }
+
+  List<String> _persistedOperatingStates() {
+    if (!_isVirtualBusiness) {
+      // Physical shops use direccion + coords; never leave stale virtual states.
+      return const <String>[];
+    }
+    return sanitizeVenezuelaStateSlugs(_operatingStateSlugs);
+  }
+
+  void _toggleOperatingState(String slug) {
+    setState(() {
+      if (_operatingStateSlugs.contains(slug)) {
+        _operatingStateSlugs.remove(slug);
+      } else {
+        _operatingStateSlugs.add(slug);
+      }
+    });
+    unawaited(_saveDraft());
   }
 
   Future<String?> _reverseGeocodeFromLatLng(LatLng position) async {
@@ -4401,7 +4538,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     if (_step == _SetupStep.identity && !_canContinueIdentity()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa nombre y URL disponible.')),
+        SnackBar(
+          content: Text(
+            _identityContinueBlocker() ??
+                'Completa nombre, URL disponible y logo.',
+          ),
+        ),
       );
       return;
     }
@@ -4632,7 +4774,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'latitud': _isVirtualBusiness ? null : _businessLatitude,
               'longitud': _isVirtualBusiness ? null : _businessLongitude,
               'negocio_virtual': _isVirtualBusiness,
-              'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
+              'estados_operacion': _persistedOperatingStates(),
+              'permite_delivery': _allowDelivery,
               if (_publicDirectoryUiEnabled)
                 'mostrar_en_directorio_publico': _showOnPublicDirectory,
               'branding_ia': _buildBrandingIaPayload(),
@@ -4644,6 +4787,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               'latitud',
               'longitud',
               'negocio_virtual',
+              'estados_operacion',
               'permite_delivery',
               'mostrar_en_directorio_publico',
               'branding_ia',
@@ -4902,9 +5046,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           if (source == _exchangeSourceP2pBinance) {
             return _adjustP2pRateForBuyer(liveRate);
           }
-          if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
-            return liveRate * (_googleAnchorRates['USD/EUR'] ?? 0);
-          }
+          // BCV EUR is VES per 1 EUR; when pivoting through USD for
+          // USD/VES (or COP/VES) we apply that official number as the
+          // commercial VES rate — do NOT multiply by USD/EUR (that made
+          // BCV EUR collapse to nearly the same value as BCV USD).
           return liveRate;
         }
         return _usdToCurrencyRate('VES');
@@ -4913,6 +5058,55 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'EUR' => _googleAnchorRates['USD/EUR'] ?? _usdToCurrencyRate('EUR'),
       _ => 0,
     };
+  }
+
+  /// Official BCV EUR (VES per 1 EUR) applied to a tracked VES pair.
+  ///
+  /// For EUR/VES this is the literal official rate. For USD/VES (and COP via
+  /// USD) merchants who pick "BCV EUR" use that same official number as their
+  /// commercial VES rate, distinct from BCV USD.
+  double _bcvEurRateForPair({
+    required String baseCurrency,
+    required String quoteCurrency,
+    double? eurVesRate,
+    double? usdCopRate,
+  }) {
+    final eurVes = eurVesRate ?? (_marketRates[_exchangeSourceBcvEur] ?? 0);
+    if (eurVes <= 0) {
+      return 0;
+    }
+    final base = baseCurrency.toUpperCase();
+    final quote = quoteCurrency.toUpperCase();
+    if (base == quote) {
+      return 1;
+    }
+
+    if (base == 'EUR' && quote == 'VES') {
+      return eurVes;
+    }
+    if (base == 'VES' && quote == 'EUR') {
+      return 1 / eurVes;
+    }
+    if (base == 'USD' && quote == 'VES') {
+      return eurVes;
+    }
+    if (base == 'VES' && quote == 'USD') {
+      return 1 / eurVes;
+    }
+
+    final usdCop =
+        usdCopRate ??
+        (_googleAnchorRates['USD/COP'] ?? _usdToCurrencyRate('COP'));
+    if (usdCop <= 0) {
+      return 0;
+    }
+    if (base == 'COP' && quote == 'VES') {
+      return eurVes / usdCop;
+    }
+    if (base == 'VES' && quote == 'COP') {
+      return usdCop / eurVes;
+    }
+    return 0;
   }
 
   String _pairKey(String baseCurrency, String quoteCurrency) {
@@ -5030,7 +5224,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return derived > 0 ? derived : null;
     }
 
-    if (source == _exchangeSourceBcv &&
+    if (_isBcvSource(source) &&
         !_canUseBcvSourceForPair(
           quoteCurrency: quoteCurrency,
           baseCurrency: baseCurrency,
@@ -5045,30 +5239,62 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return null;
     }
 
-    final liveRate = switch (source) {
-      _exchangeSourceBcv => _parseExchangeRate(row['bcv_rate']),
-      _exchangeSourceP2pBinance => _adjustP2pRateForBuyer(
-        _parseExchangeRate(row['p2p_binance_rate']),
-      ),
-      _ => 0,
-    };
+    final payload = row['payload'];
+    final bcvRates = payload is Map ? payload['bcv_rates'] : null;
+    final googleRates = _googleRatesFromPayload(payload);
+    final usdCop =
+        (googleRates['USD/COP'] ??
+                _googleAnchorRates['USD/COP'] ??
+                _usdToCurrencyRate('COP'))
+            .toDouble();
+
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+      final eurRate = bcvRates is Map
+          ? _parseExchangeRate(bcvRates['EUR'])
+          : 0.0;
+      if (eurRate <= 0) {
+        return null;
+      }
+      final derived = _bcvEurRateForPair(
+        baseCurrency: baseCurrency,
+        quoteCurrency: quoteCurrency,
+        eurVesRate: eurRate,
+        usdCopRate: usdCop,
+      );
+      return derived > 0 ? derived : null;
+    }
+
+    final canonical = _canonicalExchangeSource(source);
+    final liveRate = () {
+      if (canonical == _exchangeSourceBcvUsd ||
+          canonical == _exchangeSourceBcv) {
+        final fromPayload = bcvRates is Map
+            ? _parseExchangeRate(bcvRates['USD'])
+            : 0.0;
+        return fromPayload > 0
+            ? fromPayload
+            : _parseExchangeRate(row['bcv_rate']);
+      }
+      if (canonical == _exchangeSourceP2pBinance) {
+        return _adjustP2pRateForBuyer(
+          _parseExchangeRate(row['p2p_binance_rate']),
+        );
+      }
+      return 0.0;
+    }();
     if (liveRate <= 0) {
       return null;
     }
 
     double usdToCurrency(String currency) {
-      final usdCop =
-          (_googleAnchorRates['USD/COP'] ?? _usdToCurrencyRate('COP'))
-              .toDouble();
       final usdEur =
-          (_googleAnchorRates['USD/EUR'] ?? _usdToCurrencyRate('EUR'))
+          (googleRates['USD/EUR'] ??
+                  _googleAnchorRates['USD/EUR'] ??
+                  _usdToCurrencyRate('EUR'))
               .toDouble();
       return switch (currency) {
         'USD' => 1.0,
-        'VES' =>
-          source == _exchangeSourceBcvEur
-              ? liveRate * usdEur
-              : liveRate.toDouble(),
+        'VES' => liveRate.toDouble(),
         'COP' => usdCop,
         'EUR' => usdEur,
         _ => 0.0,
@@ -5544,6 +5770,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       return false;
     }
 
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+      return _bcvEurRateForPair(
+            baseCurrency: base,
+            quoteCurrency: quoteCurrency,
+          ) >
+          0;
+    }
+
     final usdToBase = _usdToCurrencyRateForSource(source, base);
     final usdToQuote = _usdToCurrencyRateForSource(source, quoteCurrency);
     return usdToBase > 0 && usdToQuote > 0;
@@ -5604,6 +5838,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         !_canUseP2pSourceForPair(quoteCurrency: currency, baseCurrency: base)) {
       return 0;
     }
+
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+      final eurDerived = _bcvEurRateForPair(
+        baseCurrency: base,
+        quoteCurrency: currency,
+      );
+      if (eurDerived > 0) {
+        return eurDerived;
+      }
+      final fallback = _defaultExchangeRateFor(currency, baseCurrency: base);
+      return fallback > 0 ? fallback : 0;
+    }
+
     if (!_canDeriveExchangeRateFromSource(
       source,
       quoteCurrency: currency,
@@ -5629,6 +5876,30 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
   String _rateBadgeText(String source, {String? quoteCurrency}) {
     final currency = quoteCurrency ?? _currentCurrency;
+    // Show the official BCV unit for each source so EUR is not labeled as USD.
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvEur) {
+      final eurRate = _marketRates[_exchangeSourceBcvEur] ?? 0;
+      if (eurRate <= 0) {
+        return '--';
+      }
+      return _formatConversionRateText(
+        rate: eurRate,
+        baseCurrency: 'EUR',
+        quoteCurrency: 'VES',
+      );
+    }
+    if (_canonicalExchangeSource(source) == _exchangeSourceBcvUsd) {
+      final usdRate = _bcvVesRate(_exchangeSourceBcvUsd);
+      if (usdRate <= 0) {
+        return '--';
+      }
+      return _formatConversionRateText(
+        rate: usdRate,
+        baseCurrency: 'USD',
+        quoteCurrency: 'VES',
+      );
+    }
+
     final rate = _rateForSource(source, quoteCurrency: currency);
     if (rate <= 0) {
       return '--';
@@ -5859,6 +6130,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       ],
       'telefono' => <TextInputFormatter>[
         FilteringTextInputFormatter.digitsOnly,
+        const NormalizeNationalPhoneFormatter(iso: 'VE'),
       ],
       'id' => <TextInputFormatter>[
         FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9-]')),
@@ -7241,10 +7513,16 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                       ),
                                       invalidNumberMessage:
                                           'Numero invalido para ese pais.',
+                                      disableLengthCheck: true,
                                       autovalidateMode:
                                           AutovalidateMode.onUserInteraction,
                                       inputFormatters: <TextInputFormatter>[
                                         FilteringTextInputFormatter.digitsOnly,
+                                        NormalizeNationalPhoneFormatter(
+                                          iso: currentIso.trim().isEmpty
+                                              ? 'VE'
+                                              : currentIso,
+                                        ),
                                       ],
                                       decoration: InputDecoration(
                                         labelText: 'Numero de telefono',
@@ -7289,8 +7567,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                         });
                                       },
                                       onChanged: (phone) {
-                                        final localDigits = phone.number
-                                            .replaceAll(RegExp(r'\D'), '');
+                                        final localDigits =
+                                            normalizeNationalPhoneDigits(
+                                          phone.number,
+                                          iso: phone.countryISOCode,
+                                        );
                                         final country = _countryByIso(
                                           phone.countryISOCode,
                                         );
@@ -8216,6 +8497,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'config_negocio': <String, dynamic>{
         'metodos_pago': <String>['efectivo'],
         'moneda_default': _baseCurrency,
+        'order_management_mode': 'whatsapp_manual',
+        'whatsapp_order_format': 'detailed',
       },
       'colores_personalizados': <String, dynamic>{
         'background': surface,
@@ -8257,7 +8540,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             _whatsappOrderFormat == 'detailed'
         ? 'detailed'
         : 'summary';
-    branding['config_negocio'] = config;
+    final catalogEnabled = _effectiveCatalogModeEnabled;
+    _catalogModeEnabled = catalogEnabled;
+    final homeConfig = KioskHomeConfig.fromConfigNegocio(config).copyWith(
+      catalogo: catalogEnabled,
+      verMetodosPago: catalogEnabled ? _showPaymentMethodsOnHome : false,
+    );
+    branding['config_negocio'] = homeConfig.mergeIntoConfigNegocio(config);
     final saved = await client
         .from('comercios')
         .update({'branding_ia': branding})
@@ -8271,7 +8560,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Formato de pedidos por WhatsApp guardado.'),
+          content: Text('Operación y WhatsApp guardados.'),
         ),
       );
     }
@@ -8294,7 +8583,23 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         _toStringDynamicMap(payload['config_negocio']),
       );
       config['social_links'] = _socialLinksPayload();
-      payload['config_negocio'] = config;
+      config['order_management_mode'] =
+          _orderManagementMode == 'whatsapp_manual'
+          ? 'whatsapp_manual'
+          : 'platform';
+      config['whatsapp_order_format'] =
+          _orderManagementMode == 'whatsapp_manual' ||
+              _whatsappOrderFormat == 'detailed'
+          ? 'detailed'
+          : 'summary';
+      final catalogEnabled = _effectiveCatalogModeEnabled;
+      _catalogModeEnabled = catalogEnabled;
+      payload['config_negocio'] = KioskHomeConfig.fromConfigNegocio(config)
+          .copyWith(
+            catalogo: catalogEnabled,
+            verMetodosPago: catalogEnabled ? _showPaymentMethodsOnHome : false,
+          )
+          .mergeIntoConfigNegocio(config);
       return payload;
     }
 
@@ -8335,6 +8640,8 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       merged['config_negocio'] = <String, dynamic>{
         'metodos_pago': <String>['efectivo'],
         'moneda_default': _baseCurrency,
+        'order_management_mode': 'whatsapp_manual',
+        'whatsapp_order_format': 'detailed',
       };
     }
 
@@ -8344,6 +8651,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     configNegocio['social_links'] = _socialLinksPayload();
     configNegocio['moneda_default'] = _baseCurrency;
     configNegocio['checkout_currencies'] = _selectedCurrencies.toList();
+    configNegocio['order_management_mode'] =
+        _orderManagementMode == 'whatsapp_manual'
+        ? 'whatsapp_manual'
+        : 'platform';
+    configNegocio['whatsapp_order_format'] =
+        _orderManagementMode == 'whatsapp_manual' ||
+            _whatsappOrderFormat == 'detailed'
+        ? 'detailed'
+        : 'summary';
     // Promotion is admin-only (admin.elmenuxfa.com). Preserve existing flag.
     // Do not let the restaurant self-promote from this panel.
 
@@ -8379,7 +8695,14 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         configNegocio.containsKey('exchange_rate_adjustments')) {
       configNegocio['exchange_rate_adjustments'] = exchangeRateAdjustments;
     }
-    merged['config_negocio'] = configNegocio;
+    final catalogEnabled = _effectiveCatalogModeEnabled;
+    _catalogModeEnabled = catalogEnabled;
+    merged['config_negocio'] = KioskHomeConfig.fromConfigNegocio(configNegocio)
+        .copyWith(
+          catalogo: catalogEnabled,
+          verMetodosPago: catalogEnabled ? _showPaymentMethodsOnHome : false,
+        )
+        .mergeIntoConfigNegocio(configNegocio);
 
     return merged;
   }
@@ -8524,9 +8847,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         if (_businessLatitude != null) 'latitud': _businessLatitude,
         if (_businessLongitude != null) 'longitud': _businessLongitude,
       },
-      'permite_delivery': _isVirtualBusiness ? false : _allowDelivery,
+      'permite_delivery': _allowDelivery,
       'recibe_pedidos_whatsapp': _receiveOrdersOnWhatsapp,
       'negocio_virtual': _isVirtualBusiness,
+      'estados_operacion': _persistedOperatingStates(),
       if (_publicDirectoryUiEnabled)
         'mostrar_en_directorio_publico': _showOnPublicDirectory,
       'logo_url': (logoUrl != null && logoUrl.trim().isNotEmpty)
@@ -8571,6 +8895,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       'permite_delivery',
       'recibe_pedidos_whatsapp',
       'negocio_virtual',
+      'estados_operacion',
       'mostrar_en_directorio_publico',
       'slug',
       'logo_url',
@@ -8656,7 +8981,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
 
     if (!_canContinueIdentity()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa nombre y URL disponible.')),
+        SnackBar(
+          content: Text(
+            _identityContinueBlocker() ??
+                'Completa nombre, URL disponible y logo.',
+          ),
+        ),
       );
       return;
     }
@@ -9048,6 +9378,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           onPickLogo: _pickLogo,
           selectedLogo: _selectedLogo,
           selectedLogoUrl: _selectedLogoUrl,
+          logoRequiredMissing: !_hasLogoSelected,
         ),
         const SizedBox(height: 12),
         _UrlBar(
@@ -10711,13 +11042,19 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             ),
           ),
           invalidNumberMessage: 'Numero invalido para ese pais.',
+          disableLengthCheck: true,
           autovalidateMode: AutovalidateMode.onUserInteraction,
           inputFormatters: <TextInputFormatter>[
             FilteringTextInputFormatter.digitsOnly,
+            NormalizeNationalPhoneFormatter(
+              iso: _selectedPhoneCountryIso.trim().isEmpty
+                  ? 'VE'
+                  : _selectedPhoneCountryIso,
+            ),
           ],
           decoration: InputDecoration(
             labelText: 'Numero de telefono / WhatsApp',
-            hintText: 'Ingresa el numero',
+            hintText: 'Ej. 4141234567',
             filled: true,
             fillColor: const Color(0xFF120E25),
             labelStyle: const TextStyle(color: _setupTextLow),
@@ -10737,21 +11074,40 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ),
           onCountryChanged: (country) {
             setState(() => _selectedPhoneCountryIso = country.code);
+            _syncWhatsappControllerNational(
+              country.code,
+              _whatsappController.text,
+            );
             unawaited(_saveDraft());
           },
           onChanged: (phone) {
+            _syncWhatsappControllerNational(
+              phone.countryISOCode,
+              phone.number,
+            );
             setState(() {
               _selectedPhoneCountryIso = phone.countryISOCode;
-              if (_whatsappE164.isEmpty && _receiveOrdersOnWhatsapp) {
+              if (_whatsappE164.isEmpty) {
                 _receiveOrdersOnWhatsapp = false;
+                _catalogModeEnabled = true;
               }
             });
             unawaited(_saveDraft());
           },
           validator: (phone) {
-            final number = phone?.number.trim() ?? '';
+            final number = normalizeNationalPhoneDigits(
+              phone?.number ?? '',
+              iso: phone?.countryISOCode ?? _selectedPhoneCountryIso,
+            );
             if (_receiveOrdersOnWhatsapp && number.isEmpty) {
               return 'Ingresa un numero de WhatsApp.';
+            }
+            final iso = (phone?.countryISOCode ?? _selectedPhoneCountryIso)
+                .toUpperCase();
+            if (number.isNotEmpty &&
+                iso == 'VE' &&
+                !isPlausibleVeNational(number)) {
+              return 'Numero invalido para ese pais.';
             }
             return null;
           },
@@ -10788,7 +11144,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             setState(() {
               _isVirtualBusiness = value;
               if (value) {
-                _allowDelivery = false;
+                _addressController.clear();
+                _locationNoteController.clear();
+                _businessLatitude = null;
+                _businessLongitude = null;
               }
             });
             unawaited(_saveDraft());
@@ -10798,12 +11157,114 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           inactiveThumbColor: const Color(0xFFE7E0F9),
           inactiveTrackColor: const Color(0xFF3A305A),
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: const Text('Negocio virtual'),
+          title: const Text('No tengo una dirección'),
           subtitle: const Text(
-            'Sin ubicacion fisica publica. Ideal para ventas solo por WhatsApp o redes.',
+            'No se muestra ubicación física pública. Puedes vender y ofrecer delivery igual.',
             style: TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
+        if (_isVirtualBusiness) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF120E25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF3B2F63)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '¿En qué estado(s) operas?',
+                  style: TextStyle(
+                    color: _setupTextHigh,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Se usa en elmenuxfa.com para mostrarte en la región correcta y para saber dónde puedes hacer delivery.',
+                  style: TextStyle(color: _setupTextMedium, fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _operatingStateSlugs
+                            ..clear()
+                            ..addAll(
+                              venezuelaStates.map((state) => state.slug),
+                            );
+                        });
+                        unawaited(_saveDraft());
+                      },
+                      child: const Text('Todos'),
+                    ),
+                    TextButton(
+                      onPressed: _operatingStateSlugs.isEmpty
+                          ? null
+                          : () {
+                              setState(_operatingStateSlugs.clear);
+                              unawaited(_saveDraft());
+                            },
+                      child: const Text('Ninguno'),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${_operatingStateSlugs.length}/${venezuelaStates.length}',
+                      style: const TextStyle(
+                        color: _setupTextLow,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final state in venezuelaStates)
+                      FilterChip(
+                        label: Text(state.name),
+                        selected: _operatingStateSlugs.contains(state.slug),
+                        onSelected: (_) => _toggleOperatingState(state.slug),
+                        selectedColor: _palette.primary.withValues(alpha: 0.35),
+                        checkmarkColor: _setupTextHigh,
+                        labelStyle: TextStyle(
+                          color: _operatingStateSlugs.contains(state.slug)
+                              ? _setupTextHigh
+                              : _setupTextMedium,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        side: BorderSide(
+                          color: _operatingStateSlugs.contains(state.slug)
+                              ? _palette.primary
+                              : const Color(0xFF3B2F63),
+                        ),
+                        backgroundColor: const Color(0xFF1A1430),
+                        showCheckmark: true,
+                      ),
+                  ],
+                ),
+                if (_operatingStateSlugs.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Elige al menos un estado para continuar.',
+                    style: TextStyle(color: Color(0xFFFFB4A8), fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
         if (!_isVirtualBusiness) ...[
           const SizedBox(height: 10),
           Container(
@@ -10903,30 +11364,26 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         const SizedBox(height: 8),
         SwitchListTile.adaptive(
           value: _allowDelivery,
-          onChanged: _isVirtualBusiness
-              ? null
-              : (value) {
-                  setState(() => _allowDelivery = value);
-                  unawaited(_saveDraft());
-                },
+          onChanged: (value) {
+            setState(() => _allowDelivery = value);
+            unawaited(_saveDraft());
+          },
           activeThumbColor: _palette.primary,
           activeTrackColor: _palette.primary.withValues(alpha: 0.45),
           inactiveThumbColor: const Color(0xFFE7E0F9),
           inactiveTrackColor: const Color(0xFF3A305A),
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          title: Text(
+          title: const Text(
             'Permitir delivery',
             style: TextStyle(
-              color: _isVirtualBusiness ? _setupTextMedium : _setupTextHigh,
+              color: _setupTextHigh,
               fontSize: 14,
               fontWeight: FontWeight.w600,
             ),
           ),
-          subtitle: Text(
-            _isVirtualBusiness
-                ? 'No disponible para negocios virtuales sin ubicacion fisica.'
-                : 'Activa entregas a domicilio para tus clientes.',
-            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+          subtitle: const Text(
+            'Activa entregas a domicilio para tus clientes.',
+            style: TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
         const SizedBox(height: 8),
@@ -10958,6 +11415,116 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
             style: const TextStyle(color: _setupTextMedium, fontSize: 12),
           ),
         ),
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          value: _effectiveCatalogModeEnabled,
+          onChanged: _whatsappE164.isEmpty
+              ? null
+              : (value) {
+                  setState(() {
+                    _catalogModeEnabled = value;
+                    if (value) {
+                      _showPaymentMethodsOnHome = true;
+                    }
+                  });
+                  unawaited(_saveDraft());
+                },
+          activeThumbColor: _palette.primary,
+          activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+          inactiveThumbColor: const Color(0xFFE7E0F9),
+          inactiveTrackColor: const Color(0xFF3A305A),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: Text(
+            'Solo catalogo',
+            style: TextStyle(
+              color: _setupTextHigh,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            _whatsappE164.isEmpty
+                ? 'Activo porque no hay WhatsApp: el cliente ve productos, suma el total y metodos de pago, sin enviar pedido.'
+                : 'El cliente ve los productos, los suma y mira el total y los metodos de pago, sin enviar el mensaje de WhatsApp.',
+            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+          ),
+        ),
+        if (_effectiveCatalogModeEnabled) ...[
+          SwitchListTile.adaptive(
+            value: _showPaymentMethodsOnHome,
+            onChanged: (value) {
+              setState(() => _showPaymentMethodsOnHome = value);
+              unawaited(_saveDraft());
+            },
+            activeThumbColor: _palette.primary,
+            activeTrackColor: _palette.primary.withValues(alpha: 0.45),
+            inactiveThumbColor: const Color(0xFFE7E0F9),
+            inactiveTrackColor: const Color(0xFF3A305A),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: const Text(
+              'Ver metodos de pago',
+              style: TextStyle(
+                color: _setupTextHigh,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            subtitle: const Text(
+              'Se muestran en la pantalla de inicio del catalogo. Por defecto queda activado.',
+              style: TextStyle(color: _setupTextMedium, fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF120E25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF3B2F63)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'QR / enlace solo catalogo',
+                  style: TextStyle(
+                    color: _setupTextHigh,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Usa este enlace en el QR de mesa. Debe incluir ?catalogo=1: ahi solo funciona el catalogo. Sin el parametro, el menu normal no muestra "Ver catalogo" y sigue permitiendo pedir por WhatsApp.',
+                  style: TextStyle(color: _setupTextMedium, fontSize: 12, height: 1.35),
+                ),
+                const SizedBox(height: 10),
+                SelectableText(
+                  _publicCatalogMenuUrl,
+                  style: const TextStyle(
+                    color: _setupTextHigh,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _copyPublicCatalogMenuUrl,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _setupTextHigh,
+                      side: const BorderSide(color: Color(0xFF6B5A9A)),
+                    ),
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    label: const Text('Copiar enlace con parametro'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         if (_publicDirectoryUiEnabled) ...[
           const SizedBox(height: 8),
           SwitchListTile.adaptive(
@@ -11556,6 +12123,7 @@ class _MenuPreviewNavbar extends StatelessWidget {
     required this.category,
     required this.onNameChanged,
     required this.onPickLogo,
+    this.logoRequiredMissing = false,
     required this.selectedLogo,
     required this.selectedLogoUrl,
   });
@@ -11565,6 +12133,7 @@ class _MenuPreviewNavbar extends StatelessWidget {
   final String category;
   final ValueChanged<String> onNameChanged;
   final VoidCallback onPickLogo;
+  final bool logoRequiredMissing;
   final XFile? selectedLogo;
   final String selectedLogoUrl;
 
@@ -11575,7 +12144,11 @@ class _MenuPreviewNavbar extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF17122E),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF3B2F63)),
+        border: Border.all(
+          color: logoRequiredMissing
+              ? const Color(0xFFF87171)
+              : const Color(0xFF3B2F63),
+        ),
       ),
       child: Column(
         children: [
@@ -11587,6 +12160,7 @@ class _MenuPreviewNavbar extends StatelessWidget {
                 child: _LogoPreview(
                   file: selectedLogo,
                   logoUrl: selectedLogoUrl,
+                  emphasizeEmpty: logoRequiredMissing,
                 ),
               ),
               const SizedBox(width: 10),
@@ -11622,11 +12196,15 @@ class _MenuPreviewNavbar extends StatelessWidget {
               ),
               IconButton(
                 onPressed: onPickLogo,
-                icon: const Icon(
-                  Icons.photo_camera_back_rounded,
-                  color: Color(0xFFD8B4FE),
+                icon: Icon(
+                  logoRequiredMissing
+                      ? Icons.add_a_photo_rounded
+                      : Icons.photo_camera_back_rounded,
+                  color: logoRequiredMissing
+                      ? const Color(0xFFFCA5A5)
+                      : const Color(0xFFD8B4FE),
                 ),
-                tooltip: 'Cambiar logo',
+                tooltip: logoRequiredMissing ? 'Subir logo (obligatorio)' : 'Cambiar logo',
               ),
             ],
           ),
@@ -11634,9 +12212,13 @@ class _MenuPreviewNavbar extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              category,
-              style: const TextStyle(
-                color: _setupTextLow,
+              logoRequiredMissing
+                  ? 'Logo obligatorio · toca el círculo para subir tu marca'
+                  : category,
+              style: TextStyle(
+                color: logoRequiredMissing
+                    ? const Color(0xFFFCA5A5)
+                    : _setupTextLow,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
@@ -11740,11 +12322,15 @@ class _StepPills extends StatelessWidget {
 }
 
 class _LogoPreview extends StatelessWidget {
-  const _LogoPreview({required this.file, required this.logoUrl});
+  const _LogoPreview({
+    required this.file,
+    required this.logoUrl,
+    this.emphasizeEmpty = false,
+  });
 
   final XFile? file;
   final String logoUrl;
-  static const String _defaultBrandLogoAsset = 'assets/branding/isotipo.png';
+  final bool emphasizeEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -11823,24 +12409,25 @@ class _LogoPreview extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: const Color(0xFF241B42),
-        border: Border.all(color: const Color(0xFFD8B4FE), width: 1.5),
+        border: Border.all(
+          color: emphasizeEmpty
+              ? const Color(0xFFF87171)
+              : const Color(0xFFD8B4FE),
+          width: 1.5,
+        ),
       ),
       child: ClipOval(
-        child: Image.asset(
-          _defaultBrandLogoAsset,
-          width: 56,
-          height: 56,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) {
-            return const Icon(
-              Icons.storefront_rounded,
-              color: Color(0xFFD8B4FE),
-            );
-          },
+        child: Icon(
+          Icons.add_a_photo_rounded,
+          color: emphasizeEmpty
+              ? const Color(0xFFFCA5A5)
+              : const Color(0xFFD8B4FE),
+          size: 22,
         ),
       ),
     );
   }
+
 }
 
 class _MenuThemeModeSelector extends StatelessWidget {

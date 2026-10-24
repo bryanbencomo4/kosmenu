@@ -16,6 +16,8 @@ const COMERCIO_SELECT = [
   'longitud',
   'permite_delivery',
   'recibe_pedidos_whatsapp',
+  'negocio_virtual',
+  'estados_operacion',
   'en_linea',
   'menu_palette',
   'menu_palette_primary',

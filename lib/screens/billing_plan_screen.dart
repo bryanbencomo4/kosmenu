@@ -6,12 +6,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/models/comercio.dart';
+import 'package:kosmenu_app/models/kit_shipping_draft.dart';
 import 'package:kosmenu_app/screens/admin_dashboard_screen.dart';
 import 'package:kosmenu_app/screens/billing_gift_card_screen.dart';
+import 'package:kosmenu_app/screens/billing_kit_shipping_screen.dart';
 import 'package:kosmenu_app/screens/billing_pago_movil_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/payment_catalog.dart';
+import 'package:kosmenu_app/utils/phone_national_normalize.dart';
 import 'package:kosmenu_app/widgets/billing_plan_checkout.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
@@ -35,13 +38,46 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
   bool _paying = false;
   bool _cancelling = false;
   String? _error;
-  String? _selectedCode;
+  String? _selectedCode = kCheckoutUiPagoMovil;
+  String _planCode = 'menu_monthly';
+  KitShippingDraft _shipping = const KitShippingDraft();
   Timer? _activationPoll;
+  bool _didPrefillBusinessContact = false;
 
   @override
   void initState() {
     super.initState();
+    final userEmail = Supabase.instance.client.auth.currentUser?.email?.trim();
+    if (userEmail != null && userEmail.isNotEmpty) {
+      _shipping = _shipping.copyWith(email: userEmail);
+    }
     _future = _loadContext(initial: widget.initialSnapshot);
+  }
+
+  /// Returns true when shipping was updated (caller should setState once).
+  bool _prefillBusinessContact(BillingCheckoutContext checkout) {
+    if (_didPrefillBusinessContact) return false;
+    _didPrefillBusinessContact = true;
+
+    var next = _shipping;
+    var changed = false;
+    final wa = (checkout.businessWhatsapp ?? '').trim();
+    if (next.phone.trim().isEmpty && wa.isNotEmpty) {
+      final national = nationalDigitsFromStoredPhone(wa, iso: 'VE');
+      if (national.isNotEmpty) {
+        next = next.copyWith(phone: '+58$national', phoneCountryIso: 'VE');
+        changed = true;
+      }
+    }
+    final name = (checkout.businessName ?? '').trim();
+    if (next.recipientName.trim().isEmpty && name.isNotEmpty) {
+      next = next.copyWith(recipientName: name);
+      changed = true;
+    }
+    if (changed) {
+      _shipping = next;
+    }
+    return changed;
   }
 
   Future<BillingCheckoutContext> _loadContext({
@@ -72,33 +108,9 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
   }
 
   void _watchActivation(BillingCheckoutContext checkout) {
-    final pending = checkout.pendingSubmission;
-    final shouldPoll =
-        pending != null &&
-        pending.methodCode == 'pago_movil' &&
-        checkout.snapshot.requiresPaymentToPublish;
-    if (!shouldPoll) {
-      _activationPoll?.cancel();
-      _activationPoll = null;
-      return;
-    }
-    if (_activationPoll != null) return;
-    _activationPoll = Timer.periodic(const Duration(seconds: 4), (_) async {
-      try {
-        final next = await _billing.loadCheckoutContext();
-        if (!mounted) return;
-        if (next.snapshot.hasActiveSubscription) {
-          _activationPoll?.cancel();
-          await Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => const BillingPaymentSuccessScreen(),
-            ),
-          );
-          return;
-        }
-        setState(() => _future = Future.value(next));
-      } catch (_) {}
-    });
+    // Manual Pago Móvil waits for admin review — no auto-activation poll.
+    _activationPoll?.cancel();
+    _activationPoll = null;
   }
 
   Future<void> _reload() async {
@@ -126,13 +138,24 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
     PaymentMethodCatalog method,
     BillingCheckoutContext contextData,
   ) async {
+    final isYearly = _planCode == 'menu_yearly';
+    final plan = isYearly
+        ? (contextData.yearlyPlan ?? contextData.snapshot.plan)
+        : contextData.snapshot.plan;
+    final planUsd = isYearly
+        ? (contextData.yearlyPlan?.priceAmount ?? 90)
+        : (contextData.snapshot.plan?.priceAmount ?? 10);
+    final extrasUsd = _shipping.extrasQty * 2.5;
     final sent = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => BillingPagoMovilScreen(
           method: method,
-          plan: contextData.snapshot.plan,
+          plan: plan,
           bcvRate: contextData.bcvRate,
           hasPendingSubmission: contextData.pendingSubmission != null,
+          planCode: _planCode,
+          months: isYearly ? 12 : 1,
+          chargeUsd: planUsd + extrasUsd,
         ),
       ),
     );
@@ -141,7 +164,7 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Pago registrado. Estamos confirmándolo automáticamente.',
+            'Comprobante enviado. Te avisaremos por correo cuando lo verifiquemos.',
           ),
         ),
       );
@@ -149,9 +172,55 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
     await _reload();
   }
 
+  Future<bool> _saveShippingOnly() async {
+    final shippingError = _shipping.validationError;
+    if (shippingError != null) {
+      setState(() => _error = shippingError);
+      return false;
+    }
+    setState(() {
+      _paying = true;
+      _error = null;
+    });
+    try {
+      await _billing.submitKitShipping(_shipping);
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Dirección de envío del kit guardada.')),
+      );
+      return true;
+    } catch (error) {
+      if (!mounted) return false;
+      setState(() => _error = '$error'.replaceFirst('Bad state: ', ''));
+      return false;
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
+
+  Future<void> _editDelivery() async {
+    final updated = await Navigator.of(context).push<KitShippingDraft>(
+      MaterialPageRoute(
+        builder: (_) => BillingKitShippingScreen(initial: _shipping),
+      ),
+    );
+    if (!mounted || updated == null) return;
+    setState(() {
+      _shipping = updated;
+      _error = null;
+    });
+  }
+
   Future<void> _continueWith(BillingCheckoutContext checkout) async {
+    final contactError = _shipping.contactValidationError;
+    if (contactError != null) {
+      setState(() => _error = contactError);
+      return;
+    }
+
+    final methods = checkoutPaymentMethods(checkout.methods);
     PaymentMethodCatalog? method;
-    for (final item in checkoutPaymentMethods(checkout.methods)) {
+    for (final item in methods) {
       if (item.code == _selectedCode) {
         method = item;
         break;
@@ -161,24 +230,46 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
       setState(() => _error = 'Elige un método de pago para continuar.');
       return;
     }
-    if (method.isCrypto) {
-      await _pay(checkout.snapshot);
-      return;
+
+    // Zoom address stays off the main checkout; collect before kit fulfillment.
+    if (!_shipping.isZoomValid) {
+      final updated = await Navigator.of(context).push<KitShippingDraft>(
+        MaterialPageRoute(
+          builder: (_) => BillingKitShippingScreen(initial: _shipping),
+        ),
+      );
+      if (!mounted) return;
+      if (updated == null) return;
+      setState(() => _shipping = updated);
     }
+
+    final saved = await _saveShippingOnly();
+    if (!saved || !mounted) return;
+
     if (method.isGiftCard) {
       await _openGiftCard(method);
+      return;
+    }
+    if (method.isAutomatedCheckout) {
+      await _pay(checkout.snapshot);
       return;
     }
     if (method.isPagoMovil) {
       if (checkout.bcvRate == null || checkout.bcvRate! <= 0) {
         setState(
-          () =>
-              _error = 'No pudimos leer la tasa BCV. Reintenta en un momento.',
+          () => _error =
+              'No pudimos leer la tasa BCV. Reintenta en un momento.',
         );
         return;
       }
       await _openPagoMovil(method, checkout);
+      return;
     }
+
+    setState(
+      () => _error =
+          'Este método aún no está disponible en el checkout. Elige otra opción.',
+    );
   }
 
   Future<void> _openHelp() async {
@@ -257,16 +348,33 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
 
           final checkout = snapshot.data!;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _watchActivation(checkout);
+            if (!mounted) return;
+            final prefilled = _prefillBusinessContact(checkout);
+            _watchActivation(checkout);
+            if (prefilled && mounted) setState(() {});
           });
 
           return BillingPlanCheckoutView(
             checkout: checkout,
             showAppHeader: !widget.embedded,
-            selectedCode: _selectedCode,
+            selectedCode: _selectedCode ?? kCheckoutUiPagoMovil,
+            planCode: _planCode,
             paying: _paying,
             cancelling: _cancelling,
             error: _error,
+            shipping: _shipping,
+            onShippingChanged: (next) {
+              setState(() {
+                _shipping = next;
+                _error = null;
+              });
+            },
+            onSelectPlan: (code) {
+              setState(() {
+                _planCode = code;
+                _error = null;
+              });
+            },
             onSelectMethod: (code) {
               setState(() {
                 _selectedCode = code;
@@ -274,6 +382,8 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
               });
             },
             onContinue: () => _continueWith(checkout),
+            onSaveShipping: () => _saveShippingOnly(),
+            onEditDelivery: () => _editDelivery(),
             onCancelPending: () {
               final pending = checkout.pendingSubmission;
               if (pending != null) _cancelPending(pending);

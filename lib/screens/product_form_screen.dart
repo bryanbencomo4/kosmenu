@@ -976,9 +976,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() => _isUploadingImage = true);
 
     try {
-      final uploadBytes = ProductImageOptimizer.compressToJpeg(
-        await sourceImage.readAsBytes(),
-      );
+      final sourceBytes = await sourceImage.readAsBytes();
+      final uploadBytes =
+          await ProductImageOptimizer.compressToJpegAsync(sourceBytes);
 
       final fileName =
           '${SupabaseConfig.currentComercioId}/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
@@ -989,6 +989,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             fileName,
             uploadBytes,
             fileOptions: FileOptions(upsert: true, contentType: 'image/jpeg'),
+          )
+          .timeout(
+            const Duration(seconds: 45),
+            onTimeout: () => throw TimeoutException(
+              'La subida de la imagen tardó demasiado. Reintenta.',
+            ),
           );
 
       final publicUrl = Supabase.instance.client.storage

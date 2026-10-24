@@ -1,8 +1,10 @@
 # Pago Móvil BDV — guía de soporte técnico
 
-Documento operativo del receptor de **BDV Payment Bridge** en ElMenúXFA. Sirve para diagnosticar por qué un Pago Móvil no activó el menú y qué hacer en el panel **Admin → Pagos BDV**.
+> **Estado actual (oct 2026):** el checkout de publicación usa **Pago Móvil con verificación manual** (comprobante + correo). Ya **no** se crean `bdv_checkout_orders` para submissions nuevas, así que el Bridge **no auto-activa** menús nuevos. La activación es **Admin → Pagos** (aprobar). Este documento sigue siendo válido para el receptor HMAC, el historial en **Pagos BDV** y diagnósticos de notificaciones huérfanas.
 
-El APK de BDV Payment Bridge **no se modifica**. El teléfono solo notifica; ElMenúXFA decide si activa la suscripción.
+Documento operativo del receptor de **BDV Payment Bridge** en ElMenúXFA. Sirve para diagnosticar notificaciones del teléfono y el panel **Admin → Pagos BDV**.
+
+El APK de BDV Payment Bridge **no se modifica**. El teléfono solo notifica; ElMenúXFA decide si activa la suscripción (hoy: revisión manual en Admin → Pagos).
 
 ---
 

@@ -21,6 +21,8 @@ Future<List<PlaceSuggestion>> lookupPlaceAutocompleteImpl({
   final params = <String, String>{
     'input': trimmed,
     'language': 'es',
+    // Limit merchant map search to Venezuela (all elmenuxfa maps).
+    'components': 'country:ve',
     'key': apiKey,
   };
   if (nearLatitude != null && nearLongitude != null) {

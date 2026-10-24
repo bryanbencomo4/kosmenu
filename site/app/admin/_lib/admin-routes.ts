@@ -72,6 +72,18 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
     permission: 'subscriptions.read',
   },
   {
+    label: 'Pagos',
+    href: '/admin/pagos',
+    icon: 'bank',
+    permission: 'subscriptions.read',
+  },
+  {
+    label: 'Envíos Kit',
+    href: '/admin/envios-kit',
+    icon: 'delivery',
+    permission: 'subscriptions.read',
+  },
+  {
     label: 'Pagos BDV',
     href: '/admin/pagos-bdv',
     icon: 'bank',

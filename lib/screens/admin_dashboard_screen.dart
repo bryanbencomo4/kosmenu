@@ -337,7 +337,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       creditsFuture,
       yesterdayOrdersFuture,
       analyticsFuture,
-    ]);
+    ]).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => throw TimeoutException(
+        'El panel tardó demasiado en cargar. Reintenta.',
+      ),
+    );
 
     final comercio = ComercioModel.fromMap(
       Map<String, dynamic>.from(
@@ -1949,6 +1954,51 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const BrandedLoadingScreen(withScaffold: true);
+        }
+
+        if (snapshot.hasError) {
+          return Scaffold(
+            backgroundColor: const Color(0xFF5B21B6),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.wifi_off_rounded,
+                      color: Color(0xFFF4ECFF),
+                      size: 40,
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'No se pudo cargar el panel. La conexión puede estar intermitente.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFFF8F5FF),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFF4ECFF),
+                        foregroundColor: const Color(0xFF5B21B6),
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _snapshotFuture = _fetchSnapshot();
+                        });
+                      },
+                      child: const Text('Reintentar'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
         }
 
         final dashboardData = snapshot.data;

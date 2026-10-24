@@ -1,3 +1,10 @@
+import {
+  VENEZUELA_STATE_DISPLAY_NAMES,
+  VENEZUELA_STATES,
+  operatingStatesMatchRegion,
+} from '../../_lib/venezuela-states';
+import { normalizeDirectoryQuery } from './public-directory-text';
+
 /** Haversine distance in km between two WGS84 points. */
 export function distanceKm(
   lat1: number,
@@ -19,19 +26,55 @@ export function toFiniteCoord(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Venezuela-oriented region chips for discovery filters (matched against direccion). */
-export const DIRECTORY_REGIONS = [
-  'Caracas DC',
-  'Miranda',
-  'La Guaira',
-  'Aragua',
-  'Carabobo',
-  'Anzoátegui',
-  'Zulia',
-  'Nueva Esparta',
-  'Táchira',
-  'Mérida',
-] as const;
+/**
+ * Region chips for discovery. Full Venezuela catalog; stats only show
+ * regions with at least one matching business.
+ */
+export const DIRECTORY_REGIONS = VENEZUELA_STATE_DISPLAY_NAMES;
+
+function addressMatchesRegionLabel(address: string, regionLabel: string) {
+  const hay = normalizeDirectoryQuery(address);
+  if (!hay) return false;
+  const needle = normalizeDirectoryQuery(regionLabel);
+  if (needle && hay.includes(needle)) return true;
+
+  const state = VENEZUELA_STATES.find(
+    (item) => normalizeDirectoryQuery(item.name) === needle,
+  );
+  if (!state) {
+    // Legacy chip "Caracas DC" against an address that only says "Caracas".
+    for (const item of VENEZUELA_STATES) {
+      for (const alias of item.aliases ?? []) {
+        if (normalizeDirectoryQuery(alias) === needle) {
+          for (const label of [item.name, item.slug, ...(item.aliases ?? [])]) {
+            const aliasNeedle = normalizeDirectoryQuery(label);
+            if (aliasNeedle && hay.includes(aliasNeedle)) return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+  for (const alias of state.aliases ?? []) {
+    const aliasNeedle = normalizeDirectoryQuery(alias);
+    if (aliasNeedle && hay.includes(aliasNeedle)) return true;
+  }
+  return false;
+}
+
+/** Physical address OR virtual operating-states match for a region chip/URL. */
+export function directoryEntryMatchesRegion(
+  entry: {
+    direccion?: string | null;
+    estadosOperacion?: string[] | null;
+  },
+  regionQuery: string,
+) {
+  const region = (regionQuery ?? '').trim();
+  if (!region) return true;
+  if (addressMatchesRegionLabel(entry.direccion ?? '', region)) return true;
+  return operatingStatesMatchRegion(entry.estadosOperacion, region);
+}
 
 export const DIRECTORY_CATEGORY_CHIPS = [
   { id: 'hamburguesas', label: 'Hamburguesas', glyph: '🍔' },

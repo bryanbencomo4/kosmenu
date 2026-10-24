@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 
 class ProductImageOptimizer {
@@ -8,6 +9,11 @@ class ProductImageOptimizer {
 
   static const int maxDimension = 1280;
   static const int jpegQuality = 78;
+
+  /// Runs [compressToJpeg] off the UI isolate when the platform allows it.
+  static Future<Uint8List> compressToJpegAsync(Uint8List sourceBytes) {
+    return compute(compressToJpeg, sourceBytes);
+  }
 
   static Uint8List compressToJpeg(Uint8List sourceBytes) {
     if (sourceBytes.isEmpty) {

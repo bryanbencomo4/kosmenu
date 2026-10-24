@@ -204,17 +204,47 @@ function usdToCurrencyRateForSource(
 
   const googleRates = googleRatesFromPayload(marketRates?.payload ?? null);
   if (normalizedCurrency === 'VES') {
-    let liveRate = source === 'p2p_binance'
+    // BCV EUR is VES per 1 EUR. Do not multiply by USD/EUR — that made
+    // BCV EUR collapse to nearly the same value as BCV USD.
+    const liveRate = source === 'p2p_binance'
       ? adjustedP2pRateForBuyer(parseExchangeRate(marketRates?.p2p_binance_rate) ?? 0)
       : bcvVesRateForSource(source, marketRates);
-    if (canonicalizeBcvSource(source) === 'bcv_eur') {
-      liveRate *= googleRates.get('USD/EUR') ?? 0;
-    }
     if (liveRate > 0) return liveRate;
     return (googleRates.get('VES/USD') ?? 0) > 0 ? 1 / (googleRates.get('VES/USD') ?? 0) : 0;
   }
   if (normalizedCurrency === 'COP') return googleRates.get('USD/COP') ?? 0;
   if (normalizedCurrency === 'EUR') return googleRates.get('USD/EUR') ?? 0;
+  return 0;
+}
+
+/**
+ * Official BCV EUR (VES per 1 EUR) applied to a tracked VES pair.
+ * EUR/VES uses the literal official rate; USD/VES (and COP via USD) use that
+ * same official number as the commercial VES rate when source is bcv_eur.
+ */
+function bcvEurRateForPair(
+  baseCurrency: string,
+  quoteCurrency: string,
+  marketRates: MarketRatesInput | null | undefined,
+) {
+  // Only the official EUR rate — never fall back to USD (that was the bug).
+  const eurVes = parseExchangeRate(marketRates?.payload?.bcv_rates?.EUR) ?? 0;
+  if (eurVes <= 0) return 0;
+
+  const base = normalizeCurrencyCode(baseCurrency);
+  const quote = normalizeCurrencyCode(quoteCurrency);
+  if (base === quote) return 1;
+
+  if (base === 'EUR' && quote === 'VES') return eurVes;
+  if (base === 'VES' && quote === 'EUR') return 1 / eurVes;
+  if (base === 'USD' && quote === 'VES') return eurVes;
+  if (base === 'VES' && quote === 'USD') return 1 / eurVes;
+
+  const googleRates = googleRatesFromPayload(marketRates?.payload ?? null);
+  const usdCop = googleRates.get('USD/COP') ?? 0;
+  if (usdCop <= 0) return 0;
+  if (base === 'COP' && quote === 'VES') return eurVes / usdCop;
+  if (base === 'VES' && quote === 'COP') return usdCop / eurVes;
   return 0;
 }
 
@@ -241,6 +271,14 @@ export function derivedExchangeRateForCurrency(
   if (source === 'google') {
     const rate = googleRateForPair(base, quote, googleRatesFromPayload(marketRates?.payload ?? null));
     if (rate > 0) return rate;
+  }
+
+  if (
+    canonicalizeBcvSource(source) === 'bcv_eur' &&
+    isTrackedVesPair(base, quote)
+  ) {
+    const eurDerived = bcvEurRateForPair(base, quote, marketRates);
+    if (eurDerived > 0) return eurDerived;
   }
 
   if (
