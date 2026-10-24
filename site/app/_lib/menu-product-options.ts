@@ -50,11 +50,33 @@ export function defaultOptionGroupQuestion(groupName: string) {
   return `¿Quieres agregar ${groupName.trim().toLowerCase()}?`;
 }
 
+/** Linear per-kg pricing: `product.precio` is the price for 1 kg. */
+export type WeightSaleConfig = {
+  unidad: 'kg';
+  /** Cart / stepper increment in kg (e.g. 0.05 = 50 g). */
+  paso: number;
+  minimo: number;
+  maximo: number;
+};
+
 export type ProductMenuOptions = {
   tamanos?: MenuSizeOption[];
   ajustes?: MenuAdjustmentOption[];
   grupos?: MenuOptionGroup[];
   personalizacion?: ProductPersonalization;
+  venta_por_peso?: WeightSaleConfig;
+};
+
+/** Common quick picks shown in the weight sheet (kg). */
+export const WEIGHT_SALE_PRESETS_KG = [
+  0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 5,
+] as const;
+
+const DEFAULT_WEIGHT_SALE: WeightSaleConfig = {
+  unidad: 'kg',
+  paso: 0.05,
+  minimo: 0.1,
+  maximo: 25,
 };
 
 export type ProductPersonalization = {
@@ -158,6 +180,55 @@ export function isServicioAdicionalName(value: string) {
   return SERVICIO_ADICIONAL_PATTERN.test(value.trim());
 }
 
+export function parseWeightSaleConfig(raw: unknown): WeightSaleConfig | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  if (row.activado === false || row.enabled === false) return null;
+  const unidad = (row.unidad ?? row.unit ?? 'kg').toString().trim().toLowerCase();
+  if (unidad !== 'kg' && unidad !== 'kilogramo' && unidad !== 'kilogramos') {
+    return null;
+  }
+  const pasoRaw = toNumber(row.paso ?? row.step) ?? DEFAULT_WEIGHT_SALE.paso;
+  const minimoRaw = toNumber(row.minimo ?? row.min) ?? DEFAULT_WEIGHT_SALE.minimo;
+  const maximoRaw = toNumber(row.maximo ?? row.max) ?? DEFAULT_WEIGHT_SALE.maximo;
+  const paso = Math.min(1, Math.max(0.01, Math.round(pasoRaw * 1000) / 1000));
+  const minimo = Math.min(5, Math.max(paso, Math.round(minimoRaw * 1000) / 1000));
+  const maximo = Math.min(100, Math.max(minimo, Math.round(maximoRaw * 1000) / 1000));
+  return { unidad: 'kg', paso, minimo, maximo };
+}
+
+/** Round to grams precision and clamp to the product weight rules. */
+export function normalizeWeightKg(value: number, config: WeightSaleConfig): number {
+  if (!Number.isFinite(value) || value <= 0) return config.minimo;
+  const rounded = Math.round(value * 1000) / 1000;
+  return Math.min(config.maximo, Math.max(config.minimo, rounded));
+}
+
+export function formatWeightLabel(kg: number): string {
+  if (!Number.isFinite(kg) || kg <= 0) return '0 kg';
+  const grams = Math.round(kg * 1000);
+  if (grams > 0 && grams < 1000) {
+    return `${grams} g`;
+  }
+  const text = (Math.round(kg * 1000) / 1000)
+    .toFixed(3)
+    .replace(/\.?0+$/, '')
+    .replace('.', ',');
+  return `${text} kg`;
+}
+
+export function weightSalePresets(config: WeightSaleConfig): number[] {
+  const presets = WEIGHT_SALE_PRESETS_KG.filter(
+    (value) => value >= config.minimo - 1e-9 && value <= config.maximo + 1e-9,
+  );
+  if (!presets.includes(config.minimo)) {
+    presets.unshift(config.minimo);
+  }
+  return [...new Set(presets.map((value) => normalizeWeightKg(value, config)))].sort(
+    (a, b) => a - b,
+  );
+}
+
 export function parseProductMenuOptions(raw: unknown): ProductMenuOptions | null {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -194,8 +265,15 @@ export function parseProductMenuOptions(raw: unknown): ProductMenuOptions | null
   // Opt-in per product: groups are ignored unless the merchant switched them on.
   const grupos = record.activadas === true ? parseOptionGroups(record.grupos) : [];
   const personalizacion = parseProductPersonalization(raw);
+  const venta_por_peso = parseWeightSaleConfig(record.venta_por_peso);
 
-  if (tamanos.length === 0 && ajustes.length === 0 && grupos.length === 0 && !personalizacion) {
+  if (
+    tamanos.length === 0 &&
+    ajustes.length === 0 &&
+    grupos.length === 0 &&
+    !personalizacion &&
+    !venta_por_peso
+  ) {
     return null;
   }
 
@@ -204,7 +282,26 @@ export function parseProductMenuOptions(raw: unknown): ProductMenuOptions | null
     ...(ajustes.length > 0 ? { ajustes } : {}),
     ...(grupos.length > 0 ? { grupos } : {}),
     ...(personalizacion ? { personalizacion } : {}),
+    ...(venta_por_peso ? { venta_por_peso } : {}),
   };
+}
+
+export function getWeightSaleConfig(product: ProductLike): WeightSaleConfig | null {
+  return parseProductMenuOptions(product.opciones_menu)?.venta_por_peso ?? null;
+}
+
+export function isSoldByWeight(product: ProductLike): boolean {
+  return getWeightSaleConfig(product) != null;
+}
+
+/**
+ * Badge / “unidades” count: weight lines count as 1 item; normal products use qty.
+ * Keeps restaurant carts (3× burger = 3) unchanged.
+ */
+export function cartBadgeQuantity(product: ProductLike, quantity: number): number {
+  if (!Number.isFinite(quantity) || quantity <= 0) return 0;
+  if (isSoldByWeight(product)) return 1;
+  return quantity;
 }
 
 const OPTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -744,8 +841,23 @@ export function productRequiresConfiguration(product: ProductLike, category?: Ca
   const hasAdjustments = (options?.ajustes?.length ?? 0) > 0;
   const hasGroups = (options?.grupos?.length ?? 0) > 0;
   const hasCategoryAddon = Boolean(categoryOptions?.servicio_adicional?.precios_por_tamano);
-  return hasSizes || hasAdjustments || hasGroups || hasCategoryAddon || (includeRemovals && Boolean(options?.personalizacion?.exclusiones)) ||
+  const hasWeightSale = Boolean(options?.venta_por_peso);
+  return hasSizes || hasAdjustments || hasGroups || hasCategoryAddon || hasWeightSale || (includeRemovals && Boolean(options?.personalizacion?.exclusiones)) ||
     (includeCombination && Boolean(options?.personalizacion?.combinacion));
+}
+
+/** True when the product needs the options sheet for non-weight reasons (sizes/groups/etc.). */
+export function productRequiresOptionSheet(product: ProductLike, category?: CategoryLike | null) {
+  const options = parseProductMenuOptions(product.opciones_menu);
+  const categoryOptions = parseCategoryMenuOptions(category?.opciones_menu ?? null);
+  return (
+    (options?.tamanos?.length ?? 0) > 0 ||
+    (options?.ajustes?.length ?? 0) > 0 ||
+    (options?.grupos?.length ?? 0) > 0 ||
+    Boolean(categoryOptions?.servicio_adicional?.precios_por_tamano) ||
+    Boolean(options?.personalizacion?.exclusiones) ||
+    Boolean(options?.personalizacion?.combinacion)
+  );
 }
 
 function sumCheapest(prices: number[], count: number) {
@@ -806,11 +918,12 @@ export function formatProductPriceLabel(product: ProductLike, formatPrice: (amou
     return 'Consultar';
   }
 
+  const perKg = isSoldByWeight(product);
   if (maxPrice > minPrice) {
-    return `Desde ${formatPrice(minPrice)}`;
+    return perKg ? `Desde ${formatPrice(minPrice)} / kg` : `Desde ${formatPrice(minPrice)}`;
   }
 
-  return formatPrice(minPrice);
+  return perKg ? `${formatPrice(minPrice)} / kg` : formatPrice(minPrice);
 }
 
 export function buildCartLineKey(productId: string, selection: CartLineSelection) {

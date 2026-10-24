@@ -77,11 +77,17 @@ import {
   buildCartLineKey,
   buildOrderLineLabel,
   formatProductPriceLabel,
+  cartBadgeQuantity,
+  formatWeightLabel,
   getProductOptionsSummary,
   getProductMinimumPrice,
+  getWeightSaleConfig,
   isServicioAdicionalName,
+  isSoldByWeight,
+  normalizeWeightKg,
   parseCartLineKey,
   productRequiresConfiguration,
+  productRequiresOptionSheet,
   resolveCombinedUnitPrice,
   parseProductPersonalization,
   validateCustomizationSelection,
@@ -2278,7 +2284,14 @@ export default function PublicMenuPage() {
     }>;
   }, [cart, categoryByProductId, productById]);
 
-  const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.quantity, 0), [cartItems]);
+  const cartCount = useMemo(
+    () =>
+      cartItems.reduce(
+        (sum, item) => sum + cartBadgeQuantity(item.product, item.quantity),
+        0,
+      ),
+    [cartItems],
+  );
   const cartTotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [cartItems],
@@ -3063,7 +3076,7 @@ export default function PublicMenuPage() {
       if (unitPrice <= 0) continue;
       const lineTotal = unitPrice * line.quantity;
       totalBase += lineTotal;
-      itemCount += line.quantity;
+      itemCount += cartBadgeQuantity(product, line.quantity);
       const lineTotalConverted = convertFromBaseCurrency(
         lineTotal,
         businessBaseCurrency,
@@ -3438,6 +3451,8 @@ export default function PublicMenuPage() {
           selectedExchangeRate,
         );
         const optionSummary = menuLineSummary(product, selection, category, productById, categoryByProductId);
+        const soldByWeight = isSoldByWeight(product);
+        const weight = getWeightSaleConfig(product);
         return {
           id: cartKey,
           name: menuLineLabel(product, selection, category, productById),
@@ -3445,7 +3460,10 @@ export default function PublicMenuPage() {
           imageUrl: safeImageSrc(product.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.thumb),
           imageSourceUrl: (product.imagen_url ?? '').trim() || null,
           quantity,
-          canIncrease: baseUnitPrice > 0,
+          soldByWeight,
+          canIncrease:
+            baseUnitPrice > 0 &&
+            (!weight || quantity + weight.paso <= weight.maximo + 1e-9),
           unitPrice,
           totalPrice: unitPrice * quantity,
         };
@@ -3459,8 +3477,15 @@ export default function PublicMenuPage() {
       selectedExchangeRate,
     ],
   );
-  const checkoutItemsCount = checkoutSummaryItems.reduce((sum, item) => sum + item.quantity, 0);
-  const canGoNextFromStep0 = checkoutItemsCount > 0;
+  const checkoutItemsCount = useMemo(
+    () =>
+      checkoutSummaryItems.reduce(
+        (sum, item) => sum + (item.soldByWeight ? 1 : item.quantity),
+        0,
+      ),
+    [checkoutSummaryItems],
+  );
+  const canGoNextFromStep0 = checkoutSummaryItems.length > 0;
   const canGoNextFromStep1 =
     isClientNameValid &&
     isClientTableValid &&
@@ -3730,7 +3755,9 @@ export default function PublicMenuPage() {
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Resumen</p>
-                <p className="text-[11px] font-semibold text-slate-500">{checkoutItemsCount} uds</p>
+                <p className="text-[11px] font-semibold text-slate-500">
+                  {checkoutItemsCount} {checkoutItemsCount === 1 ? 'ítem' : 'ítems'}
+                </p>
               </div>
               <div className={isDesktop ? 'max-h-[320px] space-y-2 overflow-y-auto pr-1' : 'space-y-2'}>
                 {checkoutSummaryItems.map((item) => (
@@ -3751,11 +3778,17 @@ export default function PublicMenuPage() {
                           ) : null}
                         </div>
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-slate-600">
-                          x{item.quantity}
+                          {item.soldByWeight
+                            ? formatWeightLabel(item.quantity)
+                            : `x${item.quantity}`}
                         </span>
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-3 text-xs font-semibold text-slate-500">
-                        <span>{formatAmountByCurrency(item.unitPrice, selectedCurrencyCode)} c/u</span>
+                        <span>
+                          {item.soldByWeight
+                            ? `${formatAmountByCurrency(item.unitPrice, selectedCurrencyCode)} / kg`
+                            : `${formatAmountByCurrency(item.unitPrice, selectedCurrencyCode)} c/u`}
+                        </span>
                         <span className="text-sm font-black text-slate-900">
                           {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
                         </span>
@@ -3771,7 +3804,11 @@ export default function PublicMenuPage() {
                           >
                             −
                           </button>
-                          <span className="min-w-8 px-2 text-center text-sm font-black text-slate-900">{item.quantity}</span>
+                          <span className="min-w-10 px-2 text-center text-sm font-black text-slate-900">
+                            {item.soldByWeight
+                              ? formatWeightLabel(item.quantity)
+                              : item.quantity}
+                          </span>
                           <button
                             type="button"
                             onClick={() => incrementCartLine(item.id)}
@@ -4353,7 +4390,17 @@ export default function PublicMenuPage() {
     const category = categoryByProductId.get(productId) ?? null;
     if (!product) return;
 
-    if (productRequiresConfiguration(product, category)) {
+    const weight = getWeightSaleConfig(product);
+    if (weight) {
+      setCart((prev) => {
+        const current = prev[cartKey] ?? 0;
+        const nextQty = normalizeWeightKg(current + weight.paso, weight);
+        return { ...prev, [cartKey]: nextQty };
+      });
+      return;
+    }
+
+    if (productRequiresOptionSheet(product, category)) {
       setProductOptionsSheet({ open: true, productId });
       return;
     }
@@ -4365,9 +4412,14 @@ export default function PublicMenuPage() {
   }
 
   function decrementProduct(cartKey: string) {
+    const { productId } = parseCartLineKey(cartKey);
+    const product = productById.get(productId);
+    const weight = product ? getWeightSaleConfig(product) : null;
+
     setCart((prev) => {
       const current = prev[cartKey] ?? 0;
-      if (current <= 1) {
+      const removeThreshold = weight ? weight.minimo + 1e-9 : 1;
+      if (current <= removeThreshold) {
         if (isConfirmOpen && Object.keys(prev).length === 1) {
           shouldReturnToMenuOnEmptyCartRef.current = true;
         }
@@ -4376,9 +4428,13 @@ export default function PublicMenuPage() {
         return next;
       }
 
+      const nextQty = weight
+        ? normalizeWeightKg(current - weight.paso, weight)
+        : current - 1;
+
       return {
         ...prev,
-        [cartKey]: current - 1,
+        [cartKey]: nextQty,
       };
     });
   }
@@ -4651,13 +4707,17 @@ export default function PublicMenuPage() {
       paymentMeta.currency,
       paymentMeta.exchangeRate,
     );
-    const orderItems = cartItems.map((item) => ({
-      product_id: item.product.id,
-      nombre: menuLineLabel(item.product, item.selection, item.category, productById),
-      cantidad: item.quantity,
-      precio: item.unitPrice,
-      opciones: item.selection,
-    }));
+    const orderItems = cartItems.map((item) => {
+      const byWeight = isSoldByWeight(item.product);
+      return {
+        product_id: item.product.id,
+        nombre: menuLineLabel(item.product, item.selection, item.category, productById),
+        cantidad: item.quantity,
+        precio: item.unitPrice,
+        opciones: item.selection,
+        ...(byWeight ? { unidad: 'kg' as const, venta_por_peso: true as const } : {}),
+      };
+    });
 
     const assistedOrderNotes = [
       kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',

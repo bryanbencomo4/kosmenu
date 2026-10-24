@@ -8,6 +8,8 @@ import { KioskImage } from './kiosk/KioskImage';
 import {
   describeDependentPriceReason,
   formatProductPriceLabel,
+  formatWeightLabel,
+  normalizeWeightKg,
   parseCategoryMenuOptions,
   parseProductMenuOptions,
   productHasDependentPrices,
@@ -19,6 +21,7 @@ import {
   validateCustomizationSelection,
   resolveCombinedUnitPrice,
   autoPartnerSelection,
+  weightSalePresets,
   type MenuOptionGroup,
 } from '../../../_lib/menu-product-options';
 import { useLockBodyScroll } from '../../../_lib/use-lock-body-scroll';
@@ -375,6 +378,7 @@ export function ProductOptionsSheet({
   const [ajusteIds, setAjusteIds] = useState<string[]>([]);
   const [groupSelections, setGroupSelections] = useState<Record<string, string[]>>({});
   const [freeTexts, setFreeTexts] = useState<Record<string, Record<string, string>>>({});
+  const weightSale = options?.venta_por_peso ?? null;
   const [quantity, setQuantity] = useState(1);
   const [partnerId, setPartnerId] = useState('');
   const [exclusionesIds, setExclusionesIds] = useState<string[]>([]);
@@ -431,7 +435,11 @@ export function ProductOptionsSheet({
         .map((group) => [group.id, (defaults[group.id]?.length ?? 0) > 0]),
     ));
     setFreeTexts({});
-    setQuantity(1);
+    setQuantity(
+      options?.venta_por_peso
+        ? normalizeWeightKg(1, options.venta_por_peso)
+        : 1,
+    );
     setPartnerId('');
     setExclusionesIds([]);
     setListSession((previous) => previous + 1);
@@ -602,7 +610,9 @@ export function ProductOptionsSheet({
             {secondary ? `Configura ${product.nombre}` : product.nombre}
           </p>
           <span className="shrink-0 text-xs font-extrabold text-[var(--menu-text-muted)]">
-            {hasGroups ? formatProductPriceLabel(product, formatPrice) : formatPrice(product.precio ?? 0)}
+            {hasGroups || weightSale
+              ? formatProductPriceLabel(product, formatPrice)
+              : formatPrice(product.precio ?? 0)}
           </span>
         </div>
 
@@ -678,7 +688,9 @@ export function ProductOptionsSheet({
               {secondary ? `Configura ${product.nombre}` : product.nombre}
             </h3>
             <span className="shrink-0 rounded-full bg-[var(--menu-surface-alt)] px-3 py-1.5 text-sm font-extrabold text-[var(--menu-text)]">
-              {hasGroups ? formatProductPriceLabel(product, formatPrice) : formatPrice(product.precio ?? 0)}
+              {hasGroups || weightSale
+              ? formatProductPriceLabel(product, formatPrice)
+              : formatPrice(product.precio ?? 0)}
             </span>
           </div>
           {product.descripcion?.trim() ? (
@@ -1038,24 +1050,96 @@ export function ProductOptionsSheet({
           ) : null}
           {!secondary && canAdd ? (
             <section>
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">Cantidad</p>
-              <div className="mt-3 inline-flex items-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] p-1">
-                <button
-                  type="button"
-                  onClick={() => setQuantity((prev) => Math.max(1, prev - 1))}
-                  className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
-                >
-                  −
-                </button>
-                <span className="min-w-10 px-2 text-center text-sm font-black text-[var(--menu-text)]">{quantity}</span>
-                <button
-                  type="button"
-                  onClick={() => setQuantity((prev) => prev + 1)}
-                  className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
-                >
-                  +
-                </button>
+              <div className="flex items-end justify-between gap-3">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
+                  {weightSale ? 'Peso' : 'Cantidad'}
+                </p>
+                {weightSale ? (
+                  <p className="text-[11px] font-semibold text-[var(--menu-text-muted)]">
+                    {formatPrice(unitPrice)} / kg
+                  </p>
+                ) : null}
               </div>
+              {weightSale ? (
+                <>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {weightSalePresets(weightSale).map((preset) => {
+                      const active = Math.abs(quantity - preset) < 1e-9;
+                      return (
+                        <button
+                          key={`weight-${preset}`}
+                          type="button"
+                          onClick={() => setQuantity(normalizeWeightKg(preset, weightSale))}
+                          className="rounded-full border px-3 py-1.5 text-xs font-black"
+                          style={
+                            active
+                              ? {
+                                  borderColor: 'var(--menu-primary)',
+                                  backgroundColor:
+                                    'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
+                                  color: 'var(--menu-text)',
+                                }
+                              : {
+                                  borderColor: 'var(--menu-border)',
+                                  backgroundColor: 'var(--menu-surface-alt)',
+                                  color: 'var(--menu-text)',
+                                }
+                          }
+                        >
+                          {formatWeightLabel(preset)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 inline-flex items-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] p-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setQuantity((prev) =>
+                          normalizeWeightKg(prev - weightSale.paso, weightSale),
+                        )
+                      }
+                      className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
+                      aria-label="Reducir peso"
+                    >
+                      −
+                    </button>
+                    <span className="min-w-16 px-3 text-center text-sm font-black text-[var(--menu-text)]">
+                      {formatWeightLabel(quantity)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setQuantity((prev) =>
+                          normalizeWeightKg(prev + weightSale.paso, weightSale),
+                        )
+                      }
+                      className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
+                      aria-label="Aumentar peso"
+                    >
+                      +
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="mt-3 inline-flex items-center rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] p-1">
+                  <button
+                    type="button"
+                    onClick={() => setQuantity((prev) => Math.max(1, prev - 1))}
+                    className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
+                  >
+                    −
+                  </button>
+                  <span className="min-w-10 px-2 text-center text-sm font-black text-[var(--menu-text)]">{quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => setQuantity((prev) => prev + 1)}
+                    className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface)] text-base font-black text-[var(--menu-text)]"
+                  >
+                    +
+                  </button>
+                </div>
+              )}
             </section>
           ) : null}
           </div>

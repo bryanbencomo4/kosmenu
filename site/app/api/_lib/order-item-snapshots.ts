@@ -14,6 +14,9 @@ export type OrderItemInput = {
   nombre: string;
   cantidad: number;
   precio: number;
+  /** Weight-sold lines: precio is per kg, cantidad is kg. */
+  unidad?: 'kg';
+  venta_por_peso?: boolean;
 };
 
 export type StoredOrderItem = OrderItemInput & {

@@ -3,6 +3,15 @@ import {
   type CartLineSelection,
 } from './menu-product-options';
 
+/** Allow integer units and fractional kg (e.g. 0.25) in restored carts. */
+function normalizeCartQuantity(raw: unknown): number | null {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const rounded = Math.round(value * 1000) / 1000;
+  if (rounded <= 0 || rounded > 99) return null;
+  return rounded;
+}
+
 export const CHECKOUT_CART_CACHE_PREFIX = 'elmenuxfa:checkout-cart-v1:';
 
 export type CachedCartLine = {
@@ -32,11 +41,11 @@ function normalizeItems(raw: unknown): CachedCartLine[] {
     if (!entry || typeof entry !== 'object') continue;
     const row = entry as Record<string, unknown>;
     const productId = (row.productId ?? '').toString().trim();
-    const quantity = Math.round(Number(row.quantity));
-    if (!productId || !Number.isFinite(quantity) || quantity <= 0) continue;
+    const quantity = normalizeCartQuantity(row.quantity);
+    if (!productId || quantity == null) continue;
     items.push({
       productId,
-      quantity: Math.min(99, quantity),
+      quantity,
       selection: sanitizeCartLineSelection(row.selection),
     });
   }

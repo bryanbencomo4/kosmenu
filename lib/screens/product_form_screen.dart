@@ -55,6 +55,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _selectedCategoryId;
   String? _upsellBadge;
   bool _upsellEnabled = true;
+  bool _ventaPorPeso = false;
   String? _remoteImageUrl;
   String? _businessLogoUrl;
   String? _businessCategory;
@@ -92,6 +93,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         : '';
     _upsellBadge = UpsellBadge.normalize(product?.upsellBadge);
     _upsellEnabled = product?.upsellEnabled ?? true;
+    final rawWeight = product?.opcionesMenu?['venta_por_peso'];
+    _ventaPorPeso = rawWeight is Map && rawWeight['activado'] != false;
     _selectedCategoryId =
         product?.categoriaId ??
         widget.initialCategoryId ??
@@ -1068,24 +1071,49 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       };
 
       final optionsEditor = _optionsEditorKey.currentState;
-      if (optionsEditor != null) {
-        final current = widget.product?.opcionesMenu;
-        final hadGroups =
-            (current?.containsKey('grupos') ?? false) ||
-            (current?.containsKey('activadas') ?? false);
-        // Simple products that never used options keep their row untouched.
-        if (optionsEditor.active ||
-            hadGroups ||
-            optionsEditor.personalizationChanged) {
+      final current = widget.product?.opcionesMenu;
+      final hadGroups =
+          (current?.containsKey('grupos') ?? false) ||
+          (current?.containsKey('activadas') ?? false);
+      final hadWeight = current?.containsKey('venta_por_peso') ?? false;
+      final optionsTouched =
+          optionsEditor != null &&
+          (optionsEditor.active ||
+              hadGroups ||
+              optionsEditor.personalizationChanged);
+      final weightTouched = _ventaPorPeso || hadWeight;
+
+      // Leave opciones_menu alone for simple products that never used options
+      // or weight sale — avoids rewriting JSON for every restaurant save.
+      if (optionsTouched || weightTouched) {
+        Map<String, dynamic>? menuOptions =
+            current == null ? null : Map<String, dynamic>.from(current);
+        if (optionsTouched) {
           final merged = ProductOptionGroup.mergeIntoMenuOptions(
             current,
-            optionsEditor.groups,
+            optionsEditor!.groups,
             enabled: optionsEditor.active,
           );
-          payload['opciones_menu'] = optionsEditor.personalizationChanged
-              ? {...?merged, 'personalizacion': optionsEditor.personalization}
+          menuOptions = optionsEditor.personalizationChanged
+              ? <String, dynamic>{
+                  ...?merged,
+                  'personalizacion': optionsEditor.personalization,
+                }
               : merged;
         }
+
+        menuOptions = <String, dynamic>{...?menuOptions};
+        if (_ventaPorPeso) {
+          menuOptions['venta_por_peso'] = <String, dynamic>{
+            'unidad': 'kg',
+            'paso': 0.05,
+            'minimo': 0.1,
+            'maximo': 25,
+          };
+        } else {
+          menuOptions.remove('venta_por_peso');
+        }
+        payload['opciones_menu'] = menuOptions.isEmpty ? null : menuOptions;
       }
 
       if (widget.isEditing) {
@@ -1284,6 +1312,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   upsellEnabled: _upsellEnabled,
                   onUpsellEnabledChanged: (value) =>
                       setState(() => _upsellEnabled = value),
+                  ventaPorPeso: _ventaPorPeso,
+                  onVentaPorPesoChanged: (value) =>
+                      setState(() => _ventaPorPeso = value),
                   isEditing: widget.isEditing,
                   validateCategory: _validateCategory,
                   validateName: _validateName,
@@ -1790,6 +1821,8 @@ class _FormPanel extends StatelessWidget {
     required this.onUpsellBadgeChanged,
     required this.upsellEnabled,
     required this.onUpsellEnabledChanged,
+    required this.ventaPorPeso,
+    required this.onVentaPorPesoChanged,
     required this.isEditing,
     required this.validateCategory,
     required this.validateName,
@@ -1819,6 +1852,8 @@ class _FormPanel extends StatelessWidget {
   final ValueChanged<String?> onUpsellBadgeChanged;
   final bool upsellEnabled;
   final ValueChanged<bool> onUpsellEnabledChanged;
+  final bool ventaPorPeso;
+  final ValueChanged<bool> onVentaPorPesoChanged;
   final bool isEditing;
   final bool isGeneratingDescription;
   final FormFieldValidator<String> validateCategory;
@@ -2088,6 +2123,26 @@ class _FormPanel extends StatelessWidget {
                     ),
                   );
                 },
+              ),
+              const SizedBox(height: 10),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: ventaPorPeso,
+                onChanged: isSaving ? null : onVentaPorPesoChanged,
+                title: Text(
+                  'Vender por peso (kg)',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                  ),
+                ),
+                subtitle: Text(
+                  'El precio es por kilogramo. El cliente elige 100 g, 1,25 kg, etc. y el total se calcula solo.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
               const SizedBox(height: 18),
               optionsSection,

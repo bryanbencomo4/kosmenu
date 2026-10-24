@@ -7,8 +7,13 @@ import {
   parseProductMenuOptions,
   buildCartLineKey,
   formatProductPriceLabel,
+  cartBadgeQuantity,
+  formatWeightLabel,
+  isSoldByWeight,
+  normalizeWeightKg,
   parseCartLineKey,
   productRequiresConfiguration,
+  productRequiresOptionSheet,
   resolveCartLineUnitPrice,
   parseProductPersonalization,
   resolveCombinedUnitPrice,
@@ -16,6 +21,7 @@ import {
   autoPartnerSelection,
   buildOrderLineLabel,
   summarizeCartLineSelection,
+  weightSalePresets,
 } from '../app/_lib/menu-product-options';
 
 describe('combined second product is never configured by the shopper', () => {
@@ -273,5 +279,52 @@ describe('menu-product-options', () => {
     expect(parseCartLineKey(key).productId).toBe('abc');
     expect(parseCartLineKey(key).selection.tamanoId).toBe('n');
     expect(parseCartLineKey(key).selection.servicioAdicional).toBe(true);
+  });
+});
+
+describe('venta por peso', () => {
+  const papa = {
+    id: 'papa',
+    nombre: 'Papa',
+    precio: 1.92,
+    opciones_menu: {
+      venta_por_peso: { unidad: 'kg', paso: 0.05, minimo: 0.1, maximo: 25 },
+    },
+  };
+
+  it('parses weight config and requires configuration', () => {
+    const options = parseProductMenuOptions(papa.opciones_menu);
+    expect(options?.venta_por_peso?.unidad).toBe('kg');
+    expect(isSoldByWeight(papa)).toBe(true);
+    expect(productRequiresConfiguration(papa)).toBe(true);
+  });
+
+  it('formats labels and snaps weight', () => {
+    const config = parseProductMenuOptions(papa.opciones_menu)!.venta_por_peso!;
+    expect(formatWeightLabel(0.1)).toBe('100 g');
+    expect(formatWeightLabel(1.25)).toBe('1,25 kg');
+    expect(normalizeWeightKg(0.01, config)).toBe(0.1);
+    expect(normalizeWeightKg(1.27, config)).toBe(1.27);
+    expect(weightSalePresets(config)).toContain(0.25);
+    expect(weightSalePresets(config)).toContain(1.5);
+  });
+
+  it('keeps unit price per kg; line total uses quantity as kg', () => {
+    expect(resolveCartLineUnitPrice(papa, null, {})).toBe(1.92);
+    expect(Math.round(1.92 * 1.25 * 100) / 100).toBe(2.4);
+  });
+
+  it('does not treat normal restaurant products as weight sale', () => {
+    const burger = { id: 'b', nombre: 'Burger', precio: 5, opciones_menu: null };
+    expect(isSoldByWeight(burger)).toBe(false);
+    expect(productRequiresConfiguration(burger)).toBe(false);
+    expect(productRequiresOptionSheet(burger)).toBe(false);
+    expect(formatProductPriceLabel(burger, (v) => `$${v}`)).toBe('$5');
+    expect(cartBadgeQuantity(burger, 3)).toBe(3);
+  });
+
+  it('counts each weight line as 1 for cart badges', () => {
+    expect(cartBadgeQuantity(papa, 1.5)).toBe(1);
+    expect(formatProductPriceLabel(papa, (v) => `$${v}`)).toBe('$1.92 / kg');
   });
 });

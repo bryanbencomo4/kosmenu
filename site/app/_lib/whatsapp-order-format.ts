@@ -140,9 +140,28 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       const quantity = Number(item.cantidad);
       const name = text(item.producto) || text(item.nombre) || 'Producto';
       const combined = combinedOrderLineSummary(item);
-      productLines.push(`*${quantity}x ${combined?.title ?? name}*`);
+      const byWeight =
+        item.venta_por_peso === true ||
+        text(item.unidad).toLowerCase() === 'kg' ||
+        (Number.isFinite(quantity) && Math.abs(quantity - Math.round(quantity)) > 1e-9);
+      const qtyLabel = byWeight
+        ? (() => {
+            const grams = Math.round(quantity * 1000);
+            if (grams > 0 && grams < 1000) return `${grams} g`;
+            const label = (Math.round(quantity * 1000) / 1000)
+              .toFixed(3)
+              .replace(/\.?0+$/, '')
+              .replace('.', ',');
+            return `${label} kg`;
+          })()
+        : `${Math.round(quantity)}x`;
+      productLines.push(`*${qtyLabel} ${combined?.title ?? name}*`);
       const price = convert(item.precio_final ?? item.precio);
-      if (price != null) productLines.push(`${amount(price, currency)}${quantity > 1 ? ' c/u' : ''}`);
+      if (price != null) {
+        productLines.push(
+          `${amount(price, currency)}${byWeight ? ' / kg' : quantity > 1 ? ' c/u' : ''}`,
+        );
+      }
       if (combined) {
         productLines.push(...combined.lines.map((line) => `• ${line}`), '');
         continue;

@@ -139,6 +139,9 @@ const ItemSchema = z.object({
   nombre: z.string().trim().optional(),
   cantidad: z.number().finite().positive('items[].cantidad debe ser mayor a 0.'),
   precio: z.number().finite().min(0, 'items[].precio debe ser >= 0.'),
+  /** Present only for weight-sold products (price is per kg; cantidad is kg). */
+  unidad: z.enum(['kg']).optional(),
+  venta_por_peso: z.boolean().optional(),
 });
 
 const DeliverySchema = z
@@ -437,6 +440,9 @@ async function postOrder(request: Request): Promise<NextResponse> {
       nombre: item.nombre || 'Producto',
       cantidad: item.cantidad,
       precio: item.precio,
+      ...(item.venta_por_peso === true || item.unidad === 'kg'
+        ? { unidad: 'kg' as const, venta_por_peso: true as const }
+        : {}),
     }));
     const paymentMethod = normalizePaymentMethod(body.paymentMethod ?? incomingDetalles.metodo_pago);
     const orderNotes = normalizeText(body.orderNotes ?? incomingDetalles.order_notes);
@@ -844,7 +850,11 @@ async function postOrder(request: Request): Promise<NextResponse> {
         managementMode: detalles.management_mode,
         items: storedItems.map((item) => {
           const unitBase = Number(item.precio_final ?? item.precio) || 0;
-          const qty = Math.max(1, Math.round(Number(item.cantidad) || 1));
+          const rawQty = Number(item.cantidad) || 1;
+          const qty = Math.max(
+            0.01,
+            Math.round((Number.isFinite(rawQty) ? rawQty : 1) * 1000) / 1000,
+          );
           const lineBase = unitBase * qty;
           const lineCheckout =
             convertOrderAmount(lineBase, baseCurrency, currency, exchangeRate) ?? lineBase;
