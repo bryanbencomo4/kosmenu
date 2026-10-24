@@ -218,7 +218,7 @@ export function formatWeightLabel(kg: number): string {
 }
 
 export function weightSalePresets(config: WeightSaleConfig): number[] {
-  const presets = WEIGHT_SALE_PRESETS_KG.filter(
+  const presets: number[] = WEIGHT_SALE_PRESETS_KG.filter(
     (value) => value >= config.minimo - 1e-9 && value <= config.maximo + 1e-9,
   );
   if (!presets.includes(config.minimo)) {
