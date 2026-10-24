@@ -56,6 +56,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _upsellBadge;
   bool _upsellEnabled = true;
   bool _ventaPorPeso = false;
+  final TextEditingController _weightPasoController = TextEditingController(
+    text: '0.05',
+  );
+  final TextEditingController _weightMinimoController = TextEditingController(
+    text: '0.1',
+  );
+  final TextEditingController _weightMaximoController = TextEditingController(
+    text: '25',
+  );
   String? _remoteImageUrl;
   String? _businessLogoUrl;
   String? _businessCategory;
@@ -95,6 +104,20 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _upsellEnabled = product?.upsellEnabled ?? true;
     final rawWeight = product?.opcionesMenu?['venta_por_peso'];
     _ventaPorPeso = rawWeight is Map && rawWeight['activado'] != false;
+    if (rawWeight is Map) {
+      final paso = _readWeightNumber(rawWeight['paso'] ?? rawWeight['step']);
+      final minimo = _readWeightNumber(rawWeight['minimo'] ?? rawWeight['min']);
+      final maximo = _readWeightNumber(rawWeight['maximo'] ?? rawWeight['max']);
+      if (paso != null) {
+        _weightPasoController.text = _formatWeightConfig(paso);
+      }
+      if (minimo != null) {
+        _weightMinimoController.text = _formatWeightConfig(minimo);
+      }
+      if (maximo != null) {
+        _weightMaximoController.text = _formatWeightConfig(maximo);
+      }
+    }
     _selectedCategoryId =
         product?.categoriaId ??
         widget.initialCategoryId ??
@@ -110,6 +133,32 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
   }
 
+  static double? _readWeightNumber(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse('$value');
+  }
+
+  static String _formatWeightConfig(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toStringAsFixed(0);
+    }
+    return value
+        .toStringAsFixed(3)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  double _parseWeightConfigField(
+    TextEditingController controller, {
+    required double fallback,
+    required double min,
+    required double max,
+  }) {
+    final parsed = double.tryParse(controller.text.trim().replaceAll(',', '.'));
+    if (parsed == null || !parsed.isFinite) return fallback;
+    return parsed.clamp(min, max).toDouble();
+  }
+
   @override
   void dispose() {
     _aiImagePollTimer?.cancel();
@@ -117,6 +166,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _descriptionController.dispose();
     _priceController.dispose();
     _compareAtPriceController.dispose();
+    _weightPasoController.dispose();
+    _weightMinimoController.dispose();
+    _weightMaximoController.dispose();
     super.dispose();
   }
 
@@ -1104,11 +1156,29 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
         menuOptions = <String, dynamic>{...?menuOptions};
         if (_ventaPorPeso) {
+          final paso = _parseWeightConfigField(
+            _weightPasoController,
+            fallback: 0.05,
+            min: 0.01,
+            max: 1,
+          );
+          final minimo = _parseWeightConfigField(
+            _weightMinimoController,
+            fallback: 0.1,
+            min: paso,
+            max: 5,
+          );
+          final maximo = _parseWeightConfigField(
+            _weightMaximoController,
+            fallback: 25,
+            min: minimo,
+            max: 100,
+          );
           menuOptions['venta_por_peso'] = <String, dynamic>{
             'unidad': 'kg',
-            'paso': 0.05,
-            'minimo': 0.1,
-            'maximo': 25,
+            'paso': paso,
+            'minimo': minimo,
+            'maximo': maximo,
           };
         } else {
           menuOptions.remove('venta_por_peso');
@@ -1297,10 +1367,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   selectedPriceCurrency: _selectedPriceCurrency,
                   priceHelperText: () {
                     final converted = _previewBasePrice();
-                    if (converted == null) {
-                      return 'El precio se guardara en $_baseCurrency.';
+                    final base = converted == null
+                        ? 'El precio se guardara en $_baseCurrency.'
+                        : 'Se guardara como ${converted.toStringAsFixed(2)} $_baseCurrency.';
+                    if (_ventaPorPeso) {
+                      return '$base Este valor es el precio por 1 kg.';
                     }
-                    return 'Se guardara como ${converted.toStringAsFixed(2)} $_baseCurrency.';
+                    return base;
                   }(),
                   nameController: _nameController,
                   descriptionController: _descriptionController,
@@ -1315,6 +1388,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   ventaPorPeso: _ventaPorPeso,
                   onVentaPorPesoChanged: (value) =>
                       setState(() => _ventaPorPeso = value),
+                  weightPasoController: _weightPasoController,
+                  weightMinimoController: _weightMinimoController,
+                  weightMaximoController: _weightMaximoController,
                   isEditing: widget.isEditing,
                   validateCategory: _validateCategory,
                   validateName: _validateName,
@@ -1823,6 +1899,9 @@ class _FormPanel extends StatelessWidget {
     required this.onUpsellEnabledChanged,
     required this.ventaPorPeso,
     required this.onVentaPorPesoChanged,
+    required this.weightPasoController,
+    required this.weightMinimoController,
+    required this.weightMaximoController,
     required this.isEditing,
     required this.validateCategory,
     required this.validateName,
@@ -1854,6 +1933,9 @@ class _FormPanel extends StatelessWidget {
   final ValueChanged<bool> onUpsellEnabledChanged;
   final bool ventaPorPeso;
   final ValueChanged<bool> onVentaPorPesoChanged;
+  final TextEditingController weightPasoController;
+  final TextEditingController weightMinimoController;
+  final TextEditingController weightMaximoController;
   final bool isEditing;
   final bool isGeneratingDescription;
   final FormFieldValidator<String> validateCategory;
@@ -2057,7 +2139,7 @@ class _FormPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              fieldLabel('Precio'),
+              fieldLabel(ventaPorPeso ? 'Precio por kg' : 'Precio'),
               if (isLoadingPricingConfig)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 10),
@@ -2105,13 +2187,14 @@ class _FormPanel extends StatelessWidget {
                   color: colorScheme.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: '0.00',
                   prefixText: '\$ ',
+                  labelText: ventaPorPeso ? 'Precio por 1 kg' : null,
                 ),
                 validator: validatePrice,
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 8),
               Builder(
                 builder: (context) {
                   return Text(
@@ -2124,26 +2207,107 @@ class _FormPanel extends StatelessWidget {
                   );
                 },
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 16),
+              fieldLabel('Venta por peso'),
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
                 value: ventaPorPeso,
                 onChanged: isSaving ? null : onVentaPorPesoChanged,
                 title: Text(
-                  'Vender por peso (kg)',
+                  'Vender por kilogramo',
                   style: GoogleFonts.manrope(
                     fontWeight: FontWeight.w700,
                     fontSize: 13.5,
                   ),
                 ),
                 subtitle: Text(
-                  'El precio es por kilogramo. El cliente elige 100 g, 1,25 kg, etc. y el total se calcula solo.',
+                  'Actívalo para verduras, frutas u otros productos a granel. El cliente elige 100 g, 1,25 kg, etc. y el total se calcula solo.',
                   style: GoogleFonts.manrope(
                     fontSize: 11.5,
                     color: colorScheme.onSurfaceVariant,
                   ),
                 ),
               ),
+              if (ventaPorPeso) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Ajustes del selector (en kg)',
+                  style: GoogleFonts.manrope(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12.5,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: weightMinimoController,
+                        enabled: !isSaving,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        style: GoogleFonts.manrope(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Mínimo',
+                          hintText: '0.1',
+                          suffixText: 'kg',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextFormField(
+                        controller: weightPasoController,
+                        enabled: !isSaving,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        style: GoogleFonts.manrope(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Paso (+/−)',
+                          hintText: '0.05',
+                          suffixText: 'kg',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextFormField(
+                        controller: weightMaximoController,
+                        enabled: !isSaving,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        style: GoogleFonts.manrope(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Máximo',
+                          hintText: '25',
+                          suffixText: 'kg',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Ejemplo: mínimo 0,1 kg (100 g), paso 0,05 kg, máximo 25 kg.',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               optionsSection,
               const SizedBox(height: 18),
