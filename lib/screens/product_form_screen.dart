@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -1023,6 +1024,55 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return null;
   }
 
+  static double? _parseWeightInput(String? value) {
+    final raw = (value ?? '').trim().replaceAll(',', '.');
+    if (raw.isEmpty) return null;
+    if (!RegExp(r'^\d+(\.\d{1,3})?$').hasMatch(raw)) return null;
+    final parsed = double.tryParse(raw);
+    if (parsed == null || !parsed.isFinite) return null;
+    return parsed;
+  }
+
+  String? _validateWeightPaso(String? value) {
+    if (!_ventaPorPeso) return null;
+    final parsed = _parseWeightInput(value);
+    if (parsed == null) return 'Usa un número (ej. 0.05)';
+    if (parsed < 0.01) return 'Mínimo 0.01 kg';
+    if (parsed > 1) return 'Máximo 1 kg';
+    return null;
+  }
+
+  String? _validateWeightMinimo(String? value) {
+    if (!_ventaPorPeso) return null;
+    final parsed = _parseWeightInput(value);
+    if (parsed == null) return 'Usa un número (ej. 0.1)';
+    if (parsed <= 0) return 'Debe ser mayor a 0';
+    if (parsed > 5) return 'Máximo 5 kg';
+    final paso = _parseWeightInput(_weightPasoController.text);
+    if (paso != null && parsed + 1e-9 < paso) {
+      return 'Debe ser ≥ al paso';
+    }
+    return null;
+  }
+
+  String? _validateWeightMaximo(String? value) {
+    if (!_ventaPorPeso) return null;
+    final parsed = _parseWeightInput(value);
+    if (parsed == null) return 'Usa un número (ej. 25)';
+    if (parsed <= 0) return 'Debe ser mayor a 0';
+    if (parsed > 100) return 'Máximo 100 kg';
+    final minimo = _parseWeightInput(_weightMinimoController.text);
+    if (minimo != null && parsed + 1e-9 < minimo) {
+      return 'Debe ser ≥ al mínimo';
+    }
+    return null;
+  }
+
+  void _revalidateWeightFields() {
+    if (!_ventaPorPeso) return;
+    _formKey.currentState?.validate();
+  }
+
   double _parsePrice() {
     return double.parse(_priceController.text.trim().replaceAll(',', '.'));
   }
@@ -1156,24 +1206,30 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
         menuOptions = <String, dynamic>{...?menuOptions};
         if (_ventaPorPeso) {
-          final paso = _parseWeightConfigField(
-            _weightPasoController,
-            fallback: 0.05,
-            min: 0.01,
-            max: 1,
-          );
-          final minimo = _parseWeightConfigField(
-            _weightMinimoController,
-            fallback: 0.1,
-            min: paso,
-            max: 5,
-          );
-          final maximo = _parseWeightConfigField(
-            _weightMaximoController,
-            fallback: 25,
-            min: minimo,
-            max: 100,
-          );
+          final paso = _parseWeightInput(_weightPasoController.text);
+          final minimo = _parseWeightInput(_weightMinimoController.text);
+          final maximo = _parseWeightInput(_weightMaximoController.text);
+          if (paso == null ||
+              minimo == null ||
+              maximo == null ||
+              paso < 0.01 ||
+              paso > 1 ||
+              minimo <= 0 ||
+              minimo > 5 ||
+              maximo <= 0 ||
+              maximo > 100 ||
+              minimo + 1e-9 < paso ||
+              maximo + 1e-9 < minimo) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Revisa mínimo, paso y máximo de la venta por kilogramo.',
+                ),
+              ),
+            );
+            return;
+          }
           menuOptions['venta_por_peso'] = <String, dynamic>{
             'unidad': 'kg',
             'paso': paso,
@@ -1395,6 +1451,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   validateCategory: _validateCategory,
                   validateName: _validateName,
                   validatePrice: _validatePrice,
+                  validateWeightPaso: _validateWeightPaso,
+                  validateWeightMinimo: _validateWeightMinimo,
+                  validateWeightMaximo: _validateWeightMaximo,
+                  onWeightConfigChanged: _revalidateWeightFields,
                   onCategoryChanged: (value) =>
                       setState(() => _selectedCategoryId = value),
                   onPriceCurrencyChanged: (value) {
@@ -1906,6 +1966,10 @@ class _FormPanel extends StatelessWidget {
     required this.validateCategory,
     required this.validateName,
     required this.validatePrice,
+    required this.validateWeightPaso,
+    required this.validateWeightMinimo,
+    required this.validateWeightMaximo,
+    required this.onWeightConfigChanged,
     required this.onCategoryChanged,
     required this.onPriceCurrencyChanged,
     required this.isGeneratingDescription,
@@ -1941,6 +2005,10 @@ class _FormPanel extends StatelessWidget {
   final FormFieldValidator<String> validateCategory;
   final FormFieldValidator<String> validateName;
   final FormFieldValidator<String> validatePrice;
+  final FormFieldValidator<String> validateWeightPaso;
+  final FormFieldValidator<String> validateWeightMinimo;
+  final FormFieldValidator<String> validateWeightMaximo;
+  final VoidCallback onWeightConfigChanged;
   final ValueChanged<String?> onCategoryChanged;
   final ValueChanged<String?> onPriceCurrencyChanged;
   final VoidCallback onGenerateDescription;
@@ -2241,14 +2309,21 @@ class _FormPanel extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: TextFormField(
                         controller: weightMinimoController,
                         enabled: !isSaving,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
+                        inputFormatters: <TextInputFormatter>[
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.,]'),
+                          ),
+                        ],
                         style: GoogleFonts.manrope(
                           color: colorScheme.onSurface,
                           fontWeight: FontWeight.w700,
@@ -2257,7 +2332,10 @@ class _FormPanel extends StatelessWidget {
                           labelText: 'Mínimo',
                           hintText: '0.1',
                           suffixText: 'kg',
+                          errorMaxLines: 2,
                         ),
+                        validator: validateWeightMinimo,
+                        onChanged: (_) => onWeightConfigChanged(),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -2265,9 +2343,15 @@ class _FormPanel extends StatelessWidget {
                       child: TextFormField(
                         controller: weightPasoController,
                         enabled: !isSaving,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
+                        inputFormatters: <TextInputFormatter>[
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.,]'),
+                          ),
+                        ],
                         style: GoogleFonts.manrope(
                           color: colorScheme.onSurface,
                           fontWeight: FontWeight.w700,
@@ -2276,7 +2360,10 @@ class _FormPanel extends StatelessWidget {
                           labelText: 'Paso (+/−)',
                           hintText: '0.05',
                           suffixText: 'kg',
+                          errorMaxLines: 2,
                         ),
+                        validator: validateWeightPaso,
+                        onChanged: (_) => onWeightConfigChanged(),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -2284,9 +2371,15 @@ class _FormPanel extends StatelessWidget {
                       child: TextFormField(
                         controller: weightMaximoController,
                         enabled: !isSaving,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
+                        inputFormatters: <TextInputFormatter>[
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.,]'),
+                          ),
+                        ],
                         style: GoogleFonts.manrope(
                           color: colorScheme.onSurface,
                           fontWeight: FontWeight.w700,
@@ -2295,14 +2388,17 @@ class _FormPanel extends StatelessWidget {
                           labelText: 'Máximo',
                           hintText: '25',
                           suffixText: 'kg',
+                          errorMaxLines: 2,
                         ),
+                        validator: validateWeightMaximo,
+                        onChanged: (_) => onWeightConfigChanged(),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Ejemplo: mínimo 0,1 kg (100 g), paso 0,05 kg, máximo 25 kg.',
+                  'Solo números. Mínimo ≥ paso, máximo ≥ mínimo. Ej.: 0,1 / 0,05 / 25.',
                   style: GoogleFonts.manrope(
                     fontSize: 11.5,
                     color: colorScheme.onSurfaceVariant,
