@@ -2207,8 +2207,9 @@ class _FormPanel extends StatelessWidget {
                   );
                 },
               ),
-              const SizedBox(height: 16),
-              fieldLabel('Venta por peso'),
+              const SizedBox(height: 18),
+              optionsSection,
+              const SizedBox(height: 8),
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
                 value: ventaPorPeso,
@@ -2221,7 +2222,7 @@ class _FormPanel extends StatelessWidget {
                   ),
                 ),
                 subtitle: Text(
-                  'Actívalo para verduras, frutas u otros productos a granel. El cliente elige 100 g, 1,25 kg, etc. y el total se calcula solo.',
+                  'Para verduras, frutas u otros productos a granel. El cliente elige el peso y el total se calcula solo.',
                   style: GoogleFonts.manrope(
                     fontSize: 11.5,
                     color: colorScheme.onSurfaceVariant,
@@ -2308,8 +2309,6 @@ class _FormPanel extends StatelessWidget {
                   ),
                 ),
               ],
-              const SizedBox(height: 18),
-              optionsSection,
               const SizedBox(height: 18),
               fieldLabel('Upselling'),
               DropdownButtonFormField<String?>(
