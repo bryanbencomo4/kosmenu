@@ -9,6 +9,8 @@ import {
   DEFAULT_KIOSK_HOME_CONFIG,
   type KioskHomeConfig,
 } from '../../../../_lib/kiosk-home-config';
+import type { PaymentDisplayField } from '../../../../_lib/payment-method-display';
+import { PaymentCopyFields } from '../PaymentCopyFields';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskImage } from './KioskImage';
 import { pickKioskGreeting } from './kiosk-greetings';
@@ -46,7 +48,13 @@ type KioskHomeProps = {
   homeConfig?: KioskHomeConfig;
   paymentGroups?: Array<{
     currency: string;
-    methods: Array<{ id: string; label: string; details: string }>;
+    methods: Array<{
+      id: string;
+      label: string;
+      details: string;
+      fields?: PaymentDisplayField[];
+      note?: string | null;
+    }>;
   }>;
   onToggleTheme: () => void;
   onSelect: (fulfillment: KioskFulfillment) => void;
@@ -442,6 +450,14 @@ export function KioskHome({
   );
 }
 
+type PaymentMethodSheetItem = {
+  id: string;
+  label: string;
+  details: string;
+  fields?: PaymentDisplayField[];
+  note?: string | null;
+};
+
 function PaymentMethodsSheet({
   groups,
   themeStyle,
@@ -449,7 +465,7 @@ function PaymentMethodsSheet({
 }: {
   groups: Array<{
     currency: string;
-    methods: Array<{ id: string; label: string; details: string }>;
+    methods: PaymentMethodSheetItem[];
   }>;
   themeStyle: CSSProperties;
   onClose: () => void;
@@ -532,7 +548,9 @@ function PaymentMethodsSheet({
                   }}
                 >
                   <p className="text-[15px] font-bold">{method.label}</p>
-                  {method.details ? (
+                  {method.fields && method.fields.length > 0 ? (
+                    <PaymentCopyFields fields={method.fields} note={method.note} dense />
+                  ) : method.details ? (
                     <p className="mt-1 text-sm leading-6" style={{ color: 'var(--menu-text-muted, #6b7280)' }}>
                       {method.details}
                     </p>

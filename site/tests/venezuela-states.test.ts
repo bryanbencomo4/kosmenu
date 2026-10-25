@@ -49,8 +49,59 @@ describe('venezuela states catalog', () => {
   it('matches directory region by address or operating states without mixing them up', () => {
     expect(
       directoryEntryMatchesRegion(
+        {
+          direccion: 'Los Salias, San Antonio de los Altos, Miranda',
+          estadosOperacion: [],
+        },
+        'Miranda',
+      ),
+    ).toBe(true);
+
+    // Landmark names must not count as the federal state.
+    expect(
+      directoryEntryMatchesRegion(
         { direccion: 'Av. Francisco de Miranda, Caracas', estadosOperacion: [] },
         'Miranda',
+      ),
+    ).toBe(false);
+    expect(
+      directoryEntryMatchesRegion(
+        {
+          direccion:
+            'Carrera 5 de Palmira, Palmira, Táchira\nReferencia: Plaza Bolívar',
+          estadosOperacion: [],
+        },
+        'Bolívar',
+      ),
+    ).toBe(false);
+    expect(
+      directoryEntryMatchesRegion(
+        {
+          direccion:
+            'Carrera 5 de Palmira, Palmira, Táchira\nReferencia: Plaza Bolívar',
+          estadosOperacion: [],
+        },
+        'Táchira',
+      ),
+    ).toBe(true);
+
+    // Declared operating states win over address landmarks.
+    expect(
+      directoryEntryMatchesRegion(
+        {
+          direccion: 'Referencia: Plaza Bolívar',
+          estadosOperacion: ['tachira'],
+        },
+        'Bolívar',
+      ),
+    ).toBe(false);
+    expect(
+      directoryEntryMatchesRegion(
+        {
+          direccion: 'Referencia: Plaza Bolívar',
+          estadosOperacion: ['tachira'],
+        },
+        'Táchira',
       ),
     ).toBe(true);
 

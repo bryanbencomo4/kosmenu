@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:kosmenu_app/core/commerce_fx.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/models/catalog.dart';
@@ -266,27 +267,12 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     if (comercioId.isEmpty) return;
 
     try {
-      final comercio = await Supabase.instance.client
-          .from('comercios')
-          .select('moneda, exchange_rate_value, tasa_cambio_pesos')
-          .eq('id', comercioId)
-          .maybeSingle();
-
-      final currency =
-          (comercio?['moneda']?.toString().trim().toUpperCase() ?? 'USD');
-      final rateRaw =
-          comercio?['exchange_rate_value'] ?? comercio?['tasa_cambio_pesos'];
-      final rate = rateRaw is num
-          ? rateRaw.toDouble()
-          : double.tryParse(
-                  (rateRaw ?? '').toString().trim().replaceAll(',', '.'),
-                ) ??
-                0;
-
+      final fx = await loadCommerceFx(Supabase.instance.client, comercioId);
       if (!mounted) return;
       setState(() {
-        _commerceCurrency = currency.isEmpty ? 'USD' : currency;
-        _commerceExchangeRate = rate;
+        _commerceCurrency = fx.baseCurrency;
+        // COP per 1 USD from configured USD/COP source (e.g. Google Finance).
+        _commerceExchangeRate = fx.usdCopRate;
       });
     } catch (_) {
       // Mantiene USD por defecto si no se puede cargar la configuración.

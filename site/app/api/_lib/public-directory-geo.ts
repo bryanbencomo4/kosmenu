@@ -32,37 +32,86 @@ export function toFiniteCoord(value: unknown): number | null {
  */
 export const DIRECTORY_REGIONS = VENEZUELA_STATE_DISPLAY_NAMES;
 
-function addressMatchesRegionLabel(address: string, regionLabel: string) {
-  const hay = normalizeDirectoryQuery(address);
-  if (!hay) return false;
-  const needle = normalizeDirectoryQuery(regionLabel);
-  if (needle && hay.includes(needle)) return true;
+/** Landmark words that precede a state name without meaning the federal entity
+ * (e.g. "Plaza Bolívar", "Av. Francisco de Miranda"). */
+const STATE_LANDMARK_PREFIXES = [
+  'plaza',
+  'avenida',
+  'av',
+  'calle',
+  'carrera',
+  'parque',
+  'boulevard',
+  'bulevar',
+  'estadio',
+  'puente',
+  'hospital',
+  'universidad',
+  'francisco',
+] as const;
 
-  const state = VENEZUELA_STATES.find(
-    (item) => normalizeDirectoryQuery(item.name) === needle,
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Collapse punctuation so "Palmira, Táchira" and "Plaza Bolívar." tokenize cleanly. */
+function tokenizeDirectoryText(value: string) {
+  return normalizeDirectoryQuery(value)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Whole-token match that ignores state names used as street/plaza landmarks. */
+function addressHasGeographicStateToken(hay: string, needle: string) {
+  if (!hay || !needle) return false;
+  const token = escapeRegex(needle);
+  const landmark = STATE_LANDMARK_PREFIXES.map(escapeRegex).join('|');
+  // Skip "plaza bolivar", "avenida francisco de miranda", "francisco de miranda".
+  const landmarkRe = new RegExp(
+    `(?:^|\\s)(?:${landmark})(?:\\s+de)?\\s+${token}(?:\\s|$)`,
   );
-  if (!state) {
-    // Legacy chip "Caracas DC" against an address that only says "Caracas".
-    for (const item of VENEZUELA_STATES) {
-      for (const alias of item.aliases ?? []) {
-        if (normalizeDirectoryQuery(alias) === needle) {
-          for (const label of [item.name, item.slug, ...(item.aliases ?? [])]) {
-            const aliasNeedle = normalizeDirectoryQuery(label);
-            if (aliasNeedle && hay.includes(aliasNeedle)) return true;
-          }
-        }
-      }
-    }
-    return false;
-  }
-  for (const alias of state.aliases ?? []) {
-    const aliasNeedle = normalizeDirectoryQuery(alias);
-    if (aliasNeedle && hay.includes(aliasNeedle)) return true;
+  if (landmarkRe.test(hay)) return false;
+  const tokenRe = new RegExp(`(?:^|\\s)${token}(?:\\s|$)`);
+  return tokenRe.test(hay);
+}
+
+function addressMatchesRegionLabel(address: string, regionLabel: string) {
+  const hay = tokenizeDirectoryText(address);
+  if (!hay) return false;
+  const needle = tokenizeDirectoryText(regionLabel);
+  if (!needle) return false;
+
+  const state =
+    VENEZUELA_STATES.find(
+      (item) => normalizeDirectoryQuery(item.name) === needle,
+    ) ??
+    VENEZUELA_STATES.find((item) =>
+      (item.aliases ?? []).some(
+        (alias) => normalizeDirectoryQuery(alias) === needle,
+      ),
+    ) ??
+    VENEZUELA_STATES.find(
+      (item) => normalizeDirectoryQuery(item.slug) === needle,
+    );
+
+  const labels = state
+    ? [state.name, state.slug, ...(state.aliases ?? [])]
+    : [regionLabel];
+
+  for (const label of labels) {
+    const aliasNeedle = tokenizeDirectoryText(label);
+    if (addressHasGeographicStateToken(hay, aliasNeedle)) return true;
   }
   return false;
 }
 
-/** Physical address OR virtual operating-states match for a region chip/URL. */
+/**
+ * Region chip / URL match.
+ * When the restaurant declared operating states, those win (never infer Bolívar
+ * from "Plaza Bolívar" in the address). Address fallback is only for shops
+ * that have not set `estados_operacion` yet.
+ */
 export function directoryEntryMatchesRegion(
   entry: {
     direccion?: string | null;
@@ -72,8 +121,11 @@ export function directoryEntryMatchesRegion(
 ) {
   const region = (regionQuery ?? '').trim();
   if (!region) return true;
-  if (addressMatchesRegionLabel(entry.direccion ?? '', region)) return true;
-  return operatingStatesMatchRegion(entry.estadosOperacion, region);
+  const declared = entry.estadosOperacion ?? [];
+  if (declared.length > 0) {
+    return operatingStatesMatchRegion(declared, region);
+  }
+  return addressMatchesRegionLabel(entry.direccion ?? '', region);
 }
 
 export const DIRECTORY_CATEGORY_CHIPS = [

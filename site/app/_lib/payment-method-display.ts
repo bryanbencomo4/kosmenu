@@ -10,7 +10,7 @@ export type PaymentMethodDisplayInput = {
   nota?: string | null;
 };
 
-type ParsedPaymentField = {
+export type PaymentDisplayField = {
   label: string;
   value: string;
 };
@@ -20,7 +20,7 @@ const GENERIC_PAYMENT_DESCRIPTIONS = new Set([
   'metodo de pago digital',
 ]);
 
-function parseTransferAccountDetalles(raw: string): ParsedPaymentField[] | null {
+function parseTransferAccountDetalles(raw: string): PaymentDisplayField[] | null {
   const trimmed = raw.trim();
   if (!trimmed.startsWith('{')) {
     return null;
@@ -33,14 +33,14 @@ function parseTransferAccountDetalles(raw: string): ParsedPaymentField[] | null 
       return null;
     }
 
-    const fields: ParsedPaymentField[] = [];
+    const fields: PaymentDisplayField[] = [];
     for (const entry of fieldsRaw) {
       if (!entry || typeof entry !== 'object') continue;
       const map = entry as Record<string, unknown>;
       const label = (map.label ?? map.name ?? '').toString().trim();
       const value = (map.value ?? '').toString().trim();
       if (!value) continue;
-      fields.push({ label, value });
+      fields.push({ label: label || 'Dato', value });
     }
 
     return fields.length > 0 ? fields : null;
@@ -49,38 +49,53 @@ function parseTransferAccountDetalles(raw: string): ParsedPaymentField[] | null 
   }
 }
 
-/** Human-readable payment destination lines for checkout and order summaries. */
-export function formatPaymentMethodDetails(method: PaymentMethodDisplayInput): string[] {
-  const details: string[] = [];
+/**
+ * Structured payment destination fields (ID, teléfono, banco…) for checkout UI.
+ * Notes / tips are returned separately so they are not treated as copy targets.
+ */
+export function parsePaymentMethodFields(method: PaymentMethodDisplayInput): {
+  fields: PaymentDisplayField[];
+  note: string | null;
+} {
+  const fields: PaymentDisplayField[] = [];
 
-  if (method.banco?.trim()) details.push(`Banco: ${method.banco.trim()}`);
-  if (method.titular?.trim()) details.push(`Titular: ${method.titular.trim()}`);
-  if (method.cedula?.trim()) details.push(`Cedula: ${method.cedula.trim()}`);
-  if (method.telefono?.trim()) details.push(`Telefono: ${method.telefono.trim()}`);
-  if (method.numero?.trim()) details.push(`Numero: ${method.numero.trim()}`);
-  if (method.alias?.trim()) details.push(`Alias: ${method.alias.trim()}`);
+  if (method.banco?.trim()) fields.push({ label: 'Banco', value: method.banco.trim() });
+  if (method.titular?.trim()) fields.push({ label: 'Titular', value: method.titular.trim() });
+  if (method.cedula?.trim()) fields.push({ label: 'Cédula', value: method.cedula.trim() });
+  if (method.telefono?.trim()) fields.push({ label: 'Teléfono', value: method.telefono.trim() });
+  if (method.numero?.trim()) fields.push({ label: 'Número', value: method.numero.trim() });
+  if (method.alias?.trim()) fields.push({ label: 'Alias', value: method.alias.trim() });
 
   const detallesRaw = (method.detalles ?? '').trim();
   const parsedFields = detallesRaw ? parseTransferAccountDetalles(detallesRaw) : null;
 
   if (parsedFields) {
-    for (const field of parsedFields) {
-      details.push(field.label ? `${field.label}: ${field.value}` : field.value);
-    }
+    fields.push(...parsedFields);
   } else if (detallesRaw && !detallesRaw.startsWith('{')) {
-    details.push(detallesRaw);
+    fields.push({ label: 'Detalle', value: detallesRaw });
   }
 
   const descripcion = (method.descripcion ?? '').trim();
   const nota = (method.nota ?? '').trim();
   const genericDescription = GENERIC_PAYMENT_DESCRIPTIONS.has(descripcion.toLowerCase());
 
+  let note: string | null = null;
   if (nota) {
-    details.push(nota);
-  } else if (descripcion && !genericDescription && details.length === 0) {
-    details.push(descripcion);
+    note = nota;
+  } else if (descripcion && !genericDescription && fields.length === 0) {
+    note = descripcion;
   }
 
+  return { fields, note };
+}
+
+/** Human-readable payment destination lines for checkout and order summaries. */
+export function formatPaymentMethodDetails(method: PaymentMethodDisplayInput): string[] {
+  const { fields, note } = parsePaymentMethodFields(method);
+  const details = fields.map((field) =>
+    field.label ? `${field.label}: ${field.value}` : field.value,
+  );
+  if (note) details.push(note);
   return details;
 }
 

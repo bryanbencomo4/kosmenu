@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:kosmenu_app/core/commerce_fx.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/models/category.dart';
 import 'package:kosmenu_app/models/product.dart';
@@ -266,21 +267,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
     setState(() => _isLoadingPricingConfig = true);
     try {
-      final comercio = await Supabase.instance.client
-          .from('comercios')
-          .select('moneda, exchange_rate_value, tasa_cambio_pesos')
-          .eq('id', comercioId)
-          .maybeSingle();
-
-      final methods = await Supabase.instance.client
+      final fxFuture = loadCommerceFx(Supabase.instance.client, comercioId);
+      final methodsFuture = Supabase.instance.client
           .from('metodos_pago')
           .select('tipo')
           .eq('comercio_id', comercioId);
 
-      final currencies = <String>{};
-      final dbBase =
-          (comercio?['moneda']?.toString().trim().toUpperCase() ?? 'USD');
-      currencies.add(dbBase.isEmpty ? 'USD' : dbBase);
+      final fx = await fxFuture;
+      final methods = await methodsFuture;
+
+      final currencies = <String>{fx.baseCurrency};
 
       for (final row in methods as List<dynamic>) {
         final tipo = (row['tipo']?.toString().trim().toLowerCase() ?? '');
@@ -293,27 +289,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         }
       }
 
-      final rateRaw =
-          comercio?['exchange_rate_value'] ?? comercio?['tasa_cambio_pesos'];
-      final rate = rateRaw is num
-          ? rateRaw.toDouble()
-          : double.tryParse(
-                  (rateRaw ?? '').toString().trim().replaceAll(',', '.'),
-                ) ??
-                0;
-
       if (currencies.isEmpty) {
         currencies.add('USD');
       }
 
       if (!mounted) return;
       setState(() {
-        _baseCurrency = dbBase.isEmpty ? 'USD' : dbBase;
-        _usdCopRate = rate;
+        _baseCurrency = fx.baseCurrency;
+        _usdCopRate = fx.usdCopRate;
         _availablePriceCurrencies = currencies;
-        if (!_availablePriceCurrencies.contains(_selectedPriceCurrency)) {
-          _selectedPriceCurrency = _baseCurrency;
-        }
+        // Stored product prices are always in the commerce base currency.
+        // Keep the editor on that currency so opening a COP price with USD
+        // selected does not multiply the value by the FX rate on save.
+        _selectedPriceCurrency = _baseCurrency;
       });
     } catch (_) {
       if (!mounted) return;
@@ -345,6 +333,48 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
 
     return value;
+  }
+
+  double _convertFromBaseCurrency({
+    required double value,
+    required String toCurrency,
+  }) {
+    if (toCurrency == _baseCurrency) {
+      return value;
+    }
+
+    if (toCurrency == 'USD' && _baseCurrency == 'COP' && _usdCopRate > 0) {
+      return value / _usdCopRate;
+    }
+    if (toCurrency == 'COP' && _baseCurrency == 'USD' && _usdCopRate > 0) {
+      return value * _usdCopRate;
+    }
+
+    return value;
+  }
+
+  void _onPriceCurrencyChanged(String? value) {
+    if (value == null || value == _selectedPriceCurrency) return;
+
+    void rewrite(TextEditingController controller) {
+      final raw = controller.text.trim().replaceAll(',', '.');
+      if (raw.isEmpty) return;
+      final parsed = double.tryParse(raw);
+      if (parsed == null) return;
+      final inBase = _convertToBaseCurrency(
+        value: parsed,
+        fromCurrency: _selectedPriceCurrency,
+      );
+      final inNew = _convertFromBaseCurrency(
+        value: inBase,
+        toCurrency: value,
+      );
+      controller.text = inNew.toStringAsFixed(2);
+    }
+
+    rewrite(_priceController);
+    rewrite(_compareAtPriceController);
+    setState(() => _selectedPriceCurrency = value);
   }
 
   double? _previewBasePrice() {
@@ -1457,10 +1487,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   onWeightConfigChanged: _revalidateWeightFields,
                   onCategoryChanged: (value) =>
                       setState(() => _selectedCategoryId = value),
-                  onPriceCurrencyChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _selectedPriceCurrency = value);
-                  },
+                  onPriceCurrencyChanged: _onPriceCurrencyChanged,
                   isGeneratingDescription: _isGeneratingDescription,
                   onGenerateDescription: _onGenerateDescription,
                   onSave: _save,
@@ -2214,6 +2241,9 @@ class _FormPanel extends StatelessWidget {
                   child: LinearProgressIndicator(minHeight: 2),
                 ),
               DropdownButtonFormField<String>(
+                // Rebuild when pricing config finishes so we don't keep the
+                // temporary default (USD) after the base currency loads.
+                key: ValueKey('price-currency-$selectedPriceCurrency'),
                 initialValue: selectedPriceCurrency,
                 isExpanded: true,
                 style: GoogleFonts.manrope(

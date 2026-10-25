@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatPaymentMethodDetails } from '../app/_lib/payment-method-display';
+import {
+  formatPaymentMethodDetails,
+  parsePaymentMethodFields,
+} from '../app/_lib/payment-method-display';
 
 describe('formatPaymentMethodDetails', () => {
   it('formats transfer account JSON from Flutter setup', () => {
@@ -15,6 +18,27 @@ describe('formatPaymentMethodDetails', () => {
 
     expect(details).toEqual(['Numero de telefono: +573019101507']);
     expect(details.join(' ')).not.toContain('{');
+  });
+
+  it('exposes structured fields for copy UI', () => {
+    expect(
+      parsePaymentMethodFields({
+        descripcion: 'Cuenta de pago digital',
+        detalles: JSON.stringify({
+          name: 'Binance',
+          fields: [
+            { type: 'texto', label: 'ID', value: '1225317379' },
+            { type: 'texto', label: 'Usuario', value: 'Maicol-666' },
+          ],
+        }),
+      }),
+    ).toEqual({
+      fields: [
+        { label: 'ID', value: '1225317379' },
+        { label: 'Usuario', value: 'Maicol-666' },
+      ],
+      note: null,
+    });
   });
 
   it('formats Bre-B style keys', () => {
@@ -39,7 +63,7 @@ describe('formatPaymentMethodDetails', () => {
     ).toEqual([
       'Banco: Banesco',
       'Titular: Maria Perez',
-      'Numero: 0134-1234-56-7890123456',
+      'Número: 0134-1234-56-7890123456',
     ]);
   });
 });

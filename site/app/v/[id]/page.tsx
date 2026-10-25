@@ -63,7 +63,11 @@ import {
   shouldShowPreCheckoutUpsell,
 } from '../../_lib/pre-checkout-upsell';
 import type { BundleRailItem } from './_components/upsell/BundleRail';
-import { formatPaymentMethodDetails } from '../../_lib/payment-method-display';
+import {
+  formatPaymentMethodDetails,
+  parsePaymentMethodFields,
+} from '../../_lib/payment-method-display';
+import { PaymentCopyFields } from './_components/PaymentCopyFields';
 import {
   convertAmountBetweenCurrencies,
   exchangeSourceLabel,
@@ -987,6 +991,10 @@ function paymentMethodLabel(method: MetodoPagoRow) {
 
 function paymentMethodDetails(method: MetodoPagoRow) {
   return formatPaymentMethodDetails(method);
+}
+
+function paymentMethodCopyModel(method: MetodoPagoRow) {
+  return parsePaymentMethodFields(method);
 }
 
 function currencyCodeFromPaymentMethodTipo(tipo: string) {
@@ -2894,11 +2902,16 @@ export default function PublicMenuPage() {
         .filter((group) => group.methods.length > 0)
         .map((group) => ({
           currency: group.currency,
-          methods: group.methods.map((method) => ({
-            id: method.id,
-            label: paymentMethodLabel(method),
-            details: paymentMethodDetails(method).join(' · '),
-          })),
+          methods: group.methods.map((method) => {
+            const parsed = paymentMethodCopyModel(method);
+            return {
+              id: method.id,
+              label: paymentMethodLabel(method),
+              details: paymentMethodDetails(method).join(' · '),
+              fields: parsed.fields,
+              note: parsed.note,
+            };
+          }),
         })),
     [paymentMethodsByCurrency],
   );
@@ -6135,19 +6148,23 @@ export default function PublicMenuPage() {
                                 {group.methods.map((method) => (
                                   <div key={`info-${method.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                                     <p className="text-sm font-bold text-slate-800">{paymentMethodLabel(method)}</p>
-                                    <div className="mt-1 space-y-1 text-xs text-slate-600">
-                                      {method.nota || method.descripcion ? (
-                                        <p>Nota: {method.nota ?? method.descripcion}</p>
-                                      ) : null}
+                                    <div className="mt-1 text-xs text-slate-600">
                                       {method.moneda || method.currency ? (
                                         <p>Moneda: {method.moneda ?? method.currency}</p>
                                       ) : null}
                                       {method.tasa_cambio || method.exchange_rate ? (
                                         <p>Tasa de cambio: {method.tasa_cambio ?? method.exchange_rate}</p>
                                       ) : null}
-                                      {paymentMethodDetails(method).map((detail, index) => (
-                                        <p key={`${method.id}-detail-${index}`}>{detail}</p>
-                                      ))}
+                                      {(() => {
+                                        const parsed = paymentMethodCopyModel(method);
+                                        return (
+                                          <PaymentCopyFields
+                                            fields={parsed.fields}
+                                            note={parsed.note}
+                                            dense
+                                          />
+                                        );
+                                      })()}
                                     </div>
                                   </div>
                                 ))}
@@ -6961,13 +6978,20 @@ export default function PublicMenuPage() {
                         <div className="space-y-2">
                           {selectedCurrencyGroup.methods.map((method, index) => {
                             const isSelected = selectedPaymentMethodId === method.id;
-                            const details = paymentMethodDetails(method);
+                            const parsed = paymentMethodCopyModel(method);
                             return (
-                              <button
+                              <div
                                 key={method.id}
-                                type="button"
+                                role="button"
+                                tabIndex={0}
                                 onClick={() => setSelectedPaymentMethodId(method.id)}
-                                className="checkout-item-enter w-full rounded-[22px] px-4 py-4 text-left shadow-[var(--menu-shadow)]"
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setSelectedPaymentMethodId(method.id);
+                                  }
+                                }}
+                                className="checkout-item-enter w-full cursor-pointer rounded-[22px] px-4 py-4 text-left shadow-[var(--menu-shadow)]"
                                 style={{
                                   ...(isSelected
                                     ? {
@@ -6979,17 +7003,25 @@ export default function PublicMenuPage() {
                                 }}
                               >
                                 <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <p className="text-sm font-bold text-[var(--menu-text)]">{paymentMethodLabel(method)}</p>
-                                    {details.length > 0 ? (
-                                      <p className="mt-1 text-xs text-[var(--menu-text-muted)]">{details.join(' · ')}</p>
-                                    ) : null}
-                                  </div>
-                                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${isSelected ? 'bg-emerald-500 text-white' : 'bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]'}`}>
+                                  <p className="text-sm font-bold text-[var(--menu-text)]">
+                                    {paymentMethodLabel(method)}
+                                  </p>
+                                  <span
+                                    className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${
+                                      isSelected
+                                        ? 'bg-emerald-500 text-white'
+                                        : 'bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]'
+                                    }`}
+                                  >
                                     {isSelected ? '✓' : ''}
                                   </span>
                                 </div>
-                              </button>
+                                <PaymentCopyFields
+                                  fields={parsed.fields}
+                                  note={parsed.note}
+                                  dense
+                                />
+                              </div>
                             );
                           })}
                         </div>
