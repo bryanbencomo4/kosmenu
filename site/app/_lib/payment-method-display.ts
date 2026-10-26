@@ -99,10 +99,53 @@ export function formatPaymentMethodDetails(method: PaymentMethodDisplayInput): s
   return details;
 }
 
+/** Strip redundant "Pago digital:" prefix so UI shows just the method name. */
+export function cleanPaymentMethodLabel(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  return trimmed.replace(/^pago\s*digital\s*:\s*/i, '').trim() || trimmed;
+}
+
 export function paymentMethodLabelFromRow(input: {
   nombre?: string | null;
   tipo?: string | null;
   banco?: string | null;
 }): string {
-  return input.nombre?.trim() || input.tipo?.trim() || input.banco?.trim() || 'Metodo de pago';
+  const raw = input.nombre?.trim() || input.tipo?.trim() || input.banco?.trim() || 'Metodo de pago';
+  return cleanPaymentMethodLabel(raw);
+}
+
+export function isCashPaymentMethodLabel(label: string) {
+  return label.toLowerCase().includes('efectivo') || label.toLowerCase().includes('cash');
+}
+
+export type PaymentMethodIconKind =
+  | 'cash'
+  | 'pago_movil'
+  | 'binance'
+  | 'transfer'
+  | 'wallet'
+  | 'card';
+
+export function paymentMethodIconKindFromText(
+  ...parts: Array<string | null | undefined>
+): PaymentMethodIconKind {
+  const hay = parts.filter(Boolean).join(' ').toLowerCase();
+  if (hay.includes('efectivo') || hay.includes('cash')) return 'cash';
+  if (hay.includes('binance')) return 'binance';
+  if (hay.includes('móvil') || hay.includes('movil')) return 'pago_movil';
+  if (
+    hay.includes('transfer') ||
+    hay.includes('cuenta') ||
+    hay.includes('banco') ||
+    hay.includes('bancolombia') ||
+    hay.includes('bnc')
+  ) {
+    return 'transfer';
+  }
+  if (hay.includes('tarjeta') || hay.includes('card') || hay.includes('visa') || hay.includes('mastercard')) {
+    return 'card';
+  }
+  if (hay.includes('digital') || hay.includes('wallet')) return 'wallet';
+  return 'wallet';
 }

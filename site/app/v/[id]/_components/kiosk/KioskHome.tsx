@@ -3,13 +3,17 @@
 import { Caveat, Manrope } from 'next/font/google';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, ChevronRight, CreditCard, Facebook, Instagram, MapPin, Moon, Music2, ShoppingBag, Star, Sun, Truck, Utensils, X, Youtube } from 'lucide-react';
+import { Banknote, Bitcoin, BookOpen, Building2, ChevronRight, CreditCard, Facebook, Instagram, MapPin, Moon, Music2, ShoppingBag, Smartphone, Star, Sun, Truck, Utensils, Wallet, X, Youtube } from 'lucide-react';
 
 import {
   DEFAULT_KIOSK_HOME_CONFIG,
   type KioskHomeConfig,
 } from '../../../../_lib/kiosk-home-config';
 import type { PaymentDisplayField } from '../../../../_lib/payment-method-display';
+import {
+  isCashPaymentMethodLabel,
+  paymentMethodIconKindFromText,
+} from '../../../../_lib/payment-method-display';
 import { PaymentCopyFields } from '../PaymentCopyFields';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskImage } from './KioskImage';
@@ -538,25 +542,68 @@ function PaymentMethodsSheet({
                   })}
                 </div>
               ) : null}
-              {methods.map((method) => (
-                <div
-                  key={method.id}
-                  className="rounded-2xl border px-4 py-3"
-                  style={{
-                    backgroundColor: 'var(--menu-surface-alt, #f3f4f6)',
-                    borderColor: 'var(--menu-border, #e5e7eb)',
-                  }}
-                >
-                  <p className="text-[15px] font-bold">{method.label}</p>
-                  {method.fields && method.fields.length > 0 ? (
-                    <PaymentCopyFields fields={method.fields} note={method.note} dense />
-                  ) : method.details ? (
-                    <p className="mt-1 text-sm leading-6" style={{ color: 'var(--menu-text-muted, #6b7280)' }}>
-                      {method.details}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
+              {methods.map((method) => {
+                const cash = isCashPaymentMethodLabel(method.label);
+                const kind = paymentMethodIconKindFromText(method.label, method.details);
+                const Icon =
+                  kind === 'cash'
+                    ? Banknote
+                    : kind === 'pago_movil'
+                      ? Smartphone
+                      : kind === 'binance'
+                        ? Bitcoin
+                        : kind === 'transfer'
+                          ? Building2
+                          : kind === 'card'
+                            ? CreditCard
+                            : Wallet;
+                return (
+                  <div
+                    key={method.id}
+                    className="rounded-2xl border px-4 py-3"
+                    style={{
+                      backgroundColor: 'var(--menu-surface-alt, #f3f4f6)',
+                      borderColor: 'var(--menu-border, #e5e7eb)',
+                    }}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                        style={{
+                          backgroundColor: 'color-mix(in srgb, var(--menu-text) 8%, transparent)',
+                          color: 'var(--menu-text-muted, #6b7280)',
+                        }}
+                      >
+                        <Icon className="h-4 w-4" aria-hidden />
+                      </span>
+                      <p className="min-w-0 text-[15px] font-bold">{method.label}</p>
+                    </div>
+                    {method.fields && method.fields.length > 0 ? (
+                      <PaymentCopyFields
+                        fields={method.fields}
+                        note={method.note}
+                        dense
+                        mode={cash ? 'info' : 'copy'}
+                      />
+                    ) : method.details ? (
+                      cash ? (
+                        <PaymentCopyFields
+                          fields={[{ label: '', value: method.details }]}
+                          dense
+                          mode="info"
+                        />
+                      ) : (
+                        <p
+                          className="mt-1 text-sm leading-6"
+                          style={{ color: 'var(--menu-text-muted, #6b7280)' }}
+                        >
+                          {method.details}
+                        </p>
+                      )
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

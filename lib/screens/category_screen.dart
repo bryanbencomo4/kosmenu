@@ -481,6 +481,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     var clearImage = false;
     var isUploadingImage = false;
     var isGeneratingAiCover = false;
+    // Uncropped source kept so "Ajustar encuadre" can restore cut pixels.
+    Uint8List? cropMasterBytes;
     var sheetOpen = true;
     String? helperMessage = category == null
         ? null
@@ -495,9 +497,9 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         isScrollControlled: true,
         useSafeArea: true,
         showDragHandle: true,
-        backgroundColor: colorScheme.surface,
+        backgroundColor: colorScheme.surfaceContainerLow,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
         builder: (sheetContext) {
           // Own the TextEditingController in a State so dispose runs after the
@@ -519,9 +521,23 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   (selectedImageUrl == null || selectedImageUrl!.isEmpty) &&
                   (fallbackProductImage?.isNotEmpty ?? false);
 
+              Future<Uint8List> _downloadImageBytes(String url) async {
+                final response = await http
+                    .get(Uri.parse(url))
+                    .timeout(const Duration(seconds: 30));
+                if (response.statusCode < 200 || response.statusCode >= 300) {
+                  throw StateError('HTTP ${response.statusCode}');
+                }
+                if (response.bodyBytes.isEmpty) {
+                  throw StateError('imagen vacía');
+                }
+                return response.bodyBytes;
+              }
+
               Future<void> uploadCroppedCategoryImage(
-                MediaCropResult cropped,
-              ) async {
+                MediaCropResult cropped, {
+                Uint8List? masterBytes,
+              }) async {
                 final comercioId = SupabaseConfig.currentComercioId.trim();
                 if (comercioId.isEmpty) {
                   updateSheet(() {
@@ -531,6 +547,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   return;
                 }
 
+                final master = masterBytes ?? cropMasterBytes;
                 updateSheet(() {
                   isUploadingImage = true;
                   helperMessage = null;
@@ -540,10 +557,13 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   final bytes = await ProductImageOptimizer.compressToJpegAsync(
                     cropped.bytes,
                   );
+                  final stamp =
+                      '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
                   final fileName =
-                      '$comercioId/categories/cat_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
-                  await Supabase.instance.client.storage
-                      .from('product-images')
+                      '$comercioId/categories/cat_$stamp.jpg';
+                  final storage = Supabase.instance.client.storage
+                      .from('product-images');
+                  await storage
                       .uploadBinary(
                         fileName,
                         bytes,
@@ -558,14 +578,37 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                           'La subida de la imagen tardó demasiado. Reintenta.',
                         ),
                       );
-                  final publicUrl = Supabase.instance.client.storage
-                      .from('product-images')
-                      .getPublicUrl(fileName);
+
+                  if (master != null && master.isNotEmpty) {
+                    final masterJpeg =
+                        await ProductImageOptimizer.compressToJpegAsync(master);
+                    final masterName = mediaMasterObjectPath(fileName);
+                    await storage
+                        .uploadBinary(
+                          masterName,
+                          masterJpeg,
+                          fileOptions: const FileOptions(
+                            upsert: true,
+                            contentType: 'image/jpeg',
+                          ),
+                        )
+                        .timeout(
+                          const Duration(seconds: 45),
+                          onTimeout: () => throw TimeoutException(
+                            'La subida de la imagen tardó demasiado. Reintenta.',
+                          ),
+                        );
+                  }
+
+                  final publicUrl = storage.getPublicUrl(fileName);
                   const ProductImageVariantsClient()
                       .ensureInBackground(publicUrl);
                   updateSheet(() {
                     selectedImageUrl = publicUrl;
                     clearImage = false;
+                    if (master != null && master.isNotEmpty) {
+                      cropMasterBytes = master;
+                    }
                     helperMessage = 'Imagen lista. Guarda para aplicarla.';
                   });
                 } catch (error) {
@@ -604,64 +647,87 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                       );
                 if (photo == null || !sheetOpen || !hostContext.mounted) return;
 
+                final masterBytes = await photo.readAsBytes();
+                if (!sheetOpen || !hostContext.mounted) return;
+
                 final cropped =
-                    await const MediaImageCropService().cropForUpload(
+                    await const MediaImageCropService().cropFromBytes(
                   hostContext,
-                  source: photo,
+                  sourceBytes: masterBytes,
                   kind: MediaCropKind.category,
                 );
                 if (cropped == null || !sheetOpen || !hostContext.mounted) {
                   return;
                 }
 
-                await uploadCroppedCategoryImage(cropped);
+                await uploadCroppedCategoryImage(
+                  cropped,
+                  masterBytes: masterBytes,
+                );
               }
 
               Future<void> recropCurrentImage() async {
                 if (isUploadingImage || isGeneratingAiCover || !sheetOpen) {
                   return;
                 }
-                final url = (clearImage
-                        ? null
-                        : (selectedImageUrl ?? fallbackProductImage))
-                    ?.trim();
-                if (url == null || url.isEmpty) {
-                  updateSheet(() {
-                    helperMessage =
-                        'No hay imagen para ajustar. Agrega una foto primero.';
-                  });
-                  return;
-                }
 
-                updateSheet(() {
-                  isUploadingImage = true;
-                  helperMessage = 'Cargando imagen para ajustar…';
-                });
+                final needsDownload =
+                    cropMasterBytes == null || cropMasterBytes!.isEmpty;
+                if (needsDownload) {
+                  updateSheet(() {
+                    isUploadingImage = true;
+                    // Loading is shown on the preview overlay only — never leave
+                    // a sticky helper banner that survives cancel/confirm.
+                    helperMessage = null;
+                  });
+                }
 
                 Uint8List sourceBytes;
                 try {
-                  final response = await http
-                      .get(Uri.parse(url))
-                      .timeout(const Duration(seconds: 30));
-                  if (response.statusCode < 200 || response.statusCode >= 300) {
-                    throw StateError(
-                      'HTTP ${response.statusCode}',
-                    );
-                  }
-                  sourceBytes = response.bodyBytes;
-                  if (sourceBytes.isEmpty) {
-                    throw StateError('imagen vacía');
+                  if (!needsDownload) {
+                    sourceBytes = cropMasterBytes!;
+                  } else {
+                    final selected = selectedImageUrl?.trim();
+                    final masterSibling = mediaMasterSiblingUrl(selected);
+                    Uint8List? loaded;
+                    if (masterSibling != null &&
+                        masterSibling.isNotEmpty &&
+                        masterSibling != selected) {
+                      try {
+                        loaded = await _downloadImageBytes(masterSibling);
+                      } catch (_) {
+                        loaded = null;
+                      }
+                    }
+                    if (loaded == null) {
+                      final fallback = fallbackProductImage?.trim();
+                      final url = (clearImage
+                              ? null
+                              : (usingFallback
+                                  ? fallback
+                                  : (selected ?? fallback)))
+                          ?.trim();
+                      if (url == null || url.isEmpty) {
+                        throw StateError('sin imagen');
+                      }
+                      loaded = await _downloadImageBytes(url);
+                    }
+                    sourceBytes = loaded;
+                    cropMasterBytes = sourceBytes;
                   }
                 } catch (error) {
                   updateSheet(() {
                     isUploadingImage = false;
-                    helperMessage =
-                        'No se pudo cargar la imagen para recortar: $error';
+                    helperMessage = error.toString().contains('sin imagen')
+                        ? 'No hay imagen para ajustar. Agrega una foto primero.'
+                        : 'No se pudo cargar la imagen para recortar: $error';
                   });
                   return;
                 }
 
-                updateSheet(() => isUploadingImage = false);
+                if (needsDownload) {
+                  updateSheet(() => isUploadingImage = false);
+                }
                 if (!sheetOpen || !hostContext.mounted) return;
 
                 final cropped = await const MediaImageCropService()
@@ -674,7 +740,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   return;
                 }
 
-                await uploadCroppedCategoryImage(cropped);
+                await uploadCroppedCategoryImage(
+                  cropped,
+                  masterBytes: sourceBytes,
+                );
               }
 
               Future<void> chooseImageSource() async {
@@ -709,14 +778,325 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 );
               }
 
+              Future<void> generateAiCover() async {
+                final existing = category;
+                if (existing == null) {
+                  updateSheet(() {
+                    helperMessage =
+                        'Guarda la categoría primero y vuelve a editarla para generar la portada con IA.';
+                  });
+                  return;
+                }
+                final comercioId = SupabaseConfig.currentComercioId.trim();
+                if (comercioId.isEmpty) {
+                  updateSheet(() {
+                    helperMessage =
+                        'No hay comercio activo para generar la imagen IA.';
+                  });
+                  return;
+                }
+
+                final confirmed = await showDialog<bool>(
+                  context: sheetContext,
+                  builder: (dialogContext) {
+                    return AlertDialog(
+                      title: Text(
+                        'Generar portada con IA',
+                        style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+                      ),
+                      content: Text(
+                        'Se descontará 1 crédito para crear una portada estilo anuncio con el logo, el nombre del negocio, el color de marca y “${existing.nombre}”. Funciona con o sin fotos de productos.',
+                        style: GoogleFonts.manrope(height: 1.35),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(false),
+                          child: const Text('Cancelar'),
+                        ),
+                        FilledButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(true),
+                          child: const Text('Generar (1 crédito)'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+                if (confirmed != true || !sheetContext.mounted) return;
+
+                updateSheet(() {
+                  isGeneratingAiCover = true;
+                  helperMessage = 'Generando portada con IA…';
+                });
+
+                try {
+                  final response = await _aiImageService.generateCategoryCover(
+                    comercioId: comercioId,
+                    categoryId: existing.id,
+                  );
+                  final imageUrl =
+                      response['image_url']?.toString().trim() ?? '';
+                  if (imageUrl.isEmpty) {
+                    throw StateError(
+                      response['message']?.toString() ??
+                          'No se recibió la imagen.',
+                    );
+                  }
+                  updateSheet(() {
+                    selectedImageUrl = imageUrl;
+                    cropMasterBytes = null;
+                    clearImage = false;
+                    helperMessage =
+                        'Portada IA lista. Guarda para confirmarla en el menú.';
+                  });
+                } catch (error) {
+                  updateSheet(() {
+                    helperMessage = _formatAiImageErrorMessage(
+                      error.toString().replaceFirst('Bad state: ', ''),
+                    );
+                  });
+                } finally {
+                  updateSheet(() => isGeneratingAiCover = false);
+                }
+              }
+
+              void clearOwnImage() {
+                updateSheet(() {
+                  selectedImageUrl = null;
+                  cropMasterBytes = null;
+                  clearImage = true;
+                  helperMessage =
+                      'Se quitará la imagen propia al guardar.';
+                });
+              }
+
+              void saveCategory() {
+                final draft = nameController.text.trim();
+                if (draft.isEmpty) {
+                  updateSheet(() {
+                    helperMessage =
+                        'Escribe un nombre para guardar la categoría.';
+                  });
+                  return;
+                }
+                FocusManager.instance.primaryFocus?.unfocus();
+                navigator.pop(
+                  _CategoryEditorResult(
+                    name: draft,
+                    imagenUrl: selectedImageUrl,
+                    clearImage: clearImage,
+                    rol: selectedRol,
+                  ),
+                );
+              }
+
+              final busy = isUploadingImage || isGeneratingAiCover;
+              final hasOwnImage = selectedImageUrl != null ||
+                  (category?.imagenUrl?.trim().isNotEmpty ?? false);
+              final hasPreview =
+                  previewUrl != null && previewUrl.trim().isNotEmpty;
+              final subtitle = category == null
+                  ? 'Define el nombre, tipo y portada de la categoría.'
+                  : 'Modifica la información de la categoría.';
+              final fieldBorder = OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.9),
+                ),
+              );
+
+              Widget coverPreview() {
+                // Same composition as the public kiosk category card:
+                // 3:4 cover image + title strip (so framing matches the menu).
+                final previewName = () {
+                  final typed = nameController.text.trim();
+                  if (typed.isNotEmpty) return typed;
+                  final existing = category?.nombre.trim() ?? '';
+                  if (existing.isNotEmpty) return existing;
+                  return 'Nombre de la categoría';
+                }();
+
+                return Material(
+                  color: colorScheme.surface,
+                  elevation: 1.5,
+                  shadowColor: Colors.black26,
+                  borderRadius: BorderRadius.circular(22),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 3 / 4,
+                        child: ColoredBox(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: previewUrl == null
+                              ? Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.image_outlined,
+                                        size: 36,
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Sin imagen',
+                                        style: GoogleFonts.manrope(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    SoftMediaImage(
+                                      imageUrl: previewUrl,
+                                      fit: BoxFit.cover,
+                                      alignment: Alignment.center,
+                                      optimizeWidth: 520,
+                                      backgroundColor:
+                                          colorScheme.surfaceContainerHighest,
+                                    ),
+                                    if (usingFallback)
+                                      Positioned(
+                                        left: 8,
+                                        bottom: 8,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 5,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0x99000000),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          child: Text(
+                                            'Del primer producto',
+                                            style: GoogleFonts.manrope(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    if (busy)
+                                      const ColoredBox(
+                                        color: Color(0x66000000),
+                                        child: Center(
+                                          child: CircularProgressIndicator(),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                        ),
+                      ),
+                      SizedBox(
+                        height: 44,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: ListenableBuilder(
+                              listenable: nameController,
+                              builder: (context, _) {
+                                final live = nameController.text.trim();
+                                final label = live.isNotEmpty
+                                    ? live
+                                    : previewName;
+                                return Text(
+                                  label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.manrope(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13.5,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              Widget coverActions() {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _CategoryCoverActionButton(
+                      onPressed: busy ? null : chooseImageSource,
+                      icon: Icons.upload_rounded,
+                      title: selectedImageUrl == null
+                          ? 'Agregar imagen'
+                          : 'Cambiar imagen',
+                      subtitle: 'Selecciona una imagen de tu dispositivo',
+                      style: _CategoryCoverActionStyle.primary,
+                    ),
+                    if (hasPreview) ...[
+                      const SizedBox(height: 10),
+                      _CategoryCoverActionButton(
+                        onPressed:
+                            busy ? null : () => unawaited(recropCurrentImage()),
+                        icon: Icons.crop_rounded,
+                        title: 'Ajustar encuadre',
+                        subtitle: usingFallback
+                            ? 'Recorta la foto del producto'
+                            : 'Recorta y ajusta la imagen',
+                        style: _CategoryCoverActionStyle.outlined,
+                        showChevron: true,
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    _CategoryCoverActionButton(
+                      onPressed: busy ? null : () => unawaited(generateAiCover()),
+                      icon: Icons.auto_awesome,
+                      title: isGeneratingAiCover
+                          ? 'Generando…'
+                          : 'Generar con IA',
+                      subtitle: 'Crea una portada personalizada',
+                      style: _CategoryCoverActionStyle.soft,
+                      trailingBadge: isGeneratingAiCover ? null : '1 crédito',
+                      loading: isGeneratingAiCover,
+                    ),
+                    if (hasOwnImage) ...[
+                      const SizedBox(height: 4),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: busy ? null : clearOwnImage,
+                          style: TextButton.styleFrom(
+                            foregroundColor: colorScheme.error,
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                          ),
+                          child: const Text('Eliminar imagen'),
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              }
+
               return SafeArea(
                 top: false,
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(
-                    20,
-                    8,
-                    20,
-                    max(4, media.viewInsets.bottom + 12),
+                    16,
+                    4,
+                    16,
+                    max(4, media.viewInsets.bottom + 10),
                   ),
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
@@ -730,537 +1110,409 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                       children: [
                         Expanded(
                           child: SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurface,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 22,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Nombre, tipo y una imagen de portada para la categoría.',
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                TextField(
-                                  controller: nameController,
-                                  autofocus: category == null,
-                                  textCapitalization: TextCapitalization.words,
-                                  cursorColor: colorScheme.primary,
-                                  decoration: InputDecoration(
-                                    labelText: 'Nombre de la categoría',
-                                    hintText: 'Ej: Pizzas, Bebidas, Postres',
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 560),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                title,
+                                                style: GoogleFonts.manrope(
+                                                  color: colorScheme.onSurface,
+                                                  fontWeight: FontWeight.w800,
+                                                  fontSize: 24,
+                                                  height: 1.15,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                subtitle,
+                                                style: GoogleFonts.manrope(
+                                                  color: colorScheme
+                                                      .onSurfaceVariant,
+                                                  fontWeight: FontWeight.w500,
+                                                  fontSize: 13.5,
+                                                  height: 1.35,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Cerrar',
+                                          onPressed: busy
+                                              ? null
+                                              : () {
+                                                  FocusManager
+                                                      .instance.primaryFocus
+                                                      ?.unfocus();
+                                                  navigator.pop();
+                                                },
+                                          icon: const Icon(Icons.close_rounded),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Tipo de categoría',
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurface,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Solo se usa si activas venta sugerida.',
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 12.5,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                ...CategoryModel.upsellKindRoles.map((role) {
-                                  return RadioListTile<String?>(
-                                    dense: true,
-                                    contentPadding: EdgeInsets.zero,
-                                    value: role,
-                                    groupValue: selectedRol,
-                                    onChanged: (value) =>
-                                        setSheetState(() => selectedRol = value),
-                                    title: Text(
-                                      CategoryModel.upsellKindLabel(role),
-                                      style: GoogleFonts.manrope(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  );
-                                }),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Imagen de la categoría',
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurface,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Opcional. Si no hay imagen propia, se usa la del primer producto.',
-                                  style: GoogleFonts.manrope(
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 12.5,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                // Same vertical tile as public menu (9:16 + title bar).
-                                Center(
-                                  child: SizedBox(
-                                    width: 168,
-                                    child: Material(
-                                      color: colorScheme.surface,
-                                      elevation: 1.5,
-                                      shadowColor: Colors.black26,
-                                      borderRadius: BorderRadius.circular(18),
-                                      clipBehavior: Clip.antiAlias,
+                                    const SizedBox(height: 16),
+                                    _CategoryEditorSectionCard(
                                       child: Column(
-                                        mainAxisSize: MainAxisSize.min,
                                         crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          AspectRatio(
-                                            aspectRatio: 3 / 4,
-                                            child: ColoredBox(
-                                              color: colorScheme
-                                                  .surfaceContainerHighest,
-                                              child: previewUrl == null
-                                                  ? Center(
-                                                      child: Column(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons
-                                                                .image_outlined,
-                                                            size: 36,
+                                          Text(
+                                            'Nombre de la categoría',
+                                            style: GoogleFonts.manrope(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 13,
+                                              color: colorScheme.onSurface,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          ListenableBuilder(
+                                            listenable: nameController,
+                                            builder: (context, _) {
+                                              return TextField(
+                                                controller: nameController,
+                                                autofocus: category == null,
+                                                textCapitalization:
+                                                    TextCapitalization.words,
+                                                cursorColor:
+                                                    colorScheme.primary,
+                                                decoration: InputDecoration(
+                                                  hintText:
+                                                      'Ej: Pizzas, Bebidas, Postres',
+                                                  filled: true,
+                                                  fillColor: colorScheme
+                                                      .surfaceContainerLowest,
+                                                  prefixIcon: Icon(
+                                                    Icons.sell_outlined,
+                                                    color: colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                                  suffixIcon: nameController
+                                                          .text.isEmpty
+                                                      ? null
+                                                      : IconButton(
+                                                          tooltip: 'Limpiar',
+                                                          onPressed: () {
+                                                            nameController
+                                                                .clear();
+                                                          },
+                                                          icon: Icon(
+                                                            Icons.close_rounded,
                                                             color: colorScheme
                                                                 .onSurfaceVariant,
                                                           ),
-                                                          const SizedBox(
-                                                              height: 8),
-                                                          Text(
-                                                            'Sin imagen todavía',
-                                                            textAlign: TextAlign
-                                                                .center,
-                                                            style: GoogleFonts
-                                                                .manrope(
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w700,
-                                                              color: colorScheme
-                                                                  .onSurfaceVariant,
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    )
-                                                  : Stack(
-                                                      fit: StackFit.expand,
-                                                      children: [
-                                                        SoftMediaImage(
-                                                          imageUrl: previewUrl,
-                                                          fit: BoxFit.cover,
-                                                          alignment: Alignment
-                                                              .topCenter,
-                                                          optimizeWidth: 520,
-                                                          backgroundColor:
-                                                              colorScheme
-                                                                  .surfaceContainerHighest,
                                                         ),
-                                                        if (usingFallback)
-                                                          Align(
-                                                            alignment: Alignment
-                                                                .bottomLeft,
-                                                            child: Container(
-                                                              margin:
-                                                                  const EdgeInsets
-                                                                      .all(10),
-                                                              padding:
-                                                                  const EdgeInsets
-                                                                      .symmetric(
-                                                                horizontal: 10,
-                                                                vertical: 6,
-                                                              ),
-                                                              decoration:
-                                                                  BoxDecoration(
-                                                                color: Colors
-                                                                    .black54,
-                                                                borderRadius:
-                                                                    BorderRadius
-                                                                        .circular(
-                                                                  999,
-                                                                ),
-                                                              ),
-                                                              child: Text(
-                                                                'Del primer producto',
-                                                                style: GoogleFonts
-                                                                    .manrope(
-                                                                  color: Colors
-                                                                      .white,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w700,
-                                                                  fontSize:
-                                                                      11.5,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        if (isUploadingImage ||
-                                                            isGeneratingAiCover)
-                                                          const ColoredBox(
-                                                            color: Color(
-                                                                0x66000000),
-                                                            child: Center(
-                                                              child:
-                                                                  CircularProgressIndicator(),
-                                                            ),
-                                                          ),
-                                                      ],
+                                                  border: fieldBorder,
+                                                  enabledBorder: fieldBorder,
+                                                  focusedBorder:
+                                                      OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                      14,
                                                     ),
+                                                    borderSide: BorderSide(
+                                                      color:
+                                                          colorScheme.primary,
+                                                      width: 1.6,
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                          const SizedBox(height: 18),
+                                          Text(
+                                            'Tipo de categoría',
+                                            style: GoogleFonts.manrope(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 13,
+                                              color: colorScheme.onSurface,
                                             ),
                                           ),
-                                          SizedBox(
-                                            height: 52,
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 12,
-                                                vertical: 10,
-                                              ),
-                                              child: Align(
-                                                alignment:
-                                                    Alignment.centerLeft,
-                                                child: Text(
-                                                  () {
-                                                    final typed =
-                                                        nameController.text
-                                                            .trim();
-                                                    if (typed.isNotEmpty) {
-                                                      return typed;
-                                                    }
-                                                    return category?.nombre
-                                                            .trim()
-                                                            .isNotEmpty ==
-                                                        true
-                                                        ? category!.nombre
-                                                            .trim()
-                                                        : 'Nombre de la categoría';
-                                                  }(),
-                                                  maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: GoogleFonts.manrope(
-                                                    fontWeight: FontWeight.w800,
-                                                    fontSize: 13,
-                                                    height: 1.2,
-                                                    color: colorScheme
-                                                        .onSurface,
-                                                  ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Solo se usa si activas venta sugerida.',
+                                            style: GoogleFonts.manrope(
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
+                                              fontWeight: FontWeight.w500,
+                                              fontSize: 12.5,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          DropdownButtonFormField<String?>(
+                                            // ignore: deprecated_member_use
+                                            // Controlled by sheet state; FormField.initialValue would not update.
+                                            value: selectedRol,
+                                            isExpanded: true,
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            decoration: InputDecoration(
+                                              filled: true,
+                                              fillColor: colorScheme
+                                                  .surfaceContainerLowest,
+                                              border: fieldBorder,
+                                              enabledBorder: fieldBorder,
+                                              focusedBorder: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(14),
+                                                borderSide: BorderSide(
+                                                  color: colorScheme.primary,
+                                                  width: 1.6,
                                                 ),
                                               ),
                                             ),
+                                            selectedItemBuilder: (context) {
+                                              return CategoryModel
+                                                  .upsellKindRoles
+                                                  .map((role) {
+                                                return Align(
+                                                  alignment:
+                                                      Alignment.centerLeft,
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(
+                                                        _categoryUpsellKindIcon(
+                                                          role,
+                                                        ),
+                                                        size: 20,
+                                                        color: colorScheme
+                                                            .onSurfaceVariant,
+                                                      ),
+                                                      const SizedBox(width: 10),
+                                                      Text(
+                                                        CategoryModel
+                                                            .upsellKindLabel(
+                                                          role,
+                                                        ),
+                                                        style: GoogleFonts
+                                                            .manrope(
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                              }).toList();
+                                            },
+                                            items: CategoryModel.upsellKindRoles
+                                                .map((role) {
+                                              return DropdownMenuItem<String?>(
+                                                value: role,
+                                                child: Row(
+                                                  children: [
+                                                    Icon(
+                                                      _categoryUpsellKindIcon(
+                                                        role,
+                                                      ),
+                                                      size: 20,
+                                                      color: colorScheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    Text(
+                                                      CategoryModel
+                                                          .upsellKindLabel(
+                                                        role,
+                                                      ),
+                                                      style:
+                                                          GoogleFonts.manrope(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            }).toList(),
+                                            onChanged: busy
+                                                ? null
+                                                : (value) => setSheetState(
+                                                      () =>
+                                                          selectedRol = value,
+                                                    ),
                                           ),
                                         ],
                                       ),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: FilledButton.icon(
-                                        onPressed: isUploadingImage ||
-                                                isGeneratingAiCover
-                                            ? null
-                                            : chooseImageSource,
-                                        icon: const Icon(
-                                          Icons.add_photo_alternate_outlined,
-                                        ),
-                                        label: Text(
-                                          selectedImageUrl == null
-                                              ? 'Agregar imagen'
-                                              : 'Cambiar imagen',
-                                        ),
-                                        style: FilledButton.styleFrom(
-                                          minimumSize: const Size(0, 46),
-                                          backgroundColor:
-                                              const Color(0xFF6D28D9),
-                                        ),
-                                      ),
-                                    ),
-                                    if (selectedImageUrl != null ||
-                                        (category?.imagenUrl
-                                                ?.trim()
-                                                .isNotEmpty ??
-                                            false)) ...[
-                                      const SizedBox(width: 10),
-                                      OutlinedButton(
-                                        onPressed: isUploadingImage ||
-                                                isGeneratingAiCover
-                                            ? null
-                                            : () {
-                                                setSheetState(() {
-                                                  selectedImageUrl = null;
-                                                  clearImage = true;
-                                                  helperMessage =
-                                                      'Se quitará la imagen propia al guardar.';
-                                                });
-                                              },
-                                        style: OutlinedButton.styleFrom(
-                                          minimumSize: const Size(0, 46),
-                                        ),
-                                        child: const Text('Quitar'),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                if (previewUrl != null &&
-                                    previewUrl!.trim().isNotEmpty) ...[
-                                  const SizedBox(height: 10),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: OutlinedButton.icon(
-                                      onPressed: isUploadingImage ||
-                                              isGeneratingAiCover
-                                          ? null
-                                          : () => unawaited(recropCurrentImage()),
-                                      icon: const Icon(
-                                        Icons.crop_rounded,
-                                      ),
-                                      label: Text(
-                                        usingFallback
-                                            ? 'Ajustar encuadre (del producto)'
-                                            : 'Ajustar encuadre',
-                                      ),
-                                      style: OutlinedButton.styleFrom(
-                                        minimumSize: const Size(0, 46),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 10),
-                                OutlinedButton.icon(
-                                  onPressed: isUploadingImage ||
-                                          isGeneratingAiCover
-                                      ? null
-                                      : () async {
-                                          final existing = category;
-                                          if (existing == null) {
-                                            setSheetState(() {
-                                              helperMessage =
-                                                  'Guarda la categoría primero y vuelve a editarla para generar la portada con IA.';
-                                            });
-                                            return;
-                                          }
-                                          final comercioId = SupabaseConfig
-                                              .currentComercioId
-                                              .trim();
-                                          if (comercioId.isEmpty) {
-                                            setSheetState(() {
-                                              helperMessage =
-                                                  'No hay comercio activo para generar la imagen IA.';
-                                            });
-                                            return;
-                                          }
-
-                                          final confirmed =
-                                              await showDialog<bool>(
-                                            context: sheetContext,
-                                            builder: (dialogContext) {
-                                              return AlertDialog(
-                                                title: Text(
-                                                  'Generar portada con IA',
+                                    const SizedBox(height: 14),
+                                    _CategoryEditorSectionCard(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  'Portada de la categoría',
                                                   style: GoogleFonts.manrope(
                                                     fontWeight: FontWeight.w800,
+                                                    fontSize: 15,
+                                                    color:
+                                                        colorScheme.onSurface,
                                                   ),
                                                 ),
-                                                content: Text(
-                                                  'Se descontará 1 crédito para crear una portada estilo anuncio con el logo, el nombre del negocio, el color de marca y “${existing.nombre}”. Funciona con o sin fotos de productos.',
+                                              ),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 4,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: colorScheme
+                                                      .surfaceContainerHighest,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                    999,
+                                                  ),
+                                                ),
+                                                child: Text(
+                                                  'Opcional',
                                                   style: GoogleFonts.manrope(
-                                                    height: 1.35,
+                                                    fontWeight: FontWeight.w700,
+                                                    fontSize: 11.5,
+                                                    color: colorScheme
+                                                        .onSurfaceVariant,
                                                   ),
                                                 ),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () =>
-                                                        Navigator.of(
-                                                      dialogContext,
-                                                    ).pop(false),
-                                                    child: const Text(
-                                                      'Cancelar',
-                                                    ),
-                                                  ),
-                                                  FilledButton(
-                                                    onPressed: () =>
-                                                        Navigator.of(
-                                                      dialogContext,
-                                                    ).pop(true),
-                                                    child: const Text(
-                                                      'Generar (1 crédito)',
-                                                    ),
-                                                  ),
-                                                ],
-                                              );
-                                            },
-                                          );
-                                          if (confirmed != true ||
-                                              !sheetContext.mounted) {
-                                            return;
-                                          }
-
-                                          setSheetState(() {
-                                            isGeneratingAiCover = true;
-                                            helperMessage =
-                                                'Generando portada con IA…';
-                                          });
-
-                                          try {
-                                            final response =
-                                                await _aiImageService
-                                                    .generateCategoryCover(
-                                              comercioId: comercioId,
-                                              categoryId: existing.id,
-                                            );
-                                            final imageUrl = response[
-                                                        'image_url']
-                                                    ?.toString()
-                                                    .trim() ??
-                                                '';
-                                            if (imageUrl.isEmpty) {
-                                              throw StateError(
-                                                response['message']
-                                                        ?.toString() ??
-                                                    'No se recibió la imagen.',
-                                              );
-                                            }
-                                            if (!sheetContext.mounted) return;
-                                            setSheetState(() {
-                                              selectedImageUrl = imageUrl;
-                                              clearImage = false;
-                                              helperMessage =
-                                                  'Portada IA lista. Guarda para confirmarla en el menú.';
-                                            });
-                                          } catch (error) {
-                                            if (!sheetContext.mounted) return;
-                                            setSheetState(() {
-                                              helperMessage =
-                                                  _formatAiImageErrorMessage(
-                                                error
-                                                    .toString()
-                                                    .replaceFirst(
-                                                      'Bad state: ',
-                                                      '',
-                                                    ),
-                                              );
-                                            });
-                                          } finally {
-                                            if (sheetContext.mounted) {
-                                              setSheetState(() {
-                                                isGeneratingAiCover = false;
-                                              });
-                                            }
-                                          }
-                                        },
-                                  icon: isGeneratingAiCover
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
+                                              ),
+                                            ],
                                           ),
-                                        )
-                                      : const Icon(Icons.auto_awesome),
-                                  label: Text(
-                                    isGeneratingAiCover
-                                        ? 'Generando…'
-                                        : 'Generar con IA (1 crédito)',
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    minimumSize: const Size.fromHeight(46),
-                                    foregroundColor: const Color(0xFF6D28D9),
-                                  ),
-                                ),
-                                if (helperMessage != null) ...[
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    helperMessage!,
-                                    style: GoogleFonts.manrope(
-                                      color: colorScheme.onSurfaceVariant,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12,
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Si no hay imagen propia, se usa la del primer producto.',
+                                            style: GoogleFonts.manrope(
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
+                                              fontWeight: FontWeight.w500,
+                                              fontSize: 12.5,
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 14),
+                                          // Preview first (menu-faithful card), actions below —
+                                          // avoids a tiny side thumbnail that crops differently.
+                                          Center(
+                                            child: ConstrainedBox(
+                                              constraints: const BoxConstraints(
+                                                maxWidth: 240,
+                                              ),
+                                              child: coverPreview(),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 14),
+                                          coverActions(),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ],
+                                    if (helperMessage != null) ...[
+                                      const SizedBox(height: 12),
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 12,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: colorScheme
+                                              .secondaryContainer
+                                              .withValues(alpha: 0.55),
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                        ),
+                                        child: Text(
+                                          helperMessage!,
+                                          style: GoogleFonts.manrope(
+                                            color: colorScheme
+                                                .onSecondaryContainer,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12.5,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 8),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ),
                         SafeArea(
                           top: false,
-                          minimum: const EdgeInsets.only(top: 14, bottom: 2),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: TextButton(
-                                  onPressed: isUploadingImage ||
-                                          isGeneratingAiCover
-                                      ? null
-                                      : () {
-                                          FocusManager.instance.primaryFocus
-                                              ?.unfocus();
-                                          navigator.pop();
-                                        },
-                                  child: const Text('Cancelar'),
-                                ),
+                          minimum: const EdgeInsets.only(top: 12, bottom: 2),
+                          child: Align(
+                            alignment: Alignment.center,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 560),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: busy
+                                          ? null
+                                          : () {
+                                              FocusManager
+                                                  .instance.primaryFocus
+                                                  ?.unfocus();
+                                              navigator.pop();
+                                            },
+                                      style: OutlinedButton.styleFrom(
+                                        minimumSize: const Size(0, 50),
+                                        foregroundColor: colorScheme.primary,
+                                        side: BorderSide(
+                                          color: colorScheme.primary
+                                              .withValues(alpha: 0.45),
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                        ),
+                                      ),
+                                      child: const Text('Cancelar'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    flex: 2,
+                                    child: FilledButton.icon(
+                                      onPressed: busy ? null : saveCategory,
+                                      icon: const Icon(
+                                        Icons.save_outlined,
+                                        size: 20,
+                                      ),
+                                      label: const Text('Guardar categoría'),
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size(0, 50),
+                                        backgroundColor:
+                                            const Color(0xFF6D28D9),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: FilledButton(
-                                  onPressed: isUploadingImage ||
-                                          isGeneratingAiCover
-                                      ? null
-                                      : () {
-                                          final draft =
-                                              nameController.text.trim();
-                                          if (draft.isEmpty) {
-                                            setSheetState(() {
-                                              helperMessage =
-                                                  'Escribe un nombre para guardar la categoría.';
-                                            });
-                                            return;
-                                          }
-                                          FocusManager.instance.primaryFocus
-                                              ?.unfocus();
-                                          navigator.pop(
-                                            _CategoryEditorResult(
-                                              name: draft,
-                                              imagenUrl: selectedImageUrl,
-                                              clearImage: clearImage,
-                                              rol: selectedRol,
-                                            ),
-                                          );
-                                        },
-                                  child: const Text('Guardar categoría'),
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ],
@@ -6646,6 +6898,181 @@ class _CategoryEditorResult {
   final String? imagenUrl;
   final bool clearImage;
   final String? rol;
+}
+
+IconData _categoryUpsellKindIcon(String? role) {
+  switch (role) {
+    case 'drink':
+      return Icons.local_cafe_outlined;
+    case 'dessert':
+      return Icons.cake_outlined;
+    case 'side':
+      return Icons.fastfood_outlined;
+    case 'other':
+      return Icons.more_horiz_rounded;
+    default:
+      return Icons.grid_view_rounded;
+  }
+}
+
+enum _CategoryCoverActionStyle { primary, outlined, soft }
+
+class _CategoryEditorSectionCard extends StatelessWidget {
+  const _CategoryEditorSectionCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.7),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _CategoryCoverActionButton extends StatelessWidget {
+  const _CategoryCoverActionButton({
+    required this.onPressed,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.style,
+    this.trailingBadge,
+    this.showChevron = false,
+    this.loading = false,
+  });
+
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final _CategoryCoverActionStyle style;
+  final String? trailingBadge;
+  final bool showChevron;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    const accent = Color(0xFF6D28D9);
+
+    final (Color background, Color foreground, BorderSide? border) =
+        switch (style) {
+      _CategoryCoverActionStyle.primary => (
+          accent,
+          Colors.white,
+          null,
+        ),
+      _CategoryCoverActionStyle.outlined => (
+          colorScheme.surface,
+          accent,
+          BorderSide(color: accent.withValues(alpha: 0.45)),
+        ),
+      _CategoryCoverActionStyle.soft => (
+          const Color(0xFFF3E8FF),
+          accent,
+          BorderSide(color: accent.withValues(alpha: 0.18)),
+        ),
+    };
+
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: border == null ? null : Border.fromBorderSide(border),
+          ),
+          child: Row(
+            children: [
+              if (loading)
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: foreground,
+                  ),
+                )
+              else
+                Icon(icon, color: foreground, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.manrope(
+                        color: foreground,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.manrope(
+                        color: foreground.withValues(
+                          alpha: style == _CategoryCoverActionStyle.primary
+                              ? 0.85
+                              : 0.72,
+                        ),
+                        fontWeight: FontWeight.w500,
+                        fontSize: 11.5,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (trailingBadge != null) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    trailingBadge!,
+                    style: GoogleFonts.manrope(
+                      color: accent,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ] else if (showChevron)
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: foreground.withValues(alpha: 0.7),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Owns the category-name [TextEditingController] for the editor sheet.

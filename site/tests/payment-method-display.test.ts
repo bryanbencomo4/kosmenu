@@ -3,7 +3,16 @@ import { describe, expect, it } from 'vitest';
 import {
   formatPaymentMethodDetails,
   parsePaymentMethodFields,
+  paymentMethodLabelFromRow,
 } from '../app/_lib/payment-method-display';
+
+describe('paymentMethodLabelFromRow', () => {
+  it('drops the redundant Pago digital prefix', () => {
+    expect(paymentMethodLabelFromRow({ nombre: 'Pago digital: Pago Móvil' })).toBe('Pago Móvil');
+    expect(paymentMethodLabelFromRow({ nombre: 'Pago digital: BNC' })).toBe('BNC');
+    expect(paymentMethodLabelFromRow({ nombre: 'Efectivo VES' })).toBe('Efectivo VES');
+  });
+});
 
 describe('formatPaymentMethodDetails', () => {
   it('formats transfer account JSON from Flutter setup', () => {

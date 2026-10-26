@@ -1,7 +1,7 @@
 'use client';
 
 import Head from 'next/head';
-import { ArrowRight, ArrowUp, Camera, ChevronDown, Facebook, Flame, ImageIcon, Info, Instagram, Mail, MapPin, Menu, MessageCircle, Music2, Phone, Share2, ShoppingCart, Store, Truck, User, X, Youtube } from 'lucide-react';
+import { ArrowRight, ArrowUp, Banknote, Bitcoin, Building2, Camera, Check, ChevronDown, CreditCard, Facebook, Flame, ImageIcon, Info, Instagram, Mail, MapPin, Menu, MessageCircle, Music2, Phone, Share2, ShoppingCart, Smartphone, Store, Truck, User, Wallet, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
@@ -51,10 +51,15 @@ import { parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-confi
 import {
   cashTenderValidity,
   currencyAllowsDecimals,
+  currencyPrefix,
   describeCashBills,
+  formatCashAmountDisplay,
+  formatCashAmountInputValue,
   parseCashAmount,
   parseCashAmountInput,
+  snapCashAmountUp,
   suggestCashTenders,
+  toCashAmountCanonical,
 } from '../../_lib/cash-tender';
 import { CartUpsellSection, type CartUpsellSuggestion } from './_components/upsell/CartUpsellSection';
 import { PreCheckoutUpsellSheet } from './_components/upsell/PreCheckoutUpsellSheet';
@@ -65,7 +70,10 @@ import {
 import type { BundleRailItem } from './_components/upsell/BundleRail';
 import {
   formatPaymentMethodDetails,
+  isCashPaymentMethodLabel,
   parsePaymentMethodFields,
+  paymentMethodIconKindFromText,
+  paymentMethodLabelFromRow,
 } from '../../_lib/payment-method-display';
 import { PaymentCopyFields } from './_components/PaymentCopyFields';
 import {
@@ -986,7 +994,33 @@ function comercioInitial(name: string | null | undefined) {
 }
 
 function paymentMethodLabel(method: MetodoPagoRow) {
-  return method.nombre?.trim() || method.tipo?.trim() || method.banco?.trim() || 'Metodo de pago';
+  return paymentMethodLabelFromRow(method);
+}
+
+function isCashPaymentMethod(method: MetodoPagoRow) {
+  return isCashPaymentMethodLabel(paymentMethodLabel(method));
+}
+
+function PaymentMethodGlyph({
+  method,
+  label,
+}: {
+  method?: MetodoPagoRow | null;
+  label?: string | null;
+}) {
+  const kind = paymentMethodIconKindFromText(
+    label,
+    method?.nombre,
+    method?.tipo,
+    method?.banco,
+  );
+  const className = 'h-4 w-4 shrink-0';
+  if (kind === 'cash') return <Banknote className={className} aria-hidden />;
+  if (kind === 'pago_movil') return <Smartphone className={className} aria-hidden />;
+  if (kind === 'binance') return <Bitcoin className={className} aria-hidden />;
+  if (kind === 'transfer') return <Building2 className={className} aria-hidden />;
+  if (kind === 'card') return <CreditCard className={className} aria-hidden />;
+  return <Wallet className={className} aria-hidden />;
 }
 
 function paymentMethodDetails(method: MetodoPagoRow) {
@@ -4063,22 +4097,16 @@ export default function PublicMenuPage() {
     };
   }, []);
 
+  // Keep payment methods collapsed until the customer picks one, so the full
+  // list is visible at first glance. Only clear a selection that no longer
+  // exists for the active currency.
   useEffect(() => {
-    if (!menuData) return;
-    if (!selectedPaymentMethodId && menuData.metodosPago.length > 0) {
-      setSelectedPaymentMethodId(menuData.metodosPago[0].id);
-    }
-  }, [menuData, selectedPaymentMethodId]);
-
-  useEffect(() => {
-    if (!selectedCurrencyGroup || selectedCurrencyGroup.methods.length === 0) return;
-    if (!selectedPaymentMethodId) {
-      setSelectedPaymentMethodId(selectedCurrencyGroup.methods[0].id);
-      return;
-    }
-    const stillAvailable = selectedCurrencyGroup.methods.some((method) => method.id === selectedPaymentMethodId);
+    if (!selectedCurrencyGroup || !selectedPaymentMethodId) return;
+    const stillAvailable = selectedCurrencyGroup.methods.some(
+      (method) => method.id === selectedPaymentMethodId,
+    );
     if (!stillAvailable) {
-      setSelectedPaymentMethodId(selectedCurrencyGroup.methods[0].id);
+      setSelectedPaymentMethodId(null);
     }
   }, [selectedCurrencyGroup, selectedPaymentMethodId]);
 
@@ -6158,11 +6186,14 @@ export default function PublicMenuPage() {
                                       {(() => {
                                         const parsed = paymentMethodCopyModel(method);
                                         return (
-                                          <PaymentCopyFields
-                                            fields={parsed.fields}
-                                            note={parsed.note}
-                                            dense
-                                          />
+                                          <>
+                                            <PaymentCopyFields
+                                              fields={parsed.fields}
+                                              note={parsed.note}
+                                              dense
+                                              mode={isCashPaymentMethod(method) ? 'info' : 'copy'}
+                                            />
+                                          </>
                                         );
                                       })()}
                                     </div>
@@ -6979,6 +7010,7 @@ export default function PublicMenuPage() {
                           {selectedCurrencyGroup.methods.map((method, index) => {
                             const isSelected = selectedPaymentMethodId === method.id;
                             const parsed = paymentMethodCopyModel(method);
+                            const methodIsCash = isCashPaymentMethod(method);
                             return (
                               <div
                                 key={method.id}
@@ -7003,9 +7035,22 @@ export default function PublicMenuPage() {
                                 }}
                               >
                                 <div className="flex items-start justify-between gap-3">
-                                  <p className="text-sm font-bold text-[var(--menu-text)]">
-                                    {paymentMethodLabel(method)}
-                                  </p>
+                                  <div className="flex min-w-0 items-center gap-2.5">
+                                    <span
+                                      className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                                      style={{
+                                        backgroundColor: isSelected
+                                          ? 'color-mix(in srgb, var(--menu-primary) 18%, var(--menu-surface))'
+                                          : 'var(--menu-surface-alt)',
+                                        color: isSelected ? 'var(--menu-primary)' : 'var(--menu-text-muted)',
+                                      }}
+                                    >
+                                      <PaymentMethodGlyph method={method} />
+                                    </span>
+                                    <p className="text-sm font-bold text-[var(--menu-text)]">
+                                      {paymentMethodLabel(method)}
+                                    </p>
+                                  </div>
                                   <span
                                     className={`grid h-6 w-6 place-items-center rounded-full text-xs font-black ${
                                       isSelected
@@ -7016,11 +7061,347 @@ export default function PublicMenuPage() {
                                     {isSelected ? '✓' : ''}
                                   </span>
                                 </div>
-                                <PaymentCopyFields
-                                  fields={parsed.fields}
-                                  note={parsed.note}
-                                  dense
-                                />
+                                {isSelected ? (
+                                  <div
+                                    className="mt-3 space-y-3"
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  >
+                                    <PaymentCopyFields
+                                      fields={parsed.fields}
+                                      note={parsed.note}
+                                      dense
+                                      mode={methodIsCash ? 'info' : 'copy'}
+                                    />
+                                    {methodIsCash ? (
+                                      <div
+                                        className="overflow-hidden rounded-2xl border"
+                                        style={{
+                                          borderColor:
+                                            cashPaymentInput && !isCashTenderValid
+                                              ? '#F43F5E'
+                                              : 'var(--menu-border)',
+                                          backgroundColor:
+                                            'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
+                                        }}
+                                      >
+                                        <div className="flex items-end justify-between gap-3 px-3.5 pb-1 pt-3">
+                                          <div className="min-w-0">
+                                            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                              ¿Con cuánto pagas?
+                                            </p>
+                                            <p className="mt-0.5 text-xs text-[var(--menu-text-muted)]">
+                                              Total{' '}
+                                              <span className="font-semibold text-[var(--menu-text)]">
+                                                {formatAmountByCurrency(
+                                                  orderGrandTotalConverted,
+                                                  selectedCurrencyCode,
+                                                )}
+                                              </span>
+                                            </p>
+                                          </div>
+                                          {isCashTenderValid && paymentWithAmount !== null ? (
+                                            <p
+                                              className="shrink-0 text-xs font-bold"
+                                              style={{
+                                                color:
+                                                  changeAmount > 0
+                                                    ? 'color-mix(in srgb, #10B981 78%, var(--menu-text))'
+                                                    : 'var(--menu-text)',
+                                              }}
+                                            >
+                                              {changeAmount > 0
+                                                ? `Cambio ${formatAmountByCurrency(changeAmount, selectedCurrencyCode)}`
+                                                : 'Exacto'}
+                                            </p>
+                                          ) : null}
+                                        </div>
+
+                                        <label className="block px-2.5 pb-2.5 pt-1">
+                                          <div
+                                            className="flex items-center gap-2 rounded-2xl px-3.5 py-3"
+                                            style={{
+                                              backgroundColor: 'var(--menu-surface-alt)',
+                                              boxShadow:
+                                                'inset 0 0 0 1px color-mix(in srgb, var(--menu-text) 10%, transparent)',
+                                            }}
+                                          >
+                                            <span className="text-lg font-black tabular-nums text-[var(--menu-text-muted)]">
+                                              {currencyPrefix(selectedCurrencyCode)}
+                                            </span>
+                                            <input
+                                              type="text"
+                                              inputMode={
+                                                currencyAllowsDecimals(selectedCurrencyCode)
+                                                  ? 'decimal'
+                                                  : 'numeric'
+                                              }
+                                              autoComplete="transaction-amount"
+                                              enterKeyHint="done"
+                                              value={formatCashAmountInputValue(
+                                                cashPaymentInput,
+                                                selectedCurrencyCode,
+                                              )}
+                                              onChange={(event) => {
+                                                setCashPaymentInput(
+                                                  parseCashAmountInput(
+                                                    event.target.value,
+                                                    selectedCurrencyCode,
+                                                  ),
+                                                );
+                                              }}
+                                              onBlur={() => {
+                                                const amount = parseCashAmount(
+                                                  cashPaymentInput,
+                                                  selectedCurrencyCode,
+                                                );
+                                                if (amount == null || amount <= 0) {
+                                                  setCashPaymentInput('');
+                                                  return;
+                                                }
+                                                const makeable = snapCashAmountUp(
+                                                  amount,
+                                                  selectedCurrencyCode,
+                                                );
+                                                setCashPaymentInput(
+                                                  toCashAmountCanonical(
+                                                    makeable,
+                                                    selectedCurrencyCode,
+                                                  ),
+                                                );
+                                              }}
+                                              placeholder={
+                                                cashTenderSuggestions[0] != null
+                                                  ? formatCashAmountDisplay(
+                                                      cashTenderSuggestions[0],
+                                                      selectedCurrencyCode,
+                                                    )
+                                                  : formatCashAmountDisplay(
+                                                      orderGrandTotalConverted,
+                                                      selectedCurrencyCode,
+                                                    )
+                                              }
+                                              className="h-8 min-w-0 flex-1 bg-transparent text-[1.65rem] font-black leading-none tabular-nums tracking-tight text-[var(--menu-text)] outline-none placeholder:font-bold placeholder:text-[var(--menu-text-muted)] placeholder:opacity-45"
+                                              aria-label="Monto con el que vas a pagar"
+                                              aria-required
+                                              aria-invalid={
+                                                cashPaymentInput ? !isCashTenderValid : undefined
+                                              }
+                                            />
+                                          </div>
+                                        </label>
+
+                                        {cashTenderSuggestions.length > 0 ? (
+                                          <div className="flex gap-1.5 overflow-x-auto px-2.5 pb-2.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                                            {cashTenderSuggestions.map((amount) => {
+                                              const selected =
+                                                paymentWithAmount !== null &&
+                                                Math.abs(paymentWithAmount - amount) < 0.001;
+                                              return (
+                                                <button
+                                                  key={amount}
+                                                  type="button"
+                                                  onClick={() =>
+                                                    setCashPaymentInput(
+                                                      toCashAmountCanonical(
+                                                        amount,
+                                                        selectedCurrencyCode,
+                                                      ),
+                                                    )
+                                                  }
+                                                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-bold tabular-nums transition"
+                                                  style={
+                                                    selected
+                                                      ? {
+                                                          backgroundColor: 'var(--menu-primary)',
+                                                          color: 'var(--menu-on-primary)',
+                                                        }
+                                                      : {
+                                                          backgroundColor: 'var(--menu-surface-alt)',
+                                                          color: 'var(--menu-text-muted)',
+                                                          boxShadow:
+                                                            'inset 0 0 0 1px var(--menu-border)',
+                                                        }
+                                                  }
+                                                >
+                                                  {formatCashAmountDisplay(
+                                                    amount,
+                                                    selectedCurrencyCode,
+                                                  )}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : null}
+
+                                        {!cashPaymentInput ? null : cashTender.reason === 'bills' ? (
+                                          <p className="border-t px-3.5 py-2 text-[11px] font-semibold text-rose-500" style={{ borderColor: 'var(--menu-border)' }}>
+                                            Se ajustará al billete posible al salir del campo (
+                                            {describeCashBills(selectedCurrencyCode)}).
+                                          </p>
+                                        ) : !isCashTenderValid ? (
+                                          <p className="border-t px-3.5 py-2 text-[11px] font-semibold text-rose-500" style={{ borderColor: 'var(--menu-border)' }}>
+                                            Debe ser igual o mayor al total.
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-2.5">
+                                        <div className="flex items-center gap-2 pt-0.5">
+                                          <div
+                                            className="h-px min-w-0 flex-1"
+                                            style={{ backgroundColor: 'var(--menu-border)' }}
+                                          />
+                                          <p className="shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                                            Después de pagar
+                                          </p>
+                                          <div
+                                            className="h-px min-w-0 flex-1"
+                                            style={{ backgroundColor: 'var(--menu-border)' }}
+                                          />
+                                        </div>
+
+                                        <div
+                                          className="overflow-hidden rounded-2xl border"
+                                          style={{
+                                            borderColor: 'var(--menu-border)',
+                                            backgroundColor:
+                                              'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
+                                          }}
+                                        >
+                                          <div
+                                            className="flex items-center gap-3 border-b px-3 py-2.5"
+                                            style={{ borderColor: 'var(--menu-border)' }}
+                                          >
+                                            <div className="min-w-0 flex-1">
+                                              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                                1 · Referencia
+                                              </p>
+                                              <p className="mt-0.5 text-xs leading-4 text-[var(--menu-text-muted)]">
+                                                Últimos 4 dígitos
+                                              </p>
+                                            </div>
+                                            <input
+                                              type="text"
+                                              inputMode="numeric"
+                                              maxLength={4}
+                                              value={paymentReferenceLast4}
+                                              onChange={(event) =>
+                                                setDigitalPaymentReference(
+                                                  normalizePhone(event.target.value).slice(0, 4),
+                                                )
+                                              }
+                                              placeholder="••••"
+                                              aria-label="Últimos 4 dígitos de la referencia"
+                                              className="h-10 w-[4.75rem] shrink-0 rounded-xl border bg-[var(--menu-surface-alt)] text-center text-base font-bold tabular-nums tracking-[0.28em] text-[var(--menu-text)] outline-none placeholder:tracking-[0.28em] placeholder:text-[var(--menu-text-muted)]"
+                                              style={{
+                                                borderColor:
+                                                  isPaymentReferenceValid ||
+                                                  !digitalPaymentReference
+                                                    ? 'var(--menu-border)'
+                                                    : '#F43F5E',
+                                              }}
+                                              required
+                                            />
+                                          </div>
+
+                                          <div className="flex items-center gap-3 px-3 py-2.5">
+                                            <div className="min-w-0 flex-1">
+                                              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                                2 · Comprobante
+                                              </p>
+                                              <p className="mt-0.5 truncate text-xs leading-4 text-[var(--menu-text-muted)]">
+                                                {paymentProofBusy
+                                                  ? 'Preparando…'
+                                                  : paymentProofFile
+                                                    ? paymentProofFile.name
+                                                    : 'Foto del pago'}
+                                              </p>
+                                              {paymentProofError ? (
+                                                <p className="mt-0.5 text-[11px] font-semibold text-[#F43F5E]">
+                                                  {paymentProofError}
+                                                </p>
+                                              ) : null}
+                                            </div>
+                                            <input
+                                              type="file"
+                                              accept="image/*"
+                                              className="hidden"
+                                              id="payment-proof-gallery"
+                                              disabled={paymentProofBusy}
+                                              onChange={(event) => {
+                                                const selected = event.target.files?.[0] ?? null;
+                                                void handlePaymentProofSelected(selected);
+                                                event.target.value = '';
+                                              }}
+                                            />
+                                            <input
+                                              type="file"
+                                              accept="image/*"
+                                              capture="environment"
+                                              className="hidden"
+                                              id="payment-proof-camera"
+                                              disabled={paymentProofBusy}
+                                              onChange={(event) => {
+                                                const selected = event.target.files?.[0] ?? null;
+                                                void handlePaymentProofSelected(selected);
+                                                event.target.value = '';
+                                              }}
+                                            />
+                                            <div className="flex shrink-0 items-center gap-1.5">
+                                              {paymentProofFile ? (
+                                                <span
+                                                  className="grid h-10 w-10 place-items-center rounded-xl"
+                                                  style={{
+                                                    backgroundColor:
+                                                      'color-mix(in srgb, #10B981 18%, var(--menu-surface))',
+                                                    color: '#10B981',
+                                                  }}
+                                                  title="Comprobante listo"
+                                                  aria-hidden
+                                                >
+                                                  <Check className="h-4 w-4" strokeWidth={2.5} />
+                                                </span>
+                                              ) : null}
+                                              <label
+                                                htmlFor="payment-proof-gallery"
+                                                aria-label="Subir comprobante desde galería"
+                                                aria-disabled={paymentProofBusy || undefined}
+                                                className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-dashed text-[var(--menu-text)] ${
+                                                  paymentProofBusy
+                                                    ? 'pointer-events-none opacity-60'
+                                                    : ''
+                                                }`}
+                                                style={{
+                                                  borderColor: 'var(--menu-border)',
+                                                  backgroundColor: 'var(--menu-surface-alt)',
+                                                }}
+                                              >
+                                                <ImageIcon className="h-4 w-4" aria-hidden />
+                                              </label>
+                                              <label
+                                                htmlFor="payment-proof-camera"
+                                                aria-label="Tomar foto del comprobante"
+                                                aria-disabled={paymentProofBusy || undefined}
+                                                className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-dashed text-[var(--menu-text)] ${
+                                                  paymentProofBusy
+                                                    ? 'pointer-events-none opacity-60'
+                                                    : ''
+                                                }`}
+                                                style={{
+                                                  borderColor: 'var(--menu-border)',
+                                                  backgroundColor: 'var(--menu-surface-alt)',
+                                                }}
+                                              >
+                                                <Camera className="h-4 w-4" aria-hidden />
+                                              </label>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : null}
                               </div>
                             );
                           })}
@@ -7030,166 +7411,6 @@ export default function PublicMenuPage() {
                           Este comercio no tiene metodos de pago configurados.
                         </div>
                       )
-                      ) : null}
-
-                      {(!isAssistedMode || !payLater) && isCashPayment ? (
-                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                              ¿Con cuánto vas a pagar?
-                            </span>
-                            <div
-                              className="flex h-12 items-center rounded-xl border bg-[var(--menu-surface-alt)] px-3"
-                              style={{
-                                borderColor:
-                                  cashPaymentInput && !isCashTenderValid ? '#F43F5E' : 'var(--menu-border)',
-                              }}
-                            >
-                              <span className="pr-2 text-sm font-semibold text-[var(--menu-text-muted)]">
-                                {selectedCurrencyCode === 'VES' ? 'Bs' : selectedCurrencyCode}
-                              </span>
-                              <input
-                                type="text"
-                                inputMode={currencyAllowsDecimals(selectedCurrencyCode) ? 'decimal' : 'numeric'}
-                                autoComplete="off"
-                                enterKeyHint="done"
-                                value={cashPaymentInput}
-                                onChange={(event) =>
-                                  setCashPaymentInput(parseCashAmountInput(event.target.value, selectedCurrencyCode))
-                                }
-                                placeholder={
-                                  cashTenderSuggestions[0] != null
-                                    ? formatAmountByCurrency(cashTenderSuggestions[0], selectedCurrencyCode)
-                                    : formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)
-                                }
-                                className="h-full min-w-0 flex-1 bg-transparent text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                                aria-required
-                                aria-invalid={cashPaymentInput ? !isCashTenderValid : undefined}
-                              />
-                            </div>
-                          </label>
-                          {cashTenderSuggestions.length > 0 ? (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {cashTenderSuggestions.map((amount) => (
-                                <button
-                                  key={amount}
-                                  type="button"
-                                  onClick={() => setCashPaymentInput(parseCashAmountInput(String(amount), selectedCurrencyCode))}
-                                  className="rounded-full bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold text-[var(--menu-text-muted)]"
-                                >
-                                  {formatAmountByCurrency(amount, selectedCurrencyCode)}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                          {!cashPaymentInput ? null : cashTender.reason === 'bills' ? (
-                            <p className="mt-2 text-xs font-semibold text-rose-500">
-                              Ese monto no se puede dar en efectivo. Usa billetes de {describeCashBills(selectedCurrencyCode)}. Puedes sumarlos.
-                            </p>
-                          ) : !isCashTenderValid ? (
-                            <p className="mt-2 text-xs font-semibold text-rose-500">
-                              El efectivo debe ser igual o mayor al total ({formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}).
-                            </p>
-                          ) : changeAmount > 0 ? (
-                            <p
-                              className="mt-2 text-sm font-bold"
-                              style={{ color: 'color-mix(in srgb, #10B981 72%, var(--menu-text))' }}
-                            >
-                              Cambio: {formatAmountByCurrency(changeAmount, selectedCurrencyCode)}
-                            </p>
-                          ) : (
-                            <p className="mt-2 text-sm font-bold text-[var(--menu-text)]">
-                              Pago exacto. Sin cambio.
-                            </p>
-                          )}
-                        </div>
-                      ) : null}
-
-                      {isDigitalPayment ? (
-                        <div className="checkout-item-enter space-y-2 rounded-[22px] bg-[var(--menu-surface)] p-3 shadow-[var(--menu-shadow)]" style={{ animationDelay: '120ms' }}>
-                          <label className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                              Referencia (ultimos 4 digitos)
-                            </span>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              maxLength={4}
-                              value={paymentReferenceLast4}
-                              onChange={(event) => setDigitalPaymentReference(normalizePhone(event.target.value).slice(0, 4))}
-                              placeholder="1234"
-                              className="h-11 w-full rounded-xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none"
-                              style={{ borderColor: isPaymentReferenceValid || !digitalPaymentReference ? 'var(--menu-border)' : '#F43F5E' }}
-                              required
-                            />
-                          </label>
-
-                          <div className="block">
-                            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                              Cargar comprobante
-                            </span>
-                            {paymentProofFile ? (
-                              <p className="mb-2 truncate text-sm font-semibold text-[var(--menu-text)]">
-                                Comprobante: {paymentProofFile.name}
-                              </p>
-                            ) : null}
-                            {paymentProofBusy ? (
-                              <p className="mb-2 text-sm font-semibold text-[var(--menu-text-muted)]">
-                                Preparando comprobante…
-                              </p>
-                            ) : null}
-                            {paymentProofError ? (
-                              <p className="mb-2 text-sm font-semibold text-[#F43F5E]">{paymentProofError}</p>
-                            ) : null}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              id="payment-proof-gallery"
-                              disabled={paymentProofBusy}
-                              onChange={(event) => {
-                                const selected = event.target.files?.[0] ?? null;
-                                void handlePaymentProofSelected(selected);
-                                event.target.value = '';
-                              }}
-                            />
-                            <input
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              className="hidden"
-                              id="payment-proof-camera"
-                              disabled={paymentProofBusy}
-                              onChange={(event) => {
-                                const selected = event.target.files?.[0] ?? null;
-                                void handlePaymentProofSelected(selected);
-                                event.target.value = '';
-                              }}
-                            />
-                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                              <label
-                                htmlFor="payment-proof-gallery"
-                                aria-disabled={paymentProofBusy || undefined}
-                                className={`inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)] ${
-                                  paymentProofBusy ? 'pointer-events-none opacity-60' : ''
-                                }`}
-                              >
-                                <ImageIcon className="h-4 w-4 shrink-0" aria-hidden />
-                                Galería
-                              </label>
-                              <label
-                                htmlFor="payment-proof-camera"
-                                aria-disabled={paymentProofBusy || undefined}
-                                className={`inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 text-sm font-semibold text-[var(--menu-text)] ${
-                                  paymentProofBusy ? 'pointer-events-none opacity-60' : ''
-                                }`}
-                              >
-                                <Camera className="h-4 w-4 shrink-0" aria-hidden />
-                                Tomar foto
-                              </label>
-                            </div>
-                          </div>
-                        </div>
                       ) : null}
 
                       <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]" style={{ animationDelay: '150ms' }}>

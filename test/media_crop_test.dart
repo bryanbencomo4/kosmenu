@@ -126,4 +126,30 @@ void main() {
       expect(decoded.height, h);
     });
   });
+
+  group('mediaMaster sibling paths', () {
+    test('object path inserts _full before extension', () {
+      expect(
+        mediaMasterObjectPath('comercio/categories/cat_1.jpg'),
+        'comercio/categories/cat_1_full.jpg',
+      );
+    });
+
+    test('object path is idempotent for existing masters', () {
+      expect(
+        mediaMasterObjectPath('comercio/categories/cat_1_full.jpg'),
+        'comercio/categories/cat_1_full.jpg',
+      );
+    });
+
+    test('public URL maps to master sibling without query params', () {
+      final url = mediaMasterSiblingUrl(
+        'https://ex.supabase.co/storage/v1/object/public/product-images/c/cat_9.jpg?width=200',
+      );
+      expect(
+        url,
+        'https://ex.supabase.co/storage/v1/object/public/product-images/c/cat_9_full.jpg',
+      );
+    });
+  });
 }

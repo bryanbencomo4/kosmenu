@@ -121,3 +121,42 @@ MediaCropResult encodeCroppedMedia({
     mimeType: 'image/jpeg',
   );
 }
+
+/// Storage object path for the uncropped master sibling (`foo.jpg` → `foo_full.jpg`).
+///
+/// Re-crop editors load this so framing can be adjusted without losing pixels
+/// that were outside the previous 3:4 window.
+String mediaMasterObjectPath(String croppedObjectPath) {
+  final path = croppedObjectPath.trim();
+  final slash = path.lastIndexOf('/');
+  final dir = slash >= 0 ? path.substring(0, slash + 1) : '';
+  final name = slash >= 0 ? path.substring(slash + 1) : path;
+  final dot = name.lastIndexOf('.');
+  if (dot <= 0) return '${path}_full';
+  final base = name.substring(0, dot);
+  if (base.endsWith('_full')) return path;
+  final ext = name.substring(dot);
+  return '$dir${base}_full$ext';
+}
+
+/// Public URL of the uncropped master sibling for a published cropped image.
+String? mediaMasterSiblingUrl(String? publishedUrl) {
+  final raw = publishedUrl?.trim() ?? '';
+  if (raw.isEmpty) return null;
+  final uri = Uri.tryParse(raw);
+  if (uri == null || !uri.hasScheme) return null;
+  final path = uri.path;
+  final slash = path.lastIndexOf('/');
+  final name = slash >= 0 ? path.substring(slash + 1) : path;
+  final dot = name.lastIndexOf('.');
+  if (dot <= 0) return null;
+  final base = name.substring(0, dot);
+  final masterPath =
+      base.endsWith('_full') ? path : mediaMasterObjectPath(path);
+  return Uri(
+    scheme: uri.scheme,
+    host: uri.host,
+    port: uri.hasPort ? uri.port : null,
+    path: masterPath,
+  ).toString();
+}

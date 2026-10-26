@@ -14,6 +14,7 @@ import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/models/product_option_group.dart';
 import 'package:kosmenu_app/models/upsell_config.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/media_crop.dart';
 import 'package:kosmenu_app/services/media_image_crop_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
@@ -76,6 +77,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _businessName;
   XFile? _pickedImage;
   Uint8List? _pickedImageBytes;
+  /// Uncropped source so re-crop can restore pixels outside the last 3:4 frame.
+  Uint8List? _cropMasterBytes;
   bool _isLoadingPricingConfig = false;
   String _baseCurrency = 'USD';
   String _selectedPriceCurrency = 'USD';
@@ -416,14 +419,18 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
     if (file == null || !mounted) return;
 
-    final cropped = await const MediaImageCropService().cropForUpload(
+    final masterBytes = await file.readAsBytes();
+    if (!mounted) return;
+
+    final cropped = await const MediaImageCropService().cropFromBytes(
       context,
-      source: file,
+      sourceBytes: masterBytes,
       kind: MediaCropKind.product,
     );
     if (cropped == null || !mounted) return;
 
     setState(() {
+      _cropMasterBytes = masterBytes;
       _pickedImageBytes = cropped.bytes;
       _pickedImage = XFile.fromData(
         cropped.bytes,
@@ -438,6 +445,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() {
       _pickedImage = null;
       _pickedImageBytes = null;
+      _cropMasterBytes = null;
       _remoteImageUrl = null;
     });
   }
@@ -445,11 +453,34 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   Future<void> _recropCurrentImage() async {
     if (_isSaving || _isUploadingImage) return;
 
-    Uint8List? sourceBytes = _pickedImageBytes;
-    if (sourceBytes == null && _pickedImage != null) {
-      sourceBytes = await _pickedImage!.readAsBytes();
+    Uint8List? sourceBytes = _cropMasterBytes;
+    if (sourceBytes == null || sourceBytes.isEmpty) {
+      final remote = _remoteImageUrl?.trim() ?? '';
+      final masterSibling = mediaMasterSiblingUrl(remote);
+      if (masterSibling != null &&
+          masterSibling.isNotEmpty &&
+          masterSibling != remote) {
+        try {
+          final response = await http
+              .get(Uri.parse(masterSibling))
+              .timeout(const Duration(seconds: 30));
+          if (response.statusCode >= 200 &&
+              response.statusCode < 300 &&
+              response.bodyBytes.isNotEmpty) {
+            sourceBytes = response.bodyBytes;
+          }
+        } catch (_) {
+          sourceBytes = null;
+        }
+      }
     }
-    if (sourceBytes == null) {
+    if (sourceBytes == null || sourceBytes.isEmpty) {
+      sourceBytes = _pickedImageBytes;
+      if (sourceBytes == null && _pickedImage != null) {
+        sourceBytes = await _pickedImage!.readAsBytes();
+      }
+    }
+    if (sourceBytes == null || sourceBytes.isEmpty) {
       final url = _remoteImageUrl?.trim() ?? '';
       if (url.isEmpty) return;
       try {
@@ -480,6 +511,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (cropped == null || !mounted) return;
 
     setState(() {
+      _cropMasterBytes = sourceBytes;
       _pickedImageBytes = cropped.bytes;
       _pickedImage = XFile.fromData(
         cropped.bytes,
@@ -1062,6 +1094,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _remoteImageUrl = imageUrl;
       _pickedImage = null;
       _pickedImageBytes = null;
+      _cropMasterBytes = null;
       _aiImageStatus = status;
       _isGeneratingAiImage = !isAiImageGenerationSettled(status);
     });
@@ -1095,6 +1128,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             _remoteImageUrl = imageUrl;
             _pickedImage = null;
             _pickedImageBytes = null;
+            _cropMasterBytes = null;
           }
           _aiImageStatus = status;
           _isGeneratingAiImage = false;
@@ -1201,11 +1235,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       final uploadBytes =
           await ProductImageOptimizer.compressToJpegAsync(sourceBytes);
 
+      final stamp =
+          '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
       final fileName =
-          '${SupabaseConfig.currentComercioId}/product_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
+          '${SupabaseConfig.currentComercioId}/product_$stamp.jpg';
+      final storage = Supabase.instance.client.storage.from(_bucketName);
 
-      await Supabase.instance.client.storage
-          .from(_bucketName)
+      await storage
           .uploadBinary(
             fileName,
             uploadBytes,
@@ -1218,9 +1254,26 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
           );
 
-      final publicUrl = Supabase.instance.client.storage
-          .from(_bucketName)
-          .getPublicUrl(fileName);
+      final master = _cropMasterBytes;
+      if (master != null && master.isNotEmpty) {
+        final masterJpeg =
+            await ProductImageOptimizer.compressToJpegAsync(master);
+        await storage
+            .uploadBinary(
+              mediaMasterObjectPath(fileName),
+              masterJpeg,
+              fileOptions:
+                  FileOptions(upsert: true, contentType: 'image/jpeg'),
+            )
+            .timeout(
+              const Duration(seconds: 45),
+              onTimeout: () => throw TimeoutException(
+                'La subida de la imagen tardó demasiado. Reintenta.',
+              ),
+            );
+      }
+
+      final publicUrl = storage.getPublicUrl(fileName);
       const ProductImageVariantsClient().ensureInBackground(publicUrl);
       return publicUrl;
     } finally {

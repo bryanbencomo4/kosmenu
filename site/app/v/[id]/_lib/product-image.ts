@@ -17,7 +17,7 @@ export const MENU_IMAGE_WIDTH = {
   thumb: 160,
   /** Product cards (~124–144 CSS px wide, 3:4 tall). */
   tile: 360,
-  /** Category 2:3 covers (~half viewport on mobile). */
+  /** Category 9:16 covers (~half viewport on mobile). */
   category: 520,
   /** Options sheet hero. */
   sheet: 640,
