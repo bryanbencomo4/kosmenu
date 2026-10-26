@@ -467,6 +467,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     final navigator = Navigator.of(context);
     final nameController = TextEditingController(text: category?.nombre ?? '');
     final webCamera = const WebCameraHandoffService();
+    // Host screen context — crop dialog must not depend on the sheet route.
+    final hostContext = context;
     var selectedRol = CategoryModel.upsellKindRoles.contains(category?.rol)
         ? category?.rol
         : null;
@@ -477,6 +479,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     var clearImage = false;
     var isUploadingImage = false;
     var isGeneratingAiCover = false;
+    var sheetOpen = true;
     String? helperMessage = category == null
         ? null
         : 'Si no subes imagen, el menú usa la foto del primer producto.';
@@ -485,7 +488,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         : _firstProductImageForCategory(category.id);
 
     try {
-      return await showModalBottomSheet<_CategoryEditorResult>(
+      final result = await showModalBottomSheet<_CategoryEditorResult>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
@@ -497,6 +500,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
         builder: (sheetContext) {
           return StatefulBuilder(
             builder: (sheetContext, setSheetState) {
+              void updateSheet(VoidCallback fn) {
+                if (!sheetOpen || !sheetContext.mounted) return;
+                setSheetState(fn);
+              }
               final media = MediaQuery.of(sheetContext);
               final previewUrl = clearImage
                   ? null
@@ -506,10 +513,10 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   (fallbackProductImage?.isNotEmpty ?? false);
 
               Future<void> pickImage(ImageSource source) async {
-                if (isUploadingImage) return;
+                if (isUploadingImage || !sheetOpen) return;
                 final comercioId = SupabaseConfig.currentComercioId.trim();
                 if (comercioId.isEmpty) {
-                  setSheetState(() {
+                  updateSheet(() {
                     helperMessage =
                         'No hay comercio activo para subir la imagen.';
                   });
@@ -518,7 +525,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
                 final photo = source == ImageSource.camera
                     ? await webCamera.pickCameraImage(
-                        sheetContext,
+                        hostContext,
                         feature: 'category',
                         waitingTitle: 'Toma la foto de la categoría',
                         waitingSubtitle:
@@ -531,16 +538,18 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                         imageQuality: 82,
                         maxWidth: 1600,
                       );
-                if (photo == null || !sheetContext.mounted) return;
+                if (photo == null || !sheetOpen || !hostContext.mounted) return;
 
                 final cropped = await const MediaImageCropService().cropForUpload(
-                  sheetContext,
+                  hostContext,
                   source: photo,
                   kind: MediaCropKind.category,
                 );
-                if (cropped == null || !sheetContext.mounted) return;
+                if (cropped == null || !sheetOpen || !hostContext.mounted) {
+                  return;
+                }
 
-                setSheetState(() {
+                updateSheet(() {
                   isUploadingImage = true;
                   helperMessage = null;
                 });
@@ -571,21 +580,17 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                       .from('product-images')
                       .getPublicUrl(fileName);
                   const ProductImageVariantsClient().ensureInBackground(publicUrl);
-                  if (!sheetContext.mounted) return;
-                  setSheetState(() {
+                  updateSheet(() {
                     selectedImageUrl = publicUrl;
                     clearImage = false;
                     helperMessage = 'Imagen lista. Guarda para aplicarla.';
                   });
                 } catch (error) {
-                  if (!sheetContext.mounted) return;
-                  setSheetState(() {
+                  updateSheet(() {
                     helperMessage = 'No se pudo subir la imagen: $error';
                   });
                 } finally {
-                  if (sheetContext.mounted) {
-                    setSheetState(() => isUploadingImage = false);
-                  }
+                  updateSheet(() => isUploadingImage = false);
                 }
               }
 
@@ -1160,8 +1165,14 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           );
         },
       );
+      return result;
     } finally {
-      nameController.dispose();
+      sheetOpen = false;
+      // Dispose after the sheet route has fully unmounted — disposing in the
+      // same frame as pop races TextField listeners and trips framework asserts.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        nameController.dispose();
+      });
     }
   }
 

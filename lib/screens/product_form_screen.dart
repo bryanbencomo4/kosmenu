@@ -412,8 +412,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         maxWidth: 1600,
       );
     }
-    if (file == null) return;
-    if (!mounted) return;
+    if (file == null || !mounted) return;
 
     final cropped = await const MediaImageCropService().cropForUpload(
       context,

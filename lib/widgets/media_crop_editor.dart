@@ -79,7 +79,11 @@ class _MediaCropEditorDialogState extends State<_MediaCropEditorDialog> {
 
   @override
   void dispose() {
-    widget.image.dispose();
+    // Defer so the route tear-down / last paint never touch a disposed image.
+    final image = widget.image;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      image.dispose();
+    });
     super.dispose();
   }
 
