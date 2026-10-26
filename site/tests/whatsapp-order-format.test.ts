@@ -238,6 +238,28 @@ describe('merchant comanda from stored snapshots', () => {
       'query=7.8,-72.2',
     ]) expect(message).toContain(value);
   });
+  it('out-of-zone delivery with fee pending shows A Acordar title and total + DELIVERY', () => {
+    const message = buildDetailedMerchantWhatsappText({
+      ...order,
+      details: {
+        ...order.details,
+        moneda_checkout: 'USD',
+        subtotal_moneda_checkout: 11.47,
+        costo_delivery_moneda_checkout: 0,
+        total_moneda_checkout: 11.47,
+        delivery: {
+          mode: 'delivery',
+          fee_pending: true,
+          address: 'C4P5+32W, C. La Fila',
+          coordinates: { lat: 10.43, lng: -66.89 },
+        },
+      },
+    });
+    expect(message).toContain('NUEVO PEDIDO #EMXFA-000156 (Delivery a Acordar)');
+    expect(message).toContain('Costo de delivery: A Acordar');
+    expect(message).toContain('TOTAL A PAGAR: US$ 11,47 + DELIVERY');
+    expect(message).not.toContain('Costo de delivery: Gratis');
+  });
   it('invalid or absent coordinates never invent a Maps location', () => {
     const message = buildDetailedMerchantWhatsappText({ ...order, details: { ...order.details, delivery: { mode: 'delivery' } } });
     expect(message).not.toContain('Google Maps');

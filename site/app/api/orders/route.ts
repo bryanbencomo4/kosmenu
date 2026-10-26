@@ -150,6 +150,8 @@ const DeliverySchema = z
     address: z.string().trim().optional(),
     reference: z.string().trim().optional(),
     instructions: z.string().trim().optional(),
+    /** Out-of-zone delivery: fee TBD with customer (not free). */
+    fee_pending: z.boolean().optional(),
     coordinates: z
       .object({
         lat: z.number().finite(),
@@ -241,6 +243,7 @@ function normalizeDelivery(value: unknown) {
     address?: unknown;
     reference?: unknown;
     instructions?: unknown;
+    fee_pending?: unknown;
     coordinates?: { lat?: unknown; lng?: unknown } | null;
   } | null;
   if (!raw) return { mode: 'pickup' as const };
@@ -249,6 +252,7 @@ function normalizeDelivery(value: unknown) {
   const address = normalizeText(raw.address);
   const reference = normalizeText(raw.reference);
   const instructions = normalizeText(raw.instructions);
+  const feePending = raw.fee_pending === true;
   const lat = Number(raw.coordinates?.lat);
   const lng = Number(raw.coordinates?.lng);
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
@@ -258,6 +262,7 @@ function normalizeDelivery(value: unknown) {
     address,
     reference,
     instructions,
+    ...(feePending ? { fee_pending: true as const } : {}),
     coordinates: hasCoords ? { lat, lng } : null,
   };
 }
@@ -627,6 +632,9 @@ async function postOrder(request: Request): Promise<NextResponse> {
     if (deliveryQuote.applied) {
       costoDelivery = deliveryQuote.fee;
       total = subtotal + costoDelivery;
+      if (deliveryQuote.outOfZone) {
+        delivery = { ...delivery, fee_pending: true };
+      }
     }
 
     const customerRatingSummary = await loadOrderServiceRatingSummary(

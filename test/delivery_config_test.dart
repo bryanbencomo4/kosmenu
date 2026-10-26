@@ -61,4 +61,50 @@ void main() {
     expect(config.toJson()['currency'], 'COP');
     expect(config.summary(), contains('COP'));
   });
+
+  test('parses area_zones polygons and fallback without affecting intervals', () {
+    final config = DeliveryConfig.fromConfigNegocio({
+      'delivery_config': {
+        'enabled': true,
+        'pricing_type': 'area_zones',
+        'area_zones': [
+          {
+            'id': 'z1',
+            'name': 'Los Salias',
+            'price': 3,
+            'polygon': [
+              [10.5, -66.9],
+              [10.51, -66.9],
+              [10.51, -66.89],
+              [10.5, -66.89],
+            ],
+          },
+        ],
+        'area_zones_fallback': {'enabled': true, 'price': 8},
+      },
+    });
+    expect(config.pricingType, DeliveryConfig.pricingAreaZones);
+    expect(config.areaZones, hasLength(1));
+    expect(config.areaZones.first.polygon, hasLength(4));
+    expect(config.areaZonesFallback.enabled, isTrue);
+    expect(config.pricingLabel, 'Por zonas');
+    expect(config.validate(), isEmpty);
+
+    final json = config.toJson();
+    expect(json['pricing_type'], 'area_zones');
+    expect(json['area_zones'], isA<List>());
+    expect(json['area_zones_fallback']['enabled'], isTrue);
+    expect(json['area_zones_fallback']['price'], 0);
+  });
+
+  test('rejects area_zones without polygons', () {
+    final config = DeliveryConfig(
+      enabled: true,
+      pricingType: DeliveryConfig.pricingAreaZones,
+      areaZones: const [
+        DeliveryAreaZone(id: 'bad', name: 'X', price: 2, polygon: []),
+      ],
+    );
+    expect(config.validate().join(' '), contains('3 puntos'));
+  });
 }

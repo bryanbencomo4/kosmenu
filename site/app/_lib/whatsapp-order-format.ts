@@ -101,7 +101,14 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       : null;
   };
   const totalValue = details.total_moneda_checkout ?? convert(details.total);
-  const totalLabel = totalValue == null ? '' : amount(totalValue, currency);
+  const amountLabel = totalValue == null ? '' : amount(totalValue, currency);
+  const delivery = record(details.delivery);
+  const feePending = delivery.mode === 'delivery' && delivery.fee_pending === true;
+  const totalLabel = amountLabel
+    ? feePending
+      ? `${amountLabel} + DELIVERY`
+      : amountLabel
+    : '';
   const subtotalValue =
     details.subtotal_moneda_checkout ??
     convert(details.subtotal) ??
@@ -118,9 +125,10 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       : null);
   const deliveryCostValue =
     details.costo_delivery_moneda_checkout ?? convert(details.costo_delivery);
-  const delivery = record(details.delivery);
   const orderType = resolveOrderTypeLabel(details, delivery);
-  const heading = `🧾 *NUEVO PEDIDO #${input.orderId} (${orderType})*`;
+  const headingType =
+    feePending && orderType === 'Delivery' ? 'Delivery a Acordar' : orderType;
+  const heading = `🧾 *NUEVO PEDIDO #${input.orderId} (${headingType})*`;
   const separator = '━━━━━━━━━━━━━━━━━━━━';
   const items = Array.isArray(details.items) ? details.items : [];
   const categories = new Map<string, Record<string, unknown>[]>();
@@ -198,8 +206,9 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
   const subtotalLabel = subtotalValue == null ? '' : amount(subtotalValue, currency);
   if (subtotalLabel) lines.push(`🛒 Subtotal productos: ${subtotalLabel}`);
   if (delivery.mode === 'delivery') {
-    const deliveryLabel =
-      deliveryCostValue == null
+    const deliveryLabel = feePending
+      ? 'A Acordar'
+      : deliveryCostValue == null
         ? ''
         : Number(deliveryCostValue) <= 0
           ? 'Gratis'

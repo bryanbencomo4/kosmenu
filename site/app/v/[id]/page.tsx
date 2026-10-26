@@ -47,7 +47,7 @@ import {
 } from '../../_lib/kiosk-home-config';
 import { foldSearchText } from '../../_lib/search-text';
 import { useLockBodyScroll } from '../../_lib/use-lock-body-scroll';
-import { parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
+import { parseDeliveryConfig, pointInPolygon, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
   cashTenderValidity,
   currencyAllowsDecimals,
@@ -472,6 +472,7 @@ type LeafletCenter = {
 type LeafletMapHandle = {
   setView(coords: [number, number], zoom: number): LeafletMapHandle;
   getCenter(): LeafletCenter | null;
+  fitBounds?(bounds: unknown, options?: Record<string, unknown>): void;
   on(event: string, handler: () => void): void;
   remove(): void;
 };
@@ -480,9 +481,18 @@ type LeafletTileLayer = {
   addTo(map: LeafletMapHandle): void;
 };
 
+type LeafletPolygon = {
+  addTo(map: LeafletMapHandle): void;
+};
+
 type LeafletApi = {
   map(element: HTMLElement, options: Record<string, unknown>): LeafletMapHandle;
   tileLayer(url: string, options: Record<string, unknown>): LeafletTileLayer;
+  polygon?(
+    latlngs: Array<[number, number]>,
+    options?: Record<string, unknown>,
+  ): LeafletPolygon;
+  latLngBounds?(latlngs: Array<[number, number]>): unknown;
 };
 
 type WindowWithExternalMaps = Window & typeof globalThis & Record<string, unknown> & {
@@ -2796,7 +2806,9 @@ export default function PublicMenuPage() {
   const normalizedDeliveryReference = deliveryReference.trim();
   const normalizedDeliveryInstructions = deliveryInstructions.trim();
   const normalizedOrderNotes = orderNotes.trim();
-  const isDeliveryOrder = supportsDelivery && deliveryMode === 'delivery';
+  // Align with home/badge choice; deliveryMode alone can lag while menuData loads.
+  const isDeliveryOrder =
+    supportsDelivery && (kioskFulfillment === 'delivery' || deliveryMode === 'delivery');
   const comercioAddress = [menuData?.comercio.direccion, menuData?.comercio.ciudad]
     .map((item) => (item ?? '').trim())
     .filter(Boolean)
@@ -3059,6 +3071,27 @@ export default function PublicMenuPage() {
     selectedExchangeRate,
   );
   const showEngineDeliveryLine = isDeliveryOrder && deliveryQuote.applied;
+  const deliveryOutOfZoneAllowed = Boolean(deliveryQuote.outOfZone && !deliveryQuote.blocked);
+  const deliveryAreaZonesForMap = useMemo(() => {
+    if (!isDeliveryOrder) return [];
+    const cfg = parseDeliveryConfig(menuData?.comercio.delivery_tarifas);
+    if (cfg.pricingType !== 'area_zones') return [];
+    return cfg.areaZones.filter((zone) => zone.polygon.length >= 3);
+  }, [isDeliveryOrder, menuData?.comercio.delivery_tarifas]);
+  const matchedDeliveryAreaZone = useMemo(() => {
+    if (!deliveryPoint || deliveryAreaZonesForMap.length === 0) return null;
+    return (
+      deliveryAreaZonesForMap.find((zone) =>
+        pointInPolygon(deliveryPoint, zone.polygon),
+      ) ?? null
+    );
+  }, [deliveryPoint, deliveryAreaZonesForMap]);
+  const mapPickerDeliveryCostLabel =
+    isDeliveryOrder && deliveryPoint && !deliveryQuote.blocked && !deliveryOutOfZoneAllowed
+      ? deliveryQuote.free
+        ? 'Gratis'
+        : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)
+      : null;
   const deliveryLineLabel = !isDeliveryOrder
     ? null
     : showEngineDeliveryLine
@@ -3066,11 +3099,16 @@ export default function PublicMenuPage() {
       : 'Costo de envio';
   const deliveryLineValue = !isDeliveryOrder
     ? null
-    : showEngineDeliveryLine && deliveryQuote.free
-      ? 'Gratis 🎉'
-      : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode);
+    : deliveryOutOfZoneAllowed
+      ? 'A acordar'
+      : showEngineDeliveryLine && deliveryQuote.free
+        ? 'Gratis 🎉'
+        : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode);
+  const deliveryOutOfZoneNotice =
+    'Tu ubicación está fuera de las zonas de cobertura. Puedes continuar con el pedido: el costo de envío lo confirmará el negocio y no está incluido en este total.';
   const deliveryEngineNote = showEngineDeliveryLine
     ? [
+        deliveryOutOfZoneAllowed ? deliveryOutOfZoneNotice : '',
         deliveryQuote.blockReason ?? '',
         typeof deliveryQuote.snapshot?.custom_message === 'string'
           ? deliveryQuote.snapshot.custom_message
@@ -4115,9 +4153,13 @@ export default function PublicMenuPage() {
   }, [selectedPaymentMethodId, selectedCurrencyCode]);
 
   useEffect(() => {
-    if (supportsDelivery) return;
-    setDeliveryMode('pickup');
-  }, [supportsDelivery]);
+    if (!supportsDelivery) {
+      setDeliveryMode('pickup');
+      return;
+    }
+    // Keep mode in sync when menu finishes loading after a Delivery home choice.
+    setDeliveryMode(kioskFulfillment === 'delivery' ? 'delivery' : 'pickup');
+  }, [supportsDelivery, kioskFulfillment]);
 
   useEffect(() => {
     if (!isMapPickerOpen) return;
@@ -4147,15 +4189,20 @@ export default function PublicMenuPage() {
       mapPickerResolveAddressRef.current = null;
     };
 
-    const resolveInitialPoint = async () => {
-      if (deliveryPoint) return deliveryPoint;
+    const resolveInitialPoint = async (): Promise<{
+      point: DeliveryPoint;
+      fromGps: boolean;
+    }> => {
+      if (deliveryPoint) return { point: deliveryPoint, fromGps: false };
       const browserPoint = await getBrowserCurrentPoint();
-      if (browserPoint) return browserPoint;
-      if (hasBusinessCoords) return { lat: businessLat, lng: businessLng };
-      return { lat: 10.4806, lng: -66.9036 };
+      if (browserPoint) return { point: browserPoint, fromGps: true };
+      if (hasBusinessCoords && businessLat != null && businessLng != null) {
+        return { point: { lat: businessLat, lng: businessLng }, fromGps: false };
+      }
+      return { point: { lat: 10.4806, lng: -66.9036 }, fromGps: false };
     };
 
-    const attachLeaflet = async (initialPoint: DeliveryPoint) => {
+    const attachLeaflet = async (initialPoint: DeliveryPoint, fromGps: boolean) => {
       try {
         const L = await loadLeafletAssets();
         if (disposed) return;
@@ -4172,16 +4219,43 @@ export default function PublicMenuPage() {
         const map = L.map(mapPickerContainerRef.current, {
           zoomControl: false,
           attributionControl: true,
-        }).setView([initialPoint.lat, initialPoint.lng], 16);
+        }).setView([initialPoint.lat, initialPoint.lng], fromGps ? 15 : 16);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
           attribution: '&copy; OpenStreetMap',
         }).addTo(map);
 
+        const coverageBounds: Array<[number, number]> = [];
+        if (L.polygon) {
+          for (const zone of deliveryAreaZonesForMap) {
+            const ring = zone.polygon.map(
+              ([lat, lng]) => [lat, lng] as [number, number],
+            );
+            for (const point of ring) coverageBounds.push(point);
+            L.polygon(ring, {
+              color: '#059669',
+              weight: 1,
+              fillColor: '#10B981',
+              fillOpacity: 0.18,
+            }).addTo(map);
+          }
+        }
+        // Keep GPS/user pin in view; only fit all zones when we don't have a location yet.
+        if (!fromGps && coverageBounds.length >= 2 && L.latLngBounds && map.fitBounds) {
+          try {
+            map.fitBounds(L.latLngBounds(coverageBounds), { padding: [28, 28], maxZoom: 13 });
+          } catch {
+            // Keep initial view if bounds fail.
+          }
+        } else {
+          map.setView([initialPoint.lat, initialPoint.lng], fromGps ? 15 : 16);
+        }
+
         mapPickerMapRef.current = map;
         mapPickerMarkerRef.current = null;
         setDeliveryPoint(initialPoint);
+        if (fromGps) setDeliveryPointSource('user');
 
         const resolveAddress = async (point: DeliveryPoint) => {
           if (!shouldResolvePoint(point)) {
@@ -4235,11 +4309,11 @@ export default function PublicMenuPage() {
       setIsMapPickerLoading(true);
       setMapPickerError('');
 
-      const initialPoint = await resolveInitialPoint();
+      const { point: initialPoint, fromGps } = await resolveInitialPoint();
       if (disposed) return;
 
       if (preferLeafletMapPicker) {
-        await attachLeaflet(initialPoint);
+        await attachLeaflet(initialPoint, fromGps);
         return;
       }
 
@@ -4249,7 +4323,7 @@ export default function PublicMenuPage() {
 
         if (!google?.maps || !mapPickerContainerRef.current) {
           setMapPickerError('Google Maps no disponible. Usando mapa alternativo.');
-          await attachLeaflet(initialPoint);
+          await attachLeaflet(initialPoint, fromGps);
           return;
         }
 
@@ -4257,7 +4331,7 @@ export default function PublicMenuPage() {
 
         const map = new google.maps.Map(mapPickerContainerRef.current, {
           center: initialPoint,
-          zoom: 16,
+          zoom: fromGps ? 15 : 16,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
@@ -4265,12 +4339,66 @@ export default function PublicMenuPage() {
         });
 
         const geocoder = new google.maps.Geocoder();
+        let skipNextIdle = false;
+        let loadingWatchdog: ReturnType<typeof setTimeout> | null = null;
+
+        const clearLoadingSoon = () => {
+          if (loadingWatchdog) clearTimeout(loadingWatchdog);
+          loadingWatchdog = setTimeout(() => {
+            if (!disposed) setIsMapPickerLoading(false);
+          }, 2500);
+        };
+
+        // Area-zone polygons only (interval circles were reverted — too buggy).
+        try {
+          const mapsApi = google.maps as typeof google.maps & {
+            LatLngBounds: new () => { extend: (point: DeliveryPoint) => void };
+            Polygon: new (opts: Record<string, unknown>) => unknown;
+          };
+          const coverageBounds = new mapsApi.LatLngBounds();
+          let drewCoverage = false;
+          for (const zone of deliveryAreaZonesForMap) {
+            const path = zone.polygon.map(([lat, lng]) => ({ lat, lng }));
+            if (path.length < 3) continue;
+            new mapsApi.Polygon({
+              paths: path,
+              strokeColor: '#059669',
+              strokeOpacity: 0.9,
+              strokeWeight: 1.5,
+              fillColor: '#10B981',
+              fillOpacity: 0.16,
+              map,
+              clickable: false,
+            });
+            for (const point of path) coverageBounds.extend(point);
+            drewCoverage = true;
+          }
+          if (drewCoverage && typeof map.fitBounds === 'function' && !fromGps) {
+            // No GPS yet: show all zones. With GPS, stay on the user pin.
+            skipNextIdle = true;
+            map.fitBounds(coverageBounds, 36);
+          } else if (fromGps) {
+            skipNextIdle = true;
+            map.setCenter(initialPoint);
+            map.setZoom(15);
+          }
+        } catch (coverageError) {
+          console.warn('[delivery-map] coverage overlay failed', coverageError);
+        }
+
+        try {
+          const mapsEvent = (google.maps as { event?: { trigger?: (t: unknown, e: string) => void } }).event;
+          mapsEvent?.trigger?.(map, 'resize');
+        } catch {
+          // ignore
+        }
 
         mapPickerMapRef.current = map;
         mapPickerMarkerRef.current = null;
         mapPickerGeocoderRef.current = geocoder;
 
         const moveToPoint = (point: DeliveryPoint, knownAddress?: string) => {
+          skipNextIdle = true;
           setDeliveryPoint(point);
           map.panTo(point);
           map.setZoom(17);
@@ -4287,20 +4415,30 @@ export default function PublicMenuPage() {
             setIsMapPickerLoading(false);
             return;
           }
-          geocoder.geocode({ location: point }, (results: GooglePlaceResult[] | null, status: string) => {
-            if (disposed) return;
+          setIsMapPickerLoading(true);
+          clearLoadingSoon();
+          let settled = false;
+          const finish = (address: string) => {
+            if (settled || disposed) return;
+            settled = true;
             markResolvedPoint(point);
-            if (status === 'OK' && results?.[0]?.formatted_address) {
-              setMapPickerAddress(results[0].formatted_address);
-            } else {
-              setMapPickerAddress('');
-            }
+            setMapPickerAddress(address);
             setIsMapPickerLoading(false);
-          });
+          };
+          try {
+            geocoder.geocode({ location: point }, (results: GooglePlaceResult[] | null, status: string) => {
+              finish(
+                status === 'OK' && results?.[0]?.formatted_address
+                  ? results[0].formatted_address
+                  : '',
+              );
+            });
+          } catch {
+            finish('');
+          }
         };
 
         mapPickerResolveAddressRef.current = (point: DeliveryPoint) => {
-          setIsMapPickerLoading(true);
           resolveAddress(point);
         };
 
@@ -4314,10 +4452,13 @@ export default function PublicMenuPage() {
 
         map.addListener('dragstart', () => {
           setIsMapPickerDragging(true);
-          setIsMapPickerLoading(true);
         });
         map.addListener('idle', () => {
           setIsMapPickerDragging(false);
+          if (skipNextIdle) {
+            skipNextIdle = false;
+            return;
+          }
           updateFromCenter();
         });
 
@@ -4333,13 +4474,13 @@ export default function PublicMenuPage() {
             if (!geometryLocation) return;
             const point = { lat: geometryLocation.lat(), lng: geometryLocation.lng() };
             const bestAddress = (place.formatted_address ?? place.name ?? '').trim();
-            setIsMapPickerLoading(true);
             moveToPoint(point, bestAddress);
           });
           mapPickerAutocompleteRef.current = autocomplete;
         }
 
         setDeliveryPoint(initialPoint);
+        if (fromGps) setDeliveryPointSource('user');
         if (!normalizedDeliveryAddress) {
           mapPickerResolveAddressRef.current(initialPoint);
         } else {
@@ -4349,7 +4490,7 @@ export default function PublicMenuPage() {
       } catch {
         if (disposed) return;
         setMapPickerError('Google Maps no disponible. Usando mapa alternativo.');
-        await attachLeaflet(initialPoint);
+        await attachLeaflet(initialPoint, fromGps);
       }
     }
 
@@ -4365,6 +4506,7 @@ export default function PublicMenuPage() {
     businessLat,
     businessLng,
     normalizedDeliveryAddress,
+    deliveryAreaZonesForMap,
   ]);
 
   function selectedPaymentMethod() {
@@ -4673,6 +4815,7 @@ export default function PublicMenuPage() {
       address: string;
       reference: string;
       instructions: string;
+      fee_pending?: true;
       coordinates: DeliveryPoint | null;
     },
   ) {
@@ -5055,17 +5198,29 @@ export default function PublicMenuPage() {
       return;
     }
 
+    const outOfZoneInstruction =
+      'Delivery fuera de zona de cobertura: el costo de envío queda pendiente de confirmación con el cliente y no está incluido en el total del checkout.';
+    const deliveryInstructionsForOrder = isDeliveryOrder
+      ? [
+          normalizedDeliveryInstructions,
+          deliveryOutOfZoneAllowed ? outOfZoneInstruction : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : '';
     const deliveryPayload = {
       mode: isDeliveryOrder ? 'delivery' : 'pickup',
       address: isDeliveryOrder ? normalizedDeliveryAddress : '',
       reference: isDeliveryOrder ? normalizedDeliveryReference : '',
-      instructions: isDeliveryOrder ? normalizedDeliveryInstructions : '',
+      instructions: deliveryInstructionsForOrder,
+      ...(isDeliveryOrder && deliveryOutOfZoneAllowed ? { fee_pending: true as const } : {}),
       coordinates: isDeliveryOrder ? deliveryPoint : null,
     } satisfies {
       mode: OrderDeliveryMode;
       address: string;
       reference: string;
       instructions: string;
+      fee_pending?: true;
       coordinates: DeliveryPoint | null;
     };
 
@@ -6363,6 +6518,11 @@ export default function PublicMenuPage() {
                     Buscando direccion...
                   </div>
                 ) : null}
+                {deliveryAreaZonesForMap.length > 0 ? (
+                  <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-full bg-[color-mix(in_srgb,#10B981_18%,var(--menu-surface))] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[color-mix(in_srgb,#047857_80%,var(--menu-text))] shadow-sm">
+                    Zonas de entrega
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-2 border-t border-[var(--menu-border)] bg-[var(--menu-surface)] px-4 py-3 sm:px-6">
@@ -6370,6 +6530,34 @@ export default function PublicMenuPage() {
                 <p className="text-sm font-semibold text-[var(--menu-text)]">
                   {mapPickerAddress || 'Mueve el mapa para colocar el pin en el punto exacto.'}
                 </p>
+                {mapPickerDeliveryCostLabel ? (
+                  <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-800/80">
+                      Costo de delivery
+                    </p>
+                    <p className="mt-0.5 text-lg font-black tracking-tight text-emerald-950">
+                      {mapPickerDeliveryCostLabel}
+                    </p>
+                    {matchedDeliveryAreaZone?.name ? (
+                      <p className="mt-0.5 text-[12px] font-medium text-emerald-900/75">
+                        Zona: {matchedDeliveryAreaZone.name}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : deliveryOutOfZoneAllowed ? (
+                  <div className="rounded-2xl border border-amber-200/80 bg-amber-50 px-3 py-2.5 text-[12px] font-medium leading-snug text-amber-950">
+                    {deliveryOutOfZoneNotice}
+                  </div>
+                ) : deliveryQuote.blocked ? (
+                  <div className="rounded-2xl border border-rose-200/80 bg-rose-50 px-3 py-2.5 text-[12px] font-medium leading-snug text-rose-900">
+                    {deliveryQuote.blockReason ||
+                      'Esta ubicación está fuera de las zonas de entrega. Elige un punto dentro del área sombreada para continuar.'}
+                  </div>
+                ) : deliveryAreaZonesForMap.length > 0 ? (
+                  <p className="text-[12px] font-medium text-[var(--menu-text-muted)]">
+                    Las áreas en verde son las zonas donde este negocio hace delivery.
+                  </p>
+                ) : null}
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
                   Mapa: {mapPickerProvider === 'google' ? 'Google Maps' : 'OpenStreetMap'}
                 </p>
@@ -6380,22 +6568,37 @@ export default function PublicMenuPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (!navigator.geolocation) return;
-                      navigator.geolocation.getCurrentPosition((position) => {
-                        const point = {
-                          lat: position.coords.latitude,
-                          lng: position.coords.longitude,
-                        };
-                        setDeliveryPoint(point);
-                        setDeliveryPointSource('user');
-                        const map = mapPickerMapRef.current;
-                        if (mapPickerProvider === 'google') {
-                          if (map?.panTo) map.panTo(point);
-                        } else {
-                          if (map?.setView) map.setView([point.lat, point.lng], 16);
-                        }
-                        mapPickerResolveAddressRef.current?.(point);
-                      });
+                      if (!navigator.geolocation) {
+                        setMapPickerError('Tu navegador no permite usar la ubicación GPS.');
+                        return;
+                      }
+                      setMapPickerError('');
+                      setIsMapPickerLoading(true);
+                      navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                          const point = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude,
+                          };
+                          setDeliveryPoint(point);
+                          setDeliveryPointSource('user');
+                          const map = mapPickerMapRef.current;
+                          if (mapPickerProvider === 'google') {
+                            if (map?.panTo) map.panTo(point);
+                            if (map?.setZoom) map.setZoom(15);
+                          } else if (map?.setView) {
+                            map.setView([point.lat, point.lng], 15);
+                          }
+                          mapPickerResolveAddressRef.current?.(point);
+                        },
+                        () => {
+                          setIsMapPickerLoading(false);
+                          setMapPickerError(
+                            'No pudimos obtener tu GPS. Activa la ubicación del navegador e inténtalo de nuevo.',
+                          );
+                        },
+                        { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
+                      );
                     }}
                     className="rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--menu-text)]"
                   >
@@ -6843,6 +7046,10 @@ export default function PublicMenuPage() {
                       </button>
                       {deliveryQuote.blocked ? (
                         <p className="text-sm font-semibold text-rose-500">{deliveryQuote.blockReason}</p>
+                      ) : deliveryOutOfZoneAllowed ? (
+                        <div className="rounded-2xl border border-amber-200/80 bg-amber-50 px-3 py-2.5 text-[12px] font-medium leading-snug text-amber-950">
+                          {deliveryOutOfZoneNotice}
+                        </div>
                       ) : deliveryEngineNote ? (
                         <p className="text-[12px] font-semibold text-[var(--menu-text-muted)]">{deliveryEngineNote}</p>
                       ) : null}
