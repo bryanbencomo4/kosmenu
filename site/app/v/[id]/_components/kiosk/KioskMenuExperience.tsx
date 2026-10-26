@@ -483,23 +483,26 @@ export function KioskMenuExperience({
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* Full cover at natural aspect — width fills card, no crop, no blur. */}
-                  <div className="relative w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)]">
-                    {category.coverUrl ? (
-                      <KioskImage
-                        src={category.coverUrl}
-                        sourceUrl={category.coverSourceUrl || category.coverUrl}
-                        displayWidth={520}
-                        alt=""
-                        fit="width"
-                        preferHot
-                        className="w-full"
-                      />
-                    ) : (
-                      <div className="grid aspect-[3/4] w-full place-items-center text-5xl">
-                        {category.glyph}
-                      </div>
-                    )}
+                  {/* Uniform 3:4 frame — full image, solid letterbox, no crop/blur. */}
+                  <div className="relative aspect-[3/4] w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)]">
+                    <div className="absolute inset-0">
+                      {category.coverUrl ? (
+                        <KioskImage
+                          src={category.coverUrl}
+                          sourceUrl={category.coverSourceUrl || category.coverUrl}
+                          displayWidth={520}
+                          alt=""
+                          fit="contain"
+                          showBlurFill={false}
+                          preferHot
+                          className="h-full w-full"
+                        />
+                      ) : (
+                        <div className="grid h-full place-items-center text-5xl">
+                          {category.glyph}
+                        </div>
+                      )}
+                    </div>
                     <span className="absolute left-2 top-2 z-10 rounded-full bg-[color-mix(in_srgb,var(--menu-surface)_92%,transparent)] px-2 py-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
                       {category.productCount}
                     </span>
