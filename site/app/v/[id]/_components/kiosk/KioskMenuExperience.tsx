@@ -483,7 +483,7 @@ export function KioskMenuExperience({
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* Uniform 3:4 frame — full image, solid letterbox, no crop/blur. */}
+                  {/* Uniform 3:4 frame — cover fills card (no white letterbox / no blur). */}
                   <div className="relative aspect-[3/4] w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)]">
                     <div className="absolute inset-0">
                       {category.coverUrl ? (
@@ -492,8 +492,7 @@ export function KioskMenuExperience({
                           sourceUrl={category.coverSourceUrl || category.coverUrl}
                           displayWidth={520}
                           alt=""
-                          fit="contain"
-                          showBlurFill={false}
+                          fit="cover"
                           preferHot
                           className="h-full w-full"
                         />
