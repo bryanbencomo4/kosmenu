@@ -32,6 +32,7 @@ Future<MediaCropResult?> showMediaCropEditor(
 
   return showDialog<MediaCropResult>(
     context: context,
+    useRootNavigator: true,
     barrierDismissible: false,
     barrierColor: const Color(0xCC000000),
     builder: (_) => _MediaCropEditorDialog(image: image, kind: kind),
@@ -79,11 +80,9 @@ class _MediaCropEditorDialogState extends State<_MediaCropEditorDialog> {
 
   @override
   void dispose() {
-    // Defer so the route tear-down / last paint never touch a disposed image.
-    final image = widget.image;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      image.dispose();
-    });
+    // Keep the ui.Image alive until after the route is gone. Disposing it in
+    // State.dispose races the last paint on Flutter web and can corrupt the
+    // element tree (_dependents.isEmpty). GC reclaims the image with the State.
     super.dispose();
   }
 
@@ -151,7 +150,7 @@ class _MediaCropEditorDialogState extends State<_MediaCropEditorDialog> {
             : 'product.jpg',
       );
       if (!mounted) return;
-      Navigator.of(context).pop(result);
+      Navigator.of(context, rootNavigator: true).pop(result);
     } catch (error, stackTrace) {
       debugPrint(
         'Media crop export error: ${error.runtimeType}: $error\n$stackTrace',
@@ -264,7 +263,9 @@ class _MediaCropEditorDialogState extends State<_MediaCropEditorDialog> {
       overflowSpacing: 8,
       children: [
         TextButton(
-          onPressed: _exporting ? null : () => Navigator.of(context).pop(),
+          onPressed: _exporting
+              ? null
+              : () => Navigator.of(context, rootNavigator: true).pop(),
           child: const Text(
             'Cancelar',
             style: TextStyle(color: _editorTextLow),

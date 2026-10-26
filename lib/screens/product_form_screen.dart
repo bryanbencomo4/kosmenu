@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/commerce_fx.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -74,6 +75,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   String? _businessCategory;
   String? _businessName;
   XFile? _pickedImage;
+  Uint8List? _pickedImageBytes;
   bool _isLoadingPricingConfig = false;
   String _baseCurrency = 'USD';
   String _selectedPriceCurrency = 'USD';
@@ -422,6 +424,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (cropped == null || !mounted) return;
 
     setState(() {
+      _pickedImageBytes = cropped.bytes;
       _pickedImage = XFile.fromData(
         cropped.bytes,
         name: cropped.fileName,
@@ -434,7 +437,55 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (!_hasLocalImage && !_hasRemoteImage) return;
     setState(() {
       _pickedImage = null;
+      _pickedImageBytes = null;
       _remoteImageUrl = null;
+    });
+  }
+
+  Future<void> _recropCurrentImage() async {
+    if (_isSaving || _isUploadingImage) return;
+
+    Uint8List? sourceBytes = _pickedImageBytes;
+    if (sourceBytes == null && _pickedImage != null) {
+      sourceBytes = await _pickedImage!.readAsBytes();
+    }
+    if (sourceBytes == null) {
+      final url = _remoteImageUrl?.trim() ?? '';
+      if (url.isEmpty) return;
+      try {
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 30));
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw StateError('HTTP ${response.statusCode}');
+        }
+        sourceBytes = response.bodyBytes;
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo cargar la imagen para recortar: $error'),
+          ),
+        );
+        return;
+      }
+    }
+    if (sourceBytes.isEmpty || !mounted) return;
+
+    final cropped = await const MediaImageCropService().cropFromBytes(
+      context,
+      sourceBytes: sourceBytes,
+      kind: MediaCropKind.product,
+    );
+    if (cropped == null || !mounted) return;
+
+    setState(() {
+      _pickedImageBytes = cropped.bytes;
+      _pickedImage = XFile.fromData(
+        cropped.bytes,
+        name: cropped.fileName,
+        mimeType: cropped.mimeType,
+      );
     });
   }
 
@@ -523,6 +574,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               if (hasImage)
                 ListTile(
                   leading: Icon(
+                    Icons.crop_rounded,
+                    color: colorScheme.onSurface,
+                  ),
+                  title: Text(
+                    'Ajustar encuadre',
+                    style: TextStyle(color: colorScheme.onSurface),
+                  ),
+                  subtitle: Text(
+                    'Recorta la foto actual a 3:4',
+                    style: TextStyle(color: colorScheme.onSurfaceVariant),
+                  ),
+                  onTap: () => Navigator.of(context).pop('recrop'),
+                ),
+              if (hasImage)
+                ListTile(
+                  leading: Icon(
                     Icons.delete_outline_rounded,
                     color: colorScheme.error,
                   ),
@@ -547,6 +614,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         break;
       case 'ai':
         await _generateAiImageForExistingProduct();
+        break;
+      case 'recrop':
+        await _recropCurrentImage();
         break;
       case 'remove':
         _removeCurrentImageSelection();
@@ -991,6 +1061,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() {
       _remoteImageUrl = imageUrl;
       _pickedImage = null;
+      _pickedImageBytes = null;
       _aiImageStatus = status;
       _isGeneratingAiImage = !isAiImageGenerationSettled(status);
     });
@@ -1023,6 +1094,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           if (imageUrl.isNotEmpty) {
             _remoteImageUrl = imageUrl;
             _pickedImage = null;
+            _pickedImageBytes = null;
           }
           _aiImageStatus = status;
           _isGeneratingAiImage = false;
@@ -1441,6 +1513,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
                 final imagePanel = _ImagePanel(
                   localImageFile: _pickedImage,
+                  localImageBytes: _pickedImageBytes,
                   remoteImageUrl: _remoteImageUrl,
                   fallbackImageUrl: _fallbackImageUrl,
                   heroTag: widget.product != null
@@ -1586,6 +1659,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 class _ImagePanel extends StatelessWidget {
   const _ImagePanel({
     required this.localImageFile,
+    required this.localImageBytes,
     required this.remoteImageUrl,
     required this.fallbackImageUrl,
     required this.heroTag,
@@ -1601,6 +1675,7 @@ class _ImagePanel extends StatelessWidget {
   });
 
   final XFile? localImageFile;
+  final Uint8List? localImageBytes;
   final String? remoteImageUrl;
   final String fallbackImageUrl;
   final String? heroTag;
@@ -1670,31 +1745,45 @@ class _ImagePanel extends StatelessWidget {
                   _wrapHero(
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: FutureBuilder<Uint8List>(
-                        future: localImageFile!.readAsBytes(),
-                        builder: (context, snapshot) {
-                          if (snapshot.hasData) {
-                            return ColoredBox(
+                      child: localImageBytes != null
+                          ? ColoredBox(
                               color: colorScheme.surfaceContainerHighest,
                               child: Image.memory(
-                                snapshot.data!,
+                                localImageBytes!,
                                 fit: BoxFit.contain,
                                 height: 230,
                                 width: double.infinity,
                                 gaplessPlayback: true,
                               ),
-                            );
-                          }
+                            )
+                          : FutureBuilder<Uint8List>(
+                              future: localImageFile!.readAsBytes(),
+                              builder: (context, snapshot) {
+                                if (snapshot.hasData) {
+                                  return ColoredBox(
+                                    color:
+                                        colorScheme.surfaceContainerHighest,
+                                    child: Image.memory(
+                                      snapshot.data!,
+                                      fit: BoxFit.contain,
+                                      height: 230,
+                                      width: double.infinity,
+                                      gaplessPlayback: true,
+                                    ),
+                                  );
+                                }
 
-                          return Container(
-                            height: 230,
-                            width: double.infinity,
-                            color: colorScheme.surfaceContainerHighest,
-                            alignment: Alignment.center,
-                            child: const CircularProgressIndicator(),
-                          );
-                        },
-                      ),
+                                return Container(
+                                  height: 230,
+                                  width: double.infinity,
+                                  color:
+                                      colorScheme.surfaceContainerHighest,
+                                  alignment: Alignment.center,
+                                  child:
+                                      const CircularProgressIndicator(),
+                                );
+                              },
+                            ),
                     ),
                   )
                 else if (hasRemoteImage)

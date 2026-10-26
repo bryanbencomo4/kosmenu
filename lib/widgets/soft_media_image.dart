@@ -12,6 +12,7 @@ class SoftMediaImage extends StatelessWidget {
     this.width,
     this.height,
     this.fit = BoxFit.contain,
+    this.alignment = Alignment.center,
     this.borderRadius,
     this.optimizeWidth = 240,
     this.backgroundColor,
@@ -22,6 +23,7 @@ class SoftMediaImage extends StatelessWidget {
   final double? width;
   final double? height;
   final BoxFit fit;
+  final AlignmentGeometry alignment;
   final BorderRadius? borderRadius;
   final int optimizeWidth;
   final Color? backgroundColor;
@@ -30,7 +32,9 @@ class SoftMediaImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final raw = imageUrl?.trim() ?? '';
-    final optimized = StorageImageUrl.optimize(raw, width: optimizeWidth) ?? raw;
+    // Prefer hot transform (always available). Cold-first caused a visible
+    // jump: 404 → original on first paint, then cold after refresh/variants.
+    final optimized = StorageImageUrl.hot(raw, width: optimizeWidth) ?? raw;
     final bg =
         backgroundColor ?? Theme.of(context).colorScheme.surfaceContainerHighest;
 
@@ -59,14 +63,14 @@ class SoftMediaImage extends StatelessWidget {
         child: Image.network(
           url,
           fit: imageFit,
-          alignment: Alignment.center,
+          alignment: alignment,
           gaplessPlayback: true,
           errorBuilder: (context, error, stackTrace) {
             if (url != raw && raw.isNotEmpty) {
               return Image.network(
                 raw,
                 fit: imageFit,
-                alignment: Alignment.center,
+                alignment: alignment,
                 width: double.infinity,
                 height: double.infinity,
                 gaplessPlayback: true,

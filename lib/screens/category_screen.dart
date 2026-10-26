@@ -2,9 +2,11 @@
 
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:kosmenu_app/core/commerce_fx.dart';
 import 'package:kosmenu_app/core/constants.dart';
@@ -17,6 +19,7 @@ import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/media_crop.dart';
 import 'package:kosmenu_app/services/media_image_crop_service.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
@@ -465,7 +468,6 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
   }) async {
     final colorScheme = Theme.of(context).colorScheme;
     final navigator = Navigator.of(context);
-    final nameController = TextEditingController(text: category?.nombre ?? '');
     final webCamera = const WebCameraHandoffService();
     // Host screen context — crop dialog must not depend on the sheet route.
     final hostContext = context;
@@ -498,6 +500,11 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         builder: (sheetContext) {
+          // Own the TextEditingController in a State so dispose runs after the
+          // TextField unmounts (StatefulBuilder+manual dispose races on web).
+          return _CategoryEditorNameHost(
+            initialName: category?.nombre ?? '',
+            builder: (sheetContext, nameController) {
           return StatefulBuilder(
             builder: (sheetContext, setSheetState) {
               void updateSheet(VoidCallback fn) {
@@ -512,40 +519,15 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   (selectedImageUrl == null || selectedImageUrl!.isEmpty) &&
                   (fallbackProductImage?.isNotEmpty ?? false);
 
-              Future<void> pickImage(ImageSource source) async {
-                if (isUploadingImage || !sheetOpen) return;
+              Future<void> uploadCroppedCategoryImage(
+                MediaCropResult cropped,
+              ) async {
                 final comercioId = SupabaseConfig.currentComercioId.trim();
                 if (comercioId.isEmpty) {
                   updateSheet(() {
                     helperMessage =
                         'No hay comercio activo para subir la imagen.';
                   });
-                  return;
-                }
-
-                final photo = source == ImageSource.camera
-                    ? await webCamera.pickCameraImage(
-                        hostContext,
-                        feature: 'category',
-                        waitingTitle: 'Toma la foto de la categoría',
-                        waitingSubtitle:
-                            'Escanea el código con tu teléfono y la cargaremos aquí.',
-                        imageQuality: 82,
-                        maxWidth: 1600,
-                      )
-                    : await ImagePicker().pickImage(
-                        source: source,
-                        imageQuality: 82,
-                        maxWidth: 1600,
-                      );
-                if (photo == null || !sheetOpen || !hostContext.mounted) return;
-
-                final cropped = await const MediaImageCropService().cropForUpload(
-                  hostContext,
-                  source: photo,
-                  kind: MediaCropKind.category,
-                );
-                if (cropped == null || !sheetOpen || !hostContext.mounted) {
                   return;
                 }
 
@@ -579,7 +561,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                   final publicUrl = Supabase.instance.client.storage
                       .from('product-images')
                       .getPublicUrl(fileName);
-                  const ProductImageVariantsClient().ensureInBackground(publicUrl);
+                  const ProductImageVariantsClient()
+                      .ensureInBackground(publicUrl);
                   updateSheet(() {
                     selectedImageUrl = publicUrl;
                     clearImage = false;
@@ -592,6 +575,106 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                 } finally {
                   updateSheet(() => isUploadingImage = false);
                 }
+              }
+
+              Future<void> pickImage(ImageSource source) async {
+                if (isUploadingImage || !sheetOpen) return;
+                if (SupabaseConfig.currentComercioId.trim().isEmpty) {
+                  updateSheet(() {
+                    helperMessage =
+                        'No hay comercio activo para subir la imagen.';
+                  });
+                  return;
+                }
+
+                final photo = source == ImageSource.camera
+                    ? await webCamera.pickCameraImage(
+                        hostContext,
+                        feature: 'category',
+                        waitingTitle: 'Toma la foto de la categoría',
+                        waitingSubtitle:
+                            'Escanea el código con tu teléfono y la cargaremos aquí.',
+                        imageQuality: 82,
+                        maxWidth: 1600,
+                      )
+                    : await ImagePicker().pickImage(
+                        source: source,
+                        imageQuality: 82,
+                        maxWidth: 1600,
+                      );
+                if (photo == null || !sheetOpen || !hostContext.mounted) return;
+
+                final cropped =
+                    await const MediaImageCropService().cropForUpload(
+                  hostContext,
+                  source: photo,
+                  kind: MediaCropKind.category,
+                );
+                if (cropped == null || !sheetOpen || !hostContext.mounted) {
+                  return;
+                }
+
+                await uploadCroppedCategoryImage(cropped);
+              }
+
+              Future<void> recropCurrentImage() async {
+                if (isUploadingImage || isGeneratingAiCover || !sheetOpen) {
+                  return;
+                }
+                final url = (clearImage
+                        ? null
+                        : (selectedImageUrl ?? fallbackProductImage))
+                    ?.trim();
+                if (url == null || url.isEmpty) {
+                  updateSheet(() {
+                    helperMessage =
+                        'No hay imagen para ajustar. Agrega una foto primero.';
+                  });
+                  return;
+                }
+
+                updateSheet(() {
+                  isUploadingImage = true;
+                  helperMessage = 'Cargando imagen para ajustar…';
+                });
+
+                Uint8List sourceBytes;
+                try {
+                  final response = await http
+                      .get(Uri.parse(url))
+                      .timeout(const Duration(seconds: 30));
+                  if (response.statusCode < 200 || response.statusCode >= 300) {
+                    throw StateError(
+                      'HTTP ${response.statusCode}',
+                    );
+                  }
+                  sourceBytes = response.bodyBytes;
+                  if (sourceBytes.isEmpty) {
+                    throw StateError('imagen vacía');
+                  }
+                } catch (error) {
+                  updateSheet(() {
+                    isUploadingImage = false;
+                    helperMessage =
+                        'No se pudo cargar la imagen para recortar: $error';
+                  });
+                  return;
+                }
+
+                updateSheet(() => isUploadingImage = false);
+                if (!sheetOpen || !hostContext.mounted) return;
+
+                final cropped = await const MediaImageCropService()
+                    .cropFromBytes(
+                  hostContext,
+                  sourceBytes: sourceBytes,
+                  kind: MediaCropKind.category,
+                );
+                if (cropped == null || !sheetOpen || !hostContext.mounted) {
+                  return;
+                }
+
+                await uploadCroppedCategoryImage(cropped);
               }
 
               Future<void> chooseImageSource() async {
@@ -751,7 +834,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                             CrossAxisAlignment.stretch,
                                         children: [
                                           AspectRatio(
-                                            aspectRatio: 9 / 16,
+                                            aspectRatio: 3 / 4,
                                             child: ColoredBox(
                                               color: colorScheme
                                                   .surfaceContainerHighest,
@@ -948,6 +1031,30 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                     ],
                                   ],
                                 ),
+                                if (previewUrl != null &&
+                                    previewUrl!.trim().isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      onPressed: isUploadingImage ||
+                                              isGeneratingAiCover
+                                          ? null
+                                          : () => unawaited(recropCurrentImage()),
+                                      icon: const Icon(
+                                        Icons.crop_rounded,
+                                      ),
+                                      label: Text(
+                                        usingFallback
+                                            ? 'Ajustar encuadre (del producto)'
+                                            : 'Ajustar encuadre',
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        minimumSize: const Size(0, 46),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 const SizedBox(height: 10),
                                 OutlinedButton.icon(
                                   onPressed: isUploadingImage ||
@@ -1163,16 +1270,13 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
               );
             },
           );
+            },
+          );
         },
       );
       return result;
     } finally {
       sheetOpen = false;
-      // Dispose after the sheet route has fully unmounted — disposing in the
-      // same frame as pop races TextField listeners and trips framework asserts.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        nameController.dispose();
-      });
     }
   }
 
@@ -6542,6 +6646,49 @@ class _CategoryEditorResult {
   final String? imagenUrl;
   final bool clearImage;
   final String? rol;
+}
+
+/// Owns the category-name [TextEditingController] for the editor sheet.
+///
+/// Disposing in [State.dispose] runs after the [TextField] unmounts, which
+/// avoids the web race that trips `_dependents.isEmpty` when a controller is
+/// disposed while the sheet is still rebuilding during route pop.
+class _CategoryEditorNameHost extends StatefulWidget {
+  const _CategoryEditorNameHost({
+    required this.initialName,
+    required this.builder,
+  });
+
+  final String initialName;
+  final Widget Function(
+    BuildContext context,
+    TextEditingController nameController,
+  ) builder;
+
+  @override
+  State<_CategoryEditorNameHost> createState() =>
+      _CategoryEditorNameHostState();
+}
+
+class _CategoryEditorNameHostState extends State<_CategoryEditorNameHost> {
+  late final TextEditingController _nameController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(context, _nameController);
+  }
 }
 
 class _CategoryIconOption {

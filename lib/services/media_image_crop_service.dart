@@ -22,8 +22,7 @@ class _Portrait3x4Preset implements CropAspectRatioPresetData {
 
 /// Instagram-style 3:4 crop before uploading category/product photos.
 ///
-/// Existing published images are never touched — only new picks go through
-/// this path. Cancel returns `null` and callers must abort the upload.
+/// Cancel returns `null` and callers must abort the upload.
 class MediaImageCropService {
   const MediaImageCropService();
 
@@ -36,7 +35,9 @@ class MediaImageCropService {
     required MediaCropKind kind,
   }) async {
     if (kIsWeb) {
-      return _cropInApp(context, source: source, kind: kind);
+      final bytes = await source.readAsBytes();
+      if (!context.mounted) return null;
+      return cropFromBytes(context, sourceBytes: bytes, kind: kind);
     }
 
     try {
@@ -51,18 +52,25 @@ class MediaImageCropService {
         '${error.runtimeType}: $error\n$stackTrace',
       );
       if (!context.mounted) return null;
-      return _cropInApp(context, source: source, kind: kind);
+      final bytes = await source.readAsBytes();
+      if (!context.mounted) return null;
+      return cropFromBytes(context, sourceBytes: bytes, kind: kind);
     }
   }
 
-  Future<MediaCropResult?> _cropInApp(
+  /// In-app 3:4 crop from already-decoded bytes (new pick or re-crop of a
+  /// published/network image). Always uses the Flutter editor — no filesystem
+  /// path required.
+  Future<MediaCropResult?> cropFromBytes(
     BuildContext context, {
-    required XFile source,
+    required Uint8List sourceBytes,
     required MediaCropKind kind,
-  }) async {
-    final bytes = await source.readAsBytes();
-    if (!context.mounted) return null;
-    return showMediaCropEditor(context, sourceBytes: bytes, kind: kind);
+  }) {
+    return showMediaCropEditor(
+      context,
+      sourceBytes: sourceBytes,
+      kind: kind,
+    );
   }
 
   Future<MediaCropResult?> _cropNative({
