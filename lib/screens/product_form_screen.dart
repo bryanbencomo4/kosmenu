@@ -13,12 +13,14 @@ import 'package:kosmenu_app/models/product.dart';
 import 'package:kosmenu_app/models/product_option_group.dart';
 import 'package:kosmenu_app/models/upsell_config.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/media_image_crop_service.dart';
 import 'package:kosmenu_app/services/product_description_ai_service.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/services/product_image_variants_client.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
+import 'package:kosmenu_app/widgets/media_crop_editor.dart';
 import 'package:kosmenu_app/widgets/product_options_editor.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -411,9 +413,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       );
     }
     if (file == null) return;
-
     if (!mounted) return;
-    setState(() => _pickedImage = file);
+
+    final cropped = await const MediaImageCropService().cropForUpload(
+      context,
+      source: file,
+      kind: MediaCropKind.product,
+    );
+    if (cropped == null || !mounted) return;
+
+    setState(() {
+      _pickedImage = XFile.fromData(
+        cropped.bytes,
+        name: cropped.fileName,
+        mimeType: cropped.mimeType,
+      );
+    });
   }
 
   void _removeCurrentImageSelection() {

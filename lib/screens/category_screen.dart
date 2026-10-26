@@ -17,12 +17,14 @@ import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/product_screen.dart';
 import 'package:kosmenu_app/screens/boost_sales_screen.dart';
 import 'package:kosmenu_app/services/ai_image_service.dart';
+import 'package:kosmenu_app/services/media_image_crop_service.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/product_image_optimizer.dart';
 import 'package:kosmenu_app/services/product_image_prompt_ui.dart';
 import 'package:kosmenu_app/services/product_image_variants_client.dart';
 import 'package:kosmenu_app/services/web_camera_handoff_service.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/media_crop_editor.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
 import 'package:kosmenu_app/widgets/soft_media_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -474,6 +476,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
     }
     var clearImage = false;
     var isUploadingImage = false;
+    var isGeneratingAiCover = false;
     String? helperMessage = category == null
         ? null
         : 'Si no subes imagen, el menú usa la foto del primer producto.';
@@ -530,6 +533,13 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                       );
                 if (photo == null || !sheetContext.mounted) return;
 
+                final cropped = await const MediaImageCropService().cropForUpload(
+                  sheetContext,
+                  source: photo,
+                  kind: MediaCropKind.category,
+                );
+                if (cropped == null || !sheetContext.mounted) return;
+
                 setSheetState(() {
                   isUploadingImage = true;
                   helperMessage = null;
@@ -537,7 +547,7 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
 
                 try {
                   final bytes = await ProductImageOptimizer.compressToJpegAsync(
-                    await photo.readAsBytes(),
+                    cropped.bytes,
                   );
                   final fileName =
                       '$comercioId/categories/cat_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}.jpg';
@@ -720,100 +730,166 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                AspectRatio(
-                                  aspectRatio: 16 / 9,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(18),
-                                    child: ColoredBox(
-                                      color:
-                                          colorScheme.surfaceContainerHighest,
-                                      child: previewUrl == null
-                                          ? Center(
-                                              child: Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.image_outlined,
-                                                    size: 36,
-                                                    color: colorScheme
-                                                        .onSurfaceVariant,
-                                                  ),
-                                                  const SizedBox(height: 8),
-                                                  Text(
-                                                    'Sin imagen todavía',
-                                                    style: GoogleFonts.manrope(
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                      color: colorScheme
-                                                          .onSurfaceVariant,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            )
-                                          : Stack(
-                                              fit: StackFit.expand,
-                                              children: [
-                                                LayoutBuilder(
-                                                  builder:
-                                                      (context, constraints) {
-                                                    return SoftMediaImage(
-                                                      imageUrl: previewUrl,
-                                                      width:
-                                                          constraints.maxWidth,
-                                                      height: constraints
-                                                          .maxHeight,
-                                                      fit: BoxFit.cover,
-                                                      optimizeWidth: 720,
-                                                      backgroundColor:
-                                                          colorScheme
-                                                              .surfaceContainerHighest,
-                                                    );
-                                                  },
-                                                ),
-                                                if (usingFallback)
-                                                  Align(
-                                                    alignment:
-                                                        Alignment.bottomLeft,
-                                                    child: Container(
-                                                      margin:
-                                                          const EdgeInsets.all(
-                                                        10,
+                                // Same vertical tile as public menu (9:16 + title bar).
+                                Center(
+                                  child: SizedBox(
+                                    width: 168,
+                                    child: Material(
+                                      color: colorScheme.surface,
+                                      elevation: 1.5,
+                                      shadowColor: Colors.black26,
+                                      borderRadius: BorderRadius.circular(18),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          AspectRatio(
+                                            aspectRatio: 9 / 16,
+                                            child: ColoredBox(
+                                              color: colorScheme
+                                                  .surfaceContainerHighest,
+                                              child: previewUrl == null
+                                                  ? Center(
+                                                      child: Column(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons
+                                                                .image_outlined,
+                                                            size: 36,
+                                                            color: colorScheme
+                                                                .onSurfaceVariant,
+                                                          ),
+                                                          const SizedBox(
+                                                              height: 8),
+                                                          Text(
+                                                            'Sin imagen todavía',
+                                                            textAlign: TextAlign
+                                                                .center,
+                                                            style: GoogleFonts
+                                                                .manrope(
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                              color: colorScheme
+                                                                  .onSurfaceVariant,
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
-                                                      padding:
-                                                          const EdgeInsets
-                                                              .symmetric(
-                                                        horizontal: 10,
-                                                        vertical: 6,
-                                                      ),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.black54,
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(999),
-                                                      ),
-                                                      child: Text(
-                                                        'Del primer producto',
-                                                        style:
-                                                            GoogleFonts.manrope(
-                                                          color: Colors.white,
-                                                          fontWeight:
-                                                              FontWeight.w700,
-                                                          fontSize: 11.5,
+                                                    )
+                                                  : Stack(
+                                                      fit: StackFit.expand,
+                                                      children: [
+                                                        SoftMediaImage(
+                                                          imageUrl: previewUrl,
+                                                          fit: BoxFit.cover,
+                                                          alignment: Alignment
+                                                              .topCenter,
+                                                          optimizeWidth: 520,
+                                                          backgroundColor:
+                                                              colorScheme
+                                                                  .surfaceContainerHighest,
                                                         ),
-                                                      ),
+                                                        if (usingFallback)
+                                                          Align(
+                                                            alignment: Alignment
+                                                                .bottomLeft,
+                                                            child: Container(
+                                                              margin:
+                                                                  const EdgeInsets
+                                                                      .all(10),
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .symmetric(
+                                                                horizontal: 10,
+                                                                vertical: 6,
+                                                              ),
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                color: Colors
+                                                                    .black54,
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                  999,
+                                                                ),
+                                                              ),
+                                                              child: Text(
+                                                                'Del primer producto',
+                                                                style: GoogleFonts
+                                                                    .manrope(
+                                                                  color: Colors
+                                                                      .white,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w700,
+                                                                  fontSize:
+                                                                      11.5,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        if (isUploadingImage ||
+                                                            isGeneratingAiCover)
+                                                          const ColoredBox(
+                                                            color: Color(
+                                                                0x66000000),
+                                                            child: Center(
+                                                              child:
+                                                                  CircularProgressIndicator(),
+                                                            ),
+                                                          ),
+                                                      ],
                                                     ),
-                                                  ),
-                                                if (isUploadingImage)
-                                                  const ColoredBox(
-                                                    color: Color(0x66000000),
-                                                    child: Center(
-                                                      child:
-                                                          CircularProgressIndicator(),
-                                                    ),
-                                                  ),
-                                              ],
                                             ),
+                                          ),
+                                          SizedBox(
+                                            height: 52,
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 12,
+                                                vertical: 10,
+                                              ),
+                                              child: Align(
+                                                alignment:
+                                                    Alignment.centerLeft,
+                                                child: Text(
+                                                  () {
+                                                    final typed =
+                                                        nameController.text
+                                                            .trim();
+                                                    if (typed.isNotEmpty) {
+                                                      return typed;
+                                                    }
+                                                    return category?.nombre
+                                                            .trim()
+                                                            .isNotEmpty ==
+                                                        true
+                                                        ? category!.nombre
+                                                            .trim()
+                                                        : 'Nombre de la categoría';
+                                                  }(),
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: GoogleFonts.manrope(
+                                                    fontWeight: FontWeight.w800,
+                                                    fontSize: 13,
+                                                    height: 1.2,
+                                                    color: colorScheme
+                                                        .onSurface,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -822,7 +898,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                   children: [
                                     Expanded(
                                       child: FilledButton.icon(
-                                        onPressed: isUploadingImage
+                                        onPressed: isUploadingImage ||
+                                                isGeneratingAiCover
                                             ? null
                                             : chooseImageSource,
                                         icon: const Icon(
@@ -847,7 +924,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                             false)) ...[
                                       const SizedBox(width: 10),
                                       OutlinedButton(
-                                        onPressed: isUploadingImage
+                                        onPressed: isUploadingImage ||
+                                                isGeneratingAiCover
                                             ? null
                                             : () {
                                                 setSheetState(() {
@@ -864,6 +942,148 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                                       ),
                                     ],
                                   ],
+                                ),
+                                const SizedBox(height: 10),
+                                OutlinedButton.icon(
+                                  onPressed: isUploadingImage ||
+                                          isGeneratingAiCover
+                                      ? null
+                                      : () async {
+                                          final existing = category;
+                                          if (existing == null) {
+                                            setSheetState(() {
+                                              helperMessage =
+                                                  'Guarda la categoría primero y vuelve a editarla para generar la portada con IA.';
+                                            });
+                                            return;
+                                          }
+                                          final comercioId = SupabaseConfig
+                                              .currentComercioId
+                                              .trim();
+                                          if (comercioId.isEmpty) {
+                                            setSheetState(() {
+                                              helperMessage =
+                                                  'No hay comercio activo para generar la imagen IA.';
+                                            });
+                                            return;
+                                          }
+
+                                          final confirmed =
+                                              await showDialog<bool>(
+                                            context: sheetContext,
+                                            builder: (dialogContext) {
+                                              return AlertDialog(
+                                                title: Text(
+                                                  'Generar portada con IA',
+                                                  style: GoogleFonts.manrope(
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
+                                                content: Text(
+                                                  'Se descontará 1 crédito para crear una portada estilo anuncio con el logo, el nombre del negocio, el color de marca y “${existing.nombre}”. Funciona con o sin fotos de productos.',
+                                                  style: GoogleFonts.manrope(
+                                                    height: 1.35,
+                                                  ),
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.of(
+                                                      dialogContext,
+                                                    ).pop(false),
+                                                    child: const Text(
+                                                      'Cancelar',
+                                                    ),
+                                                  ),
+                                                  FilledButton(
+                                                    onPressed: () =>
+                                                        Navigator.of(
+                                                      dialogContext,
+                                                    ).pop(true),
+                                                    child: const Text(
+                                                      'Generar (1 crédito)',
+                                                    ),
+                                                  ),
+                                                ],
+                                              );
+                                            },
+                                          );
+                                          if (confirmed != true ||
+                                              !sheetContext.mounted) {
+                                            return;
+                                          }
+
+                                          setSheetState(() {
+                                            isGeneratingAiCover = true;
+                                            helperMessage =
+                                                'Generando portada con IA…';
+                                          });
+
+                                          try {
+                                            final response =
+                                                await _aiImageService
+                                                    .generateCategoryCover(
+                                              comercioId: comercioId,
+                                              categoryId: existing.id,
+                                            );
+                                            final imageUrl = response[
+                                                        'image_url']
+                                                    ?.toString()
+                                                    .trim() ??
+                                                '';
+                                            if (imageUrl.isEmpty) {
+                                              throw StateError(
+                                                response['message']
+                                                        ?.toString() ??
+                                                    'No se recibió la imagen.',
+                                              );
+                                            }
+                                            if (!sheetContext.mounted) return;
+                                            setSheetState(() {
+                                              selectedImageUrl = imageUrl;
+                                              clearImage = false;
+                                              helperMessage =
+                                                  'Portada IA lista. Guarda para confirmarla en el menú.';
+                                            });
+                                          } catch (error) {
+                                            if (!sheetContext.mounted) return;
+                                            setSheetState(() {
+                                              helperMessage =
+                                                  _formatAiImageErrorMessage(
+                                                error
+                                                    .toString()
+                                                    .replaceFirst(
+                                                      'Bad state: ',
+                                                      '',
+                                                    ),
+                                              );
+                                            });
+                                          } finally {
+                                            if (sheetContext.mounted) {
+                                              setSheetState(() {
+                                                isGeneratingAiCover = false;
+                                              });
+                                            }
+                                          }
+                                        },
+                                  icon: isGeneratingAiCover
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.auto_awesome),
+                                  label: Text(
+                                    isGeneratingAiCover
+                                        ? 'Generando…'
+                                        : 'Generar con IA (1 crédito)',
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    minimumSize: const Size.fromHeight(46),
+                                    foregroundColor: const Color(0xFF6D28D9),
+                                  ),
                                 ),
                                 if (helperMessage != null) ...[
                                   const SizedBox(height: 10),
@@ -887,7 +1107,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                             children: [
                               Expanded(
                                 child: TextButton(
-                                  onPressed: isUploadingImage
+                                  onPressed: isUploadingImage ||
+                                          isGeneratingAiCover
                                       ? null
                                       : () {
                                           FocusManager.instance.primaryFocus
@@ -900,7 +1121,8 @@ class _CatalogCategoriesScreenState extends State<CatalogCategoriesScreen> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: FilledButton(
-                                  onPressed: isUploadingImage
+                                  onPressed: isUploadingImage ||
+                                          isGeneratingAiCover
                                       ? null
                                       : () {
                                           final draft =
