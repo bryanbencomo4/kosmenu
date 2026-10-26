@@ -108,6 +108,8 @@ export function optimizeStorageImageUrl(
     const url = new URL(raw);
     if (url.pathname.includes(RENDER_MARKER)) {
       url.searchParams.set('width', String(Math.max(1, Math.round(width))));
+      // Without resize=contain, Supabase keeps source height and crops width.
+      url.searchParams.set('resize', 'contain');
       url.searchParams.set('quality', String(Math.min(90, Math.max(40, quality))));
       url.searchParams.set('format', 'webp');
       return url.toString();
@@ -117,6 +119,7 @@ export function optimizeStorageImageUrl(
 
     url.pathname = url.pathname.replace(PUBLIC_MARKER, RENDER_MARKER);
     url.searchParams.set('width', String(Math.max(1, Math.round(width))));
+    url.searchParams.set('resize', 'contain');
     url.searchParams.set('quality', String(Math.min(90, Math.max(40, quality))));
     url.searchParams.set('format', 'webp');
     return url.toString();

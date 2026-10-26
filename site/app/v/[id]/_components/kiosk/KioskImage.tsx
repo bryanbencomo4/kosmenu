@@ -23,11 +23,17 @@ type KioskImageProps = {
   /**
    * `cover` (default) = fill frame, sharp edges clipped by parent radius (Instagram-style).
    * `contain` = full photo letterboxed on a blurred cover fill (product sheet hero).
+   * `width` = full image at natural aspect, scaled to parent width (no crop, no blur).
    * `auto` = treated as `cover` (legacy alias).
    */
-  fit?: 'auto' | 'contain' | 'cover';
-  /** Keep blurred cover fill behind the photo (default: on for `contain`, off for `cover`). */
+  fit?: 'auto' | 'contain' | 'cover' | 'width';
+  /** Keep blurred cover fill behind the photo (default: on for `contain`, off for `cover`/`width`). */
   showBlurFill?: boolean;
+  /**
+   * Skip cold variants (use hot transform). Avoids cold-404→hot swap that
+   * looks like the image "adjusts" after refresh on freshly uploaded covers.
+   */
+  preferHot?: boolean;
 };
 
 function queueLazyVariants(imageUrl: string) {
@@ -51,6 +57,7 @@ function preferredSrc(
   src: string,
   sourceUrl: string | null | undefined,
   displayWidth: number,
+  preferHot = false,
 ): { active: string; hot: string | null; original: string | null } {
   if (!sourceUrl) {
     return { active: src, hot: null, original: null };
@@ -58,6 +65,13 @@ function preferredSrc(
   const sources = resolveMenuImageSources(sourceUrl, displayWidth);
   if (!sources) {
     return { active: src, hot: null, original: null };
+  }
+  if (preferHot) {
+    return {
+      active: sources.hot || src,
+      hot: null,
+      original: sources.original,
+    };
   }
   // Cold-first: one URL, browser-cache friendly. Fallback only on error.
   return {
@@ -83,6 +97,7 @@ export function KioskImage({
   priority = false,
   fit = 'cover',
   showBlurFill,
+  preferHot = false,
 }: KioskImageProps) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const blurRef = useRef<HTMLImageElement | null>(null);
@@ -94,17 +109,18 @@ export function KioskImage({
   const [fillReady, setFillReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  const resolved = preferredSrc(src, sourceUrl, displayWidth);
+  const resolved = preferredSrc(src, sourceUrl, displayWidth, preferHot);
   const [activeSrc, setActiveSrc] = useState(resolved.active);
 
-  const useCover = fit !== 'contain';
-  const keepBlurFill = showBlurFill ?? !useCover;
-  // Only load a blur layer when letterboxing (contain). Cover tiles use one <img> only.
+  const useWidth = fit === 'width';
+  const useCover = fit !== 'contain' && !useWidth;
+  const keepBlurFill = showBlurFill ?? fit === 'contain';
+  // Only load a blur layer when letterboxing (contain). Cover/width tiles use one <img> only.
   const fillSrc = keepBlurFill ? (previewSrc ?? '').trim() || activeSrc : '';
   const shown = Boolean(activeSrc) && !failed && sharpReady;
 
   useLayoutEffect(() => {
-    const next = preferredSrc(src, sourceUrl, displayWidth);
+    const next = preferredSrc(src, sourceUrl, displayWidth, preferHot);
     cascadeRef.current = { hot: next.hot, original: next.original };
     setActiveSrc(next.active);
     setFailed(false);
@@ -118,7 +134,7 @@ export function KioskImage({
       setSharpReady(true);
       setFillReady(true);
     }
-  }, [src, sourceUrl, displayWidth]);
+  }, [src, sourceUrl, displayWidth, preferHot]);
 
   function handleSharpError() {
     const { hot, original } = cascadeRef.current;
@@ -139,19 +155,29 @@ export function KioskImage({
 
   return (
     <div
-      className={`relative overflow-hidden ${className}`}
-      style={{ backgroundColor: 'var(--menu-surface-alt, #f3f4f6)' }}
+      className={`relative overflow-hidden ${useWidth ? 'w-full' : ''} ${className}`}
+      style={
+        useWidth
+          ? undefined
+          : { backgroundColor: 'var(--menu-surface-alt, #f3f4f6)' }
+      }
     >
       {!shown && !failed ? (
         <div
-          className="absolute inset-0 animate-pulse bg-[var(--menu-surface-alt,#e5e7eb)]"
+          className={
+            useWidth
+              ? 'aspect-[2/3] w-full animate-pulse bg-[var(--menu-surface-alt,#e5e7eb)]'
+              : 'absolute inset-0 animate-pulse bg-[var(--menu-surface-alt,#e5e7eb)]'
+          }
           aria-hidden
         />
       ) : null}
 
       {failed || !activeSrc ? (
         <div
-          className="grid h-full w-full place-items-center text-2xl text-[var(--menu-text-muted)]"
+          className={`grid place-items-center text-2xl text-[var(--menu-text-muted)] ${
+            useWidth ? 'aspect-[2/3] w-full' : 'h-full w-full'
+          }`}
           aria-hidden
         >
           🍽️
@@ -185,8 +211,10 @@ export function KioskImage({
             loading={priority ? 'eager' : 'lazy'}
             decoding="async"
             fetchPriority={priority ? 'high' : 'auto'}
-            className={`relative z-[1] h-full w-full transition-opacity duration-150 ${
-              useCover ? 'object-cover' : 'object-contain'
+            className={`relative z-[1] transition-opacity duration-150 ${
+              useWidth
+                ? 'block h-auto w-full'
+                : `h-full w-full ${useCover ? 'object-cover' : 'object-contain'}`
             } ${shown ? 'opacity-100' : 'opacity-0'} ${imgClassName}`}
             onLoad={() => {
               setFailed(false);

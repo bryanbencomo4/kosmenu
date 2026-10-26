@@ -470,7 +470,7 @@ export function KioskMenuExperience({
           categories.length === 0 ? (
             <EmptyState message="No hay categorías con esa búsqueda." />
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
               {categories.map((category, index) => (
                 <button
                   key={category.id}
@@ -483,30 +483,30 @@ export function KioskMenuExperience({
                   className="kiosk-card flex h-full flex-col overflow-hidden rounded-[22px] bg-[var(--menu-surface)] text-left shadow-[var(--menu-shadow)] transition duration-200 ease-out hover:-translate-y-0.5"
                   style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                 >
-                  {/* 2:3 media — cover crop, sharp edges clipped by card radius. */}
-                  <div className="relative w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)] pt-[150%]">
-                    <div className="absolute inset-0">
-                      {category.coverUrl ? (
-                        <KioskImage
-                          src={category.coverUrl}
-                          sourceUrl={category.coverSourceUrl || category.coverUrl}
-                          displayWidth={520}
-                          alt=""
-                          fit="cover"
-                          className="h-full w-full"
-                        />
-                      ) : (
-                        <div className="grid h-full place-items-center text-5xl">{category.glyph}</div>
-                      )}
-                    </div>
+                  {/* Full cover at natural aspect — width fills card, no crop, no blur. */}
+                  <div className="relative w-full shrink-0 overflow-hidden bg-[var(--menu-surface-alt)]">
+                    {category.coverUrl ? (
+                      <KioskImage
+                        src={category.coverUrl}
+                        sourceUrl={category.coverSourceUrl || category.coverUrl}
+                        displayWidth={520}
+                        alt=""
+                        fit="width"
+                        preferHot
+                        className="w-full"
+                      />
+                    ) : (
+                      <div className="grid aspect-[3/4] w-full place-items-center text-5xl">
+                        {category.glyph}
+                      </div>
+                    )}
                     <span className="absolute left-2 top-2 z-10 rounded-full bg-[color-mix(in_srgb,var(--menu-surface)_92%,transparent)] px-2 py-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
                       {category.productCount}
                     </span>
                   </div>
-                  {/* Fixed 2-line title slot so long names don't stretch neighbors / next row. */}
-                  <div className="flex h-[3.25rem] shrink-0 items-center px-3 py-2.5">
+                  <div className="flex h-11 shrink-0 items-center px-3 py-2">
                     <p
-                      className={`${titleFont.className} line-clamp-2 text-sm font-extrabold leading-5 text-[var(--menu-text)]`}
+                      className={`${titleFont.className} truncate text-sm font-extrabold text-[var(--menu-text)]`}
                     >
                       {category.name}
                     </p>
