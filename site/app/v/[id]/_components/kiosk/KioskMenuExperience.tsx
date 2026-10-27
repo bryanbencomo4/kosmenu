@@ -490,10 +490,10 @@ export function KioskMenuExperience({
                         <KioskImage
                           src={category.coverUrl}
                           sourceUrl={category.coverSourceUrl || category.coverUrl}
-                          displayWidth={520}
+                          displayWidth={360}
                           alt=""
                           fit="cover"
-                          preferHot
+                          priority={index < 6}
                           className="h-full w-full"
                         />
                       ) : (
@@ -538,6 +538,7 @@ export function KioskMenuExperience({
                       displayWidth={360}
                       alt={product.name}
                       fit="cover"
+                      priority={index < 4}
                       className="h-full w-full"
                     />
                   ) : (

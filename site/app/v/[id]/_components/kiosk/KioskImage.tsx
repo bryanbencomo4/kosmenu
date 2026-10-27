@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import {
   resolveMenuImageSources,
@@ -18,7 +18,7 @@ type KioskImageProps = {
   alt?: string;
   className?: string;
   imgClassName?: string;
-  /** Eager-load + high fetch priority (home logo / LCP). Keep false for grids. */
+  /** Eager-load + high fetch priority (home logo / first grid tiles). Keep false for below-fold. */
   priority?: boolean;
   /**
    * `cover` (default) = fill frame, sharp edges clipped by parent radius (Instagram-style).
@@ -30,8 +30,7 @@ type KioskImageProps = {
   /** Keep blurred cover fill behind the photo (default: on for `contain`, off for `cover`/`width`). */
   showBlurFill?: boolean;
   /**
-   * Skip cold variants (use hot transform). Avoids cold-404→hot swap that
-   * looks like the image "adjusts" after refresh on freshly uploaded covers.
+   * @deprecated Prefer cold WebP. Hot `/render/` is slower under concurrency and caches only 1h.
    */
   preferHot?: boolean;
 };
@@ -136,6 +135,22 @@ export function KioskImage({
     }
   }, [src, sourceUrl, displayWidth, preferHot]);
 
+  // Warm the HTTP cache for above-the-fold tiles before paint settles.
+  useEffect(() => {
+    if (!priority || !activeSrc || typeof document === 'undefined') return;
+    const existing = document.head.querySelector(`link[data-kiosk-preload="${activeSrc.replace(/"/g, '')}"]`);
+    if (existing) return;
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = 'image';
+    link.href = activeSrc;
+    link.setAttribute('data-kiosk-preload', activeSrc);
+    document.head.appendChild(link);
+    return () => {
+      link.remove();
+    };
+  }, [priority, activeSrc]);
+
   function handleSharpError() {
     const { hot, original } = cascadeRef.current;
     if (hot && activeSrc !== hot && activeSrc !== original) {
@@ -192,8 +207,8 @@ export function KioskImage({
               alt=""
               aria-hidden
               loading={priority ? 'eager' : 'lazy'}
-              decoding="async"
-              fetchPriority={priority ? 'high' : 'auto'}
+              decoding={priority ? 'sync' : 'async'}
+              fetchPriority={priority ? 'high' : 'low'}
               onLoad={() => setFillReady(true)}
               onError={() => setFillReady(false)}
               className={`pointer-events-none absolute inset-0 h-full w-full object-cover blur-xl transition-opacity duration-200 ${
@@ -209,7 +224,7 @@ export function KioskImage({
             src={activeSrc}
             alt={alt}
             loading={priority ? 'eager' : 'lazy'}
-            decoding="async"
+            decoding={priority ? 'sync' : 'async'}
             fetchPriority={priority ? 'high' : 'auto'}
             className={`relative z-[1] transition-opacity duration-150 ${
               useWidth

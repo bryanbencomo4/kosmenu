@@ -3609,7 +3609,7 @@ export default function PublicMenuPage() {
             categoria.imagen_url,
             categoria.productos,
             comercioLogoUrl,
-            MENU_IMAGE_WIDTH.category,
+            MENU_IMAGE_WIDTH.tile,
           ),
           coverSourceUrl: coverSource,
           productCount: categoria.productos.length,
@@ -5563,6 +5563,12 @@ export default function PublicMenuPage() {
       <Head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {supabaseUrl ? (
+          <>
+            <link rel="preconnect" href={supabaseUrl} crossOrigin="" />
+            <link rel="dns-prefetch" href={supabaseUrl} />
+          </>
+        ) : null}
         {googleFontsUrl ? (
           <>
             <link rel="preconnect" href="https://fonts.googleapis.com" />
