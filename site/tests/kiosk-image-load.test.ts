@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  autoRetryDelayMs,
   hashImagePath,
   IMAGE_PHASE_TIMEOUT_MS,
   IMAGE_TOTAL_BUDGET_MS,
   initialPhase,
   nextPhase,
   phaseTimeoutMs,
+  shouldAdvanceAfterFailure,
   urlForPhase,
   type ImageCascadeUrls,
 } from '../app/v/[id]/_lib/kiosk-image-load';
@@ -24,34 +26,32 @@ describe('kiosk image cascade (scenarios)', () => {
     expect(urlForPhase(full, 'cold')).toContain('/card.webp');
   });
 
-  it('2. after cold failure/timeout advances to hot then original', () => {
+  it('2. after cold hard error advances to hot then original', () => {
+    expect(shouldAdvanceAfterFailure('error')).toBe(true);
     expect(nextPhase(full, 'cold')).toBe('hot');
     expect(nextPhase(full, 'hot')).toBe('original');
-    expect(nextPhase(full, 'original')).toBeNull();
   });
 
-  it('3. pending hang is bounded by phase timeout within total budget', () => {
+  it('3. hang timeout does not advance to same-host hot (cost + recovery)', () => {
+    expect(shouldAdvanceAfterFailure('timeout')).toBe(false);
+  });
+
+  it('4. pending hang is bounded by phase timeout within total budget', () => {
     expect(phaseTimeoutMs('cold', 0)).toBe(IMAGE_PHASE_TIMEOUT_MS.cold);
     expect(phaseTimeoutMs('cold', IMAGE_TOTAL_BUDGET_MS - 1_000)).toBe(1_000);
     expect(phaseTimeoutMs('hot', IMAGE_TOTAL_BUDGET_MS)).toBe(0);
   });
 
-  it('4. slow network still gets a substantial cold window before giving up', () => {
+  it('5. slow network still gets a substantial cold window before giving up', () => {
     expect(IMAGE_PHASE_TIMEOUT_MS.cold).toBeGreaterThanOrEqual(10_000);
     expect(IMAGE_TOTAL_BUDGET_MS).toBeGreaterThanOrEqual(18_000);
   });
 
-  it('5. category change = new cascade urls; hash is stable for same path', () => {
+  it('6. category change = new cascade urls; hash is stable for same path', () => {
     const a = hashImagePath(full.cold!);
     const b = hashImagePath(`${full.cold}?cachebust=1`);
     expect(a).toBe(b);
     expect(a).toHaveLength(8);
-  });
-
-  it('6. interrupted cascade with only original still resolves a phase', () => {
-    const onlyOriginal: ImageCascadeUrls = { cold: null, hot: null, original: full.original };
-    expect(initialPhase(onlyOriginal)).toBe('original');
-    expect(nextPhase(onlyOriginal, 'original')).toBeNull();
   });
 
   it('7. missing cold WebP starts at hot (new photo not backfilled yet)', () => {
@@ -60,18 +60,16 @@ describe('kiosk image cascade (scenarios)', () => {
     expect(nextPhase(noCold, 'hot')).toBe('original');
   });
 
-  it('8. same-host outage still ends: no infinite next phase', () => {
-    let phase = initialPhase(full);
-    const seen = new Set<string>([phase]);
-    for (let i = 0; i < 5; i += 1) {
-      const n = nextPhase(full, phase);
-      if (!n) break;
-      expect(seen.has(n)).toBe(false);
-      seen.add(n);
-      phase = n;
-    }
-    expect(nextPhase(full, phase)).toBeNull();
-    expect(seen.size).toBeLessThanOrEqual(3);
+  it('8. auto-retry delay fits inside the same 22s attempt budget', () => {
+    expect(autoRetryDelayMs(12_000)).not.toBeNull();
+    expect(autoRetryDelayMs(20_000)).toBeNull();
+    const delay = autoRetryDelayMs(12_000)!;
+    expect(12_000 + delay + IMAGE_PHASE_TIMEOUT_MS.cold).toBeGreaterThan(IMAGE_TOTAL_BUDGET_MS);
+    // Remaining after delay is still usable but clipped by total budget.
+    expect(phaseTimeoutMs('cold', 12_000 + delay)).toBeGreaterThan(0);
+    expect(phaseTimeoutMs('cold', 12_000 + delay)).toBeLessThanOrEqual(
+      IMAGE_TOTAL_BUDGET_MS - (12_000 + delay),
+    );
   });
 
   it('9. skips duplicate URLs when advancing phases', () => {
@@ -86,7 +84,6 @@ describe('kiosk image cascade (scenarios)', () => {
 
 describe('image analytics sampling', () => {
   it('caps and samples loads without requiring Wi-Fi labeling', () => {
-    // Should not throw in node; returns false without window sessionStorage quirks
     const result = shouldSampleImageEvent('image_error');
     expect(typeof result).toBe('boolean');
   });

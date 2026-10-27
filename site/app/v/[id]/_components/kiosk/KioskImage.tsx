@@ -7,13 +7,14 @@ import {
   VARIANT_WIDTHS,
 } from '../../../../_lib/optimize-storage-image';
 import {
+  autoRetryDelayMs,
   hashImagePath,
-  IMAGE_AUTO_RETRY_DELAY_MS,
   IMAGE_MAX_AUTO_RETRIES,
+  IMAGE_PHASE_TIMEOUT_MS,
   IMAGE_TOTAL_BUDGET_MS,
   initialPhase,
   nextPhase,
-  phaseTimeoutMs,
+  shouldAdvanceAfterFailure,
   urlForPhase,
   type ImageCascadeUrls,
   type ImageLoadPhase,
@@ -23,6 +24,28 @@ import {
   imageKindForWidth,
   trackImageAnalyticsEvent,
 } from '../../_lib/track-image-analytics';
+
+type ImageBudgetOverrides = {
+  __KOS_IMAGE_BUDGET_MS?: number;
+  __KOS_IMAGE_PHASE_MS?: Partial<Record<ImageLoadPhase, number>>;
+};
+
+function budgetMs(): number {
+  if (typeof window === 'undefined') return IMAGE_TOTAL_BUDGET_MS;
+  const value = (window as Window & ImageBudgetOverrides).__KOS_IMAGE_BUDGET_MS;
+  return typeof value === 'number' && value > 0 ? value : IMAGE_TOTAL_BUDGET_MS;
+}
+
+function phaseCapMs(phase: ImageLoadPhase): number {
+  if (typeof window === 'undefined') return IMAGE_PHASE_TIMEOUT_MS[phase];
+  const override = (window as Window & ImageBudgetOverrides).__KOS_IMAGE_PHASE_MS?.[phase];
+  return typeof override === 'number' && override > 0 ? override : IMAGE_PHASE_TIMEOUT_MS[phase];
+}
+
+function phaseWaitMs(phase: ImageLoadPhase, elapsedMs: number): number {
+  const remaining = Math.max(0, budgetMs() - elapsedMs);
+  return Math.min(phaseCapMs(phase), remaining);
+}
 
 type KioskImageProps = {
   src: string;
@@ -117,6 +140,8 @@ export function KioskImage({
   const imageRef = useRef<HTMLImageElement | null>(null);
   const blurRef = useRef<HTMLImageElement | null>(null);
   const loadGenRef = useRef(0);
+  /** Wall clock for the whole attempt cycle (phases + one auto-retry). Manual retry resets. */
+  const attemptStartedAtRef = useRef(0);
   const cascadeStartedAtRef = useRef(0);
   const phaseStartedAtRef = useRef(0);
   const phaseRef = useRef<ImageLoadPhase>('cold');
@@ -175,7 +200,7 @@ export function KioskImage({
     url: string,
     reason?: string,
   ) {
-    const started = phaseStartedAtRef.current || cascadeStartedAtRef.current;
+    const started = phaseStartedAtRef.current || attemptStartedAtRef.current;
     trackImageAnalyticsEvent({
       event,
       comercioId: comercioIdFromLocation(),
@@ -187,11 +212,20 @@ export function KioskImage({
     });
   }
 
+  function attemptElapsedMs(): number {
+    if (typeof performance === 'undefined') return 0;
+    return Math.max(0, performance.now() - attemptStartedAtRef.current);
+  }
+
   function armPhaseTimer(gen: number, currentPhase: ImageLoadPhase) {
     clearPhaseTimer();
-    const elapsed =
-      typeof performance !== 'undefined' ? performance.now() - cascadeStartedAtRef.current : 0;
-    const wait = phaseTimeoutMs(currentPhase, elapsed, IMAGE_TOTAL_BUDGET_MS);
+    // Offline: fail fast — waiting on a hung socket wastes the budget and never paints.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      report('image_timeout', currentPhase, urlForPhase(urlsRef.current, currentPhase) || '', 'offline');
+      finalizeFailure(gen);
+      return;
+    }
+    const wait = phaseWaitMs(currentPhase, attemptElapsedMs());
     if (wait <= 0) {
       handlePhaseTimeout(gen);
       return;
@@ -203,15 +237,25 @@ export function KioskImage({
 
   function advanceOrFail(gen: number, fromPhase: ImageLoadPhase, why: 'error' | 'timeout') {
     if (gen !== loadGenRef.current) return;
+    // Hang/timeout on Storage: another path on the same host will not heal a blocked domain.
+    // Skip hot /render/ to protect Spend Cap under unstable Wi‑Fi. Hard errors (404) still cascade.
+    if (!shouldAdvanceAfterFailure(why)) {
+      finalizeFailure(gen);
+      return;
+    }
     const urls = urlsRef.current;
     const upcoming = nextPhase(urls, fromPhase);
     if (upcoming) {
-      // Same Supabase host: still try next URL, but shared total budget bounds the hang.
-      if (why === 'error' && fromPhase === 'cold' && sourceUrl) {
+      if (fromPhase === 'cold' && sourceUrl) {
         queueLazyVariants(sourceUrl);
       }
       const nextUrl = urlForPhase(urls, upcoming);
       if (!nextUrl) {
+        finalizeFailure(gen);
+        return;
+      }
+      // Stop if the shared attempt budget is already exhausted.
+      if (phaseWaitMs(upcoming, attemptElapsedMs()) <= 0) {
         finalizeFailure(gen);
         return;
       }
@@ -233,14 +277,15 @@ export function KioskImage({
     waitingUrlRef.current = null;
     setFailed(true);
     setSharpReady(true);
-    if (autoRetriesRef.current < IMAGE_MAX_AUTO_RETRIES) {
-      autoRetriesRef.current += 1;
-      clearRetryTimer();
-      retryTimerRef.current = window.setTimeout(() => {
-        if (gen !== loadGenRef.current) return;
-        beginCascade(false);
-      }, IMAGE_AUTO_RETRY_DELAY_MS);
-    }
+    if (autoRetriesRef.current >= IMAGE_MAX_AUTO_RETRIES) return;
+    const delay = autoRetryDelayMs(attemptElapsedMs(), budgetMs());
+    if (delay == null) return;
+    autoRetriesRef.current += 1;
+    clearRetryTimer();
+    retryTimerRef.current = window.setTimeout(() => {
+      if (gen !== loadGenRef.current) return;
+      beginCascade(false);
+    }, delay);
   }
 
   function handlePhaseTimeout(gen: number) {
@@ -254,7 +299,10 @@ export function KioskImage({
   function beginCascade(resetRetries: boolean) {
     clearPhaseTimer();
     clearRetryTimer();
-    if (resetRetries) autoRetriesRef.current = 0;
+    if (resetRetries) {
+      autoRetriesRef.current = 0;
+      attemptStartedAtRef.current = typeof performance !== 'undefined' ? performance.now() : 0;
+    }
 
     const gen = loadGenRef.current + 1;
     loadGenRef.current = gen;
@@ -266,6 +314,9 @@ export function KioskImage({
     setPhase(startPhase);
     cascadeStartedAtRef.current = typeof performance !== 'undefined' ? performance.now() : 0;
     phaseStartedAtRef.current = cascadeStartedAtRef.current;
+    if (!attemptStartedAtRef.current) {
+      attemptStartedAtRef.current = cascadeStartedAtRef.current;
+    }
     setFailed(false);
     setFillReady(false);
     setSharpReady(false);

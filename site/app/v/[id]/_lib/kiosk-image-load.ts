@@ -8,19 +8,30 @@ export type ImageCascadeUrls = {
   original: string | null;
 };
 
-/** Per-phase wait before advancing. Slow links still get a full window. */
+/**
+ * Per-phase wait before treating a request as hung.
+ * Slow links that are still downloading should finish inside the cold window.
+ * Clear failures (img.onError / 404) advance immediately — they do not wait these timers.
+ */
 export const IMAGE_PHASE_TIMEOUT_MS: Record<ImageLoadPhase, number> = {
   cold: 12_000,
   hot: 8_000,
   original: 8_000,
 };
 
-/** Hard cap across the whole cascade (same-origin hangs must not stack forever). */
+/**
+ * Hard wall-clock cap for one user-visible attempt cycle:
+ * all phases + the single automatic retry + its delay.
+ * Manual "Reintentar" starts a fresh cycle with a new budget.
+ */
 export const IMAGE_TOTAL_BUDGET_MS = 22_000;
 
-/** One automatic full-cascade retry after hard failure. */
-export const IMAGE_AUTO_RETRY_DELAY_MS = 2_500;
+/** Delay before the single automatic retry (only if budget remains). */
+export const IMAGE_AUTO_RETRY_DELAY_MS = 1_500;
 export const IMAGE_MAX_AUTO_RETRIES = 1;
+
+/** Minimum remaining budget required to schedule an auto-retry. */
+export const IMAGE_AUTO_RETRY_MIN_REMAINING_MS = 2_500;
 
 export function initialPhase(urls: ImageCascadeUrls): ImageLoadPhase {
   if (urls.cold) return 'cold';
@@ -58,6 +69,23 @@ export function phaseTimeoutMs(
   const remaining = Math.max(0, totalBudgetMs - elapsedMs);
   const preferred = IMAGE_PHASE_TIMEOUT_MS[phase];
   return Math.min(preferred, remaining);
+}
+
+/**
+ * After a hang (no onLoad/onError), another URL on the same Storage host will not recover.
+ * Only advance on hard errors (404 / decode) where the next URL may legitimately exist.
+ */
+export function shouldAdvanceAfterFailure(why: 'error' | 'timeout'): boolean {
+  return why === 'error';
+}
+
+export function autoRetryDelayMs(
+  elapsedMs: number,
+  totalBudgetMs: number = IMAGE_TOTAL_BUDGET_MS,
+): number | null {
+  const remaining = totalBudgetMs - elapsedMs;
+  if (remaining < IMAGE_AUTO_RETRY_MIN_REMAINING_MS) return null;
+  return Math.min(IMAGE_AUTO_RETRY_DELAY_MS, Math.max(0, remaining - IMAGE_AUTO_RETRY_MIN_REMAINING_MS));
 }
 
 /** Stable short hash of a storage object path (no PII / no full URL). */

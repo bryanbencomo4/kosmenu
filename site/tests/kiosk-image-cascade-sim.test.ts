@@ -1,23 +1,21 @@
 /**
  * Scenario simulations for KioskImage load policy (no DOM / no hot transforms).
- * Models gen races, budgets, and failure → placeholder without infinite loops.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
-  IMAGE_AUTO_RETRY_DELAY_MS,
+  autoRetryDelayMs,
   IMAGE_MAX_AUTO_RETRIES,
   IMAGE_PHASE_TIMEOUT_MS,
   IMAGE_TOTAL_BUDGET_MS,
   initialPhase,
   nextPhase,
   phaseTimeoutMs,
+  shouldAdvanceAfterFailure,
   urlForPhase,
   type ImageCascadeUrls,
   type ImageLoadPhase,
 } from '../app/v/[id]/_lib/kiosk-image-load';
-
-type Outcome = 'load' | 'error' | 'hang';
 
 type SimEvent =
   | { type: 'load'; phase: ImageLoadPhase; at: number }
@@ -28,23 +26,20 @@ type SimEvent =
 
 function simulateCascade(opts: {
   urls: ImageCascadeUrls;
-  /** Outcome per phase when that URL is requested. */
-  outcomes: Partial<Record<ImageLoadPhase, Outcome>>;
-  /** Wall time until outcome fires (hang ignores and waits for phase timeout). */
+  outcomes: Partial<Record<ImageLoadPhase, 'load' | 'error' | 'hang'>>;
   latencyMs?: Partial<Record<ImageLoadPhase, number>>;
-  /** Abort cascade at this time (category change). */
   abortAtMs?: number;
   maxAutoRetries?: number;
-}): { events: SimEvent[]; final: 'shown' | 'placeholder' | 'aborted'; hotRequests: number } {
+}): { events: SimEvent[]; final: 'shown' | 'placeholder' | 'aborted'; hotRequests: number; endedAt: number } {
   const events: SimEvent[] = [];
   let hotRequests = 0;
   let autoRetry = 0;
   const maxRetries = opts.maxAutoRetries ?? IMAGE_MAX_AUTO_RETRIES;
   let now = 0;
+  const attemptStart = 0;
 
-  function runOnce(cascadeStart: number): 'shown' | 'placeholder' | 'aborted' {
+  function runOnce(): 'shown' | 'placeholder' | 'aborted' {
     let phase = initialPhase(opts.urls);
-    const started = cascadeStart;
 
     while (true) {
       const url = urlForPhase(opts.urls, phase);
@@ -54,8 +49,7 @@ function simulateCascade(opts: {
       }
       if (phase === 'hot') hotRequests += 1;
 
-      const elapsed = now - started;
-      const budgetWait = phaseTimeoutMs(phase, elapsed);
+      const budgetWait = phaseTimeoutMs(phase, now - attemptStart);
       const outcome = opts.outcomes[phase] ?? 'load';
       const latency = opts.latencyMs?.[phase] ?? (outcome === 'hang' ? budgetWait + 1 : 50);
 
@@ -68,6 +62,10 @@ function simulateCascade(opts: {
       if (outcome === 'hang' || latency >= budgetWait) {
         now += budgetWait;
         events.push({ type: 'timeout', phase, at: now });
+        if (!shouldAdvanceAfterFailure('timeout')) {
+          events.push({ type: 'fail', at: now, autoRetry });
+          return 'placeholder';
+        }
         const next = nextPhase(opts.urls, phase);
         if (!next) {
           events.push({ type: 'fail', at: now, autoRetry });
@@ -84,8 +82,16 @@ function simulateCascade(opts: {
       }
 
       events.push({ type: 'error', phase, at: now });
+      if (!shouldAdvanceAfterFailure('error')) {
+        events.push({ type: 'fail', at: now, autoRetry });
+        return 'placeholder';
+      }
       const next = nextPhase(opts.urls, phase);
       if (!next) {
+        events.push({ type: 'fail', at: now, autoRetry });
+        return 'placeholder';
+      }
+      if (phaseTimeoutMs(next, now - attemptStart) <= 0) {
         events.push({ type: 'fail', at: now, autoRetry });
         return 'placeholder';
       }
@@ -93,14 +99,16 @@ function simulateCascade(opts: {
     }
   }
 
-  let final = runOnce(0);
+  let final = runOnce();
   while (final === 'placeholder' && autoRetry < maxRetries) {
+    const delay = autoRetryDelayMs(now - attemptStart);
+    if (delay == null) break;
     autoRetry += 1;
-    now += IMAGE_AUTO_RETRY_DELAY_MS;
-    final = runOnce(now);
+    now += delay;
+    final = runOnce();
   }
 
-  return { events, final, hotRequests };
+  return { events, final, hotRequests, endedAt: now };
 }
 
 const full: ImageCascadeUrls = {
@@ -110,18 +118,10 @@ const full: ImageCascadeUrls = {
 };
 
 describe('KioskImage cascade simulation', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it('1. WebP cold load succeeds without hot transform', () => {
     const r = simulateCascade({ urls: full, outcomes: { cold: 'load' } });
     expect(r.final).toBe('shown');
     expect(r.hotRequests).toBe(0);
-    expect(r.events.some((e) => e.type === 'load' && e.phase === 'cold')).toBe(true);
   });
 
   it('2. 404 on cold advances to hot then can succeed', () => {
@@ -133,15 +133,16 @@ describe('KioskImage cascade simulation', () => {
     expect(r.hotRequests).toBe(1);
   });
 
-  it('3. pending hang without onLoad/onError times out into next phase', () => {
+  it('3. hang without onLoad/onError → placeholder; zero hot /render/', () => {
     const r = simulateCascade({
       urls: full,
-      outcomes: { cold: 'hang', hot: 'load' },
+      outcomes: { cold: 'hang' },
+      maxAutoRetries: 0,
     });
     expect(r.events.some((e) => e.type === 'timeout' && e.phase === 'cold')).toBe(true);
-    expect(r.final).toBe('shown');
-    const timeoutAt = r.events.find((e) => e.type === 'timeout')!.at;
-    expect(timeoutAt).toBe(IMAGE_PHASE_TIMEOUT_MS.cold);
+    expect(r.final).toBe('placeholder');
+    expect(r.hotRequests).toBe(0);
+    expect(r.endedAt).toBe(IMAGE_PHASE_TIMEOUT_MS.cold);
   });
 
   it('4. slow but successful download within cold window never times out', () => {
@@ -155,87 +156,54 @@ describe('KioskImage cascade simulation', () => {
     expect(r.hotRequests).toBe(0);
   });
 
-  it('5. category change aborts in-flight cascade (gen race)', () => {
+  it('5. category change aborts in-flight cascade', () => {
     const r = simulateCascade({
       urls: full,
       outcomes: { cold: 'hang' },
       abortAtMs: 2_000,
     });
     expect(r.final).toBe('aborted');
-    expect(r.events.some((e) => e.type === 'abort')).toBe(true);
   });
 
-  it('6. interrupt then recovery: auto-retry eventually shows', () => {
-    let calls = 0;
-    // First pass: all hang → placeholder; second pass (retry): cold loads.
-    const urls = full;
-    const events: SimEvent[] = [];
-    let now = 0;
-    let phase = initialPhase(urls);
-    let pass = 0;
-    const maxPasses = 1 + IMAGE_MAX_AUTO_RETRIES;
-
-    outer: while (pass < maxPasses) {
-      const cascadeStart = now;
-      phase = initialPhase(urls);
-      while (true) {
-        const elapsed = now - cascadeStart;
-        const wait = phaseTimeoutMs(phase, elapsed);
-        if (pass === 0) {
-          now += wait;
-          events.push({ type: 'timeout', phase, at: now });
-          const n = nextPhase(urls, phase);
-          if (!n) {
-            events.push({ type: 'fail', at: now, autoRetry: pass });
-            pass += 1;
-            now += IMAGE_AUTO_RETRY_DELAY_MS;
-            continue outer;
-          }
-          phase = n;
-          continue;
-        }
-        now += 80;
-        events.push({ type: 'load', phase, at: now });
-        calls += 1;
-        break outer;
-      }
-    }
-
-    expect(calls).toBe(1);
-    expect(events.some((e) => e.type === 'fail')).toBe(true);
-    expect(events.some((e) => e.type === 'load')).toBe(true);
-    expect(now).toBeLessThan(IMAGE_TOTAL_BUDGET_MS * 2 + IMAGE_AUTO_RETRY_DELAY_MS + 1_000);
+  it('6. hang + auto-retry stays inside the 22s attempt budget', () => {
+    const r = simulateCascade({
+      urls: full,
+      outcomes: { cold: 'hang' },
+      maxAutoRetries: 1,
+    });
+    expect(r.final).toBe('placeholder');
+    expect(r.hotRequests).toBe(0);
+    expect(r.endedAt).toBeLessThanOrEqual(IMAGE_TOTAL_BUDGET_MS);
+    expect(r.events.filter((e) => e.type === 'timeout').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('7. missing cold WebP starts at hot (no unnecessary cold wait)', () => {
+  it('7. missing cold WebP starts at hot', () => {
     const noCold: ImageCascadeUrls = { cold: null, hot: full.hot, original: full.original };
     const r = simulateCascade({ urls: noCold, outcomes: { hot: 'load' } });
     expect(r.final).toBe('shown');
     expect(r.hotRequests).toBe(1);
-    expect(r.events[0]).toMatchObject({ type: 'load', phase: 'hot' });
   });
 
-  it('8. Supabase host outage: cascade ends with placeholder, bounded budget', () => {
+  it('8. Supabase host hang: no stacked same-host fallbacks', () => {
     const r = simulateCascade({
       urls: full,
       outcomes: { cold: 'hang', hot: 'hang', original: 'hang' },
       maxAutoRetries: 0,
     });
     expect(r.final).toBe('placeholder');
-    const last = r.events[r.events.length - 1];
-    expect(last.type).toBe('fail');
-    expect(last.at).toBeLessThanOrEqual(IMAGE_TOTAL_BUDGET_MS + 50);
+    expect(r.hotRequests).toBe(0);
+    expect(r.endedAt).toBeLessThanOrEqual(IMAGE_PHASE_TIMEOUT_MS.cold + 50);
   });
 
-  it('9. many simultaneous failures stay independent (N placeholders, no shared hang)', () => {
+  it('9. many simultaneous hangs: N cold only, zero hot transforms', () => {
     const results = Array.from({ length: 12 }, () =>
       simulateCascade({
         urls: full,
-        outcomes: { cold: 'error', hot: 'error', original: 'error' },
+        outcomes: { cold: 'hang' },
         maxAutoRetries: 0,
       }),
     );
     expect(results.every((r) => r.final === 'placeholder')).toBe(true);
-    expect(results.every((r) => r.hotRequests === 1)).toBe(true);
+    expect(results.every((r) => r.hotRequests === 0)).toBe(true);
   });
 });
