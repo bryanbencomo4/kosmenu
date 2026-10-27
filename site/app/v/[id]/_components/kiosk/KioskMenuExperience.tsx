@@ -2,7 +2,7 @@
 
 import { Caveat, Manrope } from 'next/font/google';
 import { ArrowLeft, ArrowRight, Plus, Search, ShoppingBag, SlidersHorizontal, Star, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskHome } from './KioskHome';
@@ -145,6 +145,37 @@ export function KioskMenuExperience({
       setScreen((current) => (current === 'home' ? 'categories' : current));
     }
   }, [assistedMode, fulfillment]);
+
+  const prefetchedCategoriesRef = useRef<Set<string>>(new Set());
+
+  /** Prefetch only the first visible product tiles of one category (on intent). */
+  function prefetchCategoryProductImages(categoryId: string) {
+    if (typeof window === 'undefined') return;
+    if (prefetchedCategoriesRef.current.has(categoryId)) return;
+    // Avoid competing with visible work on constrained links.
+    const conn = (navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }).connection;
+    if (conn?.saveData) return;
+    if (conn?.effectiveType === 'slow-2g' || conn?.effectiveType === '2g') return;
+
+    prefetchedCategoriesRef.current.add(categoryId);
+    const products = productsByCategory[categoryId] ?? [];
+    const loaders: HTMLImageElement[] = [];
+    for (const product of products.slice(0, 4)) {
+      const url = (product.imageUrl ?? '').trim();
+      if (!url) continue;
+      const img = new Image();
+      img.decoding = 'async';
+      img.fetchPriority = 'low';
+      img.src = url;
+      loaders.push(img);
+    }
+    // Keep refs briefly so GC does not cancel in-flight requests.
+    window.setTimeout(() => {
+      for (const img of loaders) img.src = '';
+    }, 8000);
+  }
 
   // Catalog from home button or ?catalogo=1 should open categories, not stay on home.
   useEffect(() => {
@@ -475,6 +506,7 @@ export function KioskMenuExperience({
                 <button
                   key={category.id}
                   type="button"
+                  onPointerDown={() => prefetchCategoryProductImages(category.id)}
                   onClick={() => {
                     setActiveCategoryId(category.id);
                     onSearchChange('');

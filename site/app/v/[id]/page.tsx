@@ -3634,6 +3634,7 @@ export default function PublicMenuPage() {
         name: producto.nombre,
         description: (producto.descripcion ?? '').trim(),
         priceLabel: formatProductPriceLabel(producto, formatUpsellPrice),
+        // List tiles ~124 CSS px @2–3x → cold card WebP (360w) for sharpness.
         imageUrl: displayProductImage(producto.imagen_url, comercioLogoUrl, MENU_IMAGE_WIDTH.tile),
         imageSourceUrl: (producto.imagen_url ?? '').trim() || null,
         available: producto.disponible !== false,
