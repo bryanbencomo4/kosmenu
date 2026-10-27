@@ -493,7 +493,7 @@ export function KioskMenuExperience({
                           displayWidth={360}
                           alt=""
                           fit="cover"
-                          priority={index < 6}
+                          priority={index < 4}
                           className="h-full w-full"
                         />
                       ) : (

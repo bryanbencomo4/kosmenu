@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import {
   resolveMenuImageSources,
@@ -134,22 +134,6 @@ export function KioskImage({
       setFillReady(true);
     }
   }, [src, sourceUrl, displayWidth, preferHot]);
-
-  // Warm the HTTP cache for above-the-fold tiles before paint settles.
-  useEffect(() => {
-    if (!priority || !activeSrc || typeof document === 'undefined') return;
-    const existing = document.head.querySelector(`link[data-kiosk-preload="${activeSrc.replace(/"/g, '')}"]`);
-    if (existing) return;
-    const link = document.createElement('link');
-    link.rel = 'preload';
-    link.as = 'image';
-    link.href = activeSrc;
-    link.setAttribute('data-kiosk-preload', activeSrc);
-    document.head.appendChild(link);
-    return () => {
-      link.remove();
-    };
-  }, [priority, activeSrc]);
 
   function handleSharpError() {
     const { hot, original } = cascadeRef.current;
