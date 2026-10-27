@@ -1,4 +1,4 @@
-/** Cold WebP/AVIF variants + hot Supabase render fallback for public Storage images. */
+/** Cold WebP variants + hot Supabase render fallback for public Storage images. */
 
 export const PRODUCT_IMAGES_BUCKET = 'product-images';
 export const LOGOS_BUCKET = 'logos-comercios';
@@ -133,6 +133,10 @@ export type MenuImageSources = {
   kind: ImageVariantKind;
   /** Cold WebP (preferred src). Null when URL is external / not Storage. */
   coldWebp: string | null;
+  /**
+   * Legacy AVIF URL helper only — menu clients must not request AVIF:
+   * product-images rejects image/avif (415). Not used by KioskImage.
+   */
   coldAvif: string | null;
   /** Hot transform fallback (same perceived performance as today). */
   hot: string;

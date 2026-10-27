@@ -78,11 +78,11 @@ async function uploadVariant(
   return true;
 }
 
-async function encodeVariant(
-  source: Buffer,
-  kind: ImageVariantKind,
-  format: 'webp' | 'avif',
-): Promise<Buffer> {
+/** Formats written to Storage. AVIF is omitted: product-images rejects image/avif (415). */
+const VARIANT_FORMATS = ['webp'] as const;
+type VariantFormat = (typeof VARIANT_FORMATS)[number];
+
+async function encodeVariant(source: Buffer, kind: ImageVariantKind, format: VariantFormat): Promise<Buffer> {
   const width = VARIANT_WIDTHS[kind];
   const pipeline = sharp(source, { failOn: 'none' })
     .rotate()
@@ -93,13 +93,14 @@ async function encodeVariant(
       withoutEnlargement: true,
     });
 
-  if (format === 'avif') {
-    return pipeline.avif({ quality: 58, effort: 4 }).toBuffer();
+  if (format === 'webp') {
+    return pipeline.webp({ quality: 72, effort: 4 }).toBuffer();
   }
-  return pipeline.webp({ quality: 72, effort: 4 }).toBuffer();
+  // Exhaustiveness guard — only webp is enabled today.
+  throw new Error(`Unsupported variant format: ${format}`);
 }
 
-/** Generate missing thumb/card/hero WebP+AVIF next to a public Storage original. */
+/** Generate missing thumb/card/hero WebP next to a public Storage original. */
 export async function ensureImageVariants(input: {
   imageUrl?: string | null;
   bucket?: string;
@@ -138,7 +139,7 @@ export async function ensureImageVariants(input: {
   const skipped: string[] = [];
 
   for (const kind of VARIANT_KINDS) {
-    for (const format of ['webp', 'avif'] as const) {
+    for (const format of VARIANT_FORMATS) {
       const objectPath = coldVariantObjectPath(parsed, kind, format);
       if (!input.force && (await variantExists(parsed.bucket, objectPath))) {
         skipped.push(objectPath);
@@ -146,23 +147,13 @@ export async function ensureImageVariants(input: {
       }
       try {
         const encoded = await encodeVariant(source.bytes, kind, format);
-        const contentType = format === 'avif' ? 'image/avif' : 'image/webp';
-        const uploaded = await uploadVariant(parsed.bucket, objectPath, encoded, contentType);
+        const uploaded = await uploadVariant(parsed.bucket, objectPath, encoded, 'image/webp');
         if (!uploaded) {
-          // Many Storage buckets allow WebP but not AVIF yet — WebP is required.
-          if (format === 'avif') {
-            skipped.push(objectPath);
-            continue;
-          }
           return { ok: false, error: 'Failed to upload variant.' };
         }
         generated.push(objectPath);
       } catch (error) {
         console.error('[image-variants] encode failed', kind, format, error);
-        if (format === 'avif') {
-          skipped.push(objectPath);
-          continue;
-        }
         return { ok: false, error: 'Failed to encode variant.' };
       }
     }

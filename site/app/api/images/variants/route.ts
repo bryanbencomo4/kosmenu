@@ -38,7 +38,7 @@ export async function OPTIONS(request: Request) {
 }
 
 /**
- * Ensure cold WebP/AVIF variants exist for a public Storage image.
+ * Ensure cold WebP variants (thumb/card/hero) exist for a public Storage image.
  * Auth: merchant Bearer (owns path comercio) OR IMAGE_VARIANTS_SECRET / CRON_SECRET.
  * Public lazy ensure also allowed (strict rate limit) so menus can self-heal on 404.
  */

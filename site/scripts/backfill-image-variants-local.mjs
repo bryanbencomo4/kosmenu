@@ -1,5 +1,5 @@
 /**
- * Local backfill: download originals from Supabase Storage, encode WebP/AVIF with sharp,
+ * Local backfill: download originals from Supabase Storage, encode WebP with sharp,
  * upload to `.variants/` — does not use Supabase Image Transformations.
  *
  * Usage (from site/):
@@ -66,32 +66,27 @@ async function ensureOne(imageUrl) {
   const source = Buffer.from(await data.arrayBuffer());
   let generated = 0;
   for (const kind of KINDS) {
-    for (const format of /** @type {const} */ (['webp', 'avif'])) {
-      const objectPath = variantPath(parsed, kind, format);
-      const pipeline = sharp(source, { failOn: 'none' })
-        .rotate()
-        .resize({
-          width: WIDTHS[kind],
-          height: WIDTHS[kind],
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      const bytes =
-        format === 'avif'
-          ? await pipeline.avif({ quality: 58, effort: 4 }).toBuffer()
-          : await pipeline.webp({ quality: 72, effort: 4 }).toBuffer();
-      const { error: upErr } = await supabase.storage.from(parsed.bucket).upload(objectPath, bytes, {
-        upsert: true,
-        contentType: format === 'avif' ? 'image/avif' : 'image/webp',
-        cacheControl: '31536000',
+    // WebP only — product-images rejects image/avif (415).
+    const format = 'webp';
+    const objectPath = variantPath(parsed, kind, format);
+    const pipeline = sharp(source, { failOn: 'none' })
+      .rotate()
+      .resize({
+        width: WIDTHS[kind],
+        height: WIDTHS[kind],
+        fit: 'inside',
+        withoutEnlargement: true,
       });
-      if (upErr) {
-        // Bucket may not allow image/avif — WebP is enough for cold serving.
-        if (format === 'avif') continue;
-        return { ok: false, reason: upErr.message };
-      }
-      generated += 1;
+    const bytes = await pipeline.webp({ quality: 72, effort: 4 }).toBuffer();
+    const { error: upErr } = await supabase.storage.from(parsed.bucket).upload(objectPath, bytes, {
+      upsert: true,
+      contentType: 'image/webp',
+      cacheControl: '31536000',
+    });
+    if (upErr) {
+      return { ok: false, reason: upErr.message };
     }
+    generated += 1;
   }
   return { ok: true, generated };
 }
