@@ -1797,6 +1797,7 @@ export default function PublicMenuPage() {
   const [clientTable, setClientTable] = useState('');
   const [payLater, setPayLater] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [isOrderReviewOpen, setIsOrderReviewOpen] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [cashPaymentInput, setCashPaymentInput] = useState('');
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
@@ -2004,6 +2005,7 @@ export default function PublicMenuPage() {
   useEffect(() => {
     if (!isConfirmOpen) {
       setIsCheckoutFooterExpanded(false);
+      setIsOrderReviewOpen(false);
     }
   }, [isConfirmOpen]);
 
@@ -3808,13 +3810,13 @@ export default function PublicMenuPage() {
         : checkoutStep === 2
           ? canGoNextFromStep2
           : canSubmitStep3;
-  const canSubmitCheckout =
+  const canReadyForReview =
     canGoNextFromStep0 &&
     canGoNextFromStep1 &&
     canGoNextFromStep2 &&
     canSubmitStep3 &&
-    isClientEmailValid &&
     !scheduleClosed;
+  const canSubmitCheckout = canReadyForReview && isClientEmailValid;
   const currentCheckoutStepTitle = checkoutStepTitles[checkoutStep] ?? 'Confirmar pedido';
   const currentCheckoutStepDescription = checkoutStepDescriptions[checkoutStep] ?? checkoutStepDescriptions[0];
   const selectedPaymentSummary = selectedPaymentLabel || 'Por seleccionar';
@@ -5230,6 +5232,19 @@ export default function PublicMenuPage() {
     proceedToCheckoutSheet();
   }
 
+  function openOrderReview() {
+    if (scheduleClosed) {
+      setCheckoutError(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
+      return;
+    }
+    if (!canReadyForReview) {
+      setCheckoutError('Completa el pago para revisar tu pedido.');
+      return;
+    }
+    setCheckoutError(null);
+    setIsOrderReviewOpen(true);
+  }
+
   async function confirmOrder() {
     if (catalogMode) return;
     if (isOwnerPreview) {
@@ -5398,6 +5413,7 @@ export default function PublicMenuPage() {
       setOrderNotes('');
       setDeliveryMode('pickup');
       setCheckoutStep(0);
+      setIsOrderReviewOpen(false);
       setIsConfirmOpen(false);
       setKioskAddedPrompt(null);
       setKioskVoucher(voucher);
@@ -6814,7 +6830,7 @@ export default function PublicMenuPage() {
               isSubmittingOrder
                 ? 'Guardando pedido...'
                 : checkoutStep === 3
-                  ? 'Confirmar pedido'
+                  ? 'Listo'
                   : checkoutStep === 1 && !isDeliveryOrder
                     ? 'Ir a pagar'
                     : checkoutStep === 2
@@ -6824,12 +6840,25 @@ export default function PublicMenuPage() {
             nextDisabled={
               isSubmittingOrder ||
               scheduleClosed ||
-              (checkoutStep === 3 ? !canSubmitCheckout : !canAdvanceCurrentStep)
+              (checkoutStep === 3 ? !canReadyForReview : !canAdvanceCurrentStep)
             }
             submitting={isSubmittingOrder}
-            onClose={() => setIsConfirmOpen(false)}
-            onBack={checkoutStep === 0 ? () => setIsConfirmOpen(false) : goToPreviousStep}
-            onNext={checkoutStep === 3 ? () => void confirmOrder() : goToNextStep}
+            onClose={() => {
+              setIsOrderReviewOpen(false);
+              setIsConfirmOpen(false);
+            }}
+            onBack={
+              checkoutStep === 0
+                ? () => {
+                    setIsOrderReviewOpen(false);
+                    setIsConfirmOpen(false);
+                  }
+                : () => {
+                    setIsOrderReviewOpen(false);
+                    goToPreviousStep();
+                  }
+            }
+            onNext={checkoutStep === 3 ? openOrderReview : goToNextStep}
           >
                   {checkoutStep === 0 ? (
                     <div className="space-y-4">
@@ -7220,246 +7249,6 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 3 ? (
                     <div className="space-y-3">
-                      <div
-                        className="checkout-item-enter overflow-hidden rounded-[24px] shadow-[var(--menu-shadow)]"
-                        style={{
-                          background:
-                            'linear-gradient(165deg, color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface)) 0%, var(--menu-surface) 42%, var(--menu-surface) 100%)',
-                        }}
-                      >
-                        <div className="px-4 pb-3 pt-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
-                                Resumen
-                              </p>
-                              <p className="mt-1 truncate text-xl font-black tracking-[-0.03em] text-[var(--menu-text)]">
-                                {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
-                              </p>
-                              <p className="mt-0.5 text-xs font-medium text-[var(--menu-text-muted)]">
-                                {checkoutItemsCount} unid.
-                                {selectedCurrencyCode !== businessBaseCurrency
-                                  ? ` · ${selectedCurrencyCode}`
-                                  : ''}
-                              </p>
-                            </div>
-                          </div>
-
-                          {!isAssistedMode && checkoutFulfillmentOptions.length > 1 ? (
-                            <div
-                              className="mt-3 grid gap-1 rounded-xl p-1"
-                              role="radiogroup"
-                              aria-label="Tipo de pedido"
-                              style={{
-                                gridTemplateColumns: `repeat(${checkoutFulfillmentOptions.length}, minmax(0, 1fr))`,
-                                backgroundColor: 'color-mix(in srgb, var(--menu-text) 6%, var(--menu-surface))',
-                              }}
-                            >
-                              {checkoutFulfillmentOptions.map((option) => {
-                                const selected = kioskFulfillment === option;
-                                return (
-                                  <button
-                                    key={`summary-fulfillment-${option}`}
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={selected}
-                                    onClick={() => changeCheckoutFulfillment(option)}
-                                    className="min-h-8 truncate rounded-lg px-1.5 text-[10px] font-bold leading-none tracking-[-0.01em] transition-colors"
-                                    style={
-                                      selected
-                                        ? {
-                                            backgroundColor: 'var(--menu-primary)',
-                                            color: 'var(--menu-on-primary)',
-                                          }
-                                        : {
-                                            backgroundColor: 'transparent',
-                                            color: 'var(--menu-text-muted)',
-                                          }
-                                    }
-                                  >
-                                    {FULFILLMENT_LABEL[option]}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p
-                              className="mt-3 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold"
-                              style={{
-                                backgroundColor: 'color-mix(in srgb, var(--menu-primary) 16%, var(--menu-surface))',
-                                color: 'var(--menu-primary)',
-                              }}
-                            >
-                              {isAssistedMode
-                                ? 'Comer aquí'
-                                : kioskFulfillment
-                                  ? FULFILLMENT_LABEL[kioskFulfillment]
-                                  : 'Pedido en local'}
-                            </p>
-                          )}
-
-                          <div className="mt-3 grid gap-2">
-                            <div
-                              className="flex items-center gap-3 rounded-2xl px-3 py-2.5"
-                              style={{
-                                backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
-                              }}
-                            >
-                              <span
-                                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
-                                style={{
-                                  backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
-                                  color: 'var(--menu-primary)',
-                                }}
-                              >
-                                <User className="h-4 w-4" strokeWidth={2.4} />
-                              </span>
-                              <div className="min-w-0">
-                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                                  Cliente
-                                </p>
-                                <p className="truncate text-sm font-bold text-[var(--menu-text)]">
-                                  {normalizedClientName || 'Cliente'}
-                                  {isAssistedMode && normalizedClientTable
-                                    ? ` · Mesa ${normalizedClientTable}`
-                                    : ''}
-                                </p>
-                              </div>
-                            </div>
-                            {!isAssistedMode && formattedClientWhatsapp ? (
-                              <div
-                                className="flex items-center gap-3 rounded-2xl px-3 py-2.5"
-                                style={{
-                                  backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
-                                }}
-                              >
-                                <span
-                                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
-                                  style={{
-                                    backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
-                                    color: 'var(--menu-primary)',
-                                  }}
-                                >
-                                  <MessageCircle className="h-4 w-4" strokeWidth={2.4} />
-                                </span>
-                                <div className="min-w-0">
-                                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                                    WhatsApp
-                                  </p>
-                                  <p className="truncate text-sm font-bold text-[var(--menu-text)]">
-                                    {formattedClientWhatsapp}
-                                  </p>
-                                </div>
-                              </div>
-                            ) : null}
-                            {isDeliveryOrder && normalizedDeliveryAddress ? (
-                              <div
-                                className="flex items-center gap-3 rounded-2xl px-3 py-2.5"
-                                style={{
-                                  backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
-                                }}
-                              >
-                                <span
-                                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
-                                  style={{
-                                    backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
-                                    color: 'var(--menu-primary)',
-                                  }}
-                                >
-                                  <MapPin className="h-4 w-4" strokeWidth={2.4} />
-                                </span>
-                                <div className="min-w-0">
-                                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                                    Entrega
-                                  </p>
-                                  <p className="line-clamp-2 text-sm font-bold leading-5 text-[var(--menu-text)]">
-                                    {normalizedDeliveryAddress}
-                                  </p>
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        {!isAssistedMode ? (
-                          <div
-                            className="border-t px-4 py-3.5"
-                            style={{ borderColor: 'var(--menu-border)' }}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                                  <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
-                                  Resumen por correo
-                                </p>
-                                <p className="mt-1 text-xs leading-4 text-[var(--menu-text-muted)]">
-                                  Te llega el detalle y podrás dejar tu opinión.
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={wantOrderEmail}
-                                aria-label="Recibir resumen por correo"
-                                onClick={() => {
-                                  const next = !wantOrderEmail;
-                                  setWantOrderEmail(next);
-                                  writeCachedCheckoutCustomer({
-                                    clientName: normalizedClientName,
-                                    clientWhatsapp: normalizedClientWhatsapp,
-                                    clientEmail: normalizedClientEmail,
-                                    wantOrderEmail: next,
-                                    selectedCurrency: selectedCurrencyCode,
-                                  });
-                                }}
-                                className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
-                                style={{
-                                  backgroundColor: wantOrderEmail
-                                    ? 'var(--menu-primary)'
-                                    : 'color-mix(in srgb, var(--menu-text) 18%, var(--menu-surface-alt))',
-                                }}
-                              >
-                                <span
-                                  className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
-                                  style={{
-                                    transform: wantOrderEmail ? 'translateX(1.25rem)' : 'translateX(0)',
-                                  }}
-                                />
-                              </button>
-                            </div>
-                            {wantOrderEmail ? (
-                              <label className="mt-3 block">
-                                <span className="sr-only">Correo electronico</span>
-                                <input
-                                  id="client-email"
-                                  type="email"
-                                  inputMode="email"
-                                  autoComplete="email"
-                                  placeholder="tu@correo.com"
-                                  value={clientEmail}
-                                  onChange={(event) => setClientEmail(event.target.value)}
-                                  className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                                  style={{
-                                    borderColor:
-                                      isClientEmailValid || clientEmail.trim().length === 0
-                                        ? 'var(--menu-border)'
-                                        : '#F43F5E',
-                                  }}
-                                />
-                                {!isClientEmailValid && clientEmail.trim().length > 0 ? (
-                                  <p className="mt-2 text-[11px] font-semibold text-rose-500">
-                                    Revisa que el correo esté bien escrito.
-                                  </p>
-                                ) : wantOrderEmail && clientEmail.trim().length === 0 ? (
-                                  <p className="mt-2 text-[11px] font-medium text-[var(--menu-text-muted)]">
-                                    Escribe tu correo para enviarte el resumen.
-                                  </p>
-                                ) : null}
-                              </label>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
                       {isAssistedMode ? (
                         <div className="flex gap-2">
                           <button
@@ -7978,6 +7767,269 @@ export default function PublicMenuPage() {
                     </div>
                   ) : null}
           </KioskCheckout>
+        ) : null}
+
+        {isConfirmOpen && isOrderReviewOpen && !kioskVoucher ? (
+          <div
+            className="fixed inset-0 z-[70] flex items-end justify-center bg-black/55 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-8 sm:items-center"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="order-review-title"
+            onClick={() => {
+              if (!isSubmittingOrder) setIsOrderReviewOpen(false);
+            }}
+          >
+            <div
+              className="flex max-h-[min(92vh,720px)] w-full max-w-[420px] flex-col overflow-hidden rounded-[28px] bg-[var(--menu-surface)] shadow-[0_24px_64px_rgba(15,23,42,0.35)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="shrink-0 border-b px-5 pb-3 pt-4" style={{ borderColor: 'var(--menu-border)' }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
+                      Revisa tu pedido
+                    </p>
+                    <h3
+                      id="order-review-title"
+                      className="mt-1 text-xl font-black tracking-[-0.03em] text-[var(--menu-text)]"
+                      style={titleFontStyle}
+                    >
+                      ¿Todo correcto?
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isSubmittingOrder) setIsOrderReviewOpen(false);
+                    }}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]"
+                    aria-label="Cerrar revisión"
+                    disabled={isSubmittingOrder}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {!isAssistedMode && checkoutFulfillmentOptions.length > 1 ? (
+                  <div
+                    className="mt-3 grid gap-1 rounded-xl p-1"
+                    role="radiogroup"
+                    aria-label="Tipo de pedido"
+                    style={{
+                      gridTemplateColumns: `repeat(${checkoutFulfillmentOptions.length}, minmax(0, 1fr))`,
+                      backgroundColor: 'color-mix(in srgb, var(--menu-text) 6%, var(--menu-surface-alt))',
+                    }}
+                  >
+                    {checkoutFulfillmentOptions.map((option) => {
+                      const selected = kioskFulfillment === option;
+                      return (
+                        <button
+                          key={`review-fulfillment-${option}`}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          disabled={isSubmittingOrder}
+                          onClick={() => changeCheckoutFulfillment(option)}
+                          className="min-h-8 truncate rounded-lg px-1.5 text-[10px] font-bold leading-none tracking-[-0.01em]"
+                          style={
+                            selected
+                              ? {
+                                  backgroundColor: 'var(--menu-primary)',
+                                  color: 'var(--menu-on-primary)',
+                                }
+                              : {
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--menu-text-muted)',
+                                }
+                          }
+                        >
+                          {FULFILLMENT_LABEL[option]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs font-semibold text-[var(--menu-text-muted)]">
+                    {isAssistedMode
+                      ? `Comer aquí${normalizedClientTable ? ` · Mesa ${normalizedClientTable}` : ''}`
+                      : kioskFulfillment
+                        ? FULFILLMENT_LABEL[kioskFulfillment]
+                        : 'Pedido en local'}
+                  </p>
+                )}
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                <ul className="space-y-2.5">
+                  {checkoutSummaryItems.map((item) => (
+                    <li
+                      key={`review-item-${item.id}`}
+                      className="flex items-baseline justify-between gap-3 border-b border-dashed pb-2.5 last:border-b-0 last:pb-0"
+                      style={{ borderColor: 'var(--menu-border)' }}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[var(--menu-text)]">{item.name}</p>
+                        <p className="mt-0.5 text-[11px] font-medium text-[var(--menu-text-muted)]">
+                          {item.soldByWeight
+                            ? formatWeightLabel(item.quantity)
+                            : `×${item.quantity}`}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-sm font-bold tabular-nums text-[var(--menu-text)]">
+                        {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="mt-4 space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
+                    <span>Subtotal</span>
+                    <span className="font-semibold tabular-nums">
+                      {formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}
+                    </span>
+                  </div>
+                  {isDeliveryOrder && deliveryLineLabel ? (
+                    <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
+                      <span>{deliveryLineLabel}</span>
+                      <span className="font-semibold tabular-nums">{deliveryPriceWithDistance}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex items-center justify-between gap-3 border-t pt-2 text-[var(--menu-text)]" style={{ borderColor: 'var(--menu-border)' }}>
+                    <span className="font-bold">Total</span>
+                    <span className="text-base font-black tabular-nums" style={titleFontStyle}>
+                      {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-1 text-xs font-medium text-[var(--menu-text-muted)]">
+                  <p>
+                    {normalizedClientName || 'Cliente'}
+                    {!isAssistedMode && formattedClientWhatsapp ? ` · ${formattedClientWhatsapp}` : ''}
+                  </p>
+                  {isDeliveryOrder && normalizedDeliveryAddress ? (
+                    <p className="line-clamp-2">{normalizedDeliveryAddress}</p>
+                  ) : null}
+                  {selectedPaymentLabel ? <p>Pago: {selectedPaymentSummary}</p> : null}
+                </div>
+
+                {!isAssistedMode ? (
+                  <div
+                    className="mt-4 rounded-2xl px-3 py-3"
+                    style={{
+                      backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface-alt))',
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                          <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
+                          Resumen por correo
+                        </p>
+                        <p className="mt-1 text-xs leading-4 text-[var(--menu-text-muted)]">
+                          Te llega el detalle y podrás dejar tu opinión.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={wantOrderEmail}
+                        aria-label="Recibir resumen por correo"
+                        disabled={isSubmittingOrder}
+                        onClick={() => {
+                          const next = !wantOrderEmail;
+                          setWantOrderEmail(next);
+                          writeCachedCheckoutCustomer({
+                            clientName: normalizedClientName,
+                            clientWhatsapp: normalizedClientWhatsapp,
+                            clientEmail: normalizedClientEmail,
+                            wantOrderEmail: next,
+                            selectedCurrency: selectedCurrencyCode,
+                          });
+                        }}
+                        className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
+                        style={{
+                          backgroundColor: wantOrderEmail
+                            ? 'var(--menu-primary)'
+                            : 'color-mix(in srgb, var(--menu-text) 18%, var(--menu-surface))',
+                        }}
+                      >
+                        <span
+                          className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
+                          style={{
+                            transform: wantOrderEmail ? 'translateX(1.25rem)' : 'translateX(0)',
+                          }}
+                        />
+                      </button>
+                    </div>
+                    {wantOrderEmail ? (
+                      <label className="mt-3 block">
+                        <span className="sr-only">Correo electronico</span>
+                        <input
+                          id="client-email-review"
+                          type="email"
+                          inputMode="email"
+                          autoComplete="email"
+                          placeholder="tu@correo.com"
+                          value={clientEmail}
+                          disabled={isSubmittingOrder}
+                          onChange={(event) => setClientEmail(event.target.value)}
+                          className="h-11 w-full rounded-xl border bg-[var(--menu-surface)] px-3 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                          style={{
+                            borderColor:
+                              isClientEmailValid || clientEmail.trim().length === 0
+                                ? 'var(--menu-border)'
+                                : '#F43F5E',
+                          }}
+                        />
+                        {!isClientEmailValid && clientEmail.trim().length > 0 ? (
+                          <p className="mt-2 text-[11px] font-semibold text-rose-500">
+                            Revisa que el correo esté bien escrito.
+                          </p>
+                        ) : null}
+                      </label>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {checkoutError ? (
+                  <div
+                    className="mt-3 rounded-2xl px-3 py-2.5 text-sm font-semibold"
+                    style={{
+                      backgroundColor: 'color-mix(in srgb, #F43F5E 16%, var(--menu-surface))',
+                      color: 'color-mix(in srgb, #E11D48 72%, var(--menu-text))',
+                    }}
+                  >
+                    {checkoutError}
+                  </div>
+                ) : null}
+              </div>
+
+              <div
+                className="shrink-0 grid grid-cols-[auto_1fr] gap-2 border-t px-5 py-3"
+                style={{ borderColor: 'var(--menu-border)' }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setIsOrderReviewOpen(false)}
+                  disabled={isSubmittingOrder}
+                  className="inline-flex min-h-12 items-center justify-center rounded-[16px] bg-[var(--menu-surface-alt)] px-4 text-sm font-bold text-[var(--menu-text-muted)] disabled:opacity-45"
+                >
+                  Atras
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmOrder()}
+                  disabled={isSubmittingOrder || !canSubmitCheckout}
+                  className="min-h-12 rounded-[16px] text-sm font-bold disabled:opacity-45"
+                  style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
+                >
+                  {isSubmittingOrder ? 'Guardando pedido...' : 'Confirmar pedido'}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
 
         <AbandonedCartResumeDialog
