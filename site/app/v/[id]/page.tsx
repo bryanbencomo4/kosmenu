@@ -1793,6 +1793,7 @@ export default function PublicMenuPage() {
   const [clientWhatsappCountry, setClientWhatsappCountry] = useState<Country>('VE');
   const [clientWhatsapp, setClientWhatsapp] = useState('');
   const [clientEmail, setClientEmail] = useState('');
+  const [wantOrderEmail, setWantOrderEmail] = useState(true);
   const [clientTable, setClientTable] = useState('');
   const [payLater, setPayLater] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -1801,7 +1802,6 @@ export default function PublicMenuPage() {
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
   const [themeOverride, setThemeOverride] = useState<MenuThemeMode | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
-  const [digitalPaymentReference, setDigitalPaymentReference] = useState('');
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
   const [paymentProofBusy, setPaymentProofBusy] = useState(false);
   const [paymentProofError, setPaymentProofError] = useState('');
@@ -2861,9 +2861,11 @@ export default function PublicMenuPage() {
       isValidPhoneNumber(normalizedClientWhatsapp) ||
       normalizePhone(normalizedClientWhatsapp).length >= 10
     : normalizedClientWhatsapp.length > 0 && isValidPhoneNumber(normalizedClientWhatsapp);
-  const isClientEmailValid = isAssistedMode
+  const isClientEmailValid = isAssistedMode || !wantOrderEmail
     ? normalizedClientEmail.length === 0 || emailRegex.test(normalizedClientEmail)
     : normalizedClientEmail.length > 0 && emailRegex.test(normalizedClientEmail);
+  const clientEmailForOrder =
+    isAssistedMode || wantOrderEmail ? normalizedClientEmail : '';
   const orderSubtotal = cartTotal;
   const businessBaseCurrency = normalizeCurrencyCode(menuData?.comercio.moneda ?? 'COP');
   const businessQuoteCurrencyRaw = (menuData?.comercio.exchange_rate_quote_currency ?? '').toString().trim();
@@ -3542,8 +3544,6 @@ export default function PublicMenuPage() {
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
   const isCashPayment = selectedPaymentLabel.toLowerCase().includes('efectivo');
   const isDigitalPayment = Boolean(selectedMethod) && !isCashPayment;
-  const paymentReferenceLast4 = normalizePhone(digitalPaymentReference).slice(-4);
-  const isPaymentReferenceValid = !isDigitalPayment || /^\d{4}$/.test(paymentReferenceLast4);
   const hasPaymentProof = !isDigitalPayment || paymentProofFile !== null;
   const paymentWithAmount = isCashPayment
     ? parseCashAmount(cashPaymentInput, selectedCurrencyCode)
@@ -3799,7 +3799,7 @@ export default function PublicMenuPage() {
   const canSubmitStep3 =
     (isAssistedMode && payLater) ||
     (((menuData?.metodosPago.length ?? 0) === 0 ||
-      (selectedPaymentMethodId !== null && isPaymentReferenceValid && hasPaymentProof)) &&
+      (selectedPaymentMethodId !== null && hasPaymentProof)) &&
       isCashTenderValid);
   const canAdvanceCurrentStep =
     checkoutStep === 0
@@ -4001,6 +4001,7 @@ export default function PublicMenuPage() {
 
     if (cached.clientName.length >= 3) setClientName(cached.clientName);
     if (cached.clientEmail) setClientEmail(cached.clientEmail);
+    setWantOrderEmail(cached.wantOrderEmail);
 
     if (cached.clientWhatsapp) {
       const parsedPhone = parsePhoneNumber(cached.clientWhatsapp);
@@ -4029,7 +4030,6 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (!isDigitalPayment) {
-      setDigitalPaymentReference('');
       setPaymentProofFile(null);
       setPaymentProofError('');
       setPaymentProofBusy(false);
@@ -5289,7 +5289,7 @@ export default function PublicMenuPage() {
     setCheckoutError(null);
     try {
       const persisted = await persistOrderRequired(
-        normalizedClientEmail,
+        clientEmailForOrder,
         normalizedClientName,
         normalizedClientWhatsapp,
         isAssistedMode && payLater ? null : selectedMethod,
@@ -5297,7 +5297,8 @@ export default function PublicMenuPage() {
           currency: selectedCurrencyCode,
           exchangeRate: selectedExchangeRate,
           exchangeRateSource: selectedExchangeSource,
-          referenceLast4: isAssistedMode && payLater ? '' : paymentReferenceLast4,
+          // Referencia opcional: se envía vacía; el comprobante es lo que valida el pago.
+          referenceLast4: '',
           proofFile: isAssistedMode && payLater ? null : paymentProofFile,
         },
         deliveryPayload,
@@ -5331,6 +5332,7 @@ export default function PublicMenuPage() {
           clientName: normalizedClientName,
           clientWhatsapp: normalizedClientWhatsapp,
           clientEmail: normalizedClientEmail,
+          wantOrderEmail,
           selectedCurrency: selectedCurrencyCode,
         });
       }
@@ -5376,7 +5378,6 @@ export default function PublicMenuPage() {
       setClientEmail('');
       setClientTable('');
       setPayLater(false);
-      setDigitalPaymentReference('');
       setPaymentProofFile(null);
       setPaymentProofError('');
       setPaymentProofBusy(false);
@@ -5500,7 +5501,17 @@ export default function PublicMenuPage() {
       return;
     }
     if (checkoutStep === 1 && !canGoNextFromStep1) {
-      setCheckoutError('Completa nombre, WhatsApp y correo valido para continuar.');
+      if (!isClientNameValid || !isClientWhatsappValid || !isClientTableValid) {
+        setCheckoutError(
+          isAssistedMode
+            ? 'Completa nombre y mesa para continuar.'
+            : 'Completa tu nombre y WhatsApp para continuar.',
+        );
+      } else if (wantOrderEmail && !isClientEmailValid) {
+        setCheckoutError('Revisa tu correo para continuar, o desactiva el resumen por correo.');
+      } else {
+        setCheckoutError('Revisa tus datos para continuar.');
+      }
       return;
     }
     if (checkoutStep === 2 && !canGoNextFromStep2) {
@@ -5529,6 +5540,7 @@ export default function PublicMenuPage() {
         clientName: normalizedClientName,
         clientWhatsapp: normalizedClientWhatsapp,
         clientEmail: normalizedClientEmail,
+        wantOrderEmail,
         selectedCurrency: selectedCurrencyCode,
       });
     }
@@ -6782,11 +6794,11 @@ export default function PublicMenuPage() {
               checkoutStep === 0
                 ? isAssistedMode
                   ? 'Revisa el pedido antes de enviarlo a cocina.'
-                  : 'Revisa cantidades. El tipo de pedido ya esta elegido.'
+                  : 'Revisa cantidades y confirma cómo quieres tu pedido.'
                 : checkoutStep === 1
                   ? isAssistedMode
                     ? 'Nombre, mesa y contacto opcional para el resumen.'
-                    : 'Te avisamos cuando el pedido este listo.'
+                    : 'Te avisamos por WhatsApp cuando esté listo.'
                   : checkoutStep === 2
                     ? 'Indica dónde enviamos el pedido.'
                     : isAssistedMode
@@ -7060,7 +7072,7 @@ export default function PublicMenuPage() {
                           </label>
                         </div>
                       ) : (
-                      <div className="grid gap-3 md:grid-cols-2">
+                      <div className="grid gap-3">
                         <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '40ms' }}>
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                             <User className="h-3.5 w-3.5" strokeWidth={2.4} />
@@ -7084,62 +7096,106 @@ export default function PublicMenuPage() {
 
                         <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
                           <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                            <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
-                            Correo electronico
+                            <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
+                            WhatsApp
                           </span>
-                          <input
-                            id="client-email"
-                            type="email"
-                            inputMode="email"
-                            autoComplete="email"
-                            placeholder="correo@ejemplo.com"
-                            value={clientEmail}
-                            onChange={(event) => setClientEmail(event.target.value)}
-                            className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                          <div
+                            className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface-alt)]"
                             style={{
-                              borderColor: isClientEmailValid || clientEmail.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
+                              borderColor:
+                                isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
                             }}
-                            required
-                          />
-                          {!isClientEmailValid && clientEmail.trim().length > 0 ? (
-                            <p className="mt-2 text-[11px] font-semibold text-rose-500">Ingresa un correo valido.</p>
-                          ) : null}
+                          >
+                            <PhoneInput
+                              international
+                              countryCallingCodeEditable={false}
+                              defaultCountry={clientWhatsappCountry}
+                              country={clientWhatsappCountry}
+                              value={clientWhatsapp || undefined}
+                              onChange={(value) => setClientWhatsapp(value ?? '')}
+                              onCountryChange={(country) => {
+                                if (country) setClientWhatsappCountry(country as Country);
+                              }}
+                              placeholder="Ingresa tu numero"
+                              numberInputProps={{
+                                required: true,
+                                autoComplete: 'tel',
+                              }}
+                            />
+                          </div>
                         </label>
+
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '140ms' }}>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
+                                Resumen por correo
+                              </p>
+                              <p className="mt-1 text-xs leading-4 text-[var(--menu-text-muted)]">
+                                Te llega el detalle del pedido y podrás dejar tu opinión.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={wantOrderEmail}
+                              aria-label="Recibir resumen por correo"
+                              onClick={() => {
+                                const next = !wantOrderEmail;
+                                setWantOrderEmail(next);
+                                writeCachedCheckoutCustomer({
+                                  clientName: normalizedClientName,
+                                  clientWhatsapp: normalizedClientWhatsapp,
+                                  clientEmail: normalizedClientEmail,
+                                  wantOrderEmail: next,
+                                  selectedCurrency: selectedCurrencyCode,
+                                });
+                              }}
+                              className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
+                              style={{
+                                backgroundColor: wantOrderEmail
+                                  ? 'var(--menu-primary)'
+                                  : 'color-mix(in srgb, var(--menu-text) 18%, var(--menu-surface-alt))',
+                              }}
+                            >
+                              <span
+                                className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
+                                style={{
+                                  transform: wantOrderEmail ? 'translateX(1.25rem)' : 'translateX(0)',
+                                }}
+                              />
+                            </button>
+                          </div>
+                          {wantOrderEmail ? (
+                            <label className="mt-3 block">
+                              <span className="sr-only">Correo electronico</span>
+                              <input
+                                id="client-email"
+                                type="email"
+                                inputMode="email"
+                                autoComplete="email"
+                                placeholder="tu@correo.com"
+                                value={clientEmail}
+                                onChange={(event) => setClientEmail(event.target.value)}
+                                className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                                style={{
+                                  borderColor:
+                                    isClientEmailValid || clientEmail.trim().length === 0
+                                      ? 'var(--menu-border)'
+                                      : '#F43F5E',
+                                }}
+                              />
+                              {!isClientEmailValid && clientEmail.trim().length > 0 ? (
+                                <p className="mt-2 text-[11px] font-semibold text-rose-500">
+                                  Revisa que el correo esté bien escrito.
+                                </p>
+                              ) : null}
+                            </label>
+                          ) : null}
+                        </div>
                       </div>
                       )}
-
-                      {!isAssistedMode ? (
-                      <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '140ms' }}>
-                        <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                          <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
-                          WhatsApp
-                        </span>
-                        <div
-                          className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface-alt)]"
-                          style={{
-                            borderColor:
-                              isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
-                          }}
-                        >
-                          <PhoneInput
-                            international
-                            countryCallingCodeEditable={false}
-                            defaultCountry={clientWhatsappCountry}
-                            country={clientWhatsappCountry}
-                            value={clientWhatsapp || undefined}
-                            onChange={(value) => setClientWhatsapp(value ?? '')}
-                            onCountryChange={(country) => {
-                              if (country) setClientWhatsappCountry(country as Country);
-                            }}
-                            placeholder="Ingresa tu numero"
-                            numberInputProps={{
-                              required: true,
-                              autoComplete: 'tel',
-                            }}
-                          />
-                        </div>
-                      </label>
-                      ) : null}
                     </div>
                   ) : null}
 
@@ -7627,46 +7683,10 @@ export default function PublicMenuPage() {
                                               'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
                                           }}
                                         >
-                                          <div
-                                            className="flex items-center gap-3 border-b px-3 py-2.5"
-                                            style={{ borderColor: 'var(--menu-border)' }}
-                                          >
-                                            <div className="min-w-0 flex-1">
-                                              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                                                1 · Referencia
-                                              </p>
-                                              <p className="mt-0.5 text-xs leading-4 text-[var(--menu-text-muted)]">
-                                                Últimos 4 dígitos
-                                              </p>
-                                            </div>
-                                            <input
-                                              type="text"
-                                              inputMode="numeric"
-                                              maxLength={4}
-                                              value={paymentReferenceLast4}
-                                              onChange={(event) =>
-                                                setDigitalPaymentReference(
-                                                  normalizePhone(event.target.value).slice(0, 4),
-                                                )
-                                              }
-                                              placeholder="••••"
-                                              aria-label="Últimos 4 dígitos de la referencia"
-                                              className="h-10 w-[4.75rem] shrink-0 rounded-xl border bg-[var(--menu-surface-alt)] text-center text-base font-bold tabular-nums tracking-[0.28em] text-[var(--menu-text)] outline-none placeholder:tracking-[0.28em] placeholder:text-[var(--menu-text-muted)]"
-                                              style={{
-                                                borderColor:
-                                                  isPaymentReferenceValid ||
-                                                  !digitalPaymentReference
-                                                    ? 'var(--menu-border)'
-                                                    : '#F43F5E',
-                                              }}
-                                              required
-                                            />
-                                          </div>
-
                                           <div className="flex items-center gap-3 px-3 py-2.5">
                                             <div className="min-w-0 flex-1">
                                               <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                                                2 · Comprobante
+                                                Comprobante
                                               </p>
                                               <p className="mt-0.5 truncate text-xs leading-4 text-[var(--menu-text-muted)]">
                                                 {paymentProofBusy

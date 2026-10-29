@@ -1,8 +1,8 @@
 'use client';
 
 import { Manrope } from 'next/font/google';
-import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, ChevronDown, X } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { ArrowLeft, ShoppingBag, Store, Truck, X } from 'lucide-react';
 
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
@@ -16,6 +16,12 @@ const titleFont = Manrope({
 export type KioskCheckoutStep = {
   id: number;
   title: string;
+};
+
+const FULFILLMENT_ICON: Record<KioskFulfillment, typeof Store> = {
+  dine_in: Store,
+  takeaway: ShoppingBag,
+  delivery: Truck,
 };
 
 type KioskCheckoutProps = {
@@ -60,14 +66,7 @@ export function KioskCheckout({
   children,
 }: KioskCheckoutProps) {
   useLockBodyScroll(true);
-  const [fulfillmentMenuOpen, setFulfillmentMenuOpen] = useState(false);
   const showFulfillmentMenu = fulfillmentOptions.length > 1 && Boolean(onFulfillmentChange);
-  useEffect(() => {
-    if (!fulfillmentMenuOpen) return;
-    const close = () => setFulfillmentMenuOpen(false);
-    window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
-  }, [fulfillmentMenuOpen]);
   const currentIndex = Math.max(
     0,
     steps.findIndex((step) => step.id === currentStepId),
@@ -78,7 +77,7 @@ export function KioskCheckout({
       <KioskDecor density="lite" />
       <KioskMotionStyles />
 
-      <header className="relative z-10 px-5 py-3">
+      <header className="relative z-20 shrink-0 px-5 py-3">
         <div className="mx-auto flex w-full max-w-[560px] items-center gap-3">
           <button
             type="button"
@@ -94,52 +93,6 @@ export function KioskCheckout({
             </h2>
             <p className="truncate text-sm font-medium text-[var(--menu-text-muted)]">{subtitle}</p>
           </div>
-          {showFulfillmentMenu ? (
-            <div className="relative z-20 shrink-0" onPointerDown={(event) => event.stopPropagation()}>
-              <button
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded={fulfillmentMenuOpen}
-                aria-label="Tipo de pedido"
-                onClick={() => setFulfillmentMenuOpen((open) => !open)}
-                className="inline-flex h-11 max-w-[8.5rem] items-center gap-1 rounded-[14px] bg-[var(--menu-surface)] px-3 text-[12px] font-bold text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
-              >
-                <span className="truncate">{fulfillment ? FULFILLMENT_LABEL[fulfillment] : 'Pedido'}</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-              </button>
-              {fulfillmentMenuOpen ? (
-                <div
-                  role="listbox"
-                  aria-label="Tipo de pedido"
-                  className="absolute right-0 top-[calc(100%+6px)] z-30 w-44 rounded-[16px] bg-[var(--menu-surface)] p-1 shadow-[var(--menu-shadow)]"
-                >
-                  {fulfillmentOptions.map((option) => {
-                    const selected = fulfillment === option;
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        role="option"
-                        aria-selected={selected}
-                        onClick={() => {
-                          onFulfillmentChange?.(option);
-                          setFulfillmentMenuOpen(false);
-                        }}
-                        className="flex min-h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-bold"
-                        style={
-                          selected
-                            ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }
-                            : { color: 'var(--menu-text)' }
-                        }
-                      >
-                        {FULFILLMENT_LABEL[option]}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
         </div>
         <ol className="mx-auto mt-4 flex w-full max-w-[560px] items-center gap-2">
           {steps.map((step, index) => {
@@ -178,6 +131,54 @@ export function KioskCheckout({
             );
           })}
         </ol>
+
+        {showFulfillmentMenu ? (
+          <div
+            className="mx-auto mt-3 w-full max-w-[560px]"
+            role="radiogroup"
+            aria-label="Tipo de pedido"
+          >
+            <div
+              className="grid gap-1.5 rounded-[18px] p-1.5"
+              style={{
+                gridTemplateColumns: `repeat(${fulfillmentOptions.length}, minmax(0, 1fr))`,
+                backgroundColor: 'var(--menu-surface)',
+                boxShadow: 'var(--menu-shadow)',
+              }}
+            >
+              {fulfillmentOptions.map((option) => {
+                const selected = fulfillment === option;
+                const Icon = FULFILLMENT_ICON[option];
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => onFulfillmentChange?.(option)}
+                    className="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-[14px] px-2 py-2 text-center transition-[background-color,color,transform] active:scale-[0.98]"
+                    style={
+                      selected
+                        ? {
+                            backgroundColor: 'var(--menu-primary)',
+                            color: 'var(--menu-on-primary)',
+                          }
+                        : {
+                            backgroundColor: 'transparent',
+                            color: 'var(--menu-text-muted)',
+                          }
+                    }
+                  >
+                    <Icon className="h-4 w-4 shrink-0" strokeWidth={2.4} aria-hidden />
+                    <span className="text-[11px] font-bold leading-tight tracking-[-0.01em]">
+                      {FULFILLMENT_LABEL[option]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
       </header>
 
       <div data-sheet-scroll className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [touch-action:pan-y]">
