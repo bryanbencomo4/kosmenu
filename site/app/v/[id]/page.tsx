@@ -1803,6 +1803,7 @@ export default function PublicMenuPage() {
     wasDelivery: boolean;
     deliveryFeeConverted: number;
   } | null>(null);
+  const [paymentAdjustmentNotice, setPaymentAdjustmentNotice] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [cashPaymentInput, setCashPaymentInput] = useState('');
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
@@ -2012,6 +2013,7 @@ export default function PublicMenuPage() {
       setIsCheckoutFooterExpanded(false);
       setIsOrderReviewOpen(false);
       setReviewFulfillmentBaseline(null);
+      setPaymentAdjustmentNotice(null);
     }
   }, [isConfirmOpen]);
 
@@ -5275,6 +5277,7 @@ export default function PublicMenuPage() {
       return;
     }
     setCheckoutError(null);
+    setPaymentAdjustmentNotice(null);
     setReviewFulfillmentBaseline({
       fulfillment: kioskFulfillment,
       wasDelivery: isDeliveryOrder,
@@ -5290,6 +5293,20 @@ export default function PublicMenuPage() {
     setCheckoutError(null);
   }
 
+  function clearCheckoutPaymentCoverage() {
+    setPaymentProofFile(null);
+    setPaymentProofError('');
+    setPaymentProofBusy(false);
+    setCashPaymentInput('');
+  }
+
+  function scrollCheckoutSheetToTop() {
+    if (typeof document === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      document.querySelector('[data-sheet-scroll]')?.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+
   function changeReviewFulfillment(next: KioskFulfillment) {
     if (next === kioskFulfillment || scheduleClosed || isAssistedMode || catalogUrlLocked || isSubmittingOrder) {
       return;
@@ -5301,14 +5318,36 @@ export default function PublicMenuPage() {
       deliveryPointSource === 'user' &&
       normalizedDeliveryAddress.length >= 6 &&
       normalizedDeliveryReference.length >= 3;
+    const hadPaidCoverage =
+      Boolean(paymentProofFile) ||
+      (isCashPayment && cashTender.valid) ||
+      Boolean(selectedPaymentMethodId);
+    const repayMessage =
+      'Al pasar a delivery el total sube. Completa el pago con el nuevo monto (incluye envío).';
 
     selectKioskFulfillment(next);
     setCheckoutError(null);
 
-    if (enteringDelivery && !addressReady) {
+    if (enteringDelivery) {
+      // El comprobante/efectivo previo cubría un total sin envío: hay que volver a pagar.
+      if (hadPaidCoverage) {
+        clearCheckoutPaymentCoverage();
+        setPaymentAdjustmentNotice(repayMessage);
+      } else {
+        setPaymentAdjustmentNotice(null);
+      }
       setIsOrderReviewOpen(false);
-      setCheckoutStep(2);
-      setCheckoutError('Indica la dirección de entrega para continuar.');
+      if (!addressReady) {
+        setCheckoutStep(2);
+        setCheckoutError('Indica la dirección de entrega para continuar.');
+        scrollCheckoutSheetToTop();
+        return;
+      }
+      setCheckoutStep(3);
+      if (hadPaidCoverage) {
+        setCheckoutError(repayMessage);
+        scrollCheckoutSheetToTop();
+      }
       return;
     }
 
@@ -5621,7 +5660,13 @@ export default function PublicMenuPage() {
         setDeliveryNoteMemory(rememberDeliveryNote('instructions', normalizedDeliveryInstructions));
       }
     }
-    setCheckoutError(null);
+    if (checkoutStep === 2 && paymentAdjustmentNotice) {
+      setCheckoutError(paymentAdjustmentNotice);
+      setPaymentAdjustmentNotice(null);
+      scrollCheckoutSheetToTop();
+    } else {
+      setCheckoutError(null);
+    }
     if (checkoutStep === 1 && canGoNextFromStep1) {
       // Cache as soon as "Tus datos" is completed so the next visit is prefilled
       // even if payment is abandoned; last successful order overwrites this later.
@@ -7952,161 +7997,167 @@ export default function PublicMenuPage() {
                 )}
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
-                <ul className="space-y-2.5">
-                  {checkoutSummaryItems.map((item) => (
-                    <li
-                      key={`review-item-${item.id}`}
-                      className="flex items-baseline justify-between gap-3 border-b border-dashed pb-2.5 last:border-b-0 last:pb-0"
-                      style={{ borderColor: 'var(--menu-border)' }}
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-[var(--menu-text)]">{item.name}</p>
-                        <p className="mt-0.5 text-[11px] font-medium text-[var(--menu-text-muted)]">
-                          {item.soldByWeight
-                            ? formatWeightLabel(item.quantity)
-                            : `×${item.quantity}`}
-                        </p>
-                      </div>
-                      <span className="shrink-0 text-sm font-bold tabular-nums text-[var(--menu-text)]">
-                        {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="mt-4 space-y-1.5 text-sm">
-                  <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
-                    <span>Subtotal</span>
-                    <span className="font-semibold tabular-nums">
-                      {formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}
-                    </span>
-                  </div>
-                  {isDeliveryOrder && deliveryLineLabel ? (
-                    <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
-                      <span>{deliveryLineLabel}</span>
-                      <span className="font-semibold tabular-nums">{deliveryPriceWithDistance}</span>
-                    </div>
-                  ) : null}
-                  <div className="flex items-center justify-between gap-3 border-t pt-2 text-[var(--menu-text)]" style={{ borderColor: 'var(--menu-border)' }}>
-                    <span className="font-bold">Total</span>
-                    <span className="text-base font-black tabular-nums" style={titleFontStyle}>
-                      {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-4 space-y-1 text-xs font-medium text-[var(--menu-text-muted)]">
-                  <p>
-                    {normalizedClientName || 'Cliente'}
-                    {!isAssistedMode && formattedClientWhatsapp ? ` · ${formattedClientWhatsapp}` : ''}
-                  </p>
-                  {isDeliveryOrder && normalizedDeliveryAddress ? (
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="min-w-0 line-clamp-2">{normalizedDeliveryAddress}</p>
-                      <button
-                        type="button"
-                        onClick={editDeliveryFromReview}
-                        disabled={isSubmittingOrder}
-                        className="shrink-0 text-[11px] font-bold text-[var(--menu-primary)] disabled:opacity-45"
+              <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
+                <div className="min-h-0 max-h-[min(34vh,240px)] overflow-y-auto overscroll-contain pr-0.5">
+                  <ul className="space-y-2.5">
+                    {checkoutSummaryItems.map((item) => (
+                      <li
+                        key={`review-item-${item.id}`}
+                        className="flex items-baseline justify-between gap-3 border-b border-dashed pb-2.5 last:border-b-0 last:pb-0"
+                        style={{ borderColor: 'var(--menu-border)' }}
                       >
-                        Cambiar
-                      </button>
-                    </div>
-                  ) : null}
-                  {selectedPaymentLabel ? <p>Pago: {selectedPaymentSummary}</p> : null}
-                </div>
-
-                {!isAssistedMode ? (
-                  <div
-                    className="mt-4 rounded-2xl px-3 py-3"
-                    style={{
-                      backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface-alt))',
-                    }}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                          <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
-                          Resumen por correo
-                        </p>
-                        <p className="mt-1 text-xs leading-4 text-[var(--menu-text-muted)]">
-                          Te llega el detalle y podrás dejar tu opinión.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={wantOrderEmail}
-                        aria-label="Recibir resumen por correo"
-                        disabled={isSubmittingOrder}
-                        onClick={() => {
-                          const next = !wantOrderEmail;
-                          setWantOrderEmail(next);
-                          writeCachedCheckoutCustomer({
-                            clientName: normalizedClientName,
-                            clientWhatsapp: normalizedClientWhatsapp,
-                            clientEmail: normalizedClientEmail,
-                            wantOrderEmail: next,
-                            selectedCurrency: selectedCurrencyCode,
-                          });
-                        }}
-                        className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
-                        style={{
-                          backgroundColor: wantOrderEmail
-                            ? 'var(--menu-primary)'
-                            : 'color-mix(in srgb, var(--menu-text) 18%, var(--menu-surface))',
-                        }}
-                      >
-                        <span
-                          className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
-                          style={{
-                            transform: wantOrderEmail ? 'translateX(1.25rem)' : 'translateX(0)',
-                          }}
-                        />
-                      </button>
-                    </div>
-                    {wantOrderEmail ? (
-                      <label className="mt-3 block">
-                        <span className="sr-only">Correo electronico</span>
-                        <input
-                          id="client-email-review"
-                          type="email"
-                          inputMode="email"
-                          autoComplete="email"
-                          placeholder="tu@correo.com"
-                          value={clientEmail}
-                          disabled={isSubmittingOrder}
-                          onChange={(event) => setClientEmail(event.target.value)}
-                          className="h-11 w-full rounded-xl border bg-[var(--menu-surface)] px-3 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                          style={{
-                            borderColor:
-                              isClientEmailValid || clientEmail.trim().length === 0
-                                ? 'var(--menu-border)'
-                                : '#F43F5E',
-                          }}
-                        />
-                        {!isClientEmailValid && clientEmail.trim().length > 0 ? (
-                          <p className="mt-2 text-[11px] font-semibold text-rose-500">
-                            Revisa que el correo esté bien escrito.
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--menu-text)]">{item.name}</p>
+                          <p className="mt-0.5 text-[11px] font-medium text-[var(--menu-text-muted)]">
+                            {item.soldByWeight
+                              ? formatWeightLabel(item.quantity)
+                              : `×${item.quantity}`}
                           </p>
-                        ) : null}
-                      </label>
-                    ) : null}
-                  </div>
-                ) : null}
+                        </div>
+                        <span className="shrink-0 text-sm font-bold tabular-nums text-[var(--menu-text)]">
+                          {formatAmountByCurrency(item.totalPrice, selectedCurrencyCode)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
 
-                {checkoutError ? (
-                  <div
-                    className="mt-3 rounded-2xl px-3 py-2.5 text-sm font-semibold"
-                    style={{
-                      backgroundColor: 'color-mix(in srgb, #F43F5E 16%, var(--menu-surface))',
-                      color: 'color-mix(in srgb, #E11D48 72%, var(--menu-text))',
-                    }}
-                  >
-                    {checkoutError}
+                <div className="mt-3 shrink-0 space-y-3 border-t pt-3" style={{ borderColor: 'var(--menu-border)' }}>
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
+                      <span>Subtotal</span>
+                      <span className="font-semibold tabular-nums">
+                        {formatAmountByCurrency(orderSubtotalConverted, selectedCurrencyCode)}
+                      </span>
+                    </div>
+                    {isDeliveryOrder && deliveryLineLabel ? (
+                      <div className="flex items-center justify-between gap-3 text-[var(--menu-text-muted)]">
+                        <span>{deliveryLineLabel}</span>
+                        <span className="font-semibold tabular-nums">{deliveryPriceWithDistance}</span>
+                      </div>
+                    ) : null}
+                    <div
+                      className="flex items-center justify-between gap-3 text-[var(--menu-text)]"
+                    >
+                      <span className="font-bold">Total</span>
+                      <span className="text-base font-black tabular-nums" style={titleFontStyle}>
+                        {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                      </span>
+                    </div>
                   </div>
-                ) : null}
+
+                  <div className="space-y-1 text-xs font-medium text-[var(--menu-text-muted)]">
+                    <p>
+                      {normalizedClientName || 'Cliente'}
+                      {!isAssistedMode && formattedClientWhatsapp ? ` · ${formattedClientWhatsapp}` : ''}
+                    </p>
+                    {isDeliveryOrder && normalizedDeliveryAddress ? (
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 line-clamp-2">{normalizedDeliveryAddress}</p>
+                        <button
+                          type="button"
+                          onClick={editDeliveryFromReview}
+                          disabled={isSubmittingOrder}
+                          className="shrink-0 text-[11px] font-bold text-[var(--menu-primary)] disabled:opacity-45"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+                    ) : null}
+                    {selectedPaymentLabel ? <p>Pago: {selectedPaymentSummary}</p> : null}
+                  </div>
+
+                  {!isAssistedMode ? (
+                    <div
+                      className="rounded-2xl px-3 py-3"
+                      style={{
+                        backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface-alt))',
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                            <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
+                            Resumen por correo
+                          </p>
+                          <p className="mt-1 text-xs leading-4 text-[var(--menu-text-muted)]">
+                            Te llega el detalle y podrás dejar tu opinión.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={wantOrderEmail}
+                          aria-label="Recibir resumen por correo"
+                          disabled={isSubmittingOrder}
+                          onClick={() => {
+                            const next = !wantOrderEmail;
+                            setWantOrderEmail(next);
+                            writeCachedCheckoutCustomer({
+                              clientName: normalizedClientName,
+                              clientWhatsapp: normalizedClientWhatsapp,
+                              clientEmail: normalizedClientEmail,
+                              wantOrderEmail: next,
+                              selectedCurrency: selectedCurrencyCode,
+                            });
+                          }}
+                          className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
+                          style={{
+                            backgroundColor: wantOrderEmail
+                              ? 'var(--menu-primary)'
+                              : 'color-mix(in srgb, var(--menu-text) 18%, var(--menu-surface))',
+                          }}
+                        >
+                          <span
+                            className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
+                            style={{
+                              transform: wantOrderEmail ? 'translateX(1.25rem)' : 'translateX(0)',
+                            }}
+                          />
+                        </button>
+                      </div>
+                      {wantOrderEmail ? (
+                        <label className="mt-3 block">
+                          <span className="sr-only">Correo electronico</span>
+                          <input
+                            id="client-email-review"
+                            type="email"
+                            inputMode="email"
+                            autoComplete="email"
+                            placeholder="tu@correo.com"
+                            value={clientEmail}
+                            disabled={isSubmittingOrder}
+                            onChange={(event) => setClientEmail(event.target.value)}
+                            className="h-11 w-full rounded-xl border bg-[var(--menu-surface)] px-3 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                            style={{
+                              borderColor:
+                                isClientEmailValid || clientEmail.trim().length === 0
+                                  ? 'var(--menu-border)'
+                                  : '#F43F5E',
+                            }}
+                          />
+                          {!isClientEmailValid && clientEmail.trim().length > 0 ? (
+                            <p className="mt-2 text-[11px] font-semibold text-rose-500">
+                              Revisa que el correo esté bien escrito.
+                            </p>
+                          ) : null}
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {checkoutError ? (
+                    <div
+                      className="rounded-2xl px-3 py-2.5 text-sm font-semibold"
+                      style={{
+                        backgroundColor: 'color-mix(in srgb, #F43F5E 16%, var(--menu-surface))',
+                        color: 'color-mix(in srgb, #E11D48 72%, var(--menu-text))',
+                      }}
+                    >
+                      {checkoutError}
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               <div
