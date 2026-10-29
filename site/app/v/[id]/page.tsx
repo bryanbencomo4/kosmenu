@@ -40,6 +40,7 @@ import { KioskImage } from './_components/kiosk/KioskImage';
 import {
   KioskCatalogReady,
   type CatalogReadyItem,
+  type CatalogWhatsappSubmitInput,
 } from './_components/kiosk/KioskCatalogReady';
 import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
 import {
@@ -1787,6 +1788,8 @@ export default function PublicMenuPage() {
   const isAssistedMode = (searchParams.get('mode') ?? '').trim().toLowerCase() === 'assisted';
   const catalogFromUrl = shouldForceCatalogModeFromQuery({
     catalogo: searchParams.get('catalogo'),
+    src: searchParams.get('src'),
+    source: searchParams.get('source'),
     modo: searchParams.get('modo'),
   });
   const [clientName, setClientName] = useState('');
@@ -1945,9 +1948,7 @@ export default function PublicMenuPage() {
   useEffect(() => {
     if (typeof window === 'undefined' || !commerceIdentifier) return;
     if (isAssistedMode || !catalogFromUrl) return;
-    if (!menuData) return;
-    const catalogEnabled = parseKioskHomeConfig(menuData.comercio.inicio_menu).catalogo;
-    if (!catalogEnabled) return;
+    // URL ?catalogo=1 / ?src=qr / ?source=qr always starts catalog mode (no merchant flag required).
     setCatalogMode(true);
     setKioskFulfillment(null);
     setDeliveryMode('pickup');
@@ -1955,7 +1956,7 @@ export default function PublicMenuPage() {
     setIsConfirmOpen(false);
     setIsPreCheckoutUpsellOpen(false);
     window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
-  }, [commerceIdentifier, isAssistedMode, catalogFromUrl, menuData]);
+  }, [commerceIdentifier, isAssistedMode, catalogFromUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !commerceIdentifier) return;
@@ -2831,7 +2832,7 @@ export default function PublicMenuPage() {
     .map(([network, value]) => ({ network, href: normalizeSocialUrl(value) }))
     .filter((item) => item.href);
   const kioskHomeConfig = parseKioskHomeConfig(menuData?.comercio.inicio_menu);
-  const catalogUrlLocked = catalogFromUrl && kioskHomeConfig.catalogo && !isAssistedMode;
+  const catalogUrlLocked = catalogFromUrl && !isAssistedMode;
   const supportsDelivery = menuData?.comercio.permite_delivery === true;
   const normalizedDeliveryAddress = deliveryAddress.trim();
   const normalizedDeliveryReference = deliveryReference.trim();
@@ -3746,7 +3747,8 @@ export default function PublicMenuPage() {
   }, [scheduleClosed, commerceIdentifier, isAssistedMode]);
 
   function enterCatalogMode() {
-    if (!kioskHomeConfig.catalogo) return;
+    // Manual entry from home, or mesa QR without waiting for merchant "solo catálogo".
+    if (!kioskHomeConfig.catalogo && !catalogUrlLocked) return;
     if (isAssistedMode) return;
     setCatalogMode(true);
     setKioskFulfillment(null);
@@ -3794,18 +3796,104 @@ export default function PublicMenuPage() {
     setKioskAddedPrompt(null);
   }
 
-  function startNewCatalogOrder() {
+  function returnToCatalogMenu() {
     setCatalogReady(null);
-    setCart({});
     setIsPreCheckoutUpsellOpen(false);
     setKioskAddedPrompt(null);
     setIsConfirmOpen(false);
   }
 
+  async function submitCatalogWhatsappOrder(input: CatalogWhatsappSubmitInput) {
+    if (!catalogMode || cartCount <= 0) {
+      throw new Error('No hay productos en el pedido.');
+    }
+    if (!whatsappNumber) {
+      throw new Error('Este comercio no tiene WhatsApp configurado.');
+    }
+
+    const paymentMethod =
+      input.paymentMethodId && menuData?.metodosPago
+        ? (menuData.metodosPago.find((method) => method.id === input.paymentMethodId) ?? null)
+        : null;
+    if ((menuData?.metodosPago.length ?? 0) > 0 && !paymentMethod) {
+      throw new Error('Selecciona un método de pago.');
+    }
+
+    const currency = normalizeCurrencyCode(input.currency || selectedCurrencyCode);
+    if (currency !== selectedCurrencyCode) {
+      selectMenuCurrency(currency);
+    }
+    const paymentGroupForCurrency = paymentMethodsByCurrency.find(
+      (group) => group.currency === currency,
+    );
+    const exchangeRate =
+      currency === businessBaseCurrency
+        ? 1
+        : resolveTickerExchangeRate(currency, {
+            baseCurrency: businessBaseCurrency,
+            paymentExchangeRate: paymentGroupForCurrency?.exchangeRate,
+            checkoutExchange: checkoutExchangeConfig,
+            businessExchangeRate,
+            businessQuoteCurrency,
+            businessExchangeSource,
+            businessExchangeMode,
+            marketRates: menuData?.marketRates,
+          });
+    const exchangeRateSource = resolveCheckoutCurrencySource(currency, {
+      checkoutExchange: checkoutExchangeConfig,
+      businessExchangeSource,
+    });
+
+    const persisted = await persistOrderRequired(
+      '',
+      input.customerName.trim(),
+      input.customerWhatsapp.replace(/\D/g, ''),
+      paymentMethod,
+      {
+        currency,
+        exchangeRate,
+        exchangeRateSource,
+        referenceLast4: '',
+        proofFiles: input.proofFiles,
+      },
+      {
+        mode: 'pickup',
+        address: '',
+        reference: '',
+        instructions: '',
+        coordinates: null,
+      },
+    );
+
+    let proofPublicUrl = '';
+    try {
+      const parsed = new URL(persisted.orderUrl);
+      const shortCodeMatch = parsed.pathname.match(/^\/o\/([A-Za-z0-9_-]{10})$/);
+      if (shortCodeMatch && input.proofFiles.length > 0) {
+        proofPublicUrl = `${parsed.origin}/p/${shortCodeMatch[1]}`;
+      }
+    } catch {
+      // Keep message without proof link if tracking URL is unexpected.
+    }
+
+    const name = input.customerName.trim();
+    const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : '';
+    const payingCash = paymentLabel.toLowerCase().includes('efectivo');
+    const message = proofPublicUrl
+      ? `👋 Hola, mi nombre es *${name}*.\n\n🧾 Aquí está mi comprobante del pedido *${persisted.orderId}*:\n${proofPublicUrl}`
+      : payingCash
+        ? `👋 Hola, mi nombre es *${name}*.\n\n💵 Voy a pagar en efectivo el pedido *${persisted.orderId}*.`
+        : `👋 Hola, mi nombre es *${name}*.\n\n🧾 Pedido *${persisted.orderId}*.`;
+
+    const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+    if (typeof window !== 'undefined') {
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+    }
+  }
+
   function handleKioskAddProduct(productId: string) {
     // Always allow opening product details (including when closed / browse-only).
     // Ordering is gated by ProductOptionsSheet `canAdd`.
-    if (catalogMode && !kioskHomeConfig.catalogo) return;
     setProductOptionsSheet({ open: true, productId });
   }
 
@@ -4101,8 +4189,8 @@ export default function PublicMenuPage() {
   async function handlePaymentProofSelected(file: File | null) {
     setPaymentProofError('');
     if (!file) return;
-    if (paymentProofFiles.length >= 5) {
-      setPaymentProofError('Puedes adjuntar hasta 5 comprobantes.');
+    if (paymentProofFiles.length >= 3) {
+      setPaymentProofError('Puedes adjuntar hasta 3 comprobantes.');
       return;
     }
     setPaymentProofBusy(true);
@@ -5036,7 +5124,11 @@ export default function PublicMenuPage() {
     });
 
     const assistedOrderNotes = [
-      kioskFulfillment ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}` : '',
+      catalogMode
+        ? 'Tipo: Comer aquí'
+        : kioskFulfillment
+          ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}`
+          : '',
       isAssistedMode && normalizedClientTable ? `Mesa: ${normalizedClientTable}` : '',
       isAssistedMode && payLater ? 'Pago: despues' : '',
       normalizedOrderNotes,
@@ -5049,7 +5141,7 @@ export default function PublicMenuPage() {
       cliente_email: email || null,
       telefono_cliente: customerWhatsapp,
       mesa: isAssistedMode ? normalizedClientTable || null : null,
-      order_source: isAssistedMode ? 'assisted_waiter' : null,
+      order_source: isAssistedMode ? 'assisted_waiter' : catalogMode ? 'catalog' : null,
       moneda_checkout: normalizeCurrencyCode(paymentMeta.currency),
       tasa_cambio_snapshot: paymentMeta.exchangeRate,
       exchange_rate_source: paymentMeta.exchangeRateSource,
@@ -5256,7 +5348,13 @@ export default function PublicMenuPage() {
   }
 
   function tryOpenPreCheckoutUpsellAfterAdd(productId: string) {
-    if (catalogMode || scheduleClosed || kioskVoucher) return false;
+    if (scheduleClosed || kioskVoucher) return false;
+    // Catalog: always open suggested-sales sheet after adding a product.
+    if (catalogMode) {
+      setKioskAddedPrompt(null);
+      setIsPreCheckoutUpsellOpen(true);
+      return true;
+    }
     if (!preCheckoutUpsellActive) return false;
     const product = productById.get(productId);
     const shouldShow = shouldShowPreCheckoutUpsell({
@@ -5335,7 +5433,7 @@ export default function PublicMenuPage() {
     setPaymentProofBusy(false);
     setCashPaymentInput('');
     setRequiredPaymentProofCount((prev) =>
-      Math.max(prev, paymentProofFiles.length + 1, 1),
+      Math.min(3, Math.max(prev, paymentProofFiles.length + 1, 1)),
     );
   }
 
@@ -6217,7 +6315,9 @@ export default function PublicMenuPage() {
             paymentGroups={publicPaymentGroups}
             selectedPaymentCurrency={selectedCurrencyCode}
             onSelectPaymentCurrency={selectMenuCurrency}
-            onNewOrder={startNewCatalogOrder}
+            whatsappNumber={whatsappNumber || null}
+            onBackToMenu={returnToCatalogMenu}
+            onSubmitWhatsapp={submitCatalogWhatsappOrder}
           />
         ) : (
         <KioskMenuExperience
@@ -6319,7 +6419,7 @@ export default function PublicMenuPage() {
           onKeepShopping={() => setIsPreCheckoutUpsellOpen(false)}
           onContinue={() => {
             if (catalogMode) {
-              setIsPreCheckoutUpsellOpen(false);
+              finishCatalogOrder();
               return;
             }
             proceedToCheckoutSheet();
@@ -7791,109 +7891,180 @@ export default function PublicMenuPage() {
                                               'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
                                           }}
                                         >
-                                          {Array.from({
-                                            length: Math.max(
-                                              requiredPaymentProofCount,
-                                              paymentProofFiles.length,
-                                              1,
-                                            ),
-                                          }).map((_, index) => {
-                                            const file = paymentProofFiles[index] ?? null;
-                                            const previewUrl = paymentProofPreviewUrls[index] ?? null;
-                                            const isExtra = index > 0;
-                                            const waiting = !file;
+                                          {(() => {
+                                            const slotCount = Math.min(
+                                              3,
+                                              Math.max(
+                                                requiredPaymentProofCount,
+                                                paymentProofFiles.length,
+                                                1,
+                                              ),
+                                            );
+                                            const showNumberedLabels = slotCount > 1;
+                                            const canAddAnother =
+                                              paymentProofFiles.length > 0 &&
+                                              paymentProofFiles.length < 3 &&
+                                              paymentProofFiles.length >=
+                                                Math.max(1, requiredPaymentProofCount);
                                             return (
-                                              <div
-                                                key={`payment-proof-slot-${index}`}
-                                                className="flex items-center gap-2.5 px-3 py-2"
-                                                style={
-                                                  index > 0
-                                                    ? {
-                                                        borderTop: '1px solid var(--menu-border)',
+                                              <>
+                                                {Array.from({ length: slotCount }).map((_, index) => {
+                                                  const file = paymentProofFiles[index] ?? null;
+                                                  const previewUrl =
+                                                    paymentProofPreviewUrls[index] ?? null;
+                                                  const waiting = !file;
+                                                  const isExtra = index > 0;
+                                                  return (
+                                                    <div
+                                                      key={`payment-proof-slot-${index}`}
+                                                      className="flex items-center gap-2.5 px-3 py-2"
+                                                      style={
+                                                        index > 0
+                                                          ? {
+                                                              borderTop:
+                                                                '1px solid var(--menu-border)',
+                                                            }
+                                                          : undefined
                                                       }
-                                                    : undefined
-                                                }
-                                              >
-                                                {file && previewUrl ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => setPaymentProofLightboxUrl(previewUrl)}
-                                                    className="h-9 w-9 shrink-0 overflow-hidden rounded-lg border"
+                                                    >
+                                                      {file && previewUrl ? (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() =>
+                                                            setPaymentProofLightboxUrl(previewUrl)
+                                                          }
+                                                          className="h-9 w-9 shrink-0 overflow-hidden rounded-lg border"
+                                                          style={{
+                                                            borderColor: 'var(--menu-border)',
+                                                          }}
+                                                          aria-label={
+                                                            showNumberedLabels
+                                                              ? `Ver comprobante ${index + 1}`
+                                                              : 'Ver comprobante'
+                                                          }
+                                                        >
+                                                          <img
+                                                            src={previewUrl}
+                                                            alt=""
+                                                            className="h-full w-full object-cover"
+                                                          />
+                                                        </button>
+                                                      ) : null}
+                                                      <div className="min-w-0 flex-1">
+                                                        {showNumberedLabels ? (
+                                                          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                                            {`Comprobante ${index + 1}`}
+                                                          </p>
+                                                        ) : null}
+                                                        <p
+                                                          className={`truncate text-[11px] leading-4 text-[var(--menu-text-muted)] ${
+                                                            showNumberedLabels ? 'mt-0.5' : ''
+                                                          }`}
+                                                        >
+                                                          {paymentProofBusy && waiting
+                                                            ? 'Preparando…'
+                                                            : file
+                                                              ? 'Toca la miniatura para ver'
+                                                              : isExtra
+                                                                ? 'Foto adicional del pago'
+                                                                : 'Foto del pago'}
+                                                        </p>
+                                                      </div>
+                                                      {file ? (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => removePaymentProofAt(index)}
+                                                          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--menu-text-muted)]"
+                                                          style={{
+                                                            backgroundColor:
+                                                              'var(--menu-surface-alt)',
+                                                          }}
+                                                          aria-label={
+                                                            showNumberedLabels
+                                                              ? `Quitar comprobante ${index + 1}`
+                                                              : 'Quitar comprobante'
+                                                          }
+                                                        >
+                                                          <X className="h-3.5 w-3.5" />
+                                                        </button>
+                                                      ) : index === paymentProofFiles.length ? (
+                                                        <div className="flex shrink-0 items-center gap-1.5">
+                                                          <label
+                                                            htmlFor="payment-proof-gallery"
+                                                            aria-label="Subir comprobante desde galería"
+                                                            aria-disabled={
+                                                              paymentProofBusy || undefined
+                                                            }
+                                                            className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-dashed text-[var(--menu-text)] ${
+                                                              paymentProofBusy
+                                                                ? 'pointer-events-none opacity-60'
+                                                                : ''
+                                                            }`}
+                                                            style={{
+                                                              borderColor: 'var(--menu-border)',
+                                                              backgroundColor:
+                                                                'var(--menu-surface-alt)',
+                                                            }}
+                                                          >
+                                                            <ImageIcon
+                                                              className="h-3.5 w-3.5"
+                                                              aria-hidden
+                                                            />
+                                                          </label>
+                                                          <label
+                                                            htmlFor="payment-proof-camera"
+                                                            aria-label="Tomar foto del comprobante"
+                                                            aria-disabled={
+                                                              paymentProofBusy || undefined
+                                                            }
+                                                            className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-dashed text-[var(--menu-text)] ${
+                                                              paymentProofBusy
+                                                                ? 'pointer-events-none opacity-60'
+                                                                : ''
+                                                            }`}
+                                                            style={{
+                                                              borderColor: 'var(--menu-border)',
+                                                              backgroundColor:
+                                                                'var(--menu-surface-alt)',
+                                                            }}
+                                                          >
+                                                            <Camera
+                                                              className="h-3.5 w-3.5"
+                                                              aria-hidden
+                                                            />
+                                                          </label>
+                                                        </div>
+                                                      ) : null}
+                                                    </div>
+                                                  );
+                                                })}
+                                                {canAddAnother ? (
+                                                  <div
+                                                    className="border-t px-3 py-2"
                                                     style={{ borderColor: 'var(--menu-border)' }}
-                                                    aria-label={`Ver comprobante ${index + 1}`}
                                                   >
-                                                    <img
-                                                      src={previewUrl}
-                                                      alt=""
-                                                      className="h-full w-full object-cover"
-                                                    />
-                                                  </button>
-                                                ) : null}
-                                                <div className="min-w-0 flex-1">
-                                                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                                                    {`Comprobante ${index + 1}`}
-                                                  </p>
-                                                  <p className="mt-0.5 truncate text-[11px] leading-4 text-[var(--menu-text-muted)]">
-                                                    {paymentProofBusy && waiting
-                                                      ? 'Preparando…'
-                                                      : file
-                                                        ? 'Toca la miniatura para ver'
-                                                        : isExtra
-                                                          ? 'Foto de la diferencia de envío'
-                                                          : 'Foto del pago'}
-                                                  </p>
-                                                </div>
-                                                {file ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => removePaymentProofAt(index)}
-                                                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--menu-text-muted)]"
-                                                    style={{
-                                                      backgroundColor: 'var(--menu-surface-alt)',
-                                                    }}
-                                                    aria-label={`Quitar comprobante ${index + 1}`}
-                                                  >
-                                                    <X className="h-3.5 w-3.5" />
-                                                  </button>
-                                                ) : index === paymentProofFiles.length ? (
-                                                  <div className="flex shrink-0 items-center gap-1.5">
-                                                    <label
-                                                      htmlFor="payment-proof-gallery"
-                                                      aria-label={`Subir comprobante ${index + 1} desde galería`}
-                                                      aria-disabled={paymentProofBusy || undefined}
-                                                      className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-dashed text-[var(--menu-text)] ${
-                                                        paymentProofBusy
-                                                          ? 'pointer-events-none opacity-60'
-                                                          : ''
-                                                      }`}
-                                                      style={{
-                                                        borderColor: 'var(--menu-border)',
-                                                        backgroundColor: 'var(--menu-surface-alt)',
-                                                      }}
+                                                    <button
+                                                      type="button"
+                                                      onClick={() =>
+                                                        setRequiredPaymentProofCount((prev) =>
+                                                          Math.min(
+                                                            3,
+                                                            Math.max(
+                                                              prev,
+                                                              paymentProofFiles.length,
+                                                            ) + 1,
+                                                          ),
+                                                        )
+                                                      }
+                                                      className="text-[12px] font-bold text-[var(--menu-text)] underline-offset-2 hover:underline"
                                                     >
-                                                      <ImageIcon className="h-3.5 w-3.5" aria-hidden />
-                                                    </label>
-                                                    <label
-                                                      htmlFor="payment-proof-camera"
-                                                      aria-label={`Tomar foto del comprobante ${index + 1}`}
-                                                      aria-disabled={paymentProofBusy || undefined}
-                                                      className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-dashed text-[var(--menu-text)] ${
-                                                        paymentProofBusy
-                                                          ? 'pointer-events-none opacity-60'
-                                                          : ''
-                                                      }`}
-                                                      style={{
-                                                        borderColor: 'var(--menu-border)',
-                                                        backgroundColor: 'var(--menu-surface-alt)',
-                                                      }}
-                                                    >
-                                                      <Camera className="h-3.5 w-3.5" aria-hidden />
-                                                    </label>
+                                                      Añadir otro
+                                                    </button>
                                                   </div>
                                                 ) : null}
-                                              </div>
+                                              </>
                                             );
-                                          })}
+                                          })()}
                                           <input
                                             type="file"
                                             accept="image/*"

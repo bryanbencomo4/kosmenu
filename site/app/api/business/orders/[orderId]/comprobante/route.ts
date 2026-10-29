@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 
-import { appSiteUrl } from '../../../../../_lib/public-site-config';
-import { extractComprobanteObjectPath } from '../../../../_lib/comprobante-path';
+import { appSiteUrl, publicSiteUrl } from '../../../../../_lib/public-site-config';
+import {
+  collectComprobanteStorageRefs,
+  extractComprobanteObjectPath,
+} from '../../../../_lib/comprobante-path';
 import { buildMerchantComprobanteMediaUrls } from '../../../../_lib/comprobante-media';
+import { findOrderShortLinkByPedidoId } from '../../../../_lib/order-short-links';
 import { extractComercioId } from '../../../../_lib/order-utils';
 import { consumeRateLimit, getClientIp } from '../../../../_lib/rate-limit';
 import { getUserFromBearerRequest } from '../../../../_lib/supabase-user-auth';
@@ -122,7 +126,8 @@ export async function GET(request: Request, { params }: Params) {
       return deny(headers);
     }
 
-    const storageRef = order.detalles?.comprobante_url ?? null;
+    const proofRefs = collectComprobanteStorageRefs(order.detalles);
+    const storageRef = proofRefs[0] ?? order.detalles?.comprobante_url ?? null;
     const objectPath = extractComprobanteObjectPath(storageRef);
     if (!objectPath) {
       return deny(headers);
@@ -136,6 +141,24 @@ export async function GET(request: Request, { params }: Params) {
     // Same-origin proxy URLs (HMAC). Phone never loads supabase.co directly.
     const view = buildMerchantComprobanteMediaUrls(orderId, objectPath);
 
+    // Prefer the same public /p/{code} page used in WhatsApp (supports multiple proofs).
+    let publicUrl: string | null = null;
+    const storedPublic = typeof order.detalles?.comprobante_public_url === 'string'
+      ? order.detalles.comprobante_public_url.trim()
+      : '';
+    if (storedPublic.startsWith('http')) {
+      publicUrl = storedPublic;
+    } else {
+      try {
+        const shortLink = await findOrderShortLinkByPedidoId(supabase, order.id);
+        if (shortLink?.code) {
+          publicUrl = `${publicSiteUrl}/p/${encodeURIComponent(shortLink.code)}`;
+        }
+      } catch {
+        publicUrl = null;
+      }
+    }
+
     return NextResponse.json(
       {
         ok: true,
@@ -144,6 +167,8 @@ export async function GET(request: Request, { params }: Params) {
           url: view.url,
           ...(view.previewUrl ? { previewUrl: view.previewUrl } : {}),
           downloadUrl: view.downloadUrl,
+          ...(publicUrl ? { publicUrl } : {}),
+          proofCount: Math.max(1, proofRefs.length),
         },
       },
       {

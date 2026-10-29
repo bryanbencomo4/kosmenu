@@ -102,8 +102,8 @@ export function KioskHome({
   const showParaLlevar = !catalogOnlySession && homeConfig.paraLlevar;
   const showDelivery = !catalogOnlySession && homeConfig.delivery;
   const fulfillmentCount = Number(showComerAqui) + Number(showParaLlevar) + Number(showDelivery);
-  // "Ver catálogo" only on mesa QR (?catalogo=1), never on the normal menu URL.
-  const showCatalogButton = catalogOnlySession && homeConfig.catalogo;
+  // "Ver catálogo" only on mesa QR (?catalogo=1 / ?src=qr), never on the normal menu URL.
+  const showCatalogButton = catalogOnlySession;
   // Catalog session: no "Ver menú". Normal URL keeps closed/browse behavior.
   const showBrowse = catalogOnlySession
     ? false

@@ -104,19 +104,29 @@ export function kioskHomeConfigToJson(config: KioskHomeConfig) {
 }
 
 /**
- * Table QR / shared link can force catalog-only browsing when the merchant
- * enabled `inicio_menu.catalogo`. Missing or unknown params keep normal flow.
+ * Table QR / shared link can force catalog-only browsing via query params
+ * (`?catalogo=1`, `?src=qr`, `?source=qr`, `?modo=catalogo`). Does not require
+ * the merchant "solo catálogo" home flag. Missing or unknown params keep normal flow.
  */
 export function isCatalogModeQueryValue(raw: string | null | undefined): boolean {
   const value = (raw ?? '').trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes' || value === 'catalogo';
 }
 
+function isQrSourceValue(raw: string | null | undefined): boolean {
+  const value = (raw ?? '').trim().toLowerCase();
+  return value === 'qr' || value === 'qr_code';
+}
+
 export function shouldForceCatalogModeFromQuery(params: {
   catalogo?: string | null;
+  src?: string | null;
+  source?: string | null;
   modo?: string | null;
 }): boolean {
   if (isCatalogModeQueryValue(params.catalogo)) return true;
+  // App QR links use `?src=qr` (also accept `source=qr`).
+  if (isQrSourceValue(params.src) || isQrSourceValue(params.source)) return true;
   const modo = (params.modo ?? '').trim().toLowerCase();
-  return modo === 'catalogo' || modo === 'catalog';
+  return modo === 'catalogo' || modo === 'catalog' || modo === 'qr';
 }

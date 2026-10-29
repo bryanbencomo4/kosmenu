@@ -94,9 +94,16 @@ describe('kiosk home config', () => {
     expect(isCatalogModeQueryValue('0')).toBe(false);
     expect(isCatalogModeQueryValue(null)).toBe(false);
     expect(shouldForceCatalogModeFromQuery({ catalogo: '1' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ src: 'qr' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ source: 'qr' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ src: 'qr_code' })).toBe(true);
     expect(shouldForceCatalogModeFromQuery({ modo: 'catalogo' })).toBe(true);
     expect(shouldForceCatalogModeFromQuery({ modo: 'catalog' })).toBe(true);
+    expect(shouldForceCatalogModeFromQuery({ modo: 'qr' })).toBe(true);
     expect(shouldForceCatalogModeFromQuery({ catalogo: '0' })).toBe(false);
+    expect(shouldForceCatalogModeFromQuery({ src: 'web' })).toBe(false);
     expect(shouldForceCatalogModeFromQuery({})).toBe(false);
   });
 });
+
+

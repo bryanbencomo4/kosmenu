@@ -201,6 +201,7 @@ class ComprobanteSignedUrlResult {
     required this.expiresInSec,
     this.previewUrl,
     this.downloadUrl,
+    this.publicUrl,
   });
 
   final String url;
@@ -211,6 +212,9 @@ class ComprobanteSignedUrlResult {
 
   /// Original file with a download filename. Falls back to [url] in the UI.
   final String? downloadUrl;
+
+  /// Same public `/p/{code}` page shared on WhatsApp (all proofs).
+  final String? publicUrl;
 }
 
 String? _optionalHttpUrl(Object? value) {
@@ -487,6 +491,7 @@ class PublicOrderApiService {
         expiresInSec: expiresInSec,
         previewUrl: _optionalHttpUrl(map['previewUrl']),
         downloadUrl: _optionalHttpUrl(map['downloadUrl']),
+        publicUrl: _optionalHttpUrl(map['publicUrl']),
       );
     }
 

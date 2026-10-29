@@ -229,7 +229,14 @@ export function detectMenuDevice(userAgent: string) {
 
 export function detectMenuOrigin(search: string, referrer: string) {
   const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
-  const src = (params.get('src') || params.get('utm_source') || '').trim().toLowerCase();
+  const src = (
+    params.get('src') ||
+    params.get('source') ||
+    params.get('utm_source') ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
   if (src === 'qr' || src === 'qr_code') return 'qr';
   if (referrer.trim()) {
     try {

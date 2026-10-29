@@ -29,11 +29,44 @@ class PedidoModel {
 
   /// Opaque storage ref (`storage://comprobantes/...`) or legacy URL from detalles.
   String? get comprobanteRef {
-    final raw = detalles['comprobante_url']?.toString().trim() ?? '';
-    return raw.isEmpty ? null : raw;
+    final refs = comprobanteRefs;
+    return refs.isEmpty ? null : refs.first;
   }
 
-  bool get hasComprobante => comprobanteRef != null;
+  /// All payment-proof storage refs (`comprobantes[]`, else `comprobante_url`).
+  List<String> get comprobanteRefs {
+    final out = <String>[];
+    final seen = <String>{};
+    void push(Object? value) {
+      final raw = value?.toString().trim() ?? '';
+      if (raw.isEmpty || seen.contains(raw)) return;
+      seen.add(raw);
+      out.add(raw);
+    }
+
+    final list = detalles['comprobantes'];
+    if (list is List) {
+      for (final item in list) {
+        push(item);
+      }
+    }
+    if (out.isEmpty) {
+      push(detalles['comprobante_url']);
+    }
+    return out;
+  }
+
+  /// Public WhatsApp-style proof page (`/p/{code}`), when stored on the order.
+  String? get comprobantePublicUrl {
+    final raw = detalles['comprobante_public_url']?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    if (uri == null || uri.host.isEmpty) return null;
+    if (uri.scheme != 'https' && uri.scheme != 'http') return null;
+    return raw;
+  }
+
+  bool get hasComprobante => comprobanteRefs.isNotEmpty;
 
   String get managementMode => detalles['management_mode'] == 'whatsapp_manual'
       ? 'whatsapp_manual'

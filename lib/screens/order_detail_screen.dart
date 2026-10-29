@@ -58,6 +58,7 @@ typedef _PaymentProof = ({
   String url,
   String? previewUrl,
   String? downloadUrl,
+  String? publicUrl,
   String? reference,
   bool isPdf,
 });
@@ -242,6 +243,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
 
     setState(() => _isLoadingComprobante = true);
     try {
+      // Prefer the same public /p/{code} page sent on WhatsApp (all proofs).
+      final storedPublic = pedido.comprobantePublicUrl;
+      if (storedPublic != null) {
+        final opened = await launchUrl(
+          Uri.parse(storedPublic),
+          mode: LaunchMode.externalApplication,
+        );
+        if (!opened && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo abrir el comprobante.')),
+          );
+        }
+        return;
+      }
+
       final session = Supabase.instance.client.auth.currentSession;
       final accessToken = session?.accessToken.trim() ?? '';
       if (accessToken.isEmpty) {
@@ -251,18 +267,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         );
       }
 
-      if (!_comprobanteSignedUrlSession.hasUsableUrl) {
-        final signed = await PublicOrderApiService().fetchComprobanteSignedUrl(
-          orderId: publicOrderId,
-          accessToken: accessToken,
+      final signed = await PublicOrderApiService().fetchComprobanteSignedUrl(
+        orderId: publicOrderId,
+        accessToken: accessToken,
+      );
+
+      final publicUrl = signed.publicUrl?.trim() ?? '';
+      if (publicUrl.isNotEmpty) {
+        final opened = await launchUrl(
+          Uri.parse(publicUrl),
+          mode: LaunchMode.externalApplication,
         );
-        _comprobanteSignedUrlSession.store(
-          url: signed.url,
-          previewUrl: signed.previewUrl,
-          downloadUrl: signed.downloadUrl,
-          expiresInSec: signed.expiresInSec,
-        );
+        if (!opened && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo abrir el comprobante.')),
+          );
+        }
+        return;
       }
+
+      // Fallback for legacy orders without a short-link public page.
+      _comprobanteSignedUrlSession.store(
+        url: signed.url,
+        previewUrl: signed.previewUrl,
+        downloadUrl: signed.downloadUrl,
+        expiresInSec: signed.expiresInSec,
+      );
 
       final url = _comprobanteSignedUrlSession.url;
       if (!mounted || url == null || url.isEmpty) {
@@ -412,6 +442,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       url: signed.url,
       previewUrl: signed.previewUrl,
       downloadUrl: signed.downloadUrl,
+      publicUrl: data.pedido.comprobantePublicUrl ?? signed.publicUrl,
       reference: reference != null && RegExp(r'^\d{4}$').hasMatch(reference)
           ? reference
           : null,
@@ -458,6 +489,35 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                         : 'Comprobante no disponible.',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.manrope(),
+                  ),
+                ),
+              );
+            }
+            final publicUrl = (proof.publicUrl ?? '').trim();
+            if (publicUrl.isNotEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Se abrirá la misma página de comprobantes que se envía por WhatsApp.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.manrope(),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: () => unawaited(
+                          launchUrl(
+                            Uri.parse(publicUrl),
+                            mode: LaunchMode.externalApplication,
+                          ),
+                        ),
+                        icon: const Icon(Icons.receipt_long_rounded),
+                        label: const Text('Ver comprobante'),
+                      ),
+                    ],
                   ),
                 ),
               );

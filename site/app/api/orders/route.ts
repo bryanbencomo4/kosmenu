@@ -463,6 +463,7 @@ async function postOrder(request: Request): Promise<NextResponse> {
       const ref = normalizeText(value);
       if (!ref || paymentProofUrls.includes(ref)) return;
       if (!isComprobanteStorageRef(ref)) return;
+      if (paymentProofUrls.length >= 3) return;
       paymentProofUrls.push(ref);
     };
     if (Array.isArray(body.paymentProofUrls)) {
@@ -841,6 +842,11 @@ async function postOrder(request: Request): Promise<NextResponse> {
       const shortLinkDetalles = {
         ...detalles,
         tracking_url: publicOrderUrl,
+        ...(paymentProofUrl
+          ? {
+              comprobante_public_url: `${publicSiteUrl}/p/${encodeURIComponent(shortLink.code)}`,
+            }
+          : {}),
       };
       await supabase
         .from('pedidos')
