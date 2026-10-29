@@ -1810,9 +1810,11 @@ export default function PublicMenuPage() {
   const [themeOverride, setThemeOverride] = useState<MenuThemeMode | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
   const [paymentProofFiles, setPaymentProofFiles] = useState<File[]>([]);
+  const [paymentProofPreviewUrls, setPaymentProofPreviewUrls] = useState<string[]>([]);
   const [requiredPaymentProofCount, setRequiredPaymentProofCount] = useState(1);
   const [paymentProofBusy, setPaymentProofBusy] = useState(false);
   const [paymentProofError, setPaymentProofError] = useState('');
+  const [paymentProofLightboxUrl, setPaymentProofLightboxUrl] = useState<string | null>(null);
   const [deliveryMode, setDeliveryMode] = useState<OrderDeliveryMode>('pickup');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryReference, setDeliveryReference] = useState('');
@@ -4073,8 +4075,17 @@ export default function PublicMenuPage() {
       setRequiredPaymentProofCount(1);
       setPaymentProofError('');
       setPaymentProofBusy(false);
+      setPaymentProofLightboxUrl(null);
     }
   }, [isDigitalPayment]);
+
+  useEffect(() => {
+    const urls = paymentProofFiles.map((file) => URL.createObjectURL(file));
+    setPaymentProofPreviewUrls(urls);
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+  }, [paymentProofFiles]);
 
   useEffect(() => {
     if (!hasDeliveryPoint || !checkoutError) return;
@@ -5545,6 +5556,7 @@ export default function PublicMenuPage() {
       setRequiredPaymentProofCount(1);
       setPaymentProofError('');
       setPaymentProofBusy(false);
+      setPaymentProofLightboxUrl(null);
       if (normalizedDeliveryReference) rememberDeliveryNote('reference', normalizedDeliveryReference);
       if (normalizedDeliveryInstructions) rememberDeliveryNote('instructions', normalizedDeliveryInstructions);
       setDeliveryAddress('');
@@ -7787,12 +7799,13 @@ export default function PublicMenuPage() {
                                             ),
                                           }).map((_, index) => {
                                             const file = paymentProofFiles[index] ?? null;
+                                            const previewUrl = paymentProofPreviewUrls[index] ?? null;
                                             const isExtra = index > 0;
                                             const waiting = !file;
                                             return (
                                               <div
                                                 key={`payment-proof-slot-${index}`}
-                                                className="flex items-center gap-3 px-3 py-2.5"
+                                                className="flex items-center gap-2.5 px-3 py-2"
                                                 style={
                                                   index > 0
                                                     ? {
@@ -7801,53 +7814,54 @@ export default function PublicMenuPage() {
                                                     : undefined
                                                 }
                                               >
+                                                {file && previewUrl ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setPaymentProofLightboxUrl(previewUrl)}
+                                                    className="h-9 w-9 shrink-0 overflow-hidden rounded-lg border"
+                                                    style={{ borderColor: 'var(--menu-border)' }}
+                                                    aria-label={`Ver comprobante ${index + 1}`}
+                                                  >
+                                                    <img
+                                                      src={previewUrl}
+                                                      alt=""
+                                                      className="h-full w-full object-cover"
+                                                    />
+                                                  </button>
+                                                ) : null}
                                                 <div className="min-w-0 flex-1">
                                                   <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
                                                     {`Comprobante ${index + 1}`}
                                                   </p>
-                                                  <p className="mt-0.5 truncate text-xs leading-4 text-[var(--menu-text-muted)]">
+                                                  <p className="mt-0.5 truncate text-[11px] leading-4 text-[var(--menu-text-muted)]">
                                                     {paymentProofBusy && waiting
                                                       ? 'Preparando…'
                                                       : file
-                                                        ? file.name
+                                                        ? 'Toca la miniatura para ver'
                                                         : isExtra
                                                           ? 'Foto de la diferencia de envío'
                                                           : 'Foto del pago'}
                                                   </p>
                                                 </div>
                                                 {file ? (
-                                                  <div className="flex shrink-0 items-center gap-1.5">
-                                                    <span
-                                                      className="grid h-10 w-10 place-items-center rounded-xl"
-                                                      style={{
-                                                        backgroundColor:
-                                                          'color-mix(in srgb, #10B981 18%, var(--menu-surface))',
-                                                        color: '#10B981',
-                                                      }}
-                                                      title="Comprobante listo"
-                                                      aria-hidden
-                                                    >
-                                                      <Check className="h-4 w-4" strokeWidth={2.5} />
-                                                    </span>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => removePaymentProofAt(index)}
-                                                      className="grid h-10 w-10 place-items-center rounded-xl text-[var(--menu-text-muted)]"
-                                                      style={{
-                                                        backgroundColor: 'var(--menu-surface-alt)',
-                                                      }}
-                                                      aria-label={`Quitar comprobante ${index + 1}`}
-                                                    >
-                                                      <X className="h-4 w-4" />
-                                                    </button>
-                                                  </div>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => removePaymentProofAt(index)}
+                                                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--menu-text-muted)]"
+                                                    style={{
+                                                      backgroundColor: 'var(--menu-surface-alt)',
+                                                    }}
+                                                    aria-label={`Quitar comprobante ${index + 1}`}
+                                                  >
+                                                    <X className="h-3.5 w-3.5" />
+                                                  </button>
                                                 ) : index === paymentProofFiles.length ? (
                                                   <div className="flex shrink-0 items-center gap-1.5">
                                                     <label
                                                       htmlFor="payment-proof-gallery"
                                                       aria-label={`Subir comprobante ${index + 1} desde galería`}
                                                       aria-disabled={paymentProofBusy || undefined}
-                                                      className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-dashed text-[var(--menu-text)] ${
+                                                      className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-dashed text-[var(--menu-text)] ${
                                                         paymentProofBusy
                                                           ? 'pointer-events-none opacity-60'
                                                           : ''
@@ -7857,13 +7871,13 @@ export default function PublicMenuPage() {
                                                         backgroundColor: 'var(--menu-surface-alt)',
                                                       }}
                                                     >
-                                                      <ImageIcon className="h-4 w-4" aria-hidden />
+                                                      <ImageIcon className="h-3.5 w-3.5" aria-hidden />
                                                     </label>
                                                     <label
                                                       htmlFor="payment-proof-camera"
                                                       aria-label={`Tomar foto del comprobante ${index + 1}`}
                                                       aria-disabled={paymentProofBusy || undefined}
-                                                      className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-dashed text-[var(--menu-text)] ${
+                                                      className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-dashed text-[var(--menu-text)] ${
                                                         paymentProofBusy
                                                           ? 'pointer-events-none opacity-60'
                                                           : ''
@@ -7873,7 +7887,7 @@ export default function PublicMenuPage() {
                                                         backgroundColor: 'var(--menu-surface-alt)',
                                                       }}
                                                     >
-                                                      <Camera className="h-4 w-4" aria-hidden />
+                                                      <Camera className="h-3.5 w-3.5" aria-hidden />
                                                     </label>
                                                   </div>
                                                 ) : null}
@@ -8276,6 +8290,31 @@ export default function PublicMenuPage() {
           onResume={resumeAbandonedCart}
           onStartFresh={startFreshAfterAbandonedCart}
         />
+
+        {paymentProofLightboxUrl ? (
+          <div
+            className="fixed inset-0 z-[85] flex items-center justify-center bg-black/70 px-4 py-8"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Vista del comprobante"
+            onClick={() => setPaymentProofLightboxUrl(null)}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white"
+              aria-label="Cerrar comprobante"
+              onClick={() => setPaymentProofLightboxUrl(null)}
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <img
+              src={paymentProofLightboxUrl}
+              alt="Comprobante de pago"
+              className="max-h-full max-w-full rounded-2xl object-contain shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            />
+          </div>
+        ) : null}
 
         {leaveConfirmOpen ? (
           <div
