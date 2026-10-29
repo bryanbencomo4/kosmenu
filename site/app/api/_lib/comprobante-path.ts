@@ -32,3 +32,29 @@ export function extractComprobanteObjectPath(storageRef: unknown): string | null
 export function isComprobanteStorageRef(value: unknown): boolean {
   return extractComprobanteObjectPath(value) !== null;
 }
+
+/**
+ * Prefer `detalles.comprobantes[]` when present; otherwise fall back to `comprobante_url`.
+ * Dedupes while preserving order.
+ */
+export function collectComprobanteStorageRefs(detalles: unknown): string[] {
+  if (!detalles || typeof detalles !== 'object') return [];
+  const record = detalles as Record<string, unknown>;
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const ref = value.trim();
+    if (!ref || seen.has(ref)) return;
+    if (!extractComprobanteObjectPath(ref)) return;
+    seen.add(ref);
+    out.push(ref);
+  };
+
+  if (Array.isArray(record.comprobantes)) {
+    for (const item of record.comprobantes) push(item);
+  }
+  if (out.length === 0) push(record.comprobante_url);
+  return out;
+}

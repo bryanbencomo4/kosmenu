@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { extractComprobanteObjectPath } from '../../../_lib/comprobante-path';
+import { collectComprobanteStorageRefs, extractComprobanteObjectPath } from '../../../_lib/comprobante-path';
 import {
   buildComprobanteMediaResponse,
   isComprobanteMediaVariant,
@@ -23,6 +23,7 @@ type PedidoRow = {
   detalles?: {
     order_id?: string | null;
     comprobante_url?: string | null;
+    comprobantes?: unknown;
     [key: string]: unknown;
   } | null;
 };
@@ -56,6 +57,8 @@ export async function GET(request: Request, { params }: Params) {
     if (!isComprobanteMediaVariant(variantRaw)) {
       return new NextResponse('Bad request.', { status: 400 });
     }
+    const indexRaw = Number.parseInt(url.searchParams.get('i') || '0', 10);
+    const proofIndex = Number.isFinite(indexRaw) && indexRaw >= 0 ? indexRaw : 0;
 
     const supabase = getServiceSupabaseClient();
     const shortLink = await findOrderShortLink(supabase, code);
@@ -73,7 +76,9 @@ export async function GET(request: Request, { params }: Params) {
       return new NextResponse('Not found.', { status: 404 });
     }
 
-    const objectPath = extractComprobanteObjectPath(row.detalles?.comprobante_url ?? null);
+    const refs = collectComprobanteStorageRefs(row.detalles);
+    const storageRef = refs[proofIndex] ?? null;
+    const objectPath = extractComprobanteObjectPath(storageRef);
     if (!objectPath) return new NextResponse('Not found.', { status: 404 });
     if (!objectPath.startsWith(`${shortLink.comercio_id}/`)) {
       return new NextResponse('Not found.', { status: 404 });

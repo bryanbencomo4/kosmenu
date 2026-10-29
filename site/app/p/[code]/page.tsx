@@ -2,7 +2,10 @@ import type { CSSProperties } from 'react';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 
-import { extractComprobanteObjectPath } from '../../api/_lib/comprobante-path';
+import {
+  collectComprobanteStorageRefs,
+  extractComprobanteObjectPath,
+} from '../../api/_lib/comprobante-path';
 import { buildPublicComprobanteMediaUrls } from '../../api/_lib/comprobante-media';
 import { ComprobanteViewer } from './comprobante-viewer';
 import { findOrderShortLink } from '../../api/_lib/order-short-links';
@@ -17,11 +20,21 @@ type PedidoRow = {
   detalles?: {
     order_id?: string | null;
     comprobante_url?: string | null;
+    comprobantes?: unknown;
     [key: string]: unknown;
   } | null;
 };
 
-async function loadProof(code: string) {
+type ProofItem = {
+  index: number;
+  label: string;
+  fileUrl: string;
+  previewUrl: string | null;
+  downloadUrl: string;
+  isPdf: boolean;
+};
+
+async function loadProofs(code: string) {
   const headerStore = await headers();
   const ip =
     headerStore.get('x-forwarded-for')?.split(',')[0]?.trim() ||
@@ -48,22 +61,28 @@ async function loadProof(code: string) {
     return { kind: 'missing' as const };
   }
 
-  const storageRef = row.detalles?.comprobante_url ?? null;
-  const objectPath = extractComprobanteObjectPath(storageRef);
-  if (!objectPath) return { kind: 'missing' as const };
-  if (!objectPath.startsWith(`${shortLink.comercio_id}/`)) {
-    return { kind: 'missing' as const };
+  const refs = collectComprobanteStorageRefs(row.detalles);
+  const items: ProofItem[] = [];
+  for (let index = 0; index < refs.length; index += 1) {
+    const objectPath = extractComprobanteObjectPath(refs[index]);
+    if (!objectPath) continue;
+    if (!objectPath.startsWith(`${shortLink.comercio_id}/`)) continue;
+    const media = buildPublicComprobanteMediaUrls(code, objectPath, index);
+    items.push({
+      index,
+      label: refs.length > 1 ? `Comprobante ${index + 1}` : 'Comprobante de pago',
+      fileUrl: media.fileUrl,
+      previewUrl: media.previewUrl,
+      downloadUrl: media.downloadUrl,
+      isPdf: /\.pdf($|\?)/i.test(objectPath),
+    });
   }
+  if (items.length === 0) return { kind: 'missing' as const };
 
-  const isPdf = /\.pdf($|\?)/i.test(objectPath);
-  const media = buildPublicComprobanteMediaUrls(code, objectPath);
   return {
     kind: 'ok' as const,
     orderId: shortLink.order_id,
-    fileUrl: media.fileUrl,
-    previewUrl: media.previewUrl,
-    downloadUrl: media.downloadUrl,
-    isPdf,
+    items,
   };
 }
 
@@ -80,7 +99,7 @@ export default async function PublicComprobantePage({
     notFound();
   }
 
-  const proof = await loadProof(code);
+  const proof = await loadProofs(code);
   if (proof.kind === 'rate') {
     return (
       <main style={pageStyle}>
@@ -96,17 +115,37 @@ export default async function PublicComprobantePage({
       <div style={columnStyle}>
         <header style={{ marginBottom: 16, textAlign: 'center' }}>
           <p style={{ margin: 0, color: '#64748b', fontSize: 13, fontWeight: 700 }}>
-            Comprobante de pago
+            {proof.items.length > 1 ? 'Comprobantes de pago' : 'Comprobante de pago'}
           </p>
           <h1 style={{ ...titleStyle, marginTop: 4 }}>{proof.orderId}</h1>
         </header>
-        <ComprobanteViewer
-          orderId={proof.orderId}
-          previewUrl={proof.previewUrl}
-          fileUrl={proof.fileUrl}
-          downloadUrl={proof.downloadUrl}
-          isPdf={proof.isPdf}
-        />
+        <div style={{ display: 'grid', gap: 18 }}>
+          {proof.items.map((item) => (
+            <section key={`proof-${item.index}`}>
+              {proof.items.length > 1 ? (
+                <p
+                  style={{
+                    margin: '0 0 8px',
+                    color: '#475569',
+                    fontSize: 12,
+                    fontWeight: 800,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {item.label}
+                </p>
+              ) : null}
+              <ComprobanteViewer
+                orderId={`${proof.orderId}-${item.index + 1}`}
+                previewUrl={item.previewUrl}
+                fileUrl={item.fileUrl}
+                downloadUrl={item.downloadUrl}
+                isPdf={item.isPdf}
+              />
+            </section>
+          ))}
+        </div>
         <p style={{ ...textStyle, marginTop: 18, textAlign: 'center' }}>
           Este enlace es temporal. Si deja de verse, vuelve a abrirlo desde el mensaje.
         </p>

@@ -1809,7 +1809,8 @@ export default function PublicMenuPage() {
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
   const [themeOverride, setThemeOverride] = useState<MenuThemeMode | null>(null);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
-  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
+  const [paymentProofFiles, setPaymentProofFiles] = useState<File[]>([]);
+  const [requiredPaymentProofCount, setRequiredPaymentProofCount] = useState(1);
   const [paymentProofBusy, setPaymentProofBusy] = useState(false);
   const [paymentProofError, setPaymentProofError] = useState('');
   const [deliveryMode, setDeliveryMode] = useState<OrderDeliveryMode>('pickup');
@@ -3554,7 +3555,8 @@ export default function PublicMenuPage() {
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
   const isCashPayment = selectedPaymentLabel.toLowerCase().includes('efectivo');
   const isDigitalPayment = Boolean(selectedMethod) && !isCashPayment;
-  const hasPaymentProof = !isDigitalPayment || paymentProofFile !== null;
+  const hasPaymentProof =
+    !isDigitalPayment || paymentProofFiles.length >= Math.max(1, requiredPaymentProofCount);
   const paymentWithAmount = isCashPayment
     ? parseCashAmount(cashPaymentInput, selectedCurrencyCode)
     : null;
@@ -4067,24 +4069,36 @@ export default function PublicMenuPage() {
 
   useEffect(() => {
     if (!isDigitalPayment) {
-      setPaymentProofFile(null);
+      setPaymentProofFiles([]);
+      setRequiredPaymentProofCount(1);
       setPaymentProofError('');
       setPaymentProofBusy(false);
     }
   }, [isDigitalPayment]);
 
+  useEffect(() => {
+    if (!hasDeliveryPoint || !checkoutError) return;
+    if (
+      /dirección de entrega|direccion de entrega|Marca el punto|marca el punto/i.test(
+        checkoutError,
+      )
+    ) {
+      setCheckoutError(null);
+    }
+  }, [hasDeliveryPoint, checkoutError]);
+
   async function handlePaymentProofSelected(file: File | null) {
     setPaymentProofError('');
-    if (!file) {
-      setPaymentProofFile(null);
+    if (!file) return;
+    if (paymentProofFiles.length >= 5) {
+      setPaymentProofError('Puedes adjuntar hasta 5 comprobantes.');
       return;
     }
     setPaymentProofBusy(true);
     try {
       const prepared = await prepareComprobanteFile(file);
-      setPaymentProofFile(prepared);
+      setPaymentProofFiles((prev) => [...prev, prepared]);
     } catch (error) {
-      setPaymentProofFile(null);
       setPaymentProofError(
         error instanceof Error
           ? error.message
@@ -4093,6 +4107,10 @@ export default function PublicMenuPage() {
     } finally {
       setPaymentProofBusy(false);
     }
+  }
+
+  function removePaymentProofAt(index: number) {
+    setPaymentProofFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   useEffect(() => {
@@ -4905,7 +4923,7 @@ export default function PublicMenuPage() {
       exchangeRate: number;
       exchangeRateSource: string;
       referenceLast4: string;
-      proofFile: File | null;
+      proofFiles: File[];
     },
     delivery: {
       mode: OrderDeliveryMode;
@@ -4925,9 +4943,9 @@ export default function PublicMenuPage() {
       : isAssistedMode && payLater
         ? 'Pagar despues'
         : 'No especificado';
-    let paymentProofUrl = '';
+    const paymentProofUrls: string[] = [];
 
-    if (paymentMeta.proofFile) {
+    if (paymentMeta.proofFiles.length > 0) {
       const permitResponse = await fetch('/api/orders/comprobantes/permit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4942,33 +4960,39 @@ export default function PublicMenuPage() {
         throw new Error('No se pudo subir el comprobante de pago.');
       }
 
-      const form = new FormData();
-      form.append('comercioId', resolvedComercioId);
-      form.append('permit', permit);
-      form.append('file', paymentMeta.proofFile);
-      const uploadResponse = await fetch('/api/orders/comprobantes', {
-        method: 'POST',
-        body: form,
-      });
-      const uploadPayload = await uploadResponse.json().catch(() => ({}));
-      if (!uploadResponse.ok) {
-        const code = (uploadPayload?.error ?? '').toString();
-        throw new Error(
-          code === 'File too large.'
-            ? 'El comprobante supera el tamano maximo (5 MB).'
-            : code === 'MIME type not allowed.'
-              ? 'Ese comprobante no se pudo cargar. Usa una foto JPEG o PNG.'
-              : 'Ese comprobante no se pudo cargar. Intentalo de nuevo.',
-        );
-      }
-      // Opaque storage ref (storage://comprobantes/...). Not a permanent public URL.
-      paymentProofUrl = (uploadPayload?.data?.storageRef ?? uploadPayload?.data?.paymentProofUrl ?? '')
-        .toString()
-        .trim();
-      if (!paymentProofUrl) {
-        throw new Error('No se pudo subir el comprobante de pago.');
+      for (const proofFile of paymentMeta.proofFiles) {
+        const form = new FormData();
+        form.append('comercioId', resolvedComercioId);
+        form.append('permit', permit);
+        form.append('file', proofFile);
+        const uploadResponse = await fetch('/api/orders/comprobantes', {
+          method: 'POST',
+          body: form,
+        });
+        const uploadPayload = await uploadResponse.json().catch(() => ({}));
+        if (!uploadResponse.ok) {
+          const code = (uploadPayload?.error ?? '').toString();
+          throw new Error(
+            code === 'File too large.'
+              ? 'El comprobante supera el tamano maximo (5 MB).'
+              : code === 'MIME type not allowed.'
+                ? 'Ese comprobante no se pudo cargar. Usa una foto JPEG o PNG.'
+                : 'Ese comprobante no se pudo cargar. Intentalo de nuevo.',
+          );
+        }
+        // Opaque storage ref (storage://comprobantes/...). Not a permanent public URL.
+        const paymentProofUrl = (
+          uploadPayload?.data?.storageRef ?? uploadPayload?.data?.paymentProofUrl ?? ''
+        )
+          .toString()
+          .trim();
+        if (!paymentProofUrl) {
+          throw new Error('No se pudo subir el comprobante de pago.');
+        }
+        paymentProofUrls.push(paymentProofUrl);
       }
     }
+    const paymentProofUrl = paymentProofUrls[0] || '';
 
     const subtotalConverted = convertFromBaseCurrency(
       orderSubtotal,
@@ -5029,6 +5053,7 @@ export default function PublicMenuPage() {
           : null,
       referencia_pago: paymentMeta.referenceLast4 || null,
       comprobante_url: paymentProofUrl || null,
+      ...(paymentProofUrls.length > 0 ? { comprobantes: paymentProofUrls } : {}),
       delivery,
       order_notes: assistedOrderNotes,
       pago_con: isCashPayment && isCashTenderValid && paymentWithAmount !== null ? paymentWithAmount : null,
@@ -5066,6 +5091,7 @@ export default function PublicMenuPage() {
           : null,
       paymentReferenceLast4: paymentMeta.referenceLast4 || null,
       paymentProofUrl: paymentProofUrl || null,
+      paymentProofUrls: paymentProofUrls.length > 0 ? paymentProofUrls : undefined,
       cashPaymentAmount: isCashPayment && isCashTenderValid && paymentWithAmount !== null ? paymentWithAmount : null,
       cashChangeAmount: isCashPayment && isCashTenderValid ? changeAmount : 0,
       orderNotes: assistedOrderNotes,
@@ -5293,11 +5319,13 @@ export default function PublicMenuPage() {
     setCheckoutError(null);
   }
 
-  function clearCheckoutPaymentCoverage() {
-    setPaymentProofFile(null);
+  function requestAdditionalPaymentProof() {
     setPaymentProofError('');
     setPaymentProofBusy(false);
     setCashPaymentInput('');
+    setRequiredPaymentProofCount((prev) =>
+      Math.max(prev, paymentProofFiles.length + 1, 1),
+    );
   }
 
   function scrollCheckoutSheetToTop() {
@@ -5319,19 +5347,21 @@ export default function PublicMenuPage() {
       normalizedDeliveryAddress.length >= 6 &&
       normalizedDeliveryReference.length >= 3;
     const hadPaidCoverage =
-      Boolean(paymentProofFile) ||
+      paymentProofFiles.length > 0 ||
       (isCashPayment && cashTender.valid) ||
       Boolean(selectedPaymentMethodId);
     const repayMessage =
-      'Al pasar a delivery el total sube. Completa el pago con el nuevo monto (incluye envío).';
+      paymentProofFiles.length > 0
+        ? 'Al pasar a delivery el total sube. Adjunta un comprobante adicional por la diferencia de envío.'
+        : 'Al pasar a delivery el total sube. Completa el pago con el nuevo monto (incluye envío).';
 
     selectKioskFulfillment(next);
     setCheckoutError(null);
 
     if (enteringDelivery) {
-      // El comprobante/efectivo previo cubría un total sin envío: hay que volver a pagar.
+      // El pago previo cubría un total sin envío: pedir comprobante adicional (sin borrar los anteriores).
       if (hadPaidCoverage) {
-        clearCheckoutPaymentCoverage();
+        requestAdditionalPaymentProof();
         setPaymentAdjustmentNotice(repayMessage);
       } else {
         setPaymentAdjustmentNotice(null);
@@ -5432,7 +5462,7 @@ export default function PublicMenuPage() {
           exchangeRateSource: selectedExchangeSource,
           // Referencia opcional: se envía vacía; el comprobante es lo que valida el pago.
           referenceLast4: '',
-          proofFile: isAssistedMode && payLater ? null : paymentProofFile,
+          proofFiles: isAssistedMode && payLater ? [] : paymentProofFiles,
         },
         deliveryPayload,
       );
@@ -5511,7 +5541,8 @@ export default function PublicMenuPage() {
       setClientEmail('');
       setClientTable('');
       setPayLater(false);
-      setPaymentProofFile(null);
+      setPaymentProofFiles([]);
+      setRequiredPaymentProofCount(1);
       setPaymentProofError('');
       setPaymentProofBusy(false);
       if (normalizedDeliveryReference) rememberDeliveryNote('reference', normalizedDeliveryReference);
@@ -7748,98 +7779,140 @@ export default function PublicMenuPage() {
                                               'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
                                           }}
                                         >
-                                          <div className="flex items-center gap-3 px-3 py-2.5">
-                                            <div className="min-w-0 flex-1">
-                                              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                                                Comprobante
-                                              </p>
-                                              <p className="mt-0.5 truncate text-xs leading-4 text-[var(--menu-text-muted)]">
-                                                {paymentProofBusy
-                                                  ? 'Preparando…'
-                                                  : paymentProofFile
-                                                    ? paymentProofFile.name
-                                                    : 'Foto del pago'}
-                                              </p>
-                                              {paymentProofError ? (
-                                                <p className="mt-0.5 text-[11px] font-semibold text-[#F43F5E]">
-                                                  {paymentProofError}
-                                                </p>
-                                              ) : null}
-                                            </div>
-                                            <input
-                                              type="file"
-                                              accept="image/*"
-                                              className="hidden"
-                                              id="payment-proof-gallery"
-                                              disabled={paymentProofBusy}
-                                              onChange={(event) => {
-                                                const selected = event.target.files?.[0] ?? null;
-                                                void handlePaymentProofSelected(selected);
-                                                event.target.value = '';
-                                              }}
-                                            />
-                                            <input
-                                              type="file"
-                                              accept="image/*"
-                                              capture="environment"
-                                              className="hidden"
-                                              id="payment-proof-camera"
-                                              disabled={paymentProofBusy}
-                                              onChange={(event) => {
-                                                const selected = event.target.files?.[0] ?? null;
-                                                void handlePaymentProofSelected(selected);
-                                                event.target.value = '';
-                                              }}
-                                            />
-                                            <div className="flex shrink-0 items-center gap-1.5">
-                                              {paymentProofFile ? (
-                                                <span
-                                                  className="grid h-10 w-10 place-items-center rounded-xl"
-                                                  style={{
-                                                    backgroundColor:
-                                                      'color-mix(in srgb, #10B981 18%, var(--menu-surface))',
-                                                    color: '#10B981',
-                                                  }}
-                                                  title="Comprobante listo"
-                                                  aria-hidden
-                                                >
-                                                  <Check className="h-4 w-4" strokeWidth={2.5} />
-                                                </span>
-                                              ) : null}
-                                              <label
-                                                htmlFor="payment-proof-gallery"
-                                                aria-label="Subir comprobante desde galería"
-                                                aria-disabled={paymentProofBusy || undefined}
-                                                className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-dashed text-[var(--menu-text)] ${
-                                                  paymentProofBusy
-                                                    ? 'pointer-events-none opacity-60'
-                                                    : ''
-                                                }`}
-                                                style={{
-                                                  borderColor: 'var(--menu-border)',
-                                                  backgroundColor: 'var(--menu-surface-alt)',
-                                                }}
+                                          {Array.from({
+                                            length: Math.max(
+                                              requiredPaymentProofCount,
+                                              paymentProofFiles.length,
+                                              1,
+                                            ),
+                                          }).map((_, index) => {
+                                            const file = paymentProofFiles[index] ?? null;
+                                            const isExtra = index > 0;
+                                            const waiting = !file;
+                                            return (
+                                              <div
+                                                key={`payment-proof-slot-${index}`}
+                                                className="flex items-center gap-3 px-3 py-2.5"
+                                                style={
+                                                  index > 0
+                                                    ? {
+                                                        borderTop: '1px solid var(--menu-border)',
+                                                      }
+                                                    : undefined
+                                                }
                                               >
-                                                <ImageIcon className="h-4 w-4" aria-hidden />
-                                              </label>
-                                              <label
-                                                htmlFor="payment-proof-camera"
-                                                aria-label="Tomar foto del comprobante"
-                                                aria-disabled={paymentProofBusy || undefined}
-                                                className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-dashed text-[var(--menu-text)] ${
-                                                  paymentProofBusy
-                                                    ? 'pointer-events-none opacity-60'
-                                                    : ''
-                                                }`}
-                                                style={{
-                                                  borderColor: 'var(--menu-border)',
-                                                  backgroundColor: 'var(--menu-surface-alt)',
-                                                }}
-                                              >
-                                                <Camera className="h-4 w-4" aria-hidden />
-                                              </label>
-                                            </div>
-                                          </div>
+                                                <div className="min-w-0 flex-1">
+                                                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                                    {`Comprobante ${index + 1}`}
+                                                  </p>
+                                                  <p className="mt-0.5 truncate text-xs leading-4 text-[var(--menu-text-muted)]">
+                                                    {paymentProofBusy && waiting
+                                                      ? 'Preparando…'
+                                                      : file
+                                                        ? file.name
+                                                        : isExtra
+                                                          ? 'Foto de la diferencia de envío'
+                                                          : 'Foto del pago'}
+                                                  </p>
+                                                </div>
+                                                {file ? (
+                                                  <div className="flex shrink-0 items-center gap-1.5">
+                                                    <span
+                                                      className="grid h-10 w-10 place-items-center rounded-xl"
+                                                      style={{
+                                                        backgroundColor:
+                                                          'color-mix(in srgb, #10B981 18%, var(--menu-surface))',
+                                                        color: '#10B981',
+                                                      }}
+                                                      title="Comprobante listo"
+                                                      aria-hidden
+                                                    >
+                                                      <Check className="h-4 w-4" strokeWidth={2.5} />
+                                                    </span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => removePaymentProofAt(index)}
+                                                      className="grid h-10 w-10 place-items-center rounded-xl text-[var(--menu-text-muted)]"
+                                                      style={{
+                                                        backgroundColor: 'var(--menu-surface-alt)',
+                                                      }}
+                                                      aria-label={`Quitar comprobante ${index + 1}`}
+                                                    >
+                                                      <X className="h-4 w-4" />
+                                                    </button>
+                                                  </div>
+                                                ) : index === paymentProofFiles.length ? (
+                                                  <div className="flex shrink-0 items-center gap-1.5">
+                                                    <label
+                                                      htmlFor="payment-proof-gallery"
+                                                      aria-label={`Subir comprobante ${index + 1} desde galería`}
+                                                      aria-disabled={paymentProofBusy || undefined}
+                                                      className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-dashed text-[var(--menu-text)] ${
+                                                        paymentProofBusy
+                                                          ? 'pointer-events-none opacity-60'
+                                                          : ''
+                                                      }`}
+                                                      style={{
+                                                        borderColor: 'var(--menu-border)',
+                                                        backgroundColor: 'var(--menu-surface-alt)',
+                                                      }}
+                                                    >
+                                                      <ImageIcon className="h-4 w-4" aria-hidden />
+                                                    </label>
+                                                    <label
+                                                      htmlFor="payment-proof-camera"
+                                                      aria-label={`Tomar foto del comprobante ${index + 1}`}
+                                                      aria-disabled={paymentProofBusy || undefined}
+                                                      className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl border border-dashed text-[var(--menu-text)] ${
+                                                        paymentProofBusy
+                                                          ? 'pointer-events-none opacity-60'
+                                                          : ''
+                                                      }`}
+                                                      style={{
+                                                        borderColor: 'var(--menu-border)',
+                                                        backgroundColor: 'var(--menu-surface-alt)',
+                                                      }}
+                                                    >
+                                                      <Camera className="h-4 w-4" aria-hidden />
+                                                    </label>
+                                                  </div>
+                                                ) : null}
+                                              </div>
+                                            );
+                                          })}
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            className="hidden"
+                                            id="payment-proof-gallery"
+                                            disabled={paymentProofBusy}
+                                            onChange={(event) => {
+                                              const selected = event.target.files?.[0] ?? null;
+                                              void handlePaymentProofSelected(selected);
+                                              event.target.value = '';
+                                            }}
+                                          />
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            capture="environment"
+                                            className="hidden"
+                                            id="payment-proof-camera"
+                                            disabled={paymentProofBusy}
+                                            onChange={(event) => {
+                                              const selected = event.target.files?.[0] ?? null;
+                                              void handlePaymentProofSelected(selected);
+                                              event.target.value = '';
+                                            }}
+                                          />
+                                          {paymentProofError ? (
+                                            <p
+                                              className="border-t px-3 py-2 text-[11px] font-semibold text-[#F43F5E]"
+                                              style={{ borderColor: 'var(--menu-border)' }}
+                                            >
+                                              {paymentProofError}
+                                            </p>
+                                          ) : null}
                                         </div>
                                       </div>
                                     )}

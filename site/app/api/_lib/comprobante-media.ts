@@ -55,17 +55,22 @@ export function buildMerchantComprobanteMediaUrls(orderId: string, objectPath: s
   };
 }
 
-export function buildPublicComprobanteMediaUrls(code: string, objectPath: string): {
+export function buildPublicComprobanteMediaUrls(
+  code: string,
+  objectPath: string,
+  index = 0,
+): {
   fileUrl: string;
   previewUrl: string | null;
   downloadUrl: string;
 } {
   const plan = planComprobanteView(objectPath, code);
   const base = `/api/p/${encodeURIComponent(code)}/image`;
+  const indexQuery = index > 0 ? `&i=${index}` : '';
   return {
-    fileUrl: `${base}?v=file`,
-    previewUrl: plan.preview ? `${base}?v=preview` : null,
-    downloadUrl: `${base}?v=download`,
+    fileUrl: `${base}?v=file${indexQuery}`,
+    previewUrl: plan.preview ? `${base}?v=preview${indexQuery}` : null,
+    downloadUrl: `${base}?v=download${indexQuery}`,
   };
 }
 

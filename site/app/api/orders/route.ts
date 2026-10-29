@@ -29,6 +29,7 @@ import {
   parseExchangeRate,
   type MarketRatesInput,
 } from '../../_lib/checkout-exchange-rate';
+import { isComprobanteStorageRef } from '../_lib/comprobante-path';
 import { createOrderShortLink } from '../_lib/order-short-links';
 import {
   buildOrderItemSnapshots,
@@ -116,6 +117,8 @@ type CreateOrderPayload = {
   } | null;
   paymentReferenceLast4?: string;
   paymentProofUrl?: string;
+  /** One or more opaque storage refs (`storage://comprobantes/...`). */
+  paymentProofUrls?: string[];
   cashPaymentAmount?: number | null;
   cashChangeAmount?: number | null;
   orderNotes?: string;
@@ -455,7 +458,22 @@ async function postOrder(request: Request): Promise<NextResponse> {
     const whatsappNotificationsEnabled =
       typeof notifications.whatsapp_enabled === 'boolean' ? notifications.whatsapp_enabled : true;
     const paymentReferenceLast4 = normalizeDigits(body.paymentReferenceLast4 ?? incomingDetalles.referencia_pago).slice(-4);
-    const paymentProofUrl = normalizeText(body.paymentProofUrl ?? incomingDetalles.comprobante_url);
+    const paymentProofUrls: string[] = [];
+    const pushProofUrl = (value: unknown) => {
+      const ref = normalizeText(value);
+      if (!ref || paymentProofUrls.includes(ref)) return;
+      if (!isComprobanteStorageRef(ref)) return;
+      paymentProofUrls.push(ref);
+    };
+    if (Array.isArray(body.paymentProofUrls)) {
+      for (const entry of body.paymentProofUrls) pushProofUrl(entry);
+    }
+    if (Array.isArray(incomingDetalles.comprobantes)) {
+      for (const entry of incomingDetalles.comprobantes) pushProofUrl(entry);
+    }
+    pushProofUrl(body.paymentProofUrl);
+    pushProofUrl(incomingDetalles.comprobante_url);
+    const paymentProofUrl = paymentProofUrls[0] || '';
     const cashPaymentAmount = Number(body.cashPaymentAmount ?? incomingDetalles.pago_con ?? 0);
     const cashChangeAmount = Number(body.cashChangeAmount ?? incomingDetalles.cambio_de ?? 0);
 
@@ -736,6 +754,7 @@ async function postOrder(request: Request): Promise<NextResponse> {
       },
       referencia_pago: paymentReferenceLast4 || null,
       comprobante_url: paymentProofUrl || null,
+      ...(paymentProofUrls.length > 0 ? { comprobantes: paymentProofUrls } : {}),
       delivery,
       order_notes: orderNotes,
       pago_con: Number.isFinite(cashPaymentAmount) && cashPaymentAmount > 0 ? cashPaymentAmount : null,
