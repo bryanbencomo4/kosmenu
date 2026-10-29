@@ -1798,6 +1798,11 @@ export default function PublicMenuPage() {
   const [payLater, setPayLater] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [isOrderReviewOpen, setIsOrderReviewOpen] = useState(false);
+  const [reviewFulfillmentBaseline, setReviewFulfillmentBaseline] = useState<{
+    fulfillment: KioskFulfillment | null;
+    wasDelivery: boolean;
+    deliveryFeeConverted: number;
+  } | null>(null);
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [cashPaymentInput, setCashPaymentInput] = useState('');
   const [selectedCurrency, setSelectedCurrency] = useState<string>('');
@@ -2006,6 +2011,7 @@ export default function PublicMenuPage() {
     if (!isConfirmOpen) {
       setIsCheckoutFooterExpanded(false);
       setIsOrderReviewOpen(false);
+      setReviewFulfillmentBaseline(null);
     }
   }, [isConfirmOpen]);
 
@@ -3817,6 +3823,33 @@ export default function PublicMenuPage() {
     canSubmitStep3 &&
     !scheduleClosed;
   const canSubmitCheckout = canReadyForReview && isClientEmailValid;
+  const reviewFulfillmentHint = (() => {
+    if (!isOrderReviewOpen || !reviewFulfillmentBaseline) return null;
+    if (kioskFulfillment === reviewFulfillmentBaseline.fulfillment) return null;
+
+    if (isDeliveryOrder && !reviewFulfillmentBaseline.wasDelivery) {
+      if (deliveryOutOfZoneAllowed) {
+        return `El envío se acuerda aparte · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+      }
+      if (deliveryQuote.free) {
+        return `Envío gratis · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+      }
+      if (deliveryCostConverted > 0) {
+        return `Envío +${formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)} · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+      }
+      return 'Se sumará el costo de envío según tu dirección.';
+    }
+
+    if (!isDeliveryOrder && reviewFulfillmentBaseline.wasDelivery) {
+      const removed = reviewFulfillmentBaseline.deliveryFeeConverted;
+      if (removed > 0) {
+        return `Sin envío −${formatAmountByCurrency(removed, selectedCurrencyCode)} · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+      }
+      return `Sin costo de envío · Total ${formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}`;
+    }
+
+    return null;
+  })();
   const currentCheckoutStepTitle = checkoutStepTitles[checkoutStep] ?? 'Confirmar pedido';
   const currentCheckoutStepDescription = checkoutStepDescriptions[checkoutStep] ?? checkoutStepDescriptions[0];
   const selectedPaymentSummary = selectedPaymentLabel || 'Por seleccionar';
@@ -5242,7 +5275,46 @@ export default function PublicMenuPage() {
       return;
     }
     setCheckoutError(null);
+    setReviewFulfillmentBaseline({
+      fulfillment: kioskFulfillment,
+      wasDelivery: isDeliveryOrder,
+      deliveryFeeConverted: isDeliveryOrder ? deliveryCostConverted : 0,
+    });
     setIsOrderReviewOpen(true);
+  }
+
+  function editDeliveryFromReview() {
+    if (isSubmittingOrder) return;
+    setIsOrderReviewOpen(false);
+    setCheckoutStep(2);
+    setCheckoutError(null);
+  }
+
+  function changeReviewFulfillment(next: KioskFulfillment) {
+    if (next === kioskFulfillment || scheduleClosed || isAssistedMode || catalogUrlLocked || isSubmittingOrder) {
+      return;
+    }
+    const enteringDelivery = !isDeliveryOrder && next === 'delivery';
+    const leavingDelivery = isDeliveryOrder && next !== 'delivery';
+    const addressReady =
+      deliveryPoint !== null &&
+      deliveryPointSource === 'user' &&
+      normalizedDeliveryAddress.length >= 6 &&
+      normalizedDeliveryReference.length >= 3;
+
+    selectKioskFulfillment(next);
+    setCheckoutError(null);
+
+    if (enteringDelivery && !addressReady) {
+      setIsOrderReviewOpen(false);
+      setCheckoutStep(2);
+      setCheckoutError('Indica la dirección de entrega para continuar.');
+      return;
+    }
+
+    if (leavingDelivery && checkoutStep === 2) {
+      setCheckoutStep(3);
+    }
   }
 
   async function confirmOrder() {
@@ -5576,10 +5648,18 @@ export default function PublicMenuPage() {
     if (next === kioskFulfillment || scheduleClosed || isAssistedMode || catalogUrlLocked) return;
     const leavingDelivery = isDeliveryOrder && next !== 'delivery';
     const enteringDelivery = !isDeliveryOrder && next === 'delivery';
+    const addressReady =
+      deliveryPoint !== null &&
+      deliveryPointSource === 'user' &&
+      normalizedDeliveryAddress.length >= 6 &&
+      normalizedDeliveryReference.length >= 3;
     selectKioskFulfillment(next);
     setCheckoutError(null);
     if (leavingDelivery && checkoutStep === 2) setCheckoutStep(3);
-    if (enteringDelivery && checkoutStep === 3) setCheckoutStep(2);
+    if (enteringDelivery && checkoutStep === 3 && !addressReady) {
+      setIsOrderReviewOpen(false);
+      setCheckoutStep(2);
+    }
   }
 
   function retryMapPicker() {
@@ -7811,42 +7891,55 @@ export default function PublicMenuPage() {
                 </div>
 
                 {!isAssistedMode && checkoutFulfillmentOptions.length > 1 ? (
-                  <div
-                    className="mt-3 grid gap-1 rounded-xl p-1"
-                    role="radiogroup"
-                    aria-label="Tipo de pedido"
-                    style={{
-                      gridTemplateColumns: `repeat(${checkoutFulfillmentOptions.length}, minmax(0, 1fr))`,
-                      backgroundColor: 'color-mix(in srgb, var(--menu-text) 6%, var(--menu-surface-alt))',
-                    }}
-                  >
-                    {checkoutFulfillmentOptions.map((option) => {
-                      const selected = kioskFulfillment === option;
-                      return (
-                        <button
-                          key={`review-fulfillment-${option}`}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          disabled={isSubmittingOrder}
-                          onClick={() => changeCheckoutFulfillment(option)}
-                          className="min-h-8 truncate rounded-lg px-1.5 text-[10px] font-bold leading-none tracking-[-0.01em]"
-                          style={
-                            selected
-                              ? {
-                                  backgroundColor: 'var(--menu-primary)',
-                                  color: 'var(--menu-on-primary)',
-                                }
-                              : {
-                                  backgroundColor: 'transparent',
-                                  color: 'var(--menu-text-muted)',
-                                }
-                          }
-                        >
-                          {FULFILLMENT_LABEL[option]}
-                        </button>
-                      );
-                    })}
+                  <div className="mt-3">
+                    <div
+                      className="grid gap-1 rounded-xl p-1"
+                      role="radiogroup"
+                      aria-label="Tipo de pedido"
+                      style={{
+                        gridTemplateColumns: `repeat(${checkoutFulfillmentOptions.length}, minmax(0, 1fr))`,
+                        backgroundColor: 'color-mix(in srgb, var(--menu-text) 6%, var(--menu-surface-alt))',
+                      }}
+                    >
+                      {checkoutFulfillmentOptions.map((option) => {
+                        const selected = kioskFulfillment === option;
+                        return (
+                          <button
+                            key={`review-fulfillment-${option}`}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            disabled={isSubmittingOrder}
+                            onClick={() => changeReviewFulfillment(option)}
+                            className="min-h-8 truncate rounded-lg px-1.5 text-[10px] font-bold leading-none tracking-[-0.01em]"
+                            style={
+                              selected
+                                ? {
+                                    backgroundColor: 'var(--menu-primary)',
+                                    color: 'var(--menu-on-primary)',
+                                  }
+                                : {
+                                    backgroundColor: 'transparent',
+                                    color: 'var(--menu-text-muted)',
+                                  }
+                            }
+                          >
+                            {FULFILLMENT_LABEL[option]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {reviewFulfillmentHint ? (
+                      <p
+                        className="mt-2 text-[11px] font-semibold leading-4"
+                        style={{
+                          color: 'color-mix(in srgb, var(--menu-primary) 72%, var(--menu-text))',
+                        }}
+                        role="status"
+                      >
+                        {reviewFulfillmentHint}
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="mt-3 text-xs font-semibold text-[var(--menu-text-muted)]">
@@ -7909,7 +8002,17 @@ export default function PublicMenuPage() {
                     {!isAssistedMode && formattedClientWhatsapp ? ` · ${formattedClientWhatsapp}` : ''}
                   </p>
                   {isDeliveryOrder && normalizedDeliveryAddress ? (
-                    <p className="line-clamp-2">{normalizedDeliveryAddress}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="min-w-0 line-clamp-2">{normalizedDeliveryAddress}</p>
+                      <button
+                        type="button"
+                        onClick={editDeliveryFromReview}
+                        disabled={isSubmittingOrder}
+                        className="shrink-0 text-[11px] font-bold text-[var(--menu-primary)] disabled:opacity-45"
+                      >
+                        Cambiar
+                      </button>
+                    </div>
                   ) : null}
                   {selectedPaymentLabel ? <p>Pago: {selectedPaymentSummary}</p> : null}
                 </div>
