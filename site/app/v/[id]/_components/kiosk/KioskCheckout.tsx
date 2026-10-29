@@ -2,11 +2,11 @@
 
 import { Manrope } from 'next/font/google';
 import type { ReactNode } from 'react';
-import { ArrowLeft, ShoppingBag, Store, Truck, X } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
 
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
-import { FULFILLMENT_LABEL, type KioskFulfillment } from './kiosk-types';
+import type { KioskFulfillment } from './kiosk-types';
 
 const titleFont = Manrope({
   subsets: ['latin'],
@@ -18,14 +18,8 @@ export type KioskCheckoutStep = {
   title: string;
 };
 
-const FULFILLMENT_ICON: Record<KioskFulfillment, typeof Store> = {
-  dine_in: Store,
-  takeaway: ShoppingBag,
-  delivery: Truck,
-};
-
 type KioskCheckoutProps = {
-  fulfillment: KioskFulfillment | null;
+  fulfillment?: KioskFulfillment | null;
   fulfillmentOptions?: KioskFulfillment[];
   onFulfillmentChange?: (next: KioskFulfillment) => void;
   steps: KioskCheckoutStep[];
@@ -46,9 +40,6 @@ type KioskCheckoutProps = {
 };
 
 export function KioskCheckout({
-  fulfillment,
-  fulfillmentOptions = [],
-  onFulfillmentChange,
   steps,
   currentStepId,
   title,
@@ -66,7 +57,6 @@ export function KioskCheckout({
   children,
 }: KioskCheckoutProps) {
   useLockBodyScroll(true);
-  const showFulfillmentMenu = fulfillmentOptions.length > 1 && Boolean(onFulfillmentChange);
   const currentIndex = Math.max(
     0,
     steps.findIndex((step) => step.id === currentStepId),
@@ -131,54 +121,6 @@ export function KioskCheckout({
             );
           })}
         </ol>
-
-        {showFulfillmentMenu ? (
-          <div
-            className="mx-auto mt-3 w-full max-w-[560px]"
-            role="radiogroup"
-            aria-label="Tipo de pedido"
-          >
-            <div
-              className="grid gap-1.5 rounded-[18px] p-1.5"
-              style={{
-                gridTemplateColumns: `repeat(${fulfillmentOptions.length}, minmax(0, 1fr))`,
-                backgroundColor: 'var(--menu-surface)',
-                boxShadow: 'var(--menu-shadow)',
-              }}
-            >
-              {fulfillmentOptions.map((option) => {
-                const selected = fulfillment === option;
-                const Icon = FULFILLMENT_ICON[option];
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => onFulfillmentChange?.(option)}
-                    className="flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-[14px] px-2 py-2 text-center transition-[background-color,color,transform] active:scale-[0.98]"
-                    style={
-                      selected
-                        ? {
-                            backgroundColor: 'var(--menu-primary)',
-                            color: 'var(--menu-on-primary)',
-                          }
-                        : {
-                            backgroundColor: 'transparent',
-                            color: 'var(--menu-text-muted)',
-                          }
-                    }
-                  >
-                    <Icon className="h-4 w-4 shrink-0" strokeWidth={2.4} aria-hidden />
-                    <span className="text-[11px] font-bold leading-tight tracking-[-0.01em]">
-                      {FULFILLMENT_LABEL[option]}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
       </header>
 
       <div data-sheet-scroll className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [touch-action:pan-y]">

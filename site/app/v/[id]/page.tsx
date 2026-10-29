@@ -7243,8 +7243,48 @@ export default function PublicMenuPage() {
                                   : ''}
                               </p>
                             </div>
-                            <span
-                              className="inline-flex shrink-0 items-center rounded-full px-3 py-1.5 text-[11px] font-bold"
+                          </div>
+
+                          {!isAssistedMode && checkoutFulfillmentOptions.length > 1 ? (
+                            <div
+                              className="mt-3 grid gap-1 rounded-xl p-1"
+                              role="radiogroup"
+                              aria-label="Tipo de pedido"
+                              style={{
+                                gridTemplateColumns: `repeat(${checkoutFulfillmentOptions.length}, minmax(0, 1fr))`,
+                                backgroundColor: 'color-mix(in srgb, var(--menu-text) 6%, var(--menu-surface))',
+                              }}
+                            >
+                              {checkoutFulfillmentOptions.map((option) => {
+                                const selected = kioskFulfillment === option;
+                                return (
+                                  <button
+                                    key={`summary-fulfillment-${option}`}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selected}
+                                    onClick={() => changeCheckoutFulfillment(option)}
+                                    className="min-h-8 truncate rounded-lg px-1.5 text-[10px] font-bold leading-none tracking-[-0.01em] transition-colors"
+                                    style={
+                                      selected
+                                        ? {
+                                            backgroundColor: 'var(--menu-primary)',
+                                            color: 'var(--menu-on-primary)',
+                                          }
+                                        : {
+                                            backgroundColor: 'transparent',
+                                            color: 'var(--menu-text-muted)',
+                                          }
+                                    }
+                                  >
+                                    {FULFILLMENT_LABEL[option]}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p
+                              className="mt-3 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold"
                               style={{
                                 backgroundColor: 'color-mix(in srgb, var(--menu-primary) 16%, var(--menu-surface))',
                                 color: 'var(--menu-primary)',
@@ -7255,8 +7295,8 @@ export default function PublicMenuPage() {
                                 : kioskFulfillment
                                   ? FULFILLMENT_LABEL[kioskFulfillment]
                                   : 'Pedido en local'}
-                            </span>
-                          </div>
+                            </p>
+                          )}
 
                           <div className="mt-3 grid gap-2">
                             <div
