@@ -3609,8 +3609,7 @@ export default function PublicMenuPage() {
   const canGoNextFromStep1 =
     isClientNameValid &&
     isClientTableValid &&
-    isClientWhatsappValid &&
-    isClientEmailValid;
+    isClientWhatsappValid;
   const canGoNextFromStep2 = isDeliveryReady && !deliveryQuote.blocked;
   const scheduleStatus = useMemo(
     () => resolveBusinessScheduleStatus(menuData?.comercio?.horarios),
@@ -3814,6 +3813,7 @@ export default function PublicMenuPage() {
     canGoNextFromStep1 &&
     canGoNextFromStep2 &&
     canSubmitStep3 &&
+    isClientEmailValid &&
     !scheduleClosed;
   const currentCheckoutStepTitle = checkoutStepTitles[checkoutStep] ?? 'Confirmar pedido';
   const currentCheckoutStepDescription = checkoutStepDescriptions[checkoutStep] ?? checkoutStepDescriptions[0];
@@ -5251,10 +5251,17 @@ export default function PublicMenuPage() {
       !isClientNameValid ||
       !isClientTableValid ||
       !isClientWhatsappValid ||
-      !isClientEmailValid ||
       !isDeliveryReady ||
       !canSubmitStep3
     ) {
+      return;
+    }
+    if (!isClientEmailValid) {
+      setCheckoutError(
+        wantOrderEmail
+          ? 'Escribe un correo válido para el resumen, o desactiva esa opción.'
+          : 'Revisa tus datos para confirmar el pedido.',
+      );
       return;
     }
 
@@ -5501,17 +5508,11 @@ export default function PublicMenuPage() {
       return;
     }
     if (checkoutStep === 1 && !canGoNextFromStep1) {
-      if (!isClientNameValid || !isClientWhatsappValid || !isClientTableValid) {
-        setCheckoutError(
-          isAssistedMode
-            ? 'Completa nombre y mesa para continuar.'
-            : 'Completa tu nombre y WhatsApp para continuar.',
-        );
-      } else if (wantOrderEmail && !isClientEmailValid) {
-        setCheckoutError('Revisa tu correo para continuar, o desactiva el resumen por correo.');
-      } else {
-        setCheckoutError('Revisa tus datos para continuar.');
-      }
+      setCheckoutError(
+        isAssistedMode
+          ? 'Completa nombre y mesa para continuar.'
+          : 'Completa tu nombre y WhatsApp para continuar.',
+      );
       return;
     }
     if (checkoutStep === 2 && !canGoNextFromStep2) {
@@ -7124,76 +7125,6 @@ export default function PublicMenuPage() {
                             />
                           </div>
                         </label>
-
-                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '140ms' }}>
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                                <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
-                                Resumen por correo
-                              </p>
-                              <p className="mt-1 text-xs leading-4 text-[var(--menu-text-muted)]">
-                                Te llega el detalle del pedido y podrás dejar tu opinión.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              role="switch"
-                              aria-checked={wantOrderEmail}
-                              aria-label="Recibir resumen por correo"
-                              onClick={() => {
-                                const next = !wantOrderEmail;
-                                setWantOrderEmail(next);
-                                writeCachedCheckoutCustomer({
-                                  clientName: normalizedClientName,
-                                  clientWhatsapp: normalizedClientWhatsapp,
-                                  clientEmail: normalizedClientEmail,
-                                  wantOrderEmail: next,
-                                  selectedCurrency: selectedCurrencyCode,
-                                });
-                              }}
-                              className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
-                              style={{
-                                backgroundColor: wantOrderEmail
-                                  ? 'var(--menu-primary)'
-                                  : 'color-mix(in srgb, var(--menu-text) 18%, var(--menu-surface-alt))',
-                              }}
-                            >
-                              <span
-                                className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
-                                style={{
-                                  transform: wantOrderEmail ? 'translateX(1.25rem)' : 'translateX(0)',
-                                }}
-                              />
-                            </button>
-                          </div>
-                          {wantOrderEmail ? (
-                            <label className="mt-3 block">
-                              <span className="sr-only">Correo electronico</span>
-                              <input
-                                id="client-email"
-                                type="email"
-                                inputMode="email"
-                                autoComplete="email"
-                                placeholder="tu@correo.com"
-                                value={clientEmail}
-                                onChange={(event) => setClientEmail(event.target.value)}
-                                className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                                style={{
-                                  borderColor:
-                                    isClientEmailValid || clientEmail.trim().length === 0
-                                      ? 'var(--menu-border)'
-                                      : '#F43F5E',
-                                }}
-                              />
-                              {!isClientEmailValid && clientEmail.trim().length > 0 ? (
-                                <p className="mt-2 text-[11px] font-semibold text-rose-500">
-                                  Revisa que el correo esté bien escrito.
-                                </p>
-                              ) : null}
-                            </label>
-                          ) : null}
-                        </div>
                       </div>
                       )}
                     </div>
@@ -7289,25 +7220,205 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 3 ? (
                     <div className="space-y-3">
-                      <div className="rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
-                          Resumen
-                        </p>
-                        <p className="mt-1 text-base font-black">
-                          {isAssistedMode
-                            ? 'Comer aquí'
-                            : kioskFulfillment
-                              ? FULFILLMENT_LABEL[kioskFulfillment]
-                              : 'Pedido en local'}
-                        </p>
-                        <p className="mt-1 text-sm font-medium text-[var(--menu-text-muted)]">
-                          {normalizedClientName || 'Cliente'}
-                          {isAssistedMode && normalizedClientTable
-                            ? ` · Mesa ${normalizedClientTable}`
-                            : ''}
-                          {' · '}
-                          {checkoutItemsCount} unid.
-                        </p>
+                      <div
+                        className="checkout-item-enter overflow-hidden rounded-[24px] shadow-[var(--menu-shadow)]"
+                        style={{
+                          background:
+                            'linear-gradient(165deg, color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface)) 0%, var(--menu-surface) 42%, var(--menu-surface) 100%)',
+                        }}
+                      >
+                        <div className="px-4 pb-3 pt-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
+                                Resumen
+                              </p>
+                              <p className="mt-1 truncate text-xl font-black tracking-[-0.03em] text-[var(--menu-text)]">
+                                {formatAmountByCurrency(orderGrandTotalConverted, selectedCurrencyCode)}
+                              </p>
+                              <p className="mt-0.5 text-xs font-medium text-[var(--menu-text-muted)]">
+                                {checkoutItemsCount} unid.
+                                {selectedCurrencyCode !== businessBaseCurrency
+                                  ? ` · ${selectedCurrencyCode}`
+                                  : ''}
+                              </p>
+                            </div>
+                            <span
+                              className="inline-flex shrink-0 items-center rounded-full px-3 py-1.5 text-[11px] font-bold"
+                              style={{
+                                backgroundColor: 'color-mix(in srgb, var(--menu-primary) 16%, var(--menu-surface))',
+                                color: 'var(--menu-primary)',
+                              }}
+                            >
+                              {isAssistedMode
+                                ? 'Comer aquí'
+                                : kioskFulfillment
+                                  ? FULFILLMENT_LABEL[kioskFulfillment]
+                                  : 'Pedido en local'}
+                            </span>
+                          </div>
+
+                          <div className="mt-3 grid gap-2">
+                            <div
+                              className="flex items-center gap-3 rounded-2xl px-3 py-2.5"
+                              style={{
+                                backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
+                              }}
+                            >
+                              <span
+                                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                                style={{
+                                  backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
+                                  color: 'var(--menu-primary)',
+                                }}
+                              >
+                                <User className="h-4 w-4" strokeWidth={2.4} />
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                                  Cliente
+                                </p>
+                                <p className="truncate text-sm font-bold text-[var(--menu-text)]">
+                                  {normalizedClientName || 'Cliente'}
+                                  {isAssistedMode && normalizedClientTable
+                                    ? ` · Mesa ${normalizedClientTable}`
+                                    : ''}
+                                </p>
+                              </div>
+                            </div>
+                            {!isAssistedMode && formattedClientWhatsapp ? (
+                              <div
+                                className="flex items-center gap-3 rounded-2xl px-3 py-2.5"
+                                style={{
+                                  backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
+                                }}
+                              >
+                                <span
+                                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                                  style={{
+                                    backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
+                                    color: 'var(--menu-primary)',
+                                  }}
+                                >
+                                  <MessageCircle className="h-4 w-4" strokeWidth={2.4} />
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                                    WhatsApp
+                                  </p>
+                                  <p className="truncate text-sm font-bold text-[var(--menu-text)]">
+                                    {formattedClientWhatsapp}
+                                  </p>
+                                </div>
+                              </div>
+                            ) : null}
+                            {isDeliveryOrder && normalizedDeliveryAddress ? (
+                              <div
+                                className="flex items-center gap-3 rounded-2xl px-3 py-2.5"
+                                style={{
+                                  backgroundColor: 'color-mix(in srgb, var(--menu-text) 4%, var(--menu-surface))',
+                                }}
+                              >
+                                <span
+                                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                                  style={{
+                                    backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
+                                    color: 'var(--menu-primary)',
+                                  }}
+                                >
+                                  <MapPin className="h-4 w-4" strokeWidth={2.4} />
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                                    Entrega
+                                  </p>
+                                  <p className="line-clamp-2 text-sm font-bold leading-5 text-[var(--menu-text)]">
+                                    {normalizedDeliveryAddress}
+                                  </p>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {!isAssistedMode ? (
+                          <div
+                            className="border-t px-4 py-3.5"
+                            style={{ borderColor: 'var(--menu-border)' }}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                                  <Mail className="h-3.5 w-3.5" strokeWidth={2.4} />
+                                  Resumen por correo
+                                </p>
+                                <p className="mt-1 text-xs leading-4 text-[var(--menu-text-muted)]">
+                                  Te llega el detalle y podrás dejar tu opinión.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={wantOrderEmail}
+                                aria-label="Recibir resumen por correo"
+                                onClick={() => {
+                                  const next = !wantOrderEmail;
+                                  setWantOrderEmail(next);
+                                  writeCachedCheckoutCustomer({
+                                    clientName: normalizedClientName,
+                                    clientWhatsapp: normalizedClientWhatsapp,
+                                    clientEmail: normalizedClientEmail,
+                                    wantOrderEmail: next,
+                                    selectedCurrency: selectedCurrencyCode,
+                                  });
+                                }}
+                                className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
+                                style={{
+                                  backgroundColor: wantOrderEmail
+                                    ? 'var(--menu-primary)'
+                                    : 'color-mix(in srgb, var(--menu-text) 18%, var(--menu-surface-alt))',
+                                }}
+                              >
+                                <span
+                                  className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform"
+                                  style={{
+                                    transform: wantOrderEmail ? 'translateX(1.25rem)' : 'translateX(0)',
+                                  }}
+                                />
+                              </button>
+                            </div>
+                            {wantOrderEmail ? (
+                              <label className="mt-3 block">
+                                <span className="sr-only">Correo electronico</span>
+                                <input
+                                  id="client-email"
+                                  type="email"
+                                  inputMode="email"
+                                  autoComplete="email"
+                                  placeholder="tu@correo.com"
+                                  value={clientEmail}
+                                  onChange={(event) => setClientEmail(event.target.value)}
+                                  className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                                  style={{
+                                    borderColor:
+                                      isClientEmailValid || clientEmail.trim().length === 0
+                                        ? 'var(--menu-border)'
+                                        : '#F43F5E',
+                                  }}
+                                />
+                                {!isClientEmailValid && clientEmail.trim().length > 0 ? (
+                                  <p className="mt-2 text-[11px] font-semibold text-rose-500">
+                                    Revisa que el correo esté bien escrito.
+                                  </p>
+                                ) : wantOrderEmail && clientEmail.trim().length === 0 ? (
+                                  <p className="mt-2 text-[11px] font-medium text-[var(--menu-text-muted)]">
+                                    Escribe tu correo para enviarte el resumen.
+                                  </p>
+                                ) : null}
+                              </label>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                       {isAssistedMode ? (
                         <div className="flex gap-2">
