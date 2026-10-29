@@ -920,6 +920,7 @@ class MerchantSettingsHub extends StatelessWidget {
     required this.comercio,
     required this.planName,
     required this.hoursSubtitle,
+    required this.accountEmail,
     required this.onOpenBusiness,
     required this.onOpenAppearance,
     required this.onOpenPayments,
@@ -927,6 +928,7 @@ class MerchantSettingsHub extends StatelessWidget {
     required this.onOpenHours,
     required this.onOpenPlan,
     required this.onOpenUsers,
+    required this.onOpenAccount,
     required this.onOpenKioskHome,
     required this.onOpenDelivery,
   });
@@ -934,6 +936,7 @@ class MerchantSettingsHub extends StatelessWidget {
   final ComercioModel comercio;
   final String planName;
   final String hoursSubtitle;
+  final String accountEmail;
   final VoidCallback onOpenBusiness;
   final VoidCallback onOpenAppearance;
   final VoidCallback onOpenPayments;
@@ -941,6 +944,7 @@ class MerchantSettingsHub extends StatelessWidget {
   final VoidCallback onOpenHours;
   final VoidCallback onOpenPlan;
   final VoidCallback onOpenUsers;
+  final VoidCallback onOpenAccount;
   final VoidCallback onOpenKioskHome;
   final VoidCallback onOpenDelivery;
 
@@ -997,6 +1001,12 @@ class MerchantSettingsHub extends StatelessWidget {
             title: 'Usuarios',
             subtitle: 'Invita caja, cocina, marketing o mesero',
             onTap: onOpenUsers,
+          ),
+          (
+            icon: Icons.manage_accounts_outlined,
+            title: 'Cuenta',
+            subtitle: accountEmail.trim().isEmpty ? '—' : accountEmail.trim(),
+            onTap: onOpenAccount,
           ),
           (
             icon: Icons.workspace_premium_outlined,

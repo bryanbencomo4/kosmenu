@@ -35,6 +35,7 @@ import { ProductOptionsSheet } from './_components/ProductOptionsSheet';
 import { ProductImageLightbox } from './_components/ProductImageLightbox';
 import { KioskMenuExperience } from './_components/kiosk/KioskMenuExperience';
 import { KioskCheckout } from './_components/kiosk/KioskCheckout';
+import { DeliveryNoteField } from './_components/kiosk/DeliveryNoteField';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import {
   KioskCatalogReady,
@@ -129,6 +130,14 @@ import {
   readCachedCheckoutCustomer,
   writeCachedCheckoutCustomer,
 } from '../../_lib/checkout-customer-cache';
+import {
+  DEFAULT_INSTRUCTION_SUGGESTIONS,
+  DEFAULT_REFERENCE_SUGGESTIONS,
+  deliveryNoteSuggestions,
+  readDeliveryNotesCache,
+  rememberDeliveryNote,
+  type DeliveryNotesCache,
+} from '../../_lib/delivery-notes-cache';
 import {
   clearCachedCheckoutCart,
   readCachedCheckoutCart,
@@ -1805,7 +1814,16 @@ export default function PublicMenuPage() {
   const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
   const [mapPickerAddress, setMapPickerAddress] = useState('');
   const [isMapPickerLoading, setIsMapPickerLoading] = useState(false);
+  const [isMapCanvasReady, setIsMapCanvasReady] = useState(false);
+  const [mapLoadSlow, setMapLoadSlow] = useState(false);
+  const [mapPickerNonce, setMapPickerNonce] = useState(0);
   const [isMapPickerDragging, setIsMapPickerDragging] = useState(false);
+  const [deliveryNoteMemory, setDeliveryNoteMemory] = useState<DeliveryNotesCache>({
+    reference: '',
+    instructions: '',
+    references: [],
+    instructionsHistory: [],
+  });
   const [mapPickerError, setMapPickerError] = useState('');
   const [mapPickerProvider, setMapPickerProvider] = useState<'google' | 'leaflet'>('google');
   const [orderNotes, setOrderNotes] = useState('');
@@ -3104,6 +3122,16 @@ export default function PublicMenuPage() {
       : showEngineDeliveryLine && deliveryQuote.free
         ? 'Gratis 🎉'
         : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode);
+  const deliveryDistanceLabel = (() => {
+    const km = deliveryQuote.distanceKm;
+    if (!isDeliveryOrder || km == null || !Number.isFinite(km)) return null;
+    const rounded = Math.round(km * 10) / 10;
+    const text = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1).replace('.', ',');
+    return `${text} km`;
+  })();
+  const deliveryPriceWithDistance = deliveryLineValue
+    ? [deliveryLineValue, deliveryDistanceLabel].filter(Boolean).join(' · ')
+    : null;
   const deliveryOutOfZoneNotice =
     'Tu ubicación está fuera de las zonas de cobertura. Puedes continuar con el pedido: el costo de envío lo confirmará el negocio y no está incluido en este total.';
   const deliveryEngineNote = showEngineDeliveryLine
@@ -3504,6 +3532,12 @@ export default function PublicMenuPage() {
         { id: 1, title: clientStepTitle },
         { id: 3, title: 'Pago' },
       ];
+  const checkoutFulfillmentOptions: KioskFulfillment[] = [];
+  if (!isAssistedMode && !catalogUrlLocked) {
+    if (kioskHomeConfig.comerAqui) checkoutFulfillmentOptions.push('dine_in');
+    if (kioskHomeConfig.paraLlevar) checkoutFulfillmentOptions.push('takeaway');
+    if (kioskHomeConfig.delivery && supportsDelivery) checkoutFulfillmentOptions.push('delivery');
+  }
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
   const isCashPayment = selectedPaymentLabel.toLowerCase().includes('efectivo');
@@ -3522,7 +3556,8 @@ export default function PublicMenuPage() {
     : [];
   const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
   const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
-  const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint;
+  const isDeliveryReferenceValid = !isDeliveryOrder || normalizedDeliveryReference.length >= 3;
+  const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint && isDeliveryReferenceValid;
   const checkoutStepDescriptions = ['Edita tu pedido', 'Tus datos', 'Entrega', 'Pago'];
   const checkoutProgress = (checkoutStep + 1) / checkoutStepTitles.length;
   const nextStepCtaLabels = ['Continuar', 'Continuar', 'Continuar'];
@@ -3934,7 +3969,7 @@ export default function PublicMenuPage() {
                 {isDeliveryOrder && deliveryLineLabel ? (
                   <div className="flex items-center justify-between gap-3">
                     <span>{deliveryLineLabel}</span>
-                    <span className="font-semibold">{deliveryLineValue}</span>
+                    <span className="font-semibold">{deliveryPriceWithDistance}</span>
                   </div>
                 ) : null}
                 {deliveryEngineNote ? (
@@ -3975,6 +4010,22 @@ export default function PublicMenuPage() {
       setClientWhatsapp(cached.clientWhatsapp);
     }
   }, []);
+
+  useEffect(() => {
+    const cached = readDeliveryNotesCache();
+    setDeliveryNoteMemory(cached);
+    if (cached.reference) setDeliveryReference(cached.reference);
+    if (cached.instructions) setDeliveryInstructions(cached.instructions);
+  }, []);
+
+  useEffect(() => {
+    if (!isMapPickerOpen || isMapCanvasReady || mapPickerError) {
+      setMapLoadSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setMapLoadSlow(true), 6000);
+    return () => window.clearTimeout(timer);
+  }, [isMapPickerOpen, isMapCanvasReady, mapPickerError, mapPickerNonce]);
 
   useEffect(() => {
     if (!isDigitalPayment) {
@@ -4166,6 +4217,7 @@ export default function PublicMenuPage() {
     if (!isMapPickerOpen) return;
 
     let disposed = false;
+    setIsMapCanvasReady(false);
     let lastResolvedPoint: DeliveryPoint | null = null;
 
     const shouldResolvePoint = (point: DeliveryPoint) => {
@@ -4222,10 +4274,13 @@ export default function PublicMenuPage() {
           attributionControl: true,
         }).setView([initialPoint.lat, initialPoint.lng], fromGps ? 15 : 16);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
           attribution: '&copy; OpenStreetMap',
         }).addTo(map);
+        tiles.on('load', () => {
+          if (!disposed) setIsMapCanvasReady(true);
+        });
 
         const coverageBounds: Array<[number, number]> = [];
         if (L.polygon) {
@@ -4397,6 +4452,9 @@ export default function PublicMenuPage() {
         mapPickerMapRef.current = map;
         mapPickerMarkerRef.current = null;
         mapPickerGeocoderRef.current = geocoder;
+        map.addListener('tilesloaded', () => {
+          if (!disposed) setIsMapCanvasReady(true);
+        });
 
         const moveToPoint = (point: DeliveryPoint, knownAddress?: string) => {
           skipNextIdle = true;
@@ -4508,6 +4566,7 @@ export default function PublicMenuPage() {
     businessLng,
     normalizedDeliveryAddress,
     deliveryAreaZonesForMap,
+    mapPickerNonce,
   ]);
 
   function selectedPaymentMethod() {
@@ -5321,6 +5380,8 @@ export default function PublicMenuPage() {
       setPaymentProofFile(null);
       setPaymentProofError('');
       setPaymentProofBusy(false);
+      if (normalizedDeliveryReference) rememberDeliveryNote('reference', normalizedDeliveryReference);
+      if (normalizedDeliveryInstructions) rememberDeliveryNote('instructions', normalizedDeliveryInstructions);
       setDeliveryAddress('');
       setDeliveryReference('');
       setDeliveryInstructions('');
@@ -5383,6 +5444,10 @@ export default function PublicMenuPage() {
   }
 
   function resumeAbandonedCart() {
+    if (scheduleClosed) {
+      window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
+      return;
+    }
     const pending = abandonedCartPrompt;
     if (!pending) return;
     const restored = applyRestoredCart(pending.items, pending.fulfillment ?? null);
@@ -5426,6 +5491,10 @@ export default function PublicMenuPage() {
   }
 
   function goToNextStep() {
+    if (scheduleClosed) {
+      setCheckoutError(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
+      return;
+    }
     if (checkoutStep === 0 && !canGoNextFromStep0) {
       setCheckoutError('Agrega al menos un producto para continuar con el pedido.');
       return;
@@ -5435,8 +5504,22 @@ export default function PublicMenuPage() {
       return;
     }
     if (checkoutStep === 2 && !canGoNextFromStep2) {
-      setCheckoutError('Completa la direccion y el punto en el mapa para continuar con delivery.');
+      if (!hasDeliveryPoint || !isDeliveryAddressValid) {
+        setCheckoutError('Marca el punto en el mapa para continuar con delivery.');
+      } else if (!isDeliveryReferenceValid) {
+        setCheckoutError('Indica el punto de referencia (por ejemplo: al frente de, torre o piso).');
+      } else {
+        setCheckoutError('Revisa la dirección de entrega para continuar.');
+      }
       return;
+    }
+    if (checkoutStep === 2) {
+      if (normalizedDeliveryReference) {
+        setDeliveryNoteMemory(rememberDeliveryNote('reference', normalizedDeliveryReference));
+      }
+      if (normalizedDeliveryInstructions) {
+        setDeliveryNoteMemory(rememberDeliveryNote('instructions', normalizedDeliveryInstructions));
+      }
     }
     setCheckoutError(null);
     if (checkoutStep === 1 && canGoNextFromStep1) {
@@ -5454,6 +5537,27 @@ export default function PublicMenuPage() {
       return;
     }
     setCheckoutStep((prev) => Math.min(3, prev + 1));
+  }
+
+  function persistDeliveryNote(field: 'reference' | 'instructions', value: string) {
+    setDeliveryNoteMemory(rememberDeliveryNote(field, value));
+  }
+
+  function changeCheckoutFulfillment(next: KioskFulfillment) {
+    if (next === kioskFulfillment || scheduleClosed || isAssistedMode || catalogUrlLocked) return;
+    const leavingDelivery = isDeliveryOrder && next !== 'delivery';
+    const enteringDelivery = !isDeliveryOrder && next === 'delivery';
+    selectKioskFulfillment(next);
+    setCheckoutError(null);
+    if (leavingDelivery && checkoutStep === 2) setCheckoutStep(3);
+    if (enteringDelivery && checkoutStep === 3) setCheckoutStep(2);
+  }
+
+  function retryMapPicker() {
+    setMapPickerError('');
+    setIsMapCanvasReady(false);
+    setMapLoadSlow(false);
+    setMapPickerNonce((current) => current + 1);
   }
 
   function goToPreviousStep() {
@@ -6507,8 +6611,31 @@ export default function PublicMenuPage() {
                     Buscar
                   </button>
                 </div>
-                <div ref={mapPickerContainerRef} className="h-full w-full bg-slate-100" />
-                <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center">
+                <div ref={mapPickerContainerRef} className="h-full w-full bg-[#e7e5e4]" />
+                {!isMapCanvasReady ? (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#e7e5e4] px-6 text-center">
+                    {mapPickerError ? (
+                      <p className="max-w-xs text-sm font-bold text-slate-800">{mapPickerError}</p>
+                    ) : (
+                      <>
+                        <span className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800" />
+                        <p className="max-w-xs text-sm font-bold leading-5 text-slate-900">
+                          Ten paciencia, esto puede demorar un momento
+                        </p>
+                      </>
+                    )}
+                    {mapPickerError || mapLoadSlow ? (
+                      <button
+                        type="button"
+                        onClick={retryMapPicker}
+                        className="rounded-full bg-slate-900 px-4 py-2 text-xs font-bold uppercase tracking-[0.08em] text-white"
+                      >
+                        Reintentar
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className={`pointer-events-none absolute inset-0 z-[5] flex items-center justify-center ${isMapCanvasReady ? '' : 'hidden'}`}>
                   <div
                     className={`-mt-6 text-4xl leading-none transition-[transform] duration-200 ease-out ${
                       isMapPickerDragging
@@ -6520,7 +6647,7 @@ export default function PublicMenuPage() {
                     📍
                   </div>
                 </div>
-                {isMapPickerLoading ? (
+                {isMapCanvasReady && isMapPickerLoading ? (
                   <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 py-1 text-xs font-semibold text-[var(--menu-text)] shadow-sm">
                     Buscando direccion...
                   </div>
@@ -6543,7 +6670,7 @@ export default function PublicMenuPage() {
                       Costo de delivery
                     </p>
                     <p className="mt-0.5 text-lg font-black tracking-tight text-emerald-950">
-                      {mapPickerDeliveryCostLabel}
+                      {[mapPickerDeliveryCostLabel, deliveryDistanceLabel].filter(Boolean).join(' · ')}
                     </p>
                     {matchedDeliveryAreaZone?.name ? (
                       <p className="mt-0.5 text-[12px] font-medium text-emerald-900/75">
@@ -6636,6 +6763,8 @@ export default function PublicMenuPage() {
         {isConfirmOpen && !kioskVoucher ? (
           <KioskCheckout
             fulfillment={kioskFulfillment}
+            fulfillmentOptions={checkoutFulfillmentOptions}
+            onFulfillmentChange={changeCheckoutFulfillment}
             steps={checkoutFlowSteps}
             currentStepId={checkoutStep}
             title={
@@ -6659,7 +6788,7 @@ export default function PublicMenuPage() {
                     ? 'Nombre, mesa y contacto opcional para el resumen.'
                     : 'Te avisamos cuando el pedido este listo.'
                   : checkoutStep === 2
-                    ? 'Indica a donde enviamos tu pedido.'
+                    ? 'Indica dónde enviamos el pedido.'
                     : isAssistedMode
                       ? 'Pagar ahora o dejar el pago para después.'
                       : 'Elige como vas a pagar.'
@@ -6681,6 +6810,7 @@ export default function PublicMenuPage() {
             }
             nextDisabled={
               isSubmittingOrder ||
+              scheduleClosed ||
               (checkoutStep === 3 ? !canSubmitCheckout : !canAdvanceCurrentStep)
             }
             submitting={isSubmittingOrder}
@@ -7017,39 +7147,53 @@ export default function PublicMenuPage() {
                     <div className="space-y-3">
                       <button
                         type="button"
-                        onClick={() => setIsMapPickerOpen(true)}
-                        className="w-full rounded-[22px] bg-[var(--menu-surface)] p-4 text-left shadow-[var(--menu-shadow)]"
-                        style={{ boxShadow: isDeliveryAddressValid ? '0 8px 30px rgba(15,23,42,0.06)' : '0 0 0 1px #F43F5E' }}
+                        onClick={() => {
+                          setIsMapCanvasReady(false);
+                          setMapLoadSlow(false);
+                          setMapPickerError('');
+                          setIsMapPickerOpen(true);
+                        }}
+                        className="w-full rounded-[22px] p-4 text-left"
+                        style={
+                          hasDeliveryPoint
+                            ? {
+                                backgroundColor: 'var(--menu-surface)',
+                                boxShadow: 'var(--menu-shadow)',
+                              }
+                            : {
+                                backgroundColor: 'color-mix(in srgb, var(--menu-primary) 12%, var(--menu-surface))',
+                                boxShadow: '0 0 0 2px var(--menu-primary)',
+                              }
+                        }
                       >
-                        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                          Direccion de entrega
-                        </p>
-                        <p className="mt-2 text-sm font-semibold">
-                          {normalizedDeliveryAddress || 'Toca para marcar la direccion en el mapa'}
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        <div className="flex items-start gap-3">
                           <span
-                            className="rounded-full px-2.5 py-1 text-[11px] font-black"
-                            style={
-                              hasDeliveryPoint
-                                ? {
-                                    backgroundColor: 'color-mix(in srgb, #10B981 16%, var(--menu-surface))',
-                                    color: 'color-mix(in srgb, #059669 70%, var(--menu-text))',
-                                  }
-                                : {
-                                    backgroundColor: 'color-mix(in srgb, #F59E0B 16%, var(--menu-surface))',
-                                    color: 'color-mix(in srgb, #D97706 72%, var(--menu-text))',
-                                  }
-                            }
+                            className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl"
+                            style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
                           >
-                            {hasDeliveryPoint ? 'Punto confirmado' : 'Falta el punto en el mapa'}
+                            <MapPin className="h-6 w-6" strokeWidth={2.4} />
                           </span>
-                          {deliveryLineLabel ? (
-                            <span className="rounded-full bg-[var(--menu-surface-alt)] px-2.5 py-1 text-[11px] font-black">
-                              {deliveryQuote.free ? 'Delivery gratis 🎉' : `${deliveryLineLabel} ${deliveryLineValue}`}
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[11px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
+                              {hasDeliveryPoint ? 'Punto en el mapa' : 'Paso necesario'}
                             </span>
-                          ) : null}
+                            <span className="mt-1 block text-sm font-bold text-[var(--menu-text)]">
+                              {hasDeliveryPoint
+                                ? normalizedDeliveryAddress || 'Punto listo'
+                                : 'Marca en el mapa dónde te llevamos el pedido'}
+                            </span>
+                            <span className="mt-1 block text-[12px] font-semibold text-[var(--menu-text-muted)]">
+                              {hasDeliveryPoint ? 'Toca para cambiar el punto' : 'Sin este punto no podemos enviar el pedido.'}
+                            </span>
+                          </span>
                         </div>
+                        {deliveryLineLabel ? (
+                          <span className="mt-3 inline-flex rounded-full bg-[var(--menu-surface-alt)] px-2.5 py-1 text-[11px] font-black text-[var(--menu-text)]">
+                            {deliveryQuote.free
+                              ? ['Delivery gratis 🎉', deliveryDistanceLabel].filter(Boolean).join(' · ')
+                              : `${deliveryLineLabel} ${deliveryPriceWithDistance}`}
+                          </span>
+                        ) : null}
                       </button>
                       {deliveryQuote.blocked ? (
                         <p className="text-sm font-semibold text-rose-500">{deliveryQuote.blockReason}</p>
@@ -7060,30 +7204,30 @@ export default function PublicMenuPage() {
                       ) : deliveryEngineNote ? (
                         <p className="text-[12px] font-semibold text-[var(--menu-text-muted)]">{deliveryEngineNote}</p>
                       ) : null}
-                      <label className="block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                          Referencia
-                        </span>
-                        <input
-                          type="text"
-                          value={deliveryReference}
-                          onChange={(event) => setDeliveryReference(event.target.value)}
-                          placeholder="Apartamento, porton, piso, torre"
-                          className="h-12 w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 text-sm outline-none"
-                        />
-                      </label>
-                      <label className="block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                          Indicaciones
-                        </span>
-                        <textarea
-                          value={deliveryInstructions}
-                          onChange={(event) => setDeliveryInstructions(event.target.value)}
-                          placeholder="Tocar timbre, llamar al llegar..."
-                          rows={3}
-                          className="w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-4 py-3 text-sm outline-none"
-                        />
-                      </label>
+                      <DeliveryNoteField
+                        id="delivery-reference"
+                        label="Punto de referencia"
+                        value={deliveryReference}
+                        placeholder="Al frente de la panadería, torre, piso"
+                        suggestions={deliveryNoteSuggestions(deliveryNoteMemory.references, DEFAULT_REFERENCE_SUGGESTIONS)}
+                        prefixes={DEFAULT_REFERENCE_SUGGESTIONS}
+                        required
+                        onChange={setDeliveryReference}
+                        onRemember={(value) => persistDeliveryNote('reference', value)}
+                      />
+                      <DeliveryNoteField
+                        id="delivery-instructions"
+                        label="Indicaciones"
+                        value={deliveryInstructions}
+                        placeholder="Tocar timbre, llamar al llegar..."
+                        suggestions={deliveryNoteSuggestions(
+                          deliveryNoteMemory.instructionsHistory,
+                          DEFAULT_INSTRUCTION_SUGGESTIONS,
+                        )}
+                        multiline
+                        onChange={setDeliveryInstructions}
+                        onRemember={(value) => persistDeliveryNote('instructions', value)}
+                      />
                     </div>
                   ) : null}
 
@@ -7635,7 +7779,7 @@ export default function PublicMenuPage() {
                         {isDeliveryOrder && deliveryLineLabel ? (
                           <p className="mt-1 flex items-center justify-between text-sm text-[var(--menu-text-muted)]">
                             <span>{deliveryLineLabel}</span>
-                            <span className="font-semibold">{deliveryLineValue}</span>
+                            <span className="font-semibold">{deliveryPriceWithDistance}</span>
                           </p>
                         ) : null}
                         <p className="mt-2 flex items-center justify-between border-t border-[var(--menu-border)] pt-2 text-sm font-semibold text-[var(--menu-text)]">
@@ -7674,6 +7818,11 @@ export default function PublicMenuPage() {
           savedLabel={abandonedCartPreview.savedLabel}
           items={abandonedCartPreview.items}
           titleFontStyle={titleFontStyle}
+          resumeBlockedReason={
+            scheduleClosed
+              ? scheduleStatus.caption || 'El restaurante está cerrado actualmente. No puedes continuar el pedido ahora.'
+              : null
+          }
           onResume={resumeAbandonedCart}
           onStartFresh={startFreshAfterAbandonedCart}
         />

@@ -23,6 +23,7 @@ import 'package:kosmenu_app/screens/auth_screen.dart';
 import 'package:kosmenu_app/screens/billing_plan_screen.dart';
 import 'package:kosmenu_app/screens/business_setup_screen.dart';
 import 'package:kosmenu_app/screens/business_hours_screen.dart';
+import 'package:kosmenu_app/screens/account_settings_screen.dart';
 import 'package:kosmenu_app/screens/comercio_staff_screen.dart';
 import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/merchant_client_profile_screen.dart';
@@ -745,6 +746,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   Future<void> _openStaff() async {
     await _pushInShell(const ComercioStaffScreen());
+  }
+
+  Future<void> _openAccount() async {
+    await _pushInShell(const AccountSettingsScreen());
   }
 
   Future<void> _openKioskHome() async {
@@ -3279,6 +3284,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           hoursSubtitle: data.schedule.isConfigured
               ? (data.schedule.statusAt().caption ?? 'Horario configurado')
               : 'Define cuándo recibes pedidos',
+          accountEmail:
+              Supabase.instance.client.auth.currentUser?.email?.trim() ?? '',
           onOpenBusiness: () => _openBusinessSettings(
             data.comercio,
             MerchantBusinessSettingsSection.profile,
@@ -3298,6 +3305,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           onOpenHours: () => _openHours(data.schedule),
           onOpenPlan: () => _selectNav(MerchantNavDestination.plan),
           onOpenUsers: _openStaff,
+          onOpenAccount: _openAccount,
           onOpenKioskHome: _openKioskHome,
           onOpenDelivery: _openDeliverySettings,
         );

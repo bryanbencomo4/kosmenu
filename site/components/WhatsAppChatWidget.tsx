@@ -48,6 +48,7 @@ function shouldHideWidget(pathname: string, hostname: string) {
   return (
     pathname.startsWith('/admin') ||
     pathname.startsWith('/v/') ||
+    pathname.startsWith('/p/') ||
     pathname.startsWith('/preview') ||
     pathname.startsWith('/orders') ||
     pathname.startsWith('/delivery') ||

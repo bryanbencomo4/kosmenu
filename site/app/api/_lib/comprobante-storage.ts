@@ -67,19 +67,77 @@ export async function uploadComprobanteObject(input: {
   };
 }
 
+export type ComprobanteSignedUrlOptions = {
+  downloadName?: string;
+  transform?: {
+    width: number;
+    quality?: number;
+  };
+};
+
+/** Small WebP preview. The original phone photo is what makes the receipt feel slow. */
+export const COMPROBANTE_PREVIEW_WIDTH = 800;
+export const COMPROBANTE_PREVIEW_QUALITY = 66;
+
+export function planComprobanteView(
+  objectPath: string,
+  orderId: string,
+): {
+  downloadName: string;
+  preview: { width: number; quality: number } | null;
+} {
+  const isPdf = /\.pdf($|\?)/i.test(objectPath);
+  const ext = isPdf
+    ? 'pdf'
+    : /\.png($|\?)/i.test(objectPath)
+      ? 'png'
+      : /\.webp($|\?)/i.test(objectPath)
+        ? 'webp'
+        : 'jpg';
+  const safeOrder = orderId.replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 40);
+  return {
+    downloadName: `comprobante-${safeOrder || 'pago'}.${ext}`,
+    preview: isPdf
+      ? null
+      : { width: COMPROBANTE_PREVIEW_WIDTH, quality: COMPROBANTE_PREVIEW_QUALITY },
+  };
+}
+
 /** Short-lived signed URL for privileged readers (merchant/admin). Not for public tracking. */
 export async function createComprobanteSignedUrl(
   objectPath: string,
   expiresInSec = COMPROBANTE_SIGNED_URL_TTL_SEC,
+  options?: ComprobanteSignedUrlOptions,
 ): Promise<string | null> {
   if (!objectPath || objectPath.includes('..') || objectPath.startsWith('/')) {
     return null;
   }
 
+  const width = options?.transform?.width;
+  const quality = options?.transform?.quality ?? COMPROBANTE_PREVIEW_QUALITY;
+  const transform =
+    typeof width === 'number' && width >= 64 && width <= 1600
+      ? {
+          width: Math.round(width),
+          resize: 'contain' as const,
+          quality: Math.min(100, Math.max(20, Math.round(quality))),
+        }
+      : undefined;
+  const downloadName = options?.downloadName
+    ?.replace(/[^A-Za-z0-9._-]+/g, '')
+    .slice(0, 80);
+  const signedOptions =
+    transform || downloadName
+      ? {
+          ...(downloadName ? { download: downloadName } : {}),
+          ...(transform ? { transform } : {}),
+        }
+      : undefined;
+
   const supabase = getServiceSupabaseClient();
   const { data, error } = await supabase.storage
     .from(COMPROBANTES_BUCKET)
-    .createSignedUrl(objectPath, expiresInSec);
+    .createSignedUrl(objectPath, expiresInSec, signedOptions);
 
   if (error || !data?.signedUrl) {
     console.error('[comprobantes] signed url failed');
@@ -87,4 +145,33 @@ export async function createComprobanteSignedUrl(
   }
 
   return data.signedUrl;
+}
+
+/**
+ * Original file, a transformed preview, and a download URL.
+ * The preview token is created with the transform. Do not rewrite /object/sign/ into /render/image/.
+ * A preview failure must not drop the original URL.
+ */
+export async function createComprobanteViewUrls(
+  objectPath: string,
+  expiresInSec: number,
+  orderId: string,
+): Promise<{
+  fileUrl: string | null;
+  previewUrl: string | null;
+  downloadUrl: string | null;
+}> {
+  const plan = planComprobanteView(objectPath, orderId);
+  const [fileUrl, downloadUrl, previewUrl] = await Promise.all([
+    createComprobanteSignedUrl(objectPath, expiresInSec),
+    createComprobanteSignedUrl(objectPath, expiresInSec, {
+      downloadName: plan.downloadName,
+    }),
+    plan.preview
+      ? createComprobanteSignedUrl(objectPath, expiresInSec, {
+          transform: plan.preview,
+        })
+      : Promise.resolve(null),
+  ]);
+  return { fileUrl, previewUrl, downloadUrl };
 }

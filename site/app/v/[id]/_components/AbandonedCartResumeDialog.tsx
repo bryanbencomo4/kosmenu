@@ -20,6 +20,8 @@ type AbandonedCartResumeDialogProps = {
   savedLabel?: string | null;
   items: AbandonedCartPreviewItem[];
   titleFontStyle?: CSSProperties;
+  /** When set, Continuar pedido is disabled (restaurant closed / offline). */
+  resumeBlockedReason?: string | null;
   onResume: () => void;
   onStartFresh: () => void;
 };
@@ -33,6 +35,7 @@ export function AbandonedCartResumeDialog({
   savedLabel,
   items,
   titleFontStyle,
+  resumeBlockedReason = null,
   onResume,
   onStartFresh,
 }: AbandonedCartResumeDialogProps) {
@@ -41,6 +44,7 @@ export function AbandonedCartResumeDialog({
   const previewItems = items.slice(0, 4);
   const extraCount = Math.max(0, items.length - previewItems.length);
   const unitsLabel = itemCount === 1 ? '1 producto' : `${itemCount} productos`;
+  const resumeBlocked = Boolean(resumeBlockedReason?.trim());
 
   return (
     <div
@@ -130,10 +134,16 @@ export function AbandonedCartResumeDialog({
           </div>
 
           <div className="grid gap-2.5">
+            {resumeBlocked ? (
+              <div className="rounded-2xl border border-rose-200/80 bg-rose-50 px-4 py-3 text-sm font-semibold leading-snug text-rose-900">
+                {resumeBlockedReason}
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={onResume}
-              className="kos-pressable min-h-12 rounded-2xl px-4 py-3.5 text-sm font-black shadow-[0_16px_32px_rgba(15,23,42,0.16)]"
+              disabled={resumeBlocked}
+              className="kos-pressable min-h-12 rounded-2xl px-4 py-3.5 text-sm font-black shadow-[0_16px_32px_rgba(15,23,42,0.16)] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
               style={{
                 backgroundColor: 'var(--menu-primary)',
                 color: 'var(--menu-on-primary)',

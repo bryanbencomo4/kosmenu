@@ -384,8 +384,59 @@ void main() {
         expect(auth, 'Bearer session-token');
         expect(result.expiresInSec, 300);
         expect(result.url, 'https://signed.example/tmp');
+        expect(result.previewUrl, isNull);
+        expect(result.downloadUrl, isNull);
       },
     );
+
+    test('reads the small preview and download urls when present', () async {
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'ok': true,
+            'data': {
+              'url': 'https://signed.example/original',
+              'previewUrl': 'https://signed.example/preview',
+              'downloadUrl': 'https://signed.example/download',
+              'expiresInSec': 120,
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      );
+      final result = await PublicOrderApiService(
+        client: client,
+      ).fetchComprobanteSignedUrl(orderId: 'ORD-1', accessToken: 'token');
+      expect(result.url, 'https://signed.example/original');
+      expect(result.previewUrl, 'https://signed.example/preview');
+      expect(result.downloadUrl, 'https://signed.example/download');
+      expect(result.expiresInSec, 120);
+    });
+
+    test('ignores non-http preview urls', () async {
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'ok': true,
+            'data': {
+              'url': 'https://signed.example/original',
+              'previewUrl': 'javascript:alert(1)',
+              'downloadUrl': 'not a url',
+              'expiresInSec': 120,
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      );
+      final result = await PublicOrderApiService(
+        client: client,
+      ).fetchComprobanteSignedUrl(orderId: 'ORD-1', accessToken: 'token');
+      expect(result.url, 'https://signed.example/original');
+      expect(result.previewUrl, isNull);
+      expect(result.downloadUrl, isNull);
+    });
 
     test('foreign ownership is generic 404/403', () async {
       final client = MockClient(

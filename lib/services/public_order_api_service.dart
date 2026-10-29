@@ -199,10 +199,27 @@ class ComprobanteSignedUrlResult {
   const ComprobanteSignedUrlResult({
     required this.url,
     required this.expiresInSec,
+    this.previewUrl,
+    this.downloadUrl,
   });
 
   final String url;
   final int expiresInSec;
+
+  /// Small transformed image. Null for PDFs and older API responses.
+  final String? previewUrl;
+
+  /// Original file with a download filename. Falls back to [url] in the UI.
+  final String? downloadUrl;
+}
+
+String? _optionalHttpUrl(Object? value) {
+  final text = value?.toString().trim() ?? '';
+  if (text.isEmpty) return null;
+  final uri = Uri.tryParse(text);
+  if (uri == null || uri.host.isEmpty) return null;
+  if (uri.scheme != 'https' && uri.scheme != 'http') return null;
+  return text;
 }
 
 /// Cryptographically random idempotency key (UUID v4 style). No PII / timestamp-only.
@@ -465,7 +482,12 @@ class PublicOrderApiService {
           statusCode: 404,
         );
       }
-      return ComprobanteSignedUrlResult(url: url, expiresInSec: expiresInSec);
+      return ComprobanteSignedUrlResult(
+        url: url,
+        expiresInSec: expiresInSec,
+        previewUrl: _optionalHttpUrl(map['previewUrl']),
+        downloadUrl: _optionalHttpUrl(map['downloadUrl']),
+      );
     }
 
     if (response.statusCode == 401) {

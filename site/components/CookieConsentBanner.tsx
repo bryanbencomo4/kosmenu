@@ -71,6 +71,7 @@ export function CookieConsentBanner() {
     (typeof window !== 'undefined' && window.location.hostname.toLowerCase() === adminSiteHost);
   const isKioskSurface =
     pathname.startsWith('/v/') ||
+    pathname.startsWith('/p/') ||
     pathname.startsWith('/o/') ||
     pathname.startsWith('/orders/') ||
     pathname.startsWith('/preview/');

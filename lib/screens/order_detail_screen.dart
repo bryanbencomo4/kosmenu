@@ -24,6 +24,7 @@ import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
 import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -52,6 +53,14 @@ class OrderDetailScreen extends StatefulWidget {
   @override
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
+
+typedef _PaymentProof = ({
+  String url,
+  String? previewUrl,
+  String? downloadUrl,
+  String? reference,
+  bool isPdf,
+});
 
 class _OrderDetailScreenState extends State<OrderDetailScreen>
     with SingleTickerProviderStateMixin {
@@ -96,7 +105,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
   bool _deferredVisualsReady = false;
   final ComprobanteSignedUrlSession _comprobanteSignedUrlSession =
       ComprobanteSignedUrlSession();
-  Future<({String url, String? reference, bool isPdf})>? _paymentProofFuture;
+  Future<_PaymentProof>? _paymentProofFuture;
 
   @override
   void initState() {
@@ -249,6 +258,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         );
         _comprobanteSignedUrlSession.store(
           url: signed.url,
+          previewUrl: signed.previewUrl,
+          downloadUrl: signed.downloadUrl,
           expiresInSec: signed.expiresInSec,
         );
       }
@@ -257,6 +268,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       if (!mounted || url == null || url.isEmpty) {
         return;
       }
+      final previewUrl = _comprobanteSignedUrlSession.previewUrl;
+      final downloadUrl = _comprobanteSignedUrlSession.downloadUrl ?? url;
 
       final ref = (pedido.comprobanteRef ?? '').toLowerCase();
       final isPdf = ref.endsWith('.pdf') || ref.contains('.pdf?');
@@ -269,35 +282,60 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
             ),
             content: SizedBox(
-              width: 360,
+              width: 280,
               child: isPdf
                   ? Text(
                       'Este comprobante es un PDF. Se abrira de forma segura en el visor del sistema.',
                       style: GoogleFonts.manrope(),
                     )
-                  : InteractiveViewer(
-                      child: Image.network(
-                        url,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) => Text(
-                          'No se pudo mostrar la imagen.',
-                          style: GoogleFonts.manrope(),
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: ColoredBox(
+                            color: Colors.white,
+                            child: SizedBox(
+                              width: 220,
+                              height: 260,
+                              child: InteractiveViewer(
+                                minScale: 1,
+                                maxScale: 4,
+                                child: SizedBox.expand(
+                                  child: ComprobanteNetworkImage(
+                                    previewUrl: previewUrl,
+                                    fallbackUrl: url,
+                                    orderIdHint: publicOrderId,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Pellizca para ampliar',
+                          style: GoogleFonts.manrope(
+                            color: const Color(0xFF64748B),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
             ),
             actions: [
+              TextButton(
+                onPressed: () => unawaited(_shareComprobante(downloadUrl)),
+                child: const Text('Compartir'),
+              ),
+              TextButton(
+                onPressed: () => unawaited(_downloadComprobante(downloadUrl)),
+                child: const Text('Descargar'),
+              ),
               if (isPdf)
                 TextButton(
-                  onPressed: () async {
-                    final uri = Uri.tryParse(url);
-                    if (uri != null) {
-                      await launchUrl(
-                        uri,
-                        mode: LaunchMode.externalApplication,
-                      );
-                    }
-                  },
+                  onPressed: () => unawaited(_downloadComprobante(url)),
                   child: const Text('Abrir PDF'),
                 ),
               TextButton(
@@ -327,8 +365,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
-  Future<({String url, String? reference, bool isPdf})>
-  _loadPaymentProof() async {
+  Future<void> _shareComprobante(String url) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
+    try {
+      await SharePlus.instance.share(ShareParams(text: trimmed));
+    } catch (_) {}
+  }
+
+  Future<void> _downloadComprobante(String url) async {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !(uri.isScheme('https') || uri.isScheme('http'))) {
+      return;
+    }
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo descargar el comprobante.')),
+      );
+    }
+  }
+
+  Future<_PaymentProof> _loadPaymentProof() async {
     final data = await _orderFuture;
     if (data == null || !data.pedido.hasComprobante) {
       throw const PublicOrderApiException(
@@ -352,6 +410,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     final file = (data.pedido.comprobanteRef ?? '').toLowerCase();
     return (
       url: signed.url,
+      previewUrl: signed.previewUrl,
+      downloadUrl: signed.downloadUrl,
       reference: reference != null && RegExp(r'^\d{4}$').hasMatch(reference)
           ? reference
           : null,
@@ -380,7 +440,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
         ],
       ),
       body: SafeArea(
-        child: FutureBuilder<({String url, String? reference, bool isPdf})>(
+        child: FutureBuilder<_PaymentProof>(
           future: _paymentProofFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
@@ -402,32 +462,26 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 ),
               );
             }
+            final shareUrl = proof.downloadUrl ?? proof.url;
             return PaymentProofContent(
               reference: proof.reference,
               pedido: _cachedOrderData?.pedido,
+              showZoomHint: !proof.isPdf,
+              onShare: () => unawaited(_shareComprobante(shareUrl)),
+              onDownload: () => unawaited(_downloadComprobante(shareUrl)),
               image: proof.isPdf
                   ? Center(
                       child: FilledButton.icon(
-                        onPressed: () => unawaited(
-                          launchUrl(
-                            Uri.parse(proof.url),
-                            mode: LaunchMode.externalApplication,
-                          ),
-                        ),
+                        onPressed: () =>
+                            unawaited(_downloadComprobante(proof.url)),
                         icon: const Icon(Icons.picture_as_pdf_outlined),
                         label: const Text('Abrir PDF'),
                       ),
                     )
-                  : Image.network(
-                      proof.url,
-                      fit: BoxFit.contain,
-                      loadingBuilder: (context, child, progress) =>
-                          progress == null
-                          ? child
-                          : const Center(child: CircularProgressIndicator()),
-                      errorBuilder: (_, _, _) => const Center(
-                        child: Text('No se pudo mostrar la imagen.'),
-                      ),
+                  : ComprobanteNetworkImage(
+                      previewUrl: proof.previewUrl,
+                      fallbackUrl: proof.url,
+                      orderIdHint: widget.orderId.trim(),
                     ),
             );
           },

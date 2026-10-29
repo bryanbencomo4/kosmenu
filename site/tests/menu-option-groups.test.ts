@@ -162,6 +162,46 @@ describe('Campesina: base 0 + sizes + extras', () => {
   });
 });
 
+describe('option summary reads repeated choices as one decision', () => {
+  function product(grupos: Array<Record<string, unknown>>) {
+    return { id: 'p', nombre: 'Arepas', precio: 11.99, opciones_menu: { activadas: true, grupos } };
+  }
+  function group(nombre: string, opciones: string[]) {
+    return {
+      id: `g_${nombre}`,
+      nombre,
+      tipo: 'unica',
+      obligatorio: true,
+      min: 1,
+      max: 1,
+      opciones: opciones.map((nombreOpcion) => ({ id: `o_${nombreOpcion}`, nombre: nombreOpcion, precio: 0 })),
+    };
+  }
+
+  it('does not pluralize the index of Relleno 1', () => {
+    const arepas = product([
+      group('Relleno 1', ['Caraotas', 'Plátano', 'Grillado', 'Soya', 'Mechada']),
+      group('Relleno 2', ['Caraotas', 'Plátano', 'Grillado', 'Soya', 'Mechada']),
+      group('Sabor de la bebida', ['Jamaica', 'Parchita', 'Papelón']),
+    ]);
+    expect(getProductOptionsSummary(arepas)).toBe('Elige 2 rellenos y bebida');
+  });
+
+  it('treats Toping 1 and Toping 2 as two toppings plus a drink', () => {
+    const pancakes = product([
+      group('Toping 1', ['Fresa', 'Chocolate']),
+      group('Toping 2', ['Fresa', 'Chocolate']),
+      group('Sabor de la bebida', ['Jamaica', 'Parchita', 'Papelón']),
+    ]);
+    expect(getProductOptionsSummary(pancakes)).toBe('Elige 2 topings y bebida');
+  });
+
+  it('pluralizes only the first word of a single group', () => {
+    const drink = product([group('Sabor de la bebida', ['Jamaica', 'Parchita', 'Papelón'])]);
+    expect(getProductOptionsSummary(drink)).toBe('3 sabores de la bebida disponibles');
+  });
+});
+
 describe('single-choice tap replaces the previous pick', () => {
   const unica = {
     id: 'g_tamano',

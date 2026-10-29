@@ -640,23 +640,65 @@ export function buildOrderLineSnapshot(
   };
 }
 
-function pluralizeEs(word: string) {
+function pluralizeWord(word: string) {
   const value = word.trim().toLowerCase();
-  if (!value || /s$/.test(value)) return value;
-  return /[aeiouáéó]$/.test(value) ? `${value}s` : `${value}es`;
+  if (!value || /[sx]$/.test(value)) return value;
+  if (/ing$/.test(value)) return `${value}s`;
+  if (/z$/.test(value)) return `${value.slice(0, -1)}ces`;
+  if (/[aeiouáéíóúü]$/.test(value)) return `${value}s`;
+  return `${value}es`;
+}
+
+/** "Relleno 1" and "Toping 2" are the same choice repeated, not a different noun. */
+function stripGroupIndex(name: string) {
+  return name.trim().replace(/\s*#?\d+\s*$/u, '').trim();
+}
+
+function pluralizePhrase(name: string) {
+  const words = stripGroupIndex(name).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 'opciones';
+  words[0] = pluralizeWord(words[0]);
+  return words.join(' ').toLowerCase();
+}
+
+function groupStem(name: string) {
+  return stripGroupIndex(name).toLocaleLowerCase('es');
+}
+
+/** Short companion for a second choice, e.g. "Sabor de la bebida" → "bebida". */
+function companionLabel(name: string) {
+  const stem = stripGroupIndex(name);
+  if (/bebida/i.test(stem)) return 'bebida';
+  const words = stem.split(/\s+/).filter(Boolean);
+  if (words.length <= 2) return stem.toLowerCase();
+  return words[0].toLowerCase();
 }
 
 /**
  * Card subtitle for configurable products ("3 tamaños disponibles"), without
  * opening the product. Null for simple products, so their card is unchanged.
+ * Numbered repeats ("Relleno 1" + "Relleno 2") read as one choice made twice.
  */
 export function getProductOptionsSummary(product: ProductLike): string | null {
   const groups = parseProductMenuOptions(product.opciones_menu)?.grupos ?? [];
   if (groups.length === 0) return null;
-  const lead = groups.find((group) => group.obligatorio) ?? groups[0];
+  const required = groups.filter((group) => group.obligatorio && group.opciones.length > 0);
+  if (required.length === 0) return 'Personalizable';
+
+  const lead = required[0];
+  const stem = groupStem(lead.nombre);
+  const series = required.filter((group) => groupStem(group.nombre) === stem);
+  const others = required.filter((group) => groupStem(group.nombre) !== stem);
+
+  if (series.length >= 2) {
+    const noun = pluralizePhrase(lead.nombre);
+    const extra = others.length === 1 ? ` y ${companionLabel(others[0].nombre)}` : '';
+    return `Elige ${series.length} ${noun}${extra}`;
+  }
+
   const count = lead.opciones.length;
-  if (!lead.obligatorio) return 'Personalizable';
-  const noun = count === 1 ? lead.nombre.trim().toLowerCase() : pluralizeEs(lead.nombre);
+  const singular = stripGroupIndex(lead.nombre).toLowerCase() || 'opción';
+  const noun = count === 1 ? singular : pluralizePhrase(lead.nombre);
   return `${count} ${noun} ${count === 1 ? 'disponible' : 'disponibles'}`;
 }
 

@@ -1,8 +1,8 @@
 'use client';
 
 import { Manrope } from 'next/font/google';
-import type { ReactNode } from 'react';
-import { ArrowLeft, X } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ArrowLeft, ChevronDown, X } from 'lucide-react';
 
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
@@ -20,6 +20,8 @@ export type KioskCheckoutStep = {
 
 type KioskCheckoutProps = {
   fulfillment: KioskFulfillment | null;
+  fulfillmentOptions?: KioskFulfillment[];
+  onFulfillmentChange?: (next: KioskFulfillment) => void;
   steps: KioskCheckoutStep[];
   currentStepId: number;
   title: string;
@@ -39,6 +41,8 @@ type KioskCheckoutProps = {
 
 export function KioskCheckout({
   fulfillment,
+  fulfillmentOptions = [],
+  onFulfillmentChange,
   steps,
   currentStepId,
   title,
@@ -56,6 +60,14 @@ export function KioskCheckout({
   children,
 }: KioskCheckoutProps) {
   useLockBodyScroll(true);
+  const [fulfillmentMenuOpen, setFulfillmentMenuOpen] = useState(false);
+  const showFulfillmentMenu = fulfillmentOptions.length > 1 && Boolean(onFulfillmentChange);
+  useEffect(() => {
+    if (!fulfillmentMenuOpen) return;
+    const close = () => setFulfillmentMenuOpen(false);
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [fulfillmentMenuOpen]);
   const currentIndex = Math.max(
     0,
     steps.findIndex((step) => step.id === currentStepId),
@@ -82,13 +94,51 @@ export function KioskCheckout({
             </h2>
             <p className="truncate text-sm font-medium text-[var(--menu-text-muted)]">{subtitle}</p>
           </div>
-          {fulfillment ? (
-            <span
-              className="shrink-0 rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]"
-              style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
-            >
-              {FULFILLMENT_LABEL[fulfillment]}
-            </span>
+          {showFulfillmentMenu ? (
+            <div className="relative z-20 shrink-0" onPointerDown={(event) => event.stopPropagation()}>
+              <button
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={fulfillmentMenuOpen}
+                aria-label="Tipo de pedido"
+                onClick={() => setFulfillmentMenuOpen((open) => !open)}
+                className="inline-flex h-11 max-w-[8.5rem] items-center gap-1 rounded-[14px] bg-[var(--menu-surface)] px-3 text-[12px] font-bold text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
+              >
+                <span className="truncate">{fulfillment ? FULFILLMENT_LABEL[fulfillment] : 'Pedido'}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              </button>
+              {fulfillmentMenuOpen ? (
+                <div
+                  role="listbox"
+                  aria-label="Tipo de pedido"
+                  className="absolute right-0 top-[calc(100%+6px)] z-30 w-44 rounded-[16px] bg-[var(--menu-surface)] p-1 shadow-[var(--menu-shadow)]"
+                >
+                  {fulfillmentOptions.map((option) => {
+                    const selected = fulfillment === option;
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        onClick={() => {
+                          onFulfillmentChange?.(option);
+                          setFulfillmentMenuOpen(false);
+                        }}
+                        className="flex min-h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-bold"
+                        style={
+                          selected
+                            ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }
+                            : { color: 'var(--menu-text)' }
+                        }
+                      >
+                        {FULFILLMENT_LABEL[option]}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
         <ol className="mx-auto mt-4 flex w-full max-w-[560px] items-center gap-2">
