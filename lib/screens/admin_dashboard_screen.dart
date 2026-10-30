@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:fl_chart/fl_chart.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -87,6 +89,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   bool _didPrimeOrderAlert = false;
   Set<String> _seenOrderIds = <String>{};
   List<PedidoModel> _latestOrders = const <PedidoModel>[];
+
+  /// Ids removed by hard-delete so paginated Pedidos caches drop them
+  /// immediately even before realtime catches up.
+  final Set<String> _purgedOrderIds = <String>{};
 
   /// Orders for the selected sales range (plus today), fetched on demand so
   /// the realtime stream only has to carry the most recent orders.
@@ -468,7 +474,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       }
     }
 
-    _latestOrders = orders;
+    _latestOrders = _purgedOrderIds.isEmpty
+        ? orders
+        : orders
+              .where((order) => !_purgedOrderIds.contains(order.id))
+              .toList(growable: false);
     _ordersPublishTimer ??= Timer(const Duration(milliseconds: 250), () {
       _ordersPublishTimer = null;
       if (!mounted) return;
@@ -485,7 +495,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       );
       _bumpShell();
     });
-    final validOrders = orders.where((order) => !order.hasParseError);
+    final validOrders = _latestOrders.where((order) => !order.hasParseError);
     final currentIds = validOrders.map((e) => e.id).toSet();
 
     if (!_didPrimeOrderAlert) {
@@ -705,20 +715,118 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     return count < live.length ? live.length : count;
   }
 
+  Map<String, dynamic>? _asStringKeyedMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) {
+      return value.map((key, item) => MapEntry('$key', item));
+    }
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return null;
+      try {
+        final decoded = jsonDecode(trimmed);
+        return _asStringKeyedMap(decoded);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
   Future<MenuAnalyticsSummary> _loadAnalytics(SupabaseClient client) async {
+    final comercioId = SupabaseConfig.currentComercioId.trim();
+    if (comercioId.isEmpty) return const MenuAnalyticsSummary();
+
     try {
       final payload = await client.rpc(
         'get_menu_analytics_summary',
-        params: {
-          'p_comercio_id': SupabaseConfig.currentComercioId,
-          'p_days': 30,
-        },
+        params: {'p_comercio_id': comercioId, 'p_days': 30},
       );
-      if (payload is Map) {
-        return MenuAnalyticsSummary.fromMap(Map<String, dynamic>.from(payload));
+      final map = _asStringKeyedMap(payload);
+      if (map != null) {
+        final summary = MenuAnalyticsSummary.fromMap(map);
+        if (summary.hasTraffic || summary.orders > 0) return summary;
       }
-    } catch (_) {}
-    return const MenuAnalyticsSummary();
+    } catch (error) {
+      debugPrint('menu analytics rpc failed: $error');
+    }
+
+    try {
+      return await _loadAnalyticsFallback(client, comercioId);
+    } catch (error) {
+      debugPrint('menu analytics fallback failed: $error');
+      return const MenuAnalyticsSummary();
+    }
+  }
+
+  /// Lightweight client-side summary when the RPC is unavailable so Visitas
+  /// still populate without pulling full event payloads.
+  Future<MenuAnalyticsSummary> _loadAnalyticsFallback(
+    SupabaseClient client,
+    String comercioId,
+  ) async {
+    final since = DateTime.now().toUtc().subtract(const Duration(days: 30));
+    final rows = await client
+        .from('menu_analytics_events')
+        .select('event_type, created_at')
+        .eq('comercio_id', comercioId)
+        .gte('created_at', since.toIso8601String())
+        .limit(5000);
+
+    var visits = 0;
+    var scans = 0;
+    var productViews = 0;
+    var addToCart = 0;
+    var checkouts = 0;
+    final dayKeys = List<String>.generate(7, (index) {
+      final day = DateTime.now().subtract(Duration(days: 6 - index));
+      final local = DateTime(day.year, day.month, day.day);
+      return '${local.year.toString().padLeft(4, '0')}-'
+          '${local.month.toString().padLeft(2, '0')}-'
+          '${local.day.toString().padLeft(2, '0')}';
+    });
+    final visitsByDay = List<int>.filled(7, 0);
+
+    for (final raw in rows as List<dynamic>) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      final type = '${row['event_type'] ?? ''}';
+      switch (type) {
+        case 'menu_view':
+          visits += 1;
+          break;
+        case 'qr_scan':
+          scans += 1;
+          break;
+        case 'product_view':
+          productViews += 1;
+          break;
+        case 'add_to_cart':
+          addToCart += 1;
+          break;
+        case 'checkout_started':
+          checkouts += 1;
+          break;
+      }
+      if (type != 'menu_view') continue;
+      final created = DateTime.tryParse('${row['created_at'] ?? ''}');
+      if (created == null) continue;
+      final local = created.toLocal();
+      final key =
+          '${local.year.toString().padLeft(4, '0')}-'
+          '${local.month.toString().padLeft(2, '0')}-'
+          '${local.day.toString().padLeft(2, '0')}';
+      final index = dayKeys.indexOf(key);
+      if (index >= 0) visitsByDay[index] += 1;
+    }
+
+    return MenuAnalyticsSummary(
+      visits: visits,
+      scans: scans,
+      productViews: productViews,
+      addToCart: addToCart,
+      checkouts: checkouts,
+      visitsByDay: visitsByDay,
+    );
   }
 
   Future<void> _openAiCredits({double balance = 0}) async {
@@ -867,6 +975,70 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     );
   }
 
+  List<PedidoModel> _withReplacedOrder(
+    List<PedidoModel> source,
+    PedidoModel updated,
+  ) {
+    final next = <PedidoModel>[];
+    var found = false;
+    for (final order in source) {
+      if (order.id == updated.id) {
+        next.add(updated);
+        found = true;
+      } else {
+        next.add(order);
+      }
+    }
+    if (!found) next.insert(0, updated);
+    return next;
+  }
+
+  void _applyOptimisticOrderUpdate(PedidoModel updated) {
+    _purgedOrderIds.remove(updated.id);
+    _latestOrders = _withReplacedOrder(_latestOrders, updated);
+    if (updated.isArchived) {
+      _metricsOrders = _metricsOrders
+          .where((order) => order.id != updated.id)
+          .toList(growable: false);
+      final clients = _clientOrders;
+      if (clients != null) {
+        _clientOrders = clients
+            .where((order) => order.id != updated.id)
+            .toList(growable: false);
+      }
+      if (_totalOrdersCount != null && _totalOrdersCount! > 0) {
+        _totalOrdersCount = _totalOrdersCount! - 1;
+      }
+    } else {
+      _metricsOrders = _withReplacedOrder(_metricsOrders, updated);
+      _clientOrders = null;
+      if (_totalOrdersCount != null) {
+        _totalOrdersCount = _totalOrdersCount! + 1;
+      }
+    }
+    _bumpShell();
+  }
+
+  void _applyOptimisticOrderRemoval(String orderId, {required bool wasArchived}) {
+    _purgedOrderIds.add(orderId);
+    _latestOrders = _latestOrders
+        .where((order) => order.id != orderId)
+        .toList(growable: false);
+    _metricsOrders = _metricsOrders
+        .where((order) => order.id != orderId)
+        .toList(growable: false);
+    final clients = _clientOrders;
+    if (clients != null) {
+      _clientOrders = clients
+          .where((order) => order.id != orderId)
+          .toList(growable: false);
+    }
+    if (!wasArchived && _totalOrdersCount != null && _totalOrdersCount! > 0) {
+      _totalOrdersCount = _totalOrdersCount! - 1;
+    }
+    _bumpShell();
+  }
+
   Future<void> _toggleOrderArchive(
     PedidoModel pedido, {
     required bool archive,
@@ -895,11 +1067,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     if (confirmed != true || !mounted) return;
 
     try {
-      await MerchantOrdersRepository.setArchived(
+      final updated = await MerchantOrdersRepository.setArchived(
         pedidoId: pedido.id,
         archived: archive,
       );
       if (!mounted) return;
+      _applyOptimisticOrderUpdate(updated);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -956,6 +1129,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     try {
       await MerchantOrdersRepository.deleteArchived(pedidoId: pedido.id);
       if (!mounted) return;
+      _applyOptimisticOrderRemoval(pedido.id, wasArchived: true);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Pedido eliminado permanentemente.')),
       );
@@ -2488,8 +2662,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                     topProducts: topProducts,
                                                     publicUrl: publicUrl,
                                                     displayUrl: displayUrl,
-                                                    todayOrders:
-                                                        todayActiveOrders,
                                                   ),
                                                 ),
                                               );
@@ -3324,10 +3496,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     required List<MerchantTopProduct> topProducts,
     required String publicUrl,
     required String displayUrl,
-    required List<PedidoModel> todayOrders,
   }) {
+    // Same window as the sales chart so peak hours match what merchants filter.
+    final salesWindow = _resolveSalesRangeWindow(metricsOrders);
     final hourCounts = List<int>.filled(24, 0);
-    for (final pedido in todayOrders) {
+    for (final pedido in metricsOrders) {
+      if (pedido.isArchived) continue;
+      if (pedido.statusBucket == OrderStatusBucket.canceled) continue;
+      if (!salesWindow.contains(pedido.createdAt)) continue;
       final hour = pedido.createdAt?.toLocal().hour;
       if (hour == null) continue;
       hourCounts[hour] += 1;
@@ -3339,6 +3515,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       case MerchantNavDestination.orders:
         return MerchantOrdersWorkspace(
           orders: validOrders,
+          purgedOrderIds: _purgedOrderIds,
           errorSubtitle: ordersSnapshot.hasError
               ? _ordersErrorSubtitle(ordersSnapshot.error)
               : null,

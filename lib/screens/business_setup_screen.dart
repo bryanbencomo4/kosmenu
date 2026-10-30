@@ -395,7 +395,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     MerchantBusinessSettingsSection.appearance =>
       'Ajusta colores, tema, tipografía y diseño del menú.',
     MerchantBusinessSettingsSection.payments =>
-      'Configura monedas, tasas y los datos de cobro.',
+      'Moneda principal, tasa de cambio y datos de cobro.',
     MerchantBusinessSettingsSection.operations =>
       'Define cómo contactarte y cómo recibes pedidos.',
     null => '',
@@ -9874,17 +9874,21 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Moneda principal',
+          '1. Moneda principal',
           style: GoogleFonts.poppins(
             color: _setupTextHigh,
-            fontSize: 19,
+            fontSize: 18,
             fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          'Selecciona la moneda en la que están expresados los precios de tu menú físico.',
-          style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+        const Text(
+          'Es la moneda de los precios de tu menú. No lleva tasa de cambio.',
+          style: TextStyle(
+            color: _setupTextMedium,
+            fontSize: 12.5,
+            height: 1.35,
+          ),
         ),
         const SizedBox(height: 14),
         Container(
@@ -9947,17 +9951,21 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         if (hasPrimary) ...[
           const SizedBox(height: 10),
           Text(
-            'Tambien aceptamos',
+            '2. También aceptamos (aquí se configura la tasa)',
             style: GoogleFonts.poppins(
               color: _setupTextHigh,
-              fontSize: 19,
+              fontSize: 18,
               fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 6),
           Text(
-            'Selecciona monedas adicionales para configurar sus pares con $baseCurrency.',
-            style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+            'Marca otra moneda (ej. VES o COP) para crear el par con $baseCurrency y editar su tasa de cambio.',
+            style: const TextStyle(
+              color: _setupTextMedium,
+              fontSize: 12.5,
+              height: 1.35,
+            ),
           ),
           const SizedBox(height: 10),
           Container(
@@ -10038,14 +10046,48 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           ),
         ],
         if (hasPrimary) ...[
-          const SizedBox(height: 10),
+          if (_selectedCurrencies.length <= 1) ...[
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF334155)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '¿Dónde está la tasa de cambio?',
+                    style: TextStyle(
+                      color: Color(0xFFF8FAFC),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    'Marca otra moneda arriba en «También aceptamos» (por ejemplo VES o COP). Después elígela en «Moneda en edición» para ver y cambiar su tasa.',
+                    style: TextStyle(
+                      color: Color(0xFFCBD5E1),
+                      fontSize: 12.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFF17122E),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF3B2F63)),
+              color: const Color(0xFF141B2D),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF334155)),
             ),
             child: Row(
               children: [
@@ -10071,17 +10113,33 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
           if (_selectedCurrencies.length > 1) ...[
             const SizedBox(height: 10),
             Text(
-              'Moneda en edicion: ${_currencyLabel(currentCurrency)} ($currentCurrency)',
-              style: const TextStyle(color: _setupTextMedium, fontSize: 12),
+              '3. Moneda en edición',
+              style: GoogleFonts.poppins(
+                color: _setupTextHigh,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
+            Text(
+              'Elige la moneda para editar su tasa y métodos de pago. Ahora: ${_currencyLabel(currentCurrency)} ($currentCurrency).',
+              style: const TextStyle(
+                color: _setupTextMedium,
+                fontSize: 12.5,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 10),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
               decoration: BoxDecoration(
-                color: const Color(0xFF17122E),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF3B2F63)),
+                color: const Color(0xFF141B2D),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: const Color(0xFF38BDF8),
+                  width: 1.2,
+                ),
               ),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -10138,11 +10196,11 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
         if (hasPrimary && requiresRate)
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF17122E),
+              color: const Color(0xFF141B2D),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF3B2F63)),
+              border: Border.all(color: const Color(0xFF334155)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -10151,7 +10209,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        'Par de conversion: $currentPairLabel',
+                        'Tasa de cambio · $currentPairLabel',
                         style: GoogleFonts.poppins(
                           color: _setupTextHigh,
                           fontSize: 16,
@@ -10190,7 +10248,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 const SizedBox(height: 4),
                 Text(
                   requiresRate
-                      ? 'Define como convertir desde $baseCurrency hacia $currentCurrency.'
+                      ? 'Aquí defines cuánto vale 1 $baseCurrency en $currentCurrency. Puedes usar tasa automática o fija.'
                       : 'Esta es tu moneda principal. No requiere tasa de conversion.',
                   style: const TextStyle(color: _setupTextMedium, fontSize: 12),
                 ),
@@ -10588,13 +10646,35 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               ],
             ),
           ),
+        if (hasPrimary &&
+            !requiresRate &&
+            _selectedCurrencies.length > 1) ...[
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF334155)),
+            ),
+            child: Text(
+              'Estás en la moneda principal ($currentCurrency): no tiene tasa. Cambia a otra moneda en «Moneda en edición» para configurar o cambiar la tasa de cambio.',
+              style: const TextStyle(
+                color: Color(0xFFCBD5E1),
+                fontSize: 12.5,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
         if (hasPrimary) ...[
           const SizedBox(height: 18),
           Text(
-            'Metodos de pago - $currentCurrency',
+            '4. Métodos de pago · $currentCurrency',
             style: GoogleFonts.poppins(
               color: _setupTextHigh,
-              fontSize: 19,
+              fontSize: 18,
               fontWeight: FontWeight.w700,
             ),
           ),

@@ -27,11 +27,15 @@ class MerchantOrdersWorkspace extends StatefulWidget {
     super.key,
     required this.orders,
     required this.itemBuilder,
+    this.purgedOrderIds = const <String>{},
     this.errorSubtitle,
     this.onRetry,
   });
 
   final List<PedidoModel> orders;
+
+  /// Hard-deleted ids that must leave paginated caches immediately.
+  final Set<String> purgedOrderIds;
   final Widget Function(PedidoModel pedido) itemBuilder;
   final String? errorSubtitle;
   final VoidCallback? onRetry;
@@ -72,6 +76,29 @@ class _OrdersPageWindow {
       }
     }
   }
+
+  void upsert(PedidoModel pedido) {
+    final index = rows.indexWhere((row) => row.id == pedido.id);
+    if (index >= 0) {
+      rows[index] = pedido;
+      return;
+    }
+    if (ids.add(pedido.id)) rows.insert(0, pedido);
+  }
+
+  void removeIds(Set<String> remove) {
+    if (remove.isEmpty) return;
+    rows.removeWhere((row) => remove.contains(row.id));
+    ids.removeAll(remove);
+  }
+
+  void retainWhere(bool Function(PedidoModel pedido) test) {
+    rows.removeWhere((row) {
+      final keep = test(row);
+      if (!keep) ids.remove(row.id);
+      return !keep;
+    });
+  }
 }
 
 class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
@@ -108,8 +135,53 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
   @override
   void didUpdateWidget(covariant MerchantOrdersWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _syncWindowsWithLive();
     if (_browse.rows.isEmpty && !_browse.isLoading) {
       _seedBrowseFromLive();
+    }
+  }
+
+  /// Keep paginated caches aligned with optimistic/live updates so archive,
+  /// restore, and delete show up without a manual reload.
+  void _syncWindowsWithLive() {
+    final liveById = <String, PedidoModel>{
+      for (final pedido in widget.orders) pedido.id: pedido,
+    };
+    final purged = widget.purgedOrderIds;
+
+    void sync(_OrdersPageWindow window) {
+      if (purged.isNotEmpty) window.removeIds(purged);
+      for (var i = 0; i < window.rows.length; i++) {
+        final live = liveById[window.rows[i].id];
+        if (live != null) window.rows[i] = live;
+      }
+      window.retainWhere((pedido) {
+        final live = liveById[pedido.id];
+        final effective = live ?? pedido;
+        if (purged.contains(effective.id)) return false;
+        return effective.isArchived == _showArchived;
+      });
+    }
+
+    sync(_browse);
+    sync(_search);
+
+    // Restored/archived orders that belong in the current inbox should appear
+    // at the top even if they were never in this paginated window.
+    if (_activeSearch.isEmpty) {
+      for (final pedido in widget.orders) {
+        if (purged.contains(pedido.id)) continue;
+        if (pedido.isArchived != _showArchived) continue;
+        if (_browse.ids.contains(pedido.id)) continue;
+        final createdAt = pedido.createdAt;
+        final cursor = _browse.cursor;
+        final insideWindow =
+            cursor == null ||
+            (createdAt != null && !createdAt.isBefore(cursor));
+        if (insideWindow || !_browse.hasMore) {
+          _browse.upsert(pedido);
+        }
+      }
     }
   }
 
@@ -287,11 +359,17 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
               as List<dynamic>;
       if (!mounted || generation != window.generation) return;
 
+      final purged = widget.purgedOrderIds;
       final page = rows
           .map(
             (row) => PedidoModel.fromMap(Map<String, dynamic>.from(row as Map)),
           )
-          .where((pedido) => !pedido.hasParseError)
+          .where(
+            (pedido) =>
+                !pedido.hasParseError &&
+                !purged.contains(pedido.id) &&
+                pedido.isArchived == _showArchived,
+          )
           .toList(growable: false);
       setState(() {
         window.addAll(page);
@@ -346,17 +424,21 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
   /// (newer than the loaded window's cursor) added on top.
   List<PedidoModel> _visibleOrders() {
     final window = _window;
+    final purged = widget.purgedOrderIds;
     final liveById = <String, PedidoModel>{
-      for (final pedido in widget.orders) pedido.id: pedido,
+      for (final pedido in widget.orders)
+        if (!purged.contains(pedido.id)) pedido.id: pedido,
     };
     final cursor = window.cursor;
     final q = foldSearchText(_query);
     final merged = <String, PedidoModel>{};
 
     for (final pedido in window.rows) {
+      if (purged.contains(pedido.id)) continue;
       merged[pedido.id] = liveById[pedido.id] ?? pedido;
     }
     for (final pedido in widget.orders) {
+      if (purged.contains(pedido.id)) continue;
       if (merged.containsKey(pedido.id)) continue;
       final createdAt = pedido.createdAt;
       final insideWindow =
@@ -367,6 +449,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
     }
 
     final result = merged.values.where((pedido) {
+      if (purged.contains(pedido.id)) return false;
       if (!_matchesClientFilters(pedido)) return false;
       // Server search also matches codigo_orden, which isn't on the model.
       return _activeSearch.isNotEmpty || _matchesQuery(pedido, q);
@@ -1283,6 +1366,13 @@ class MerchantStatsWorkspace extends StatelessWidget {
   final VoidCallback onSeeProducts;
   final VoidCallback onAddProduct;
 
+  static const Color _ink = Color(0xFF111827);
+  static const Color _muted = Color(0xFF6B7280);
+  static const Color _bar = Color(0xFFC4B5FD);
+  static const Color _barPeak = Color(0xFF4C1D95);
+  static const Color _visitBar = Color(0xFFA5B4FC);
+  static const Color _orderBar = Color(0xFF4338CA);
+
   @override
   Widget build(BuildContext context) {
     final peakHour = hourCounts.isEmpty
@@ -1291,27 +1381,16 @@ class MerchantStatsWorkspace extends StatelessWidget {
     final maxCount = hourCounts.isEmpty
         ? 0
         : hourCounts.reduce((a, b) => a > b ? a : b);
+    final totalHourOrders = hourCounts.fold<int>(0, (sum, n) => sum + n);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
         salesCard,
         const SizedBox(height: 16),
-        _conversionCard(analytics),
+        _visitsCard(analytics),
         const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(22),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x100F172A),
-                blurRadius: 12,
-                offset: Offset(0, 4),
-              ),
-            ],
-          ),
+        _card(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1320,43 +1399,76 @@ class MerchantStatsWorkspace extends StatelessWidget {
                 style: GoogleFonts.poppins(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
+                  color: _ink,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               Text(
                 maxCount == 0
-                    ? 'Todavía no hay suficiente volumen para ver picos.'
-                    : 'El mayor movimiento está cerca de las ${peakHour.toString().padLeft(2, '0')}:00.',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: const Color(0xFF6B6F92),
-                ),
+                    ? 'Cuando haya pedidos en el rango elegido verás aquí las horas pico.'
+                    : 'Pico a las ${peakHour.toString().padLeft(2, '0')}:00 · $totalHourOrders pedido${totalHourOrders == 1 ? '' : 's'} en el rango.',
+                style: GoogleFonts.poppins(fontSize: 12.5, color: _muted),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               SizedBox(
-                height: 88,
+                height: 120,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     for (var hour = 0; hour < 24; hour++)
                       Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 1),
-                          child: Container(
-                            height: maxCount == 0
-                                ? 8
-                                : 12 + (76 * (hourCounts[hour] / maxCount)),
-                            decoration: BoxDecoration(
-                              color: hour == peakHour && maxCount > 0
-                                  ? const Color(0xFF6D28D9)
-                                  : const Color(0xFFEDE9FE),
-                              borderRadius: BorderRadius.circular(4),
+                        child: Tooltip(
+                          message: maxCount == 0
+                              ? '${hour.toString().padLeft(2, '0')}:00'
+                              : '${hour.toString().padLeft(2, '0')}:00 · ${hourCounts[hour]}',
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 1),
+                            child: Align(
+                              alignment: Alignment.bottomCenter,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 220),
+                                curve: Curves.easeOutCubic,
+                                width: double.infinity,
+                                height: maxCount == 0
+                                    ? 6
+                                    : (hourCounts[hour] == 0
+                                          ? 6
+                                          : 18 +
+                                                (86 *
+                                                    (hourCounts[hour] /
+                                                        maxCount))),
+                                decoration: BoxDecoration(
+                                  color: maxCount == 0
+                                      ? const Color(0xFFE5E7EB)
+                                      : hour == peakHour
+                                      ? _barPeak
+                                      : hourCounts[hour] == 0
+                                      ? const Color(0xFFEEF2FF)
+                                      : _bar,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
                   ],
                 ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  for (final label in const ['00', '06', '12', '18', '23'])
+                    Text(
+                      label,
+                      style: GoogleFonts.poppins(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF9CA3AF),
+                      ),
+                    ),
+                ],
               ),
             ],
           ),
@@ -1371,161 +1483,208 @@ class MerchantStatsWorkspace extends StatelessWidget {
     );
   }
 
-  Widget _conversionCard(MenuAnalyticsSummary analytics) {
-    if (!analytics.hasTraffic) {
-      return const MerchantEmptyPanel(
-        title: 'Sin datos de conversión todavía',
-        subtitle:
-            'Cuando el menú público reciba visitas podrás ver visitas, pedidos y conversión reales.',
-        icon: Icons.insights_outlined,
-      );
-    }
-    final visitsSeries = analytics.visitsByDay;
-    final ordersSeries = analytics.ordersByDay;
-    final maxVisit = visitsSeries.isEmpty
-        ? 0
-        : visitsSeries.reduce((a, b) => a > b ? a : b);
+  Widget _card({required Widget child}) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x100F172A),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
+      child: child,
+    );
+  }
+
+  Widget _visitsCard(MenuAnalyticsSummary analytics) {
+    final visitsSeries = analytics.visitsByDay;
+    final ordersSeries = analytics.ordersByDay;
+    final seriesMax = <int>[
+      ...visitsSeries,
+      ...ordersSeries,
+      0,
+    ].reduce((a, b) => a > b ? a : b);
+
+    return _card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Conversión del menú',
+            'Visitas del menú',
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w800,
               fontSize: 15,
+              color: _ink,
             ),
           ),
-          const SizedBox(height: 12),
-          _funnelRow('Visitas menú', analytics.visits),
-          _funnelRow('Productos vistos', analytics.productViews),
-          _funnelRow('Agregaron carrito', analytics.addToCart),
-          _funnelRow('Pedidos', analytics.orders),
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
+          Text(
+            analytics.hasTraffic
+                ? 'Últimos 30 días en el menú público.'
+                : 'Aún no hay tráfico registrado. Comparte el menú o el QR para empezar.',
+            style: GoogleFonts.poppins(fontSize: 12.5, color: _muted),
+          ),
+          const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
-                child: _stat(
-                  '${analytics.conversion.toStringAsFixed(analytics.conversion % 1 == 0 ? 0 : 1)}%',
-                  'Conversión',
+                child: _statTile(
+                  value: _formatCount(analytics.visits),
+                  label: 'Visitas',
                 ),
               ),
               Expanded(
-                child: _stat(
-                  analytics.avgTicket <= 0
-                      ? '—'
-                      : '\$${analytics.avgTicket.toStringAsFixed(2)}',
-                  'Ticket promedio',
+                child: _statTile(
+                  value: _formatCount(analytics.scans),
+                  label: 'Escaneos QR',
                 ),
               ),
               Expanded(
-                child: _stat(
-                  analytics.repeatCustomers == 0
+                child: _statTile(
+                  value: _formatCount(analytics.addToCart),
+                  label: 'Al carrito',
+                ),
+              ),
+              Expanded(
+                child: _statTile(
+                  value: analytics.visits <= 0
                       ? '—'
-                      : '${analytics.repeatCustomers}',
-                  'Clientes recurrentes',
+                      : '${analytics.conversion.toStringAsFixed(analytics.conversion % 1 == 0 ? 0 : 1)}%',
+                  label: 'Conversión',
                 ),
               ),
             ],
           ),
-          if (visitsSeries.isNotEmpty) ...[
+          if (analytics.hasTraffic) ...[
             const SizedBox(height: 14),
-            Text(
-              'Visitas y pedidos (7 días)',
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                color: const Color(0xFF6B6F92),
+            _funnelRow('Productos vistos', analytics.productViews),
+            _funnelRow('Checkout iniciado', analytics.checkouts),
+            _funnelRow('Pedidos', analytics.orders),
+            if (visitsSeries.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                'Visitas y pedidos · 7 días',
+                style: GoogleFonts.poppins(fontSize: 12, color: _muted),
               ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 72,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  for (var i = 0; i < visitsSeries.length; i++)
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Container(
-                              height: maxVisit == 0
-                                  ? 8
-                                  : 10 + (46 * (visitsSeries[i] / maxVisit)),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFDDD6FE),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Container(
-                              height: maxVisit == 0 || i >= ordersSeries.length
-                                  ? 4
-                                  : 4 + (18 * (ordersSeries[i] / maxVisit)),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF6D28D9),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Barras claras: visitas. Barras moradas: pedidos.',
-              style: GoogleFonts.poppins(
-                fontSize: 11,
-                color: const Color(0xFF9CA3AF),
-              ),
-            ),
-          ],
-          if (analytics.topViewed.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(
-              'Productos más vistos',
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w800,
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(height: 8),
-            for (final item in analytics.topViewed.take(5))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 84,
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Expanded(
-                      child: Text(
-                        item.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                    for (var i = 0; i < visitsSeries.length; i++)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Container(
+                                height: seriesMax == 0
+                                    ? 6
+                                    : 8 +
+                                          (48 *
+                                              (visitsSeries[i] / seriesMax)),
+                                decoration: BoxDecoration(
+                                  color: _visitBar,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Container(
+                                height: seriesMax == 0 ||
+                                        i >= ordersSeries.length
+                                    ? 4
+                                    : 4 +
+                                          (22 *
+                                              (ordersSeries[i] / seriesMax)),
+                                decoration: BoxDecoration(
+                                  color: _orderBar,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    Text(
-                      '${item.views}',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w800),
-                    ),
                   ],
                 ),
               ),
+              const SizedBox(height: 8),
+              Text(
+                'Claro: visitas · Oscuro: pedidos',
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  color: const Color(0xFF9CA3AF),
+                ),
+              ),
+            ],
+            if (analytics.topViewed.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Productos más vistos',
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  color: _ink,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final item in analytics.topViewed.take(5))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${item.views}',
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w800),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ],
         ],
       ),
+    );
+  }
+
+  String _formatCount(int value) => value <= 0 ? '0' : '$value';
+
+  Widget _statTile({required String value, required String label}) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w800,
+            fontSize: 18,
+            color: _ink,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.poppins(fontSize: 10.5, color: _muted, height: 1.2),
+        ),
+      ],
     );
   }
 
@@ -1549,24 +1708,6 @@ class MerchantStatsWorkspace extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _stat(String value, String label) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w800, fontSize: 18),
-        ),
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            fontSize: 11,
-            color: const Color(0xFF6B6F92),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1642,7 +1783,7 @@ class MerchantSettingsHub extends StatelessWidget {
           (
             icon: Icons.payments_outlined,
             title: 'Cobros y tasa',
-            subtitle: 'Monedas y métodos de pago',
+            subtitle: 'Monedas, tasa de cambio y métodos de pago',
             onTap: onOpenPayments,
           ),
           (
