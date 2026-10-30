@@ -13,7 +13,7 @@ class MerchantOrdersRepository {
   /// Only the fields the clients list/profile read, projected out of
   /// `detalles` so the full JSON payload is not downloaded.
   static const String _clientSummaryColumns =
-      'id,comercio_id,estado,total,created_at,nombre_cliente,'
+      'id,comercio_id,estado,total,created_at,archived_at,nombre_cliente,'
       'telefono_cliente,cliente_email,'
       'd_order_id:detalles->>order_id,'
       'd_codigo_orden:detalles->>codigo_orden,'
@@ -46,7 +46,9 @@ class MerchantOrdersRepository {
     final byId = <String, PedidoModel>{};
     for (final pedido in fetched.followedBy(live)) {
       final createdAt = pedido.createdAt;
-      if (pedido.hasParseError || createdAt == null) continue;
+      if (pedido.hasParseError || createdAt == null || pedido.isArchived) {
+        continue;
+      }
       final inRange =
           !createdAt.isBefore(startInclusive) &&
           createdAt.isBefore(endExclusive);
@@ -67,6 +69,7 @@ class MerchantOrdersRepository {
           .from('pedidos')
           .select(_metricsSummaryColumns)
           .eq('comercio_id', comercioId)
+          .filter('archived_at', 'is', null)
           .gte('created_at', startInclusive.toUtc().toIso8601String())
           .lt('created_at', endExclusive.toUtc().toIso8601String())
           .order('created_at', ascending: false)
@@ -84,6 +87,7 @@ class MerchantOrdersRepository {
           .from('pedidos')
           .select(_clientSummaryColumns)
           .eq('comercio_id', comercioId)
+          .filter('archived_at', 'is', null)
           .order('created_at', ascending: false)
           .order('id', ascending: false)
           .range(from, to),
@@ -111,9 +115,35 @@ class MerchantOrdersRepository {
         .from('pedidos')
         .select('id')
         .eq('comercio_id', comercioId)
+        .filter('archived_at', 'is', null)
         .limit(1)
         .count(CountOption.exact);
     return response.count;
+  }
+
+  static Future<PedidoModel> setArchived({
+    required String pedidoId,
+    required bool archived,
+  }) async {
+    final payload = <String, dynamic>{
+      'archived_at': archived ? DateTime.now().toUtc().toIso8601String() : null,
+    };
+    final row = await _client
+        .from('pedidos')
+        .update(payload)
+        .eq('id', pedidoId)
+        .select('*')
+        .single();
+    return PedidoModel.fromMap(Map<String, dynamic>.from(row));
+  }
+
+  /// Permanently deletes an archived order. Requires archived_at set.
+  static Future<void> deleteArchived({required String pedidoId}) async {
+    await _client
+        .from('pedidos')
+        .delete()
+        .eq('id', pedidoId)
+        .not('archived_at', 'is', null);
   }
 
   static Future<List<Map<String, dynamic>>> _fetchAllPages(
@@ -141,6 +171,7 @@ class MerchantOrdersRepository {
       'estado': row['estado'],
       'total': row['total'],
       'created_at': row['created_at'],
+      'archived_at': row['archived_at'],
       'nombre_cliente': row['nombre_cliente'],
       'telefono_cliente': row['telefono_cliente'],
       'cliente_email': row['cliente_email'],

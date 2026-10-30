@@ -38,6 +38,8 @@ class OrderDetailScreen extends StatefulWidget {
     this.initialPedido,
     this.initialComercioNombre,
     this.initialBusinessLogoUrl,
+    this.onArchiveChanged,
+    this.onDeletePermanent,
   });
 
   final String orderId;
@@ -49,6 +51,12 @@ class OrderDetailScreen extends StatefulWidget {
   final PedidoModel? initialPedido;
   final String? initialComercioNombre;
   final String? initialBusinessLogoUrl;
+
+  /// Optional merchant action to archive/restore without leaving the detail.
+  final Future<void> Function(bool archived)? onArchiveChanged;
+
+  /// Optional permanent delete for already-archived orders.
+  final Future<void> Function()? onDeletePermanent;
 
   @override
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
@@ -2601,6 +2609,64 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                     }
                   },
                 ),
+                if (!widget.readOnlyView &&
+                    (widget.onArchiveChanged != null ||
+                        (pedido.isArchived &&
+                            widget.onDeletePermanent != null)))
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      children: [
+                        if (widget.onArchiveChanged != null)
+                          TextButton.icon(
+                            onPressed: _isUpdatingStatus
+                                ? null
+                                : () async {
+                                    final archive = !pedido.isArchived;
+                                    await widget.onArchiveChanged!(archive);
+                                    if (!mounted) return;
+                                    setState(() {
+                                      _orderFuture = _fetchOrder();
+                                    });
+                                  },
+                            icon: Icon(
+                              pedido.isArchived
+                                  ? Icons.unarchive_outlined
+                                  : Icons.archive_outlined,
+                              size: 18,
+                            ),
+                            label: Text(
+                              pedido.isArchived
+                                  ? 'Recuperar pedido'
+                                  : 'Archivar pedido',
+                            ),
+                          ),
+                        if (pedido.isArchived &&
+                            widget.onDeletePermanent != null)
+                          TextButton.icon(
+                            onPressed: _isUpdatingStatus
+                                ? null
+                                : () async {
+                                    await widget.onDeletePermanent!();
+                                    if (!mounted) return;
+                                    if (Navigator.of(context).canPop()) {
+                                      Navigator.of(context).pop();
+                                    }
+                                  },
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFB91C1C),
+                            ),
+                            icon: const Icon(
+                              Icons.delete_forever_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Eliminar permanentemente'),
+                          ),
+                      ],
+                    ),
+                  ),
                 KitchenSummaryStrip(
                   isDelivery: isDeliveryOrder,
                   paymentTitle: _kitchenPaymentTitle(paymentMethod),

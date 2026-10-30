@@ -34,6 +34,7 @@ import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/screens/delivery_settings_screen.dart';
 import 'package:kosmenu_app/screens/kiosk_home_settings_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
+import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_pages.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
@@ -326,8 +327,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final analyticsFuture = _loadAnalytics(client);
     final yesterdayOrdersFuture = client
         .from('pedidos')
-        .select('id, comercio_id, total, detalles, estado, created_at')
+        .select(
+          'id, comercio_id, total, detalles, estado, created_at, archived_at',
+        )
         .eq('comercio_id', SupabaseConfig.currentComercioId)
+        .filter('archived_at', 'is', null)
         .gte('created_at', yesterdayStart.toIso8601String())
         .lt('created_at', todayStart.toIso8601String());
 
@@ -855,8 +859,118 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         initialPedido: pedido.items.isEmpty ? null : pedido,
         initialComercioNombre: comercio?.nombre,
         initialBusinessLogoUrl: comercio?.logoUrl,
+        onArchiveChanged: (archived) async {
+          await _toggleOrderArchive(pedido, archive: archived);
+        },
+        onDeletePermanent: () => _deleteArchivedOrder(pedido),
       ),
     );
+  }
+
+  Future<void> _toggleOrderArchive(
+    PedidoModel pedido, {
+    required bool archive,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(archive ? 'Archivar pedido' : 'Recuperar pedido'),
+        content: Text(
+          archive
+              ? 'El pedido saldrá de la lista activa y no contará en las finanzas. Puedes recuperarlo después desde Archivados.'
+              : 'El pedido volverá a la lista activa y contará otra vez en las finanzas.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(archive ? 'Archivar' : 'Recuperar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await MerchantOrdersRepository.setArchived(
+        pedidoId: pedido.id,
+        archived: archive,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            archive
+                ? 'Pedido archivado. Ya no cuenta en finanzas.'
+                : 'Pedido recuperado.',
+          ),
+        ),
+      );
+      unawaited(_loadMetricsOrders());
+      unawaited(_loadTotalOrdersCount());
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            archive
+                ? 'No se pudo archivar el pedido. Intenta de nuevo.'
+                : 'No se pudo recuperar el pedido. Intenta de nuevo.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteArchivedOrder(PedidoModel pedido) async {
+    if (!pedido.isArchived) return;
+    final orderLabel = (pedido.orderId ?? pedido.id).trim();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eliminar permanentemente'),
+        content: Text(
+          'Se borrará el pedido $orderLabel y no se podrá recuperar. '
+          'Esta acción es definitiva.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB91C1C),
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await MerchantOrdersRepository.deleteArchived(pedidoId: pedido.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pedido eliminado permanentemente.')),
+      );
+      unawaited(_loadMetricsOrders());
+      unawaited(_loadTotalOrdersCount());
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No se pudo eliminar. Solo el administrador puede borrar archivados.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<ComercioModel> _resolveCurrentComercio() async {
@@ -1490,6 +1604,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   double _resolvePedidoTotal(PedidoModel pedido) {
+    if (pedido.isArchived) return 0;
     final direct = pedido.total;
     if (direct != null && direct > 0) return direct;
 
@@ -1525,6 +1640,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   ) {
     final window = _resolveSalesRangeWindow(orders);
     final filtered = orders
+        .where((pedido) => !pedido.isArchived)
         .where((pedido) => pedido.statusBucket != OrderStatusBucket.canceled)
         .where((pedido) => window.contains(pedido.createdAt))
         .toList(growable: false);
@@ -1684,6 +1800,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   List<MerchantTopProduct> _topProducts(Iterable<PedidoModel> orders) {
     final counts = <String, ({int quantity, String? imageUrl})>{};
     for (final pedido in orders) {
+      if (pedido.isArchived) continue;
       if (pedido.statusBucket == OrderStatusBucket.canceled) continue;
       for (final item in pedido.items) {
         final name = item.displayName.trim().isEmpty
@@ -2193,6 +2310,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                             );
                                             final todayOrders = metricsOrders
                                                 .where(
+                                                  (pedido) => !pedido.isArchived,
+                                                )
+                                                .where(
                                                   (pedido) => _isOnLocalDay(
                                                     pedido.createdAt,
                                                     todayStart,
@@ -2230,6 +2350,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                   metricsOrders,
                                                 );
                                             final selectedOrders = metricsOrders
+                                                .where((o) => !o.isArchived)
                                                 .where(
                                                   (o) => salesWindow.contains(
                                                     o.createdAt,
@@ -3225,6 +3346,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           itemBuilder: (pedido) => _CompactRecentOrderTile(
             pedido: pedido,
             onTap: () => _openOrderDetail(pedido),
+            onToggleArchive: () =>
+                _toggleOrderArchive(pedido, archive: !pedido.isArchived),
+            onDeletePermanent: pedido.isArchived
+                ? () => _deleteArchivedOrder(pedido)
+                : null,
             darkText: _darkText,
             mutedText: _mutedText,
           ),
@@ -5641,87 +5767,97 @@ class _CompactRecentOrderTile extends StatelessWidget {
     required this.onTap,
     required this.darkText,
     required this.mutedText,
+    this.onToggleArchive,
+    this.onDeletePermanent,
   });
 
   final PedidoModel pedido;
   final VoidCallback onTap;
+  final VoidCallback? onToggleArchive;
+  final VoidCallback? onDeletePermanent;
   final Color darkText;
   final Color mutedText;
 
-  String get _shortOrderId {
-    final value = (pedido.orderId ?? pedido.id).trim();
-    if (value.length <= 10) {
-      return value;
-    }
-    return '${value.substring(0, 10)}…';
-  }
-
-  String get _hourLabel {
-    final created = pedido.createdAt;
-    if (created == null) {
-      return '--:--';
-    }
-    final local = created.toLocal();
-    final hh = local.hour.toString().padLeft(2, '0');
-    final mm = local.minute.toString().padLeft(2, '0');
-    return '$hh:$mm';
+  String get _orderNumber {
+    final value = (pedido.orderId ?? '').trim();
+    if (value.isNotEmpty) return value;
+    return pedido.id.trim();
   }
 
   @override
   Widget build(BuildContext context) {
     final status = pedido.statusBucket;
+    final currency = pedido.currencyForDisplay();
+    final total = pedido.totalForDisplay(currency);
+    final orderNumber = _orderNumber;
 
-    return SizedBox(
-      height: 72,
-      child: Material(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE8EAF2)),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x0D0F172A),
-                  blurRadius: 8,
-                  offset: Offset(0, 3),
-                ),
-              ],
+        onTap: onTap,
+        onLongPress: onToggleArchive,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 76),
+          padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: pedido.isArchived
+                  ? const Color(0xFFD1D5DB)
+                  : const Color(0xFFE8EAF2),
             ),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: status.color.withValues(alpha: 0.14),
-                  ),
-                  child: Icon(status.icon, size: 17, color: status.color),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0D0F172A),
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: status.color.withValues(alpha: 0.14),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        _shortOrderId,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.poppins(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: darkText,
-                        ),
+                child: Icon(
+                  pedido.isArchived
+                      ? Icons.inventory_2_outlined
+                      : status.icon,
+                  size: 17,
+                  color: status.color,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      orderNumber,
+                      softWrap: true,
+                      maxLines: 2,
+                      overflow: TextOverflow.visible,
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        height: 1.25,
+                        color: darkText,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '$_hourLabel · ${status.label}',
+                    ),
+                    const SizedBox(height: 3),
+                    KitchenRelativeTimeTicker(
+                      createdAt: pedido.createdAt,
+                      builder: (context, label) => Text(
+                        '$label · ${status.label}'
+                        '${pedido.isArchived ? ' · Archivado' : ''}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.poppins(
@@ -5730,24 +5866,59 @@ class _CompactRecentOrderTile extends StatelessWidget {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  pedido.total != null
-                      ? '\$${pedido.total!.toStringAsFixed(2)}'
-                      : '--',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: darkText,
-                  ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                total > 0
+                    ? '$currency ${total.toStringAsFixed(currency == 'COP' ? 0 : 2)}'
+                    : '--',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
                 ),
+              ),
+              if (onToggleArchive != null || onDeletePermanent != null) ...[
+                PopupMenuButton<String>(
+                  tooltip: 'Más opciones',
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    Icons.more_vert_rounded,
+                    color: mutedText,
+                    size: 18,
+                  ),
+                  onSelected: (value) {
+                    if (value == 'archive') onToggleArchive?.call();
+                    if (value == 'delete') onDeletePermanent?.call();
+                  },
+                  itemBuilder: (context) => [
+                    if (onToggleArchive != null)
+                      PopupMenuItem<String>(
+                        value: 'archive',
+                        child: Text(
+                          pedido.isArchived
+                              ? 'Recuperar pedido'
+                              : 'Archivar pedido',
+                        ),
+                      ),
+                    if (onDeletePermanent != null)
+                      const PopupMenuItem<String>(
+                        value: 'delete',
+                        child: Text(
+                          'Eliminar permanentemente',
+                          style: TextStyle(color: Color(0xFFB91C1C)),
+                        ),
+                      ),
+                  ],
+                ),
+              ] else ...[
                 const SizedBox(width: 6),
                 Icon(Icons.chevron_right_rounded, color: mutedText, size: 18),
               ],
-            ),
+            ],
           ),
         ),
       ),

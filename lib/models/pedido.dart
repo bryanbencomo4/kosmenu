@@ -11,6 +11,7 @@ class PedidoModel {
   final String? estado;
   final double? total;
   final DateTime? createdAt;
+  final DateTime? archivedAt;
   final bool? creadoPorIa;
   final double? confianzaIa;
   final String? metodoPago;
@@ -26,6 +27,13 @@ class PedidoModel {
   final Map<String, dynamic> detalles;
   final bool hasParseError;
   final String? parseErrorMessage;
+
+  bool get isArchived => archivedAt != null;
+
+  bool get isDeliveryOrder {
+    final mode = (deliveryMode ?? '').trim().toLowerCase();
+    return mode == 'delivery' || mode == 'envio' || mode == 'envío';
+  }
 
   /// Opaque storage ref (`storage://comprobantes/...`) or legacy URL from detalles.
   String? get comprobanteRef {
@@ -164,6 +172,7 @@ class PedidoModel {
     this.estado,
     this.total,
     this.createdAt,
+    this.archivedAt,
     this.creadoPorIa,
     this.confianzaIa,
     this.metodoPago,
@@ -181,7 +190,11 @@ class PedidoModel {
     this.parseErrorMessage,
   });
 
-  PedidoModel copyWithItems(List<PedidoItemModel> nextItems) {
+  PedidoModel copyWith({
+    DateTime? archivedAt,
+    bool clearArchivedAt = false,
+    List<PedidoItemModel>? items,
+  }) {
     return PedidoModel(
       id: id,
       comercioId: comercioId,
@@ -192,6 +205,7 @@ class PedidoModel {
       estado: estado,
       total: total,
       createdAt: createdAt,
+      archivedAt: clearArchivedAt ? null : (archivedAt ?? this.archivedAt),
       creadoPorIa: creadoPorIa,
       confianzaIa: confianzaIa,
       metodoPago: metodoPago,
@@ -203,11 +217,15 @@ class PedidoModel {
       deliveryLongitude: deliveryLongitude,
       orderNotes: orderNotes,
       costoDelivery: costoDelivery,
-      items: nextItems,
+      items: items ?? this.items,
       detalles: detalles,
       hasParseError: hasParseError,
       parseErrorMessage: parseErrorMessage,
     );
+  }
+
+  PedidoModel copyWithItems(List<PedidoItemModel> nextItems) {
+    return copyWith(items: nextItems);
   }
 
   factory PedidoModel.fromMap(Map<String, dynamic> map) {
@@ -276,6 +294,7 @@ class PedidoModel {
       createdAt: createdAtValue == null || createdAtValue.isEmpty
           ? null
           : DateTime.tryParse(createdAtValue),
+      archivedAt: _tryParseDate(map['archived_at']),
       creadoPorIa: map['creado_por_ia'] as bool?,
       confianzaIa: confianzaValue is num
           ? confianzaValue.toDouble()
@@ -349,6 +368,7 @@ class PedidoModel {
           _toDoubleOrNull(raw['total']) ??
           _toDoubleOrNull(detallesMap['total']),
       createdAt: _tryParseDate(raw['created_at']),
+      archivedAt: _tryParseDate(raw['archived_at']),
       metodoPago: _resolveMetodoPago(detallesMap['metodo_pago']),
       detalles: detallesMap,
       hasParseError: true,
@@ -366,6 +386,7 @@ class PedidoModel {
       'estado': estado,
       'total': total,
       'created_at': createdAt?.toIso8601String(),
+      'archived_at': archivedAt?.toIso8601String(),
       'creado_por_ia': creadoPorIa,
       'confianza_ia': confianzaIa,
       'delivery_latitude': deliveryLatitude,

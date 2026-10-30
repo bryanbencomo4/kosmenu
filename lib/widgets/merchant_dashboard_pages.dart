@@ -18,6 +18,10 @@ import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+enum _OrdersDatePreset { all, today, yesterday, last7, thisMonth, custom }
+
+enum _OrdersFulfillmentFilter { all, delivery, pickup }
+
 class MerchantOrdersWorkspace extends StatefulWidget {
   const MerchantOrdersWorkspace({
     super.key,
@@ -75,6 +79,11 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
   static const int _minVisibleWhenFiltered = 12;
 
   OrderStatusBucket? _filter;
+  _OrdersFulfillmentFilter _fulfillment = _OrdersFulfillmentFilter.all;
+  String? _currency;
+  _OrdersDatePreset _datePreset = _OrdersDatePreset.all;
+  DateTimeRange? _customRange;
+  bool _showArchived = false;
   String _query = '';
   String _activeSearch = '';
   Timer? _searchDebounce;
@@ -115,7 +124,10 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
   /// the list paints without waiting on the network.
   void _seedBrowseFromLive() {
     if (widget.orders.isEmpty) return;
-    _browse.addAll(widget.orders.take(_pageSize));
+    final seeded = widget.orders
+        .where((pedido) => pedido.isArchived == _showArchived)
+        .take(_pageSize);
+    _browse.addAll(seeded);
     _browse.hasMore = true;
   }
 
@@ -154,6 +166,55 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
         .trim();
   }
 
+  ({DateTime? start, DateTime? end}) _dateBounds() {
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    switch (_datePreset) {
+      case _OrdersDatePreset.all:
+        return (start: null, end: null);
+      case _OrdersDatePreset.today:
+        return (start: todayStart, end: todayStart.add(const Duration(days: 1)));
+      case _OrdersDatePreset.yesterday:
+        return (
+          start: todayStart.subtract(const Duration(days: 1)),
+          end: todayStart,
+        );
+      case _OrdersDatePreset.last7:
+        return (
+          start: todayStart.subtract(const Duration(days: 6)),
+          end: todayStart.add(const Duration(days: 1)),
+        );
+      case _OrdersDatePreset.thisMonth:
+        return (
+          start: DateTime(now.year, now.month, 1),
+          end: todayStart.add(const Duration(days: 1)),
+        );
+      case _OrdersDatePreset.custom:
+        final range = _customRange;
+        if (range == null) return (start: null, end: null);
+        final start = DateTime(
+          range.start.year,
+          range.start.month,
+          range.start.day,
+        );
+        final end = DateTime(
+          range.end.year,
+          range.end.month,
+          range.end.day,
+        ).add(const Duration(days: 1));
+        return (start: start, end: end);
+    }
+  }
+
+  void _resetWindowsAndReload({bool seedLive = false}) {
+    setState(() {
+      _browse.reset();
+      _search.reset();
+      if (seedLive && _activeSearch.isEmpty) _seedBrowseFromLive();
+    });
+    unawaited(_loadMore());
+  }
+
   Future<void> _refresh() async {
     setState(() {
       _browse.reset();
@@ -174,6 +235,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
 
     final generation = window.generation;
     final search = _activeSearch;
+    final bounds = _dateBounds();
     setState(() {
       window.isLoading = true;
       window.error = null;
@@ -184,6 +246,11 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
           .from('pedidos')
           .select('*')
           .eq('comercio_id', comercioId);
+      if (_showArchived) {
+        query = query.not('archived_at', 'is', null);
+      } else {
+        query = query.filter('archived_at', 'is', null);
+      }
       if (search.isNotEmpty) {
         final pattern = '*$search*';
         query = query.or(
@@ -192,6 +259,21 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
           'detalles->>order_id.ilike.$pattern,'
           'detalles->>codigo_orden.ilike.$pattern',
         );
+      }
+      final currency = _currency;
+      if (currency != null && currency.isNotEmpty) {
+        query = query.filter('detalles->>moneda_checkout', 'eq', currency);
+      }
+      if (_fulfillment == _OrdersFulfillmentFilter.delivery) {
+        query = query.filter('detalles->delivery->>mode', 'eq', 'delivery');
+      }
+      final start = bounds.start;
+      final end = bounds.end;
+      if (start != null) {
+        query = query.gte('created_at', start.toUtc().toIso8601String());
+      }
+      if (end != null) {
+        query = query.lt('created_at', end.toUtc().toIso8601String());
       }
       final cursor = window.cursor;
       if (cursor != null) {
@@ -233,6 +315,33 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
     return name.contains(q) || phone.contains(q) || id.contains(q);
   }
 
+  bool _matchesClientFilters(PedidoModel pedido) {
+    if (pedido.isArchived != _showArchived) return false;
+    if (_filter != null && pedido.statusBucket != _filter) return false;
+    if (_fulfillment == _OrdersFulfillmentFilter.delivery &&
+        !pedido.isDeliveryOrder) {
+      return false;
+    }
+    if (_fulfillment == _OrdersFulfillmentFilter.pickup &&
+        pedido.isDeliveryOrder) {
+      return false;
+    }
+    final currency = _currency;
+    if (currency != null && currency.isNotEmpty) {
+      final orderCurrency = pedido.currencyForDisplay();
+      if (orderCurrency != currency) return false;
+    }
+    final bounds = _dateBounds();
+    final createdAt = pedido.createdAt;
+    if (createdAt != null) {
+      final start = bounds.start;
+      final end = bounds.end;
+      if (start != null && createdAt.isBefore(start)) return false;
+      if (end != null && !createdAt.isBefore(end)) return false;
+    }
+    return true;
+  }
+
   /// Loaded pages, with live rows replacing stale copies and new live orders
   /// (newer than the loaded window's cursor) added on top.
   List<PedidoModel> _visibleOrders() {
@@ -258,7 +367,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
     }
 
     final result = merged.values.where((pedido) {
-      if (_filter != null && pedido.statusBucket != _filter) return false;
+      if (!_matchesClientFilters(pedido)) return false;
       // Server search also matches codigo_orden, which isn't on the model.
       return _activeSearch.isNotEmpty || _matchesQuery(pedido, q);
     }).toList();
@@ -273,13 +382,25 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
     return result;
   }
 
+  Set<String> _availableCurrencies() {
+    final out = <String>{};
+    for (final pedido in widget.orders.followedBy(_window.rows)) {
+      final currency = pedido.checkoutCurrencySnapshot;
+      if (currency != null && currency.isNotEmpty) out.add(currency);
+    }
+    return out;
+  }
+
   void _ensureEnoughRows(int visibleCount) {
     final window = _window;
     if (window.isLoading || !window.hasMore || window.error != null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final underfilled =
-          _filter != null && visibleCount < _minVisibleWhenFiltered;
+          (_filter != null ||
+              _fulfillment != _OrdersFulfillmentFilter.all ||
+              _currency != null) &&
+          visibleCount < _minVisibleWhenFiltered;
       final cannotScroll =
           !_scrollController.hasClients ||
           _scrollController.position.maxScrollExtent <= 0;
@@ -329,12 +450,386 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
     return const SizedBox(height: 18);
   }
 
+  int get _advancedFilterCount {
+    var count = 0;
+    if (_filter != null) count += 1;
+    if (_fulfillment != _OrdersFulfillmentFilter.all) count += 1;
+    if (_currency != null) count += 1;
+    if (_datePreset != _OrdersDatePreset.all) count += 1;
+    return count;
+  }
+
+  bool get _hasActiveFilters =>
+      _activeSearch.isNotEmpty || _advancedFilterCount > 0 || _showArchived;
+
+  String get _datePresetLabel {
+    switch (_datePreset) {
+      case _OrdersDatePreset.all:
+        return 'Cualquier fecha';
+      case _OrdersDatePreset.today:
+        return 'Hoy';
+      case _OrdersDatePreset.yesterday:
+        return 'Ayer';
+      case _OrdersDatePreset.last7:
+        return 'Últimos 7 días';
+      case _OrdersDatePreset.thisMonth:
+        return 'Este mes';
+      case _OrdersDatePreset.custom:
+        if (_customRange == null) return 'Rango';
+        return '${_customRange!.start.day}/${_customRange!.start.month}'
+            '–${_customRange!.end.day}/${_customRange!.end.month}';
+    }
+  }
+
+  Future<void> _openFiltersSheet() async {
+    final currencies = _availableCurrencies().toList()..sort();
+    var draftStatus = _filter;
+    var draftFulfillment = _fulfillment;
+    var draftCurrency = _currency;
+    var draftDate = _datePreset;
+    var draftRange = _customRange;
+
+    final applied = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Widget sectionTitle(String text) => Padding(
+              padding: const EdgeInsets.only(bottom: 8, top: 4),
+              child: Text(
+                text,
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF6B7280),
+                  letterSpacing: 0.2,
+                ),
+              ),
+            );
+
+            Widget choice({
+              required String label,
+              required bool selected,
+              required VoidCallback onTap,
+            }) {
+              return Padding(
+                padding: const EdgeInsets.only(right: 8, bottom: 8),
+                child: ChoiceChip(
+                  label: Text(label),
+                  selected: selected,
+                  onSelected: (_) => onTap(),
+                  selectedColor: const Color(0xFF111827),
+                  backgroundColor: const Color(0xFFF3F4F6),
+                  side: BorderSide.none,
+                  labelStyle: GoogleFonts.poppins(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? Colors.white : const Color(0xFF374151),
+                  ),
+                ),
+              );
+            }
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  12,
+                  20,
+                  16 + MediaQuery.viewInsetsOf(context).bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE5E7EB),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Filtros',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF111827),
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            setSheetState(() {
+                              draftStatus = null;
+                              draftFulfillment = _OrdersFulfillmentFilter.all;
+                              draftCurrency = null;
+                              draftDate = _OrdersDatePreset.all;
+                              draftRange = null;
+                            });
+                          },
+                          child: const Text('Limpiar'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            sectionTitle('Estado'),
+                            Wrap(
+                              children: [
+                                choice(
+                                  label: 'Todos',
+                                  selected: draftStatus == null,
+                                  onTap: () =>
+                                      setSheetState(() => draftStatus = null),
+                                ),
+                                choice(
+                                  label: 'Nuevo',
+                                  selected:
+                                      draftStatus == OrderStatusBucket.pending,
+                                  onTap: () => setSheetState(
+                                    () => draftStatus = OrderStatusBucket.pending,
+                                  ),
+                                ),
+                                choice(
+                                  label: 'En preparación',
+                                  selected: draftStatus ==
+                                      OrderStatusBucket.inProgress,
+                                  onTap: () => setSheetState(
+                                    () => draftStatus =
+                                        OrderStatusBucket.inProgress,
+                                  ),
+                                ),
+                                choice(
+                                  label: 'Entregado',
+                                  selected: draftStatus ==
+                                      OrderStatusBucket.completed,
+                                  onTap: () => setSheetState(
+                                    () => draftStatus =
+                                        OrderStatusBucket.completed,
+                                  ),
+                                ),
+                                choice(
+                                  label: 'Cancelado',
+                                  selected:
+                                      draftStatus == OrderStatusBucket.canceled,
+                                  onTap: () => setSheetState(
+                                    () =>
+                                        draftStatus = OrderStatusBucket.canceled,
+                                  ),
+                                ),
+                                if (widget.orders.any(
+                                  (pedido) => pedido.isWhatsappManual,
+                                ))
+                                  choice(
+                                    label: 'WhatsApp',
+                                    selected: draftStatus ==
+                                        OrderStatusBucket.whatsappManual,
+                                    onTap: () => setSheetState(
+                                      () => draftStatus =
+                                          OrderStatusBucket.whatsappManual,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            sectionTitle('Tipo'),
+                            Wrap(
+                              children: [
+                                choice(
+                                  label: 'Todos',
+                                  selected: draftFulfillment ==
+                                      _OrdersFulfillmentFilter.all,
+                                  onTap: () => setSheetState(
+                                    () => draftFulfillment =
+                                        _OrdersFulfillmentFilter.all,
+                                  ),
+                                ),
+                                choice(
+                                  label: 'Delivery',
+                                  selected: draftFulfillment ==
+                                      _OrdersFulfillmentFilter.delivery,
+                                  onTap: () => setSheetState(
+                                    () => draftFulfillment =
+                                        _OrdersFulfillmentFilter.delivery,
+                                  ),
+                                ),
+                                choice(
+                                  label: 'Recoger',
+                                  selected: draftFulfillment ==
+                                      _OrdersFulfillmentFilter.pickup,
+                                  onTap: () => setSheetState(
+                                    () => draftFulfillment =
+                                        _OrdersFulfillmentFilter.pickup,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (currencies.isNotEmpty) ...[
+                              sectionTitle('Moneda'),
+                              Wrap(
+                                children: [
+                                  choice(
+                                    label: 'Todas',
+                                    selected: draftCurrency == null,
+                                    onTap: () => setSheetState(
+                                      () => draftCurrency = null,
+                                    ),
+                                  ),
+                                  for (final currency in currencies)
+                                    choice(
+                                      label: currency,
+                                      selected: draftCurrency == currency,
+                                      onTap: () => setSheetState(
+                                        () => draftCurrency = currency,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                            sectionTitle('Fecha'),
+                            Wrap(
+                              children: [
+                                choice(
+                                  label: 'Cualquiera',
+                                  selected:
+                                      draftDate == _OrdersDatePreset.all,
+                                  onTap: () => setSheetState(() {
+                                    draftDate = _OrdersDatePreset.all;
+                                    draftRange = null;
+                                  }),
+                                ),
+                                choice(
+                                  label: 'Hoy',
+                                  selected:
+                                      draftDate == _OrdersDatePreset.today,
+                                  onTap: () => setSheetState(
+                                    () => draftDate = _OrdersDatePreset.today,
+                                  ),
+                                ),
+                                choice(
+                                  label: 'Ayer',
+                                  selected: draftDate ==
+                                      _OrdersDatePreset.yesterday,
+                                  onTap: () => setSheetState(
+                                    () =>
+                                        draftDate = _OrdersDatePreset.yesterday,
+                                  ),
+                                ),
+                                choice(
+                                  label: '7 días',
+                                  selected:
+                                      draftDate == _OrdersDatePreset.last7,
+                                  onTap: () => setSheetState(
+                                    () => draftDate = _OrdersDatePreset.last7,
+                                  ),
+                                ),
+                                choice(
+                                  label: 'Este mes',
+                                  selected: draftDate ==
+                                      _OrdersDatePreset.thisMonth,
+                                  onTap: () => setSheetState(
+                                    () =>
+                                        draftDate = _OrdersDatePreset.thisMonth,
+                                  ),
+                                ),
+                                choice(
+                                  label: draftDate ==
+                                              _OrdersDatePreset.custom &&
+                                          draftRange != null
+                                      ? '${draftRange!.start.day}/${draftRange!.start.month}–${draftRange!.end.day}/${draftRange!.end.month}'
+                                      : 'Elegir rango',
+                                  selected: draftDate ==
+                                      _OrdersDatePreset.custom,
+                                  onTap: () async {
+                                    final now = DateTime.now();
+                                    final picked = await showDateRangePicker(
+                                      context: context,
+                                      firstDate: DateTime(now.year - 3),
+                                      lastDate: DateTime(
+                                        now.year,
+                                        now.month,
+                                        now.day,
+                                      ),
+                                      initialDateRange:
+                                          draftRange ??
+                                          DateTimeRange(
+                                            start: now.subtract(
+                                              const Duration(days: 7),
+                                            ),
+                                            end: now,
+                                          ),
+                                      helpText: 'Rango de fechas',
+                                      cancelText: 'Cancelar',
+                                      confirmText: 'Aplicar',
+                                    );
+                                    if (picked == null) return;
+                                    setSheetState(() {
+                                      draftDate = _OrdersDatePreset.custom;
+                                      draftRange = picked;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF111827),
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: () => Navigator.of(sheetContext).pop(true),
+                      child: const Text('Aplicar filtros'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (applied != true || !mounted) return;
+    setState(() {
+      _filter = draftStatus;
+      _fulfillment = draftFulfillment;
+      _currency = draftCurrency;
+      _datePreset = draftDate;
+      _customRange = draftRange;
+    });
+    _resetWindowsAndReload();
+  }
+
   @override
   Widget build(BuildContext context) {
     final window = _window;
     final filtered = _visibleOrders();
     _ensureEnoughRows(filtered.length);
     final isInitialLoading = filtered.isEmpty && window.isLoading;
+    final filterCount = _advancedFilterCount;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -344,10 +839,14 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
           TextField(
             onChanged: _onQueryChanged,
             decoration: InputDecoration(
-              hintText: 'Buscar por cliente, teléfono o ID',
+              hintText: 'Buscar Nº de orden, cliente o teléfono',
               prefixIcon: const Icon(Icons.search_rounded),
               filled: true,
               fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 14,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
                 borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
@@ -359,50 +858,158 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
             ),
           ),
           const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _FilterChip(
-                  label: 'Todos',
-                  selected: _filter == null,
-                  onTap: () => setState(() => _filter = null),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 42,
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _InboxSegment(
+                          label: 'Activos',
+                          selected: !_showArchived,
+                          onTap: () {
+                            if (!_showArchived) return;
+                            setState(() => _showArchived = false);
+                            _resetWindowsAndReload(seedLive: true);
+                          },
+                        ),
+                      ),
+                      Expanded(
+                        child: _InboxSegment(
+                          label: 'Archivados',
+                          selected: _showArchived,
+                          onTap: () {
+                            if (_showArchived) return;
+                            setState(() => _showArchived = true);
+                            _resetWindowsAndReload(seedLive: true);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                if (widget.orders.any((pedido) => pedido.isWhatsappManual))
-                  _FilterChip(
-                    label: 'WhatsApp',
-                    selected: _filter == OrderStatusBucket.whatsappManual,
-                    onTap: () => setState(
-                      () => _filter = OrderStatusBucket.whatsappManual,
+              ),
+              const SizedBox(width: 10),
+              Material(
+                color: filterCount > 0
+                    ? const Color(0xFF111827)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => unawaited(_openFiltersSheet()),
+                  child: Container(
+                    height: 42,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: filterCount > 0
+                            ? const Color(0xFF111827)
+                            : const Color(0xFFE5E7EB),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.tune_rounded,
+                          size: 18,
+                          color: filterCount > 0
+                              ? Colors.white
+                              : const Color(0xFF374151),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          filterCount > 0 ? 'Filtros ($filterCount)' : 'Filtros',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: filterCount > 0
+                                ? Colors.white
+                                : const Color(0xFF374151),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                _FilterChip(
-                  label: 'Nuevo',
-                  selected: _filter == OrderStatusBucket.pending,
-                  onTap: () =>
-                      setState(() => _filter = OrderStatusBucket.pending),
                 ),
-                _FilterChip(
-                  label: 'En preparación',
-                  selected: _filter == OrderStatusBucket.inProgress,
-                  onTap: () =>
-                      setState(() => _filter = OrderStatusBucket.inProgress),
-                ),
-                _FilterChip(
-                  label: 'Entregado',
-                  selected: _filter == OrderStatusBucket.completed,
-                  onTap: () =>
-                      setState(() => _filter = OrderStatusBucket.completed),
-                ),
-                _FilterChip(
-                  label: 'Cancelado',
-                  selected: _filter == OrderStatusBucket.canceled,
-                  onTap: () =>
-                      setState(() => _filter = OrderStatusBucket.canceled),
-                ),
+              ),
+            ],
+          ),
+          if (filterCount > 0) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (_filter != null)
+                  _ActiveFilterPill(
+                    label: _filter!.label,
+                    onClear: () {
+                      setState(() => _filter = null);
+                      _resetWindowsAndReload();
+                    },
+                  ),
+                if (_fulfillment != _OrdersFulfillmentFilter.all)
+                  _ActiveFilterPill(
+                    label: _fulfillment == _OrdersFulfillmentFilter.delivery
+                        ? 'Delivery'
+                        : 'Recoger',
+                    onClear: () {
+                      setState(
+                        () => _fulfillment = _OrdersFulfillmentFilter.all,
+                      );
+                      _resetWindowsAndReload();
+                    },
+                  ),
+                if (_currency != null)
+                  _ActiveFilterPill(
+                    label: _currency!,
+                    onClear: () {
+                      setState(() => _currency = null);
+                      _resetWindowsAndReload();
+                    },
+                  ),
+                if (_datePreset != _OrdersDatePreset.all)
+                  _ActiveFilterPill(
+                    label: _datePresetLabel,
+                    onClear: () {
+                      setState(() {
+                        _datePreset = _OrdersDatePreset.all;
+                        _customRange = null;
+                      });
+                      _resetWindowsAndReload();
+                    },
+                  ),
               ],
             ),
-          ),
+          ],
+          if (_showArchived) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Text(
+                'Pedidos archivados: no cuentan en finanzas. Puedes recuperarlos o eliminarlos por completo.',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  height: 1.35,
+                  color: const Color(0xFF64748B),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Expanded(
             child: widget.errorSubtitle != null
@@ -417,13 +1024,19 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
                 ? const Center(child: CircularProgressIndicator())
                 : filtered.isEmpty && !window.hasMore
                 ? MerchantEmptyPanel(
-                    title: _activeSearch.isNotEmpty || _filter != null
+                    title: _showArchived
+                        ? 'Sin archivados'
+                        : _hasActiveFilters
                         ? 'Sin resultados'
                         : 'Sin pedidos',
-                    subtitle: _activeSearch.isNotEmpty || _filter != null
-                        ? 'No hay pedidos que coincidan con este filtro.'
+                    subtitle: _showArchived
+                        ? 'Aquí aparecerán los pedidos que archives.'
+                        : _hasActiveFilters
+                        ? 'Prueba limpiar los filtros o cambiar la búsqueda.'
                         : 'Cuando entren pedidos aparecerán aquí con su estado.',
-                    icon: Icons.receipt_long_outlined,
+                    icon: _showArchived
+                        ? Icons.inventory_2_outlined
+                        : Icons.receipt_long_outlined,
                   )
                 : RefreshIndicator(
                     onRefresh: _refresh,
@@ -447,8 +1060,8 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
+class _InboxSegment extends StatelessWidget {
+  const _InboxSegment({
     required this.label,
     required this.selected,
     required this.onTap,
@@ -460,18 +1073,62 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        selectedColor: const Color(0xFF6D28D9),
-        labelStyle: GoogleFonts.poppins(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: selected ? Colors.white : const Color(0xFF374151),
+    return Material(
+      color: selected ? Colors.white : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Center(
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: selected
+                  ? const Color(0xFF111827)
+                  : const Color(0xFF6B7280),
+            ),
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _ActiveFilterPill extends StatelessWidget {
+  const _ActiveFilterPill({required this.label, required this.onClear});
+
+  final String label;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.only(left: 10, right: 4, top: 4, bottom: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF374151),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            onPressed: onClear,
+            icon: const Icon(Icons.close_rounded, size: 16),
+          ),
+        ],
       ),
     );
   }
