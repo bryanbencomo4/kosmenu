@@ -3879,11 +3879,13 @@ export default function PublicMenuPage() {
     const name = input.customerName.trim();
     const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : '';
     const payingCash = paymentLabel.toLowerCase().includes('efectivo');
+    const orderLink = (persisted.orderUrl || '').trim();
+    const orderLinkBlock = orderLink ? `\n\n🔗 Ver pedido:\n${orderLink}` : '';
     const message = proofPublicUrl
-      ? `👋 Hola, mi nombre es *${name}*.\n\n🧾 Aquí está mi comprobante del pedido *${persisted.orderId}*:\n${proofPublicUrl}`
+      ? `👋 Hola, mi nombre es *${name}*.\n\n🧾 Aquí está mi comprobante del pedido *${persisted.orderId}*:\n${proofPublicUrl}${orderLinkBlock}`
       : payingCash
-        ? `👋 Hola, mi nombre es *${name}*.\n\n💵 Voy a pagar en efectivo el pedido *${persisted.orderId}*.`
-        : `👋 Hola, mi nombre es *${name}*.\n\n🧾 Pedido *${persisted.orderId}*.`;
+        ? `👋 Hola, mi nombre es *${name}*.\n\n💵 Voy a pagar en efectivo el pedido *${persisted.orderId}*.${orderLinkBlock}`
+        : `👋 Hola, mi nombre es *${name}*.\n\n🧾 Pedido *${persisted.orderId}*.${orderLinkBlock}`;
 
     const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
     if (typeof window !== 'undefined') {
