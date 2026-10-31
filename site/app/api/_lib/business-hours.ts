@@ -228,6 +228,8 @@ export function detectMenuDevice(userAgent: string) {
 }
 
 export function detectMenuOrigin(search: string, referrer: string) {
+  // Keep in sync with shouldForceCatalogModeFromQuery:
+  // ?src=qr, ?source=qr, ?qr=1, ?catalogo=1, ?modo=catalogo|qr
   const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
   const src = (
     params.get('src') ||
@@ -237,7 +239,15 @@ export function detectMenuOrigin(search: string, referrer: string) {
   )
     .trim()
     .toLowerCase();
+  const qrFlag = (params.get('qr') ?? '').trim().toLowerCase();
+  const catalogo = (params.get('catalogo') ?? '').trim().toLowerCase();
+  const modo = (params.get('modo') ?? '').trim().toLowerCase();
   if (src === 'qr' || src === 'qr_code') return 'qr';
+  if (qrFlag === '1' || qrFlag === 'true' || qrFlag === 'yes') return 'qr';
+  if (catalogo === '1' || catalogo === 'true' || catalogo === 'yes' || catalogo === 'catalogo') {
+    return 'qr';
+  }
+  if (modo === 'catalogo' || modo === 'catalog' || modo === 'qr') return 'qr';
   if (referrer.trim()) {
     try {
       return new URL(referrer).host || 'referral';

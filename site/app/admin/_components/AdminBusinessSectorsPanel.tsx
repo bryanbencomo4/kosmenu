@@ -191,33 +191,30 @@ export function AdminBusinessSectorsPanel({ admin }: AdminBusinessSectorsPanelPr
   }
 
   return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-[2rem] border border-violet-200/80 bg-[linear-gradient(135deg,#1b1140_0%,#31106a_45%,#5b21b6_100%)] p-6 text-white shadow-[0_30px_90px_-48px_rgba(91,33,182,0.7)] sm:p-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl space-y-3">
+    <div className="space-y-4 sm:space-y-6">
+      <section className="overflow-hidden rounded-2xl border border-violet-200/80 bg-[linear-gradient(135deg,#1b1140_0%,#31106a_45%,#5b21b6_100%)] p-4 text-white shadow-[0_30px_90px_-48px_rgba(91,33,182,0.7)] sm:rounded-[2rem] sm:p-6 lg:p-8">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1.5 sm:space-y-3">
             <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-violet-100">
               <Layers3 className="h-3.5 w-3.5" />
-              Catalogo operativo
+              Catalogo
             </span>
-            <div className="space-y-2">
-              <h1 className="font-[var(--font-display)] text-3xl font-black tracking-[-0.04em] sm:text-4xl">
-                Sectores de negocio
-              </h1>
-              <p className="max-w-2xl text-sm leading-7 text-violet-100/82 sm:text-base">
-                Estas opciones alimentan el selector de sector en el onboarding de app.elmenuxfa.com.
-                Los negocios existentes conservan el texto guardado en su perfil aunque renombres un sector.
-              </p>
-            </div>
+            <h1 className="font-[var(--font-display)] text-2xl font-black tracking-[-0.04em] sm:text-3xl lg:text-4xl">
+              Sectores
+            </h1>
+            <p className="hidden max-w-2xl text-sm leading-7 text-violet-100/82 sm:block">
+              Opciones del onboarding en app.elmenuxfa.com.
+            </p>
           </div>
 
           <button
             type="button"
             onClick={() => void loadSectors()}
             disabled={loading || saving}
-            className="inline-flex items-center justify-center gap-2 rounded-[1rem] border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-3 text-sm font-semibold text-white transition hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-60 sm:px-4"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Recargar
+            <span className="hidden sm:inline">Recargar</span>
           </button>
         </div>
       </section>

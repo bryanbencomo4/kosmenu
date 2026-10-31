@@ -377,10 +377,15 @@ export async function requireAdmin() {
   redirect(ADMIN_UNAUTHORIZED_PATH);
 }
 
-export async function requireAdminPermission(permission: AdminPermission) {
+export async function requireAdminAnyPermission(
+  permissions: readonly AdminPermission[],
+) {
   const admin = await requireAdmin();
+  const allowed = permissions.some((permission) =>
+    hasAdminPermission(admin.role, permission),
+  );
 
-  if (!hasAdminPermission(admin.role, permission)) {
+  if (!allowed) {
     const requestHeaders = await headers();
 
     await logAdminAction({
@@ -390,7 +395,7 @@ export async function requireAdminPermission(permission: AdminPermission) {
       metadata: {
         path: currentAdminPath(requestHeaders),
         reason: 'missing_permission',
-        permission,
+        permission: permissions.join('|'),
         role: admin.role,
       },
       requestHeaders,
@@ -400,6 +405,10 @@ export async function requireAdminPermission(permission: AdminPermission) {
   }
 
   return admin;
+}
+
+export async function requireAdminPermission(permission: AdminPermission) {
+  return requireAdminAnyPermission([permission]);
 }
 
 export async function loginAdminAction(formData: FormData) {

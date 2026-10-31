@@ -1,72 +1,79 @@
+'use client';
+
 import Link from 'next/link';
-import { Bell, LogOut, Plus, Search, ShieldCheck } from 'lucide-react';
+import { LogOut, Menu, Plus, ShieldCheck } from 'lucide-react';
 
 import type { CurrentAdmin } from '../_lib/admin-auth';
-import { logoutAdminAction } from '../_lib/admin-auth';
+import { logoutAdminAction } from '../_lib/admin-logout-action';
 import { hasAdminPermission } from '../_lib/admin-permissions';
 
-export function AdminTopbar({ admin }: { admin: CurrentAdmin }) {
+export function AdminTopbar({
+  admin,
+  onOpenMenu,
+}: {
+  admin: CurrentAdmin;
+  onOpenMenu?: () => void;
+}) {
   const canCreateBusiness = hasAdminPermission(admin.role, 'businesses.write');
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/82 backdrop-blur-xl">
-      <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-        <div className="flex min-w-0 items-center gap-3 rounded-[1.1rem] border border-slate-200 bg-slate-50 px-4 py-3 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.4)] lg:max-w-xl lg:flex-1">
-          <Search className="h-4.5 w-4.5 text-slate-400" />
-          <input
-            type="search"
-            placeholder="Buscar negocios, pedidos, creditos o configuraciones"
-            className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
+    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
+      <div className="flex items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-6 sm:py-3 lg:px-8">
+        {onOpenMenu ? (
           <button
             type="button"
-            className="relative inline-flex h-11 w-11 items-center justify-center rounded-[1rem] border border-slate-200 bg-white text-slate-600 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.4)] transition hover:border-violet-300 hover:text-violet-700"
-            aria-label="Notificaciones"
+            onClick={onOpenMenu}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 lg:hidden"
+            aria-label="Abrir menu"
           >
-            <Bell className="h-4.5 w-4.5" />
-            <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-violet-500" />
+            <Menu className="h-5 w-5" />
           </button>
+        ) : null}
 
+        <div className="min-w-0 flex-1 lg:hidden">
+          <p className="truncate text-sm font-black tracking-[-0.02em] text-slate-950">
+            Admin ElMenuxFA
+          </p>
+          <p className="truncate text-[11px] text-slate-500">{admin.displayName}</p>
+        </div>
+
+        <div className="hidden min-w-0 flex-1 lg:block">
+          <p className="text-sm font-semibold text-slate-950">Panel admin</p>
+          <p className="truncate text-xs text-slate-500">{admin.email}</p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
           {canCreateBusiness ? (
             <Link
-              href="/admin#businesses"
-              className="inline-flex h-11 items-center gap-2 rounded-[1rem] bg-violet-600 px-4 text-sm font-black text-white shadow-[0_20px_40px_-28px_rgba(109,40,217,0.8)] transition hover:bg-violet-700"
+              href="/admin/negocios"
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-violet-600 px-3 text-xs font-black text-white sm:px-4 sm:text-sm"
             >
-              <Plus className="h-4.5 w-4.5" />
-              Crear negocio
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Negocios</span>
             </Link>
-          ) : (
-            <button
-              type="button"
-              disabled
-              className="inline-flex h-11 items-center gap-2 rounded-[1rem] border border-slate-200 bg-slate-100 px-4 text-sm font-bold text-slate-400"
-            >
-              <Plus className="h-4.5 w-4.5" />
-              Crear negocio
-            </button>
-          )}
+          ) : null}
 
-          <div className="flex items-center gap-3 rounded-[1rem] border border-slate-200 bg-white px-4 py-2.5 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.4)]">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-100 text-violet-700">
-              <ShieldCheck className="h-4.5 w-4.5" />
+          <div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 sm:flex">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-100 text-violet-700">
+              <ShieldCheck className="h-4 w-4" />
             </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-950">{admin.displayName}</p>
-              <p className="truncate text-xs text-slate-500">{admin.email}</p>
+            <div className="min-w-0 max-w-[140px]">
+              <p className="truncate text-xs font-semibold text-slate-950">
+                {admin.displayName}
+              </p>
+              <p className="truncate text-[10px] text-slate-500">{admin.email}</p>
             </div>
-            <form action={logoutAdminAction}>
-              <button
-                type="submit"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-                aria-label="Cerrar sesion"
-              >
-                <LogOut className="h-4.5 w-4.5" />
-              </button>
-            </form>
           </div>
+
+          <form action={logoutAdminAction}>
+            <button
+              type="submit"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:text-slate-900"
+              aria-label="Cerrar sesion"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </form>
         </div>
       </div>
     </header>

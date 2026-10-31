@@ -1,5 +1,5 @@
 /**
- * Provision "Pa' Que Comais" (slug: paquekomais) from Menu_Pa_Que_Comais.xlsx.
+ * Provision "Pa' Que Komais" (slug: paquekomais) from Menu_Pa_Que_Comais.xlsx.
  * Currencies COP + USD + VES (cash). Delivery from Auto Pizzas Nápoles.
  * FX mirrors Inversiones Doleto. No product-app code changes.
  *
@@ -15,13 +15,13 @@ const XLSX = require('xlsx');
 
 const dryRun = process.argv.includes('--dry-run');
 const SLUG = 'paquekomais';
-const NOMBRE = "Pa' Que Comais";
+const NOMBRE = "Pa' Que Komais";
 const EMAIL = 'paquekomais@1xp.fr';
 const PASSWORD = '123456789';
 const WHATSAPP = '+584143754727';
 const INSTAGRAM = 'https://www.instagram.com/paquekomais';
 const DIRECCION =
-  'Calle 4, Palmira, Táchira, Venezuela\nReferencia: Calle 4, Palmira';
+  'Calle 4, Palmira, Táchira, Venezuela\nReferencia: Calle 4 entre carreras 4 y 5 frente al movistar de Palmira';
 /** From maps.app.goo.gl/kwLRVnGKeEdWvh5t8 */
 const LAT = 7.839216;
 const LNG = -72.227299;
@@ -53,7 +53,7 @@ function brandingPayload({ delivery, rates, modes, sources }) {
     fuente_cuerpo: 'Open Sans',
     estilo_botones: 'rounded',
     mood_tags: ['pasteles', 'arepas', 'pasapalos', 'familiar'],
-    descripcion_visual: "Pa' Que Comais — pasteles, arepas y pasapalos en Palmira.",
+    descripcion_visual: "Pa' Que Komais — pasteles, arepas y pasapalos en Palmira.",
     layout_type: 'grid',
     colores_personalizados: {
       background: '#FFF7ED',
@@ -68,7 +68,7 @@ function brandingPayload({ delivery, rates, modes, sources }) {
     config_negocio: {
       promovido: false,
       destacado_directorio: false,
-      metodos_pago: ['efectivo'],
+      metodos_pago: ['transferencia'],
       social_links: { instagram: INSTAGRAM },
       order_management_mode: 'whatsapp_manual',
       whatsapp_order_format: 'detailed',
@@ -93,28 +93,50 @@ function brandingPayload({ delivery, rates, modes, sources }) {
   };
 }
 
+function digital(name, fields) {
+  return JSON.stringify({ name, fields });
+}
+
 function paymentRows(comercioId) {
   return [
     {
       comercio_id: comercioId,
-      tipo: 'efectivo__cop',
-      nombre: 'Efectivo',
-      descripcion: 'Pago en efectivo en pesos colombianos.',
-      detalles: 'Por favor, usa billetes en buen estado.',
+      tipo: 'transferencia__usd__1',
+      nombre: 'Pago digital: Binance',
+      descripcion: 'Pago en USD por Binance.',
+      detalles: digital('Binance', [
+        {
+          type: 'correo',
+          label: 'Email',
+          value: 'paquecomais2025@gmail.com',
+        },
+      ]),
     },
     {
       comercio_id: comercioId,
-      tipo: 'efectivo__usd',
-      nombre: 'Efectivo',
-      descripcion: 'Pago en efectivo en dólares.',
-      detalles: 'Por favor, usa billetes en buen estado.',
+      tipo: 'transferencia__cop__1',
+      nombre: 'Pago digital: Bancolombia',
+      descripcion: 'Transferencia Bancolombia (PCO).',
+      detalles: digital('Bancolombia', [
+        { type: 'numero_cuenta', label: 'Nro. Cuenta', value: '08809147364' },
+        { type: 'texto', label: 'Tipo', value: 'Ahorro' },
+        {
+          type: 'texto',
+          label: 'Titular',
+          value: 'mireya karelis colmenares serrano',
+        },
+      ]),
     },
     {
       comercio_id: comercioId,
-      tipo: 'efectivo__ves',
-      nombre: 'Efectivo',
-      descripcion: 'Pago en efectivo en bolívares.',
-      detalles: 'Por favor, usa billetes en buen estado.',
+      tipo: 'transferencia__ves__1',
+      nombre: 'Pago digital: Pago Móvil',
+      descripcion: 'Pago Móvil en bolívares.',
+      detalles: digital('Pago Móvil', [
+        { type: 'telefono', label: 'Teléfono', value: '+584147292343' },
+        { type: 'id', label: 'Cédula', value: 'V-14022843' },
+        { type: 'texto', label: 'Banco', value: 'Mercantil' },
+      ]),
     },
   ];
 }
@@ -309,8 +331,8 @@ async function main() {
       onboarding_completed: true,
       ai_enabled: true,
       en_linea: false,
-      metodos_pago: ['Efectivo'],
-      metodo_pago_predeterminado: 'Efectivo',
+      metodos_pago: ['Transferencia'],
+      metodo_pago_predeterminado: 'Transferencia',
       estados_operacion: ['tachira'],
       branding_ia: branding,
     })
@@ -330,7 +352,7 @@ async function main() {
     p_months: 1,
     p_batch_label: 'paquekomais-launch',
     p_expires_at: null,
-    p_note: "Activación Pa' Que Comais",
+    p_note: "Activación Pa' Que Komais",
     p_plan_code: 'menu_monthly',
   });
   if (issueError) throw issueError;

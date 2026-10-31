@@ -80,7 +80,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(find.text('Ajustar esta tasa para mi negocio'), findsOneWidget);
+        expect(find.text('Ajuste para mi negocio (opcional)'), findsOneWidget);
         expect(find.text('Tasa aplicada ahora'), findsOneWidget);
         expect(find.text('0,3448 VES por 1 COP'), findsOneWidget);
         expect(find.textContaining('17.241,38 Bs'), findsOneWidget);
@@ -173,6 +173,6 @@ void main() {
       _harness(controller: controller, enabled: false, factor: null),
     );
     expect(find.byType(TextField), findsNothing);
-    expect(find.text('Ajustar esta tasa para mi negocio'), findsOneWidget);
+    expect(find.text('Ajuste para mi negocio (opcional)'), findsOneWidget);
   });
 }

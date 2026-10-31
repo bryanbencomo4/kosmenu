@@ -161,27 +161,26 @@ export function AdminAppAndroidPanel({ admin }: { admin: CurrentAdmin }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-[11px] font-black uppercase tracking-[0.16em] text-violet-600">
             App Android
           </p>
-          <h1 className="mt-1 font-[var(--font-display)] text-2xl font-black tracking-[-0.03em] text-slate-950">
-            Actualizaciones del APK
+          <h1 className="mt-1 font-[var(--font-display)] text-xl font-black tracking-[-0.03em] text-slate-950 sm:text-2xl">
+            Actualizaciones APK
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-500">
-            Publica un nuevo APK de producción. Los clientes con la app instalada deberán
-            descargar e instalar esta versión antes de seguir usando el panel.
+          <p className="mt-1 hidden max-w-2xl text-sm text-slate-500 sm:block">
+            Publica el APK de producción. Los clientes deben instalarlo para seguir.
           </p>
         </div>
         <button
           type="button"
           onClick={() => void load()}
-          className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
         >
           <RefreshCw className="h-4 w-4" />
-          Recargar
+          <span className="hidden sm:inline">Recargar</span>
         </button>
       </div>
 

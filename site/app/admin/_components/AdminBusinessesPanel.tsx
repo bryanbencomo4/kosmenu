@@ -14,6 +14,7 @@ import {
 
 import type { CurrentAdmin } from '../_lib/admin-auth';
 import { foldSearchText } from '../../_lib/search-text';
+import { AdminFilterBar, AdminFilterSelect } from './AdminFilterSelect';
 
 type AdminBusiness = {
   id: string;
@@ -28,6 +29,7 @@ type AdminBusiness = {
   updated_at: string | null;
   created_at: string | null;
   menuUrl: string;
+  ordersTotal?: number;
 };
 
 type FilterMode = 'all' | 'promoted' | 'directory' | 'offline';
@@ -171,52 +173,49 @@ export function AdminBusinessesPanel({
   }
 
   return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-[1.8rem] border border-violet-200/70 bg-[linear-gradient(135deg,#1e1b4b_0%,#312e81_48%,#4c1d95_100%)] p-6 text-white shadow-[0_24px_80px_-48px_rgba(76,29,149,0.85)] sm:p-8">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-3">
+    <div className="space-y-4 sm:space-y-6">
+      <section className="overflow-hidden rounded-2xl border border-violet-200/70 bg-[linear-gradient(135deg,#1e1b4b_0%,#312e81_48%,#4c1d95_100%)] p-4 text-white shadow-[0_24px_80px_-48px_rgba(76,29,149,0.85)] sm:rounded-[1.8rem] sm:p-6 lg:p-8">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1.5 sm:space-y-2">
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-violet-100">
               <Store className="h-3.5 w-3.5" />
-              Gestion de negocios
+              Negocios
             </span>
-            <div className="space-y-2">
-              <h1 className="font-[var(--font-display)] text-3xl font-black tracking-[-0.04em] sm:text-4xl">
-                Negocios registrados
-              </h1>
-              <p className="max-w-2xl text-sm leading-7 text-violet-100/82 sm:text-base">
-                Consulta todos los comercios y controla visibilidad en el directorio y sitios
-                promocionados. Delivery automático: rotación justa + optimización por clics y
-                pedidos (métricas 7 días).
-              </p>
-            </div>
+            <h1 className="font-[var(--font-display)] text-2xl font-black tracking-[-0.04em] sm:text-3xl lg:text-4xl">
+              Negocios registrados
+            </h1>
+            <p className="hidden max-w-2xl text-sm leading-7 text-violet-100/82 sm:block">
+              Visibilidad, promo y pedidos por comercio.
+            </p>
           </div>
-
           <button
             type="button"
             onClick={() => void loadBusinesses()}
             disabled={loading || savingId != null}
-            className="inline-flex items-center justify-center gap-2 rounded-[1rem] border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-3 text-sm font-semibold text-white hover:bg-white/16 disabled:opacity-60 sm:px-4"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Recargar
+            <span className="hidden sm:inline">Recargar</span>
           </button>
         </div>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-6 sm:grid-cols-4 sm:gap-3">
           {[
-            ['Registrados', stats.total],
+            ['Total', stats.total],
             ['En linea', stats.online],
-            ['En directorio', stats.directory],
-            ['Promocionados', stats.promoted],
+            ['Directorio', stats.directory],
+            ['Promo', stats.promoted],
           ].map(([label, value]) => (
             <div
               key={label}
-              className="rounded-[1.25rem] border border-white/10 bg-white/8 px-4 py-3"
+              className="rounded-xl border border-white/10 bg-white/8 px-3 py-2.5 sm:rounded-[1.25rem] sm:px-4 sm:py-3"
             >
-              <p className="text-[11px] font-black uppercase tracking-[0.14em] text-violet-100/70">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-violet-100/70 sm:text-[11px]">
                 {label}
               </p>
-              <p className="mt-1 text-2xl font-black tabular-nums">{value}</p>
+              <p className="mt-0.5 text-xl font-black tabular-nums sm:mt-1 sm:text-2xl">
+                {value}
+              </p>
             </div>
           ))}
         </div>
@@ -225,7 +224,7 @@ export function AdminBusinessesPanel({
       {(error || statusMessage) && (
         <div
           className={[
-            'rounded-[1.35rem] border px-4 py-3 text-sm font-medium',
+            'rounded-xl border px-4 py-3 text-sm font-medium',
             error
               ? 'border-rose-200 bg-rose-50 text-rose-700'
               : 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -236,61 +235,134 @@ export function AdminBusinessesPanel({
       )}
 
       {!canWrite ? (
-        <section className="rounded-[1.35rem] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Tu rol puede consultar negocios. Activar promoción o cambiar visibilidad requiere
-          permiso de escritura.
+        <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Tu rol puede consultar negocios. Escribir requiere permiso extra.
         </section>
       ) : null}
 
-      <section className="rounded-[1.8rem] border border-slate-200/80 bg-white p-6 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.35)]">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.35)] sm:rounded-[1.8rem] sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="font-[var(--font-display)] text-xl font-black tracking-[-0.03em] text-slate-950">
-              Tabla de negocios
+            <h2 className="font-[var(--font-display)] text-lg font-black tracking-[-0.03em] text-slate-950 sm:text-xl">
+              Listado
             </h2>
-            <p className="mt-2 text-sm text-slate-500">
-              {filtered.length} de {businesses.length} visibles en esta vista.
+            <p className="mt-1 text-xs text-slate-500 sm:text-sm">
+              {filtered.length} de {businesses.length}
             </p>
           </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="relative min-w-[240px]">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar por nombre, slug, zona…"
-                className="w-full rounded-[1rem] border border-slate-200 py-3 pl-10 pr-4 text-sm text-slate-900 outline-none ring-violet-200 transition focus:ring-4"
-              />
-            </label>
-          </div>
+          <label className="relative w-full sm:max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar nombre o slug…"
+              className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm text-slate-900 outline-none ring-violet-200 focus:ring-4"
+            />
+          </label>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {(
-            [
-              ['all', 'Todos'],
-              ['promoted', 'Promocionados'],
-              ['directory', 'En directorio'],
-              ['offline', 'Fuera de linea'],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setFilter(value)}
-              className={`rounded-full border px-3.5 py-1.5 text-xs font-bold transition ${
-                filter === value
-                  ? 'border-violet-600 bg-violet-600 text-white'
-                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <AdminFilterBar className="mt-3">
+          <AdminFilterSelect
+            label="Filtro"
+            value={filter}
+            onChange={(value) => setFilter(value as FilterMode)}
+            options={[
+              { value: 'all', label: 'Todos' },
+              { value: 'promoted', label: 'Promocionados' },
+              { value: 'directory', label: 'En directorio' },
+              { value: 'offline', label: 'Fuera de linea' },
+            ]}
+          />
+        </AdminFilterBar>
+
+        {/* Mobile compact cards */}
+        <div className="mt-4 space-y-2 lg:hidden">
+          {loading ? (
+            <p className="py-8 text-center text-sm text-slate-500">Cargando…</p>
+          ) : filtered.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-500">Sin resultados.</p>
+          ) : (
+            filtered.map((business) => {
+              const busy = savingId === business.id;
+              return (
+                <div
+                  key={business.id}
+                  className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <Link
+                        href={`/admin/negocios/${business.id}`}
+                        className="block truncate font-bold text-slate-950"
+                      >
+                        {business.nombre}
+                      </Link>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {business.categoria || 'Sin categoria'} · {business.ordersTotal ?? 0}{' '}
+                        pedidos
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!canWrite || busy}
+                      onClick={() =>
+                        void patchBusiness(business.id, { en_linea: !business.en_linea })
+                      }
+                      className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                        business.en_linea
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {business.en_linea ? 'Online' : 'Off'}
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Link
+                      href={`/admin/pedidos?businessId=${business.id}`}
+                      className="text-[11px] font-bold text-violet-700"
+                    >
+                      Pedidos
+                    </Link>
+                    <Link
+                      href={business.menuUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] font-bold text-slate-500"
+                    >
+                      Menu
+                    </Link>
+                    <Link
+                      href={`/admin/negocios/${business.id}`}
+                      className="text-[11px] font-bold text-slate-500"
+                    >
+                      Detalle
+                    </Link>
+                    {canWrite ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void patchBusiness(business.id, {
+                            promovido: !business.promovido,
+                          })
+                        }
+                        className={`text-[11px] font-bold ${
+                          business.promovido ? 'text-violet-700' : 'text-slate-500'
+                        }`}
+                      >
+                        {business.promovido ? 'Promo on' : 'Promo'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
-        <div className="mt-5 overflow-hidden rounded-[1.35rem] border border-slate-200">
+        {/* Desktop table */}
+        <div className="mt-5 hidden overflow-hidden rounded-[1.35rem] border border-slate-200 lg:block">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">
@@ -299,43 +371,48 @@ export function AdminBusinessesPanel({
                   <th className="px-4 py-3">Estado</th>
                   <th className="px-4 py-3">Directorio</th>
                   <th className="px-4 py-3">Promo</th>
-                  <th className="px-4 py-3">Imp. 7d</th>
-                  <th className="px-4 py-3">Unicas</th>
-                  <th className="px-4 py-3">Clics</th>
-                  <th className="px-4 py-3">CTR</th>
                   <th className="px-4 py-3">Pedidos</th>
-                  <th className="px-4 py-3">CVR</th>
+                  <th className="px-4 py-3">CTR</th>
                   <th className="px-4 py-3">Menu</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {loading ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                       Cargando negocios…
                     </td>
                   </tr>
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                       No hay negocios que coincidan con el filtro.
                     </td>
                   </tr>
                 ) : (
                   filtered.map((business) => {
                     const busy = savingId === business.id;
-                    const stats = promoStats.get(business.id);
+                    const rowStats = promoStats.get(business.id);
                     return (
-                      <tr key={business.id} className="align-top">
-                        <td className="px-4 py-4">
-                          <p className="font-semibold text-slate-950">{business.nombre}</p>
-                          <p className="mt-0.5 text-xs text-slate-500">/{business.slug}</p>
-                          <p className="mt-1 text-xs text-slate-500">
+                      <tr key={business.id}>
+                        <td className="px-4 py-3">
+                          <Link
+                            href={`/admin/negocios/${business.id}`}
+                            className="font-semibold text-slate-950 hover:text-violet-700 hover:underline"
+                          >
+                            {business.nombre}
+                          </Link>
+                          <p className="text-xs text-slate-500">
                             {business.categoria || 'Sin categoria'}
-                            {business.direccion ? ` · ${business.direccion}` : ''}
                           </p>
+                          <Link
+                            href={`/admin/pedidos?businessId=${business.id}`}
+                            className="mt-1 inline-flex text-[11px] font-bold text-violet-700 hover:underline"
+                          >
+                            Ver pedidos ({business.ordersTotal ?? 0})
+                          </Link>
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-3">
                           <button
                             type="button"
                             disabled={!canWrite || busy}
@@ -344,7 +421,7 @@ export function AdminBusinessesPanel({
                                 en_linea: !business.en_linea,
                               })
                             }
-                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-60 ${
+                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold disabled:opacity-60 ${
                               business.en_linea
                                 ? 'bg-emerald-50 text-emerald-700'
                                 : 'bg-slate-100 text-slate-600'
@@ -358,7 +435,7 @@ export function AdminBusinessesPanel({
                             {business.en_linea ? 'En linea' : 'Offline'}
                           </button>
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-3">
                           <button
                             type="button"
                             disabled={!canWrite || busy}
@@ -368,18 +445,16 @@ export function AdminBusinessesPanel({
                                   !business.mostrar_en_directorio_publico,
                               })
                             }
-                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-60 ${
+                            className={`rounded-full px-3 py-1.5 text-xs font-bold disabled:opacity-60 ${
                               business.mostrar_en_directorio_publico
                                 ? 'bg-violet-50 text-violet-700'
                                 : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            {business.mostrar_en_directorio_publico
-                              ? 'Visible'
-                              : 'Oculto'}
+                            {business.mostrar_en_directorio_publico ? 'Visible' : 'Oculto'}
                           </button>
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-3">
                           <button
                             type="button"
                             disabled={!canWrite || busy}
@@ -388,36 +463,23 @@ export function AdminBusinessesPanel({
                                 promovido: !business.promovido,
                               })
                             }
-                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-60 ${
+                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold disabled:opacity-60 ${
                               business.promovido
                                 ? 'bg-[#6D28D9] text-white'
                                 : 'border border-slate-200 bg-white text-slate-600'
                             }`}
-                            title="Sitio promocionado en elmenuxfa.com"
                           >
                             <Megaphone className="h-3.5 w-3.5" />
-                            {business.promovido ? 'Promocionado' : 'Promocionar'}
+                            {business.promovido ? 'On' : 'Off'}
                           </button>
                         </td>
-                        <td className="px-4 py-4 text-xs font-semibold tabular-nums text-slate-700">
-                          {business.promovido ? (stats?.impressions ?? 0) : '—'}
+                        <td className="px-4 py-3 text-xs font-semibold tabular-nums text-slate-700">
+                          {business.ordersTotal ?? 0}
                         </td>
-                        <td className="px-4 py-4 text-xs tabular-nums text-slate-600">
-                          {business.promovido ? (stats?.uniqueVisitors ?? 0) : '—'}
+                        <td className="px-4 py-3 text-xs tabular-nums text-slate-600">
+                          {business.promovido ? formatPct(rowStats?.ctr ?? 0) : '—'}
                         </td>
-                        <td className="px-4 py-4 text-xs tabular-nums text-slate-600">
-                          {business.promovido ? (stats?.clicks ?? 0) : '—'}
-                        </td>
-                        <td className="px-4 py-4 text-xs tabular-nums text-slate-600">
-                          {business.promovido ? formatPct(stats?.ctr ?? 0) : '—'}
-                        </td>
-                        <td className="px-4 py-4 text-xs font-semibold tabular-nums text-slate-700">
-                          {business.promovido ? (stats?.orders ?? 0) : '—'}
-                        </td>
-                        <td className="px-4 py-4 text-xs tabular-nums text-slate-600">
-                          {business.promovido ? formatPct(stats?.cvr ?? 0) : '—'}
-                        </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-3">
                           <Link
                             href={business.menuUrl}
                             target="_blank"

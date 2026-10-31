@@ -1,7 +1,25 @@
 import 'server-only';
 
 import type { CurrentAdmin } from './admin-auth';
+import {
+  defaultAdminExclusions,
+  type AdminExclusions,
+} from './admin-exclusions';
+import { getAdminDashboardChartData } from './admin-dashboard-chart';
+import {
+  extractOrderMoney,
+  formatAdminMoney,
+  formatAverageTicketBreakdown,
+  formatMoneyBreakdown,
+  sumUsdEstimates,
+  type AdminMoney,
+} from './admin-money';
 import { getAdminSupabaseClient } from './admin-supabase';
+import {
+  loadAdminBusinessUnitsPerUsd,
+  loadAdminMarketUnitsPerUsd,
+  mergeUnitsPerUsd,
+} from './admin-usd-rates';
 import { isWhatsappManualOrder, normalizeOrderManagementMode } from '../../_lib/order-management-mode';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -18,6 +36,7 @@ type DashboardOrderMetricRow = {
   estado?: string | null;
   total?: number | string | null;
   created_at?: string | null;
+  detalles?: unknown;
 };
 
 type DashboardRecentOrderRow = DashboardOrderMetricRow & {
@@ -31,6 +50,7 @@ type DashboardRecentOrderRow = DashboardOrderMetricRow & {
 type DashboardCommerceRow = {
   id: string;
   nombre?: string | null;
+  slug?: string | null;
   categoria?: string | null;
   direccion?: string | null;
   en_linea?: boolean | null;
@@ -74,9 +94,17 @@ export type AdminDashboardData = {
   }>;
   chartData: Array<{
     label: string;
+    key?: string;
+    from?: string;
+    to?: string;
     orders: number;
-    revenue: number;
+    /** Native checkout totals by currency (exact; never mixed). */
+    byCurrency: Array<{ currency: string; amount: number; count: number }>;
+    /** Sum of per-order USD estimates (only orders with rate/base). */
+    usdEstimate: number;
+    usdCoveredOrders: number;
   }>;
+  chartAvailableCurrencies: string[];
   deliveryOverview: {
     badge: string;
     title: string;
@@ -91,6 +119,7 @@ export type AdminDashboardData = {
   featuredBusinesses: Array<{
     id: string;
     name: string;
+    slug: string;
     location: string;
     category: string;
     channel: string;
@@ -101,8 +130,11 @@ export type AdminDashboardData = {
   recentOrders: Array<{
     code: string;
     business: string;
+    businessId: string | null;
     customer: string;
     amount: number;
+    amountLabel: string;
+    currency: string;
     status: string;
     statusTone: ActivityTone;
     createdLabel: string;
@@ -123,12 +155,6 @@ export type AdminDashboardData = {
   }>;
   recentActivity: RecentActivityEntry[];
 };
-
-const currencyFormatter = new Intl.NumberFormat('es-CO', {
-  style: 'currency',
-  currency: 'COP',
-  maximumFractionDigits: 0,
-});
 
 function startOfDay(date: Date) {
   const copy = new Date(date);
@@ -155,11 +181,6 @@ function parseDate(value: string | null | undefined) {
 
 function toTimestamp(value: string | null | undefined) {
   return parseDate(value)?.getTime() ?? 0;
-}
-
-function toNumber(value: number | string | null | undefined) {
-  const parsed = typeof value === 'number' ? value : Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function clampPercentage(value: number) {
@@ -387,8 +408,49 @@ function countOrThrow(label: string, result: { count: number | null; error: { me
   return result.count ?? 0;
 }
 
-export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminDashboardData> {
+async function loadExcludedBusinessIds(
+  supabase: ReturnType<typeof getAdminSupabaseClient>,
+  exclusions: AdminExclusions,
+): Promise<Set<string>> {
+  const excluded = new Set(
+    exclusions.excludedIds.map((id) => id.trim()).filter(Boolean),
+  );
+
+  if (!exclusions.excludeDemos) {
+    return excluded;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('comercios')
+      .select('id')
+      .eq('is_platform_demo', true)
+      .limit(800);
+    if (error) {
+      // Column may not exist in some environments — keep manual exclusions only.
+      console.warn('[admin-dashboard] demo exclusion skipped', error.message);
+      return excluded;
+    }
+    for (const row of (data ?? []) as Array<{ id?: string | null }>) {
+      const id = row.id?.toString().trim();
+      if (id) excluded.add(id);
+    }
+  } catch (error) {
+    console.warn(
+      '[admin-dashboard] demo exclusion skipped',
+      error instanceof Error ? error.message : error,
+    );
+  }
+
+  return excluded;
+}
+
+export async function getAdminDashboardData(
+  admin: CurrentAdmin,
+  options?: { exclusions?: AdminExclusions },
+): Promise<AdminDashboardData> {
   const supabase = getAdminSupabaseClient();
+  const exclusions = options?.exclusions ?? defaultAdminExclusions();
   const now = new Date();
   const last24hStart = new Date(now.getTime() - DAY_MS);
   const todayStart = startOfDay(now);
@@ -414,6 +476,7 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
     orderMetricsResult,
     recentOrdersResult,
     featuredBusinessesResult,
+    excludedBusinessIds,
   ] = await Promise.all([
     supabase.from('comercios').select('id', { count: 'exact', head: true }).eq('en_linea', true),
     supabase.from('comercios').select('id', { count: 'exact', head: true }),
@@ -444,20 +507,23 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       .gte('completed_at', toIso(current7Start)),
     supabase
       .from('pedidos')
-      .select('id,comercio_id,estado,total,created_at,management_mode:detalles->>management_mode')
+      .select('id,comercio_id,estado,total,created_at,detalles,management_mode:detalles->>management_mode')
+      .is('archived_at', null)
       .gte('created_at', toIso(previous7Start))
       .order('created_at', { ascending: false }),
     supabase
       .from('pedidos')
       .select('id,comercio_id,estado,total,created_at,nombre_cliente,detalles')
+      .is('archived_at', null)
       .order('created_at', { ascending: false })
-      .limit(4),
+      .limit(40),
     supabase
       .from('comercios')
-      .select('id,nombre,categoria,direccion,en_linea,updated_at,permite_delivery,recibe_pedidos_whatsapp')
+      .select('id,nombre,slug,categoria,direccion,en_linea,updated_at,permite_delivery,recibe_pedidos_whatsapp')
       .eq('en_linea', true)
       .order('updated_at', { ascending: false })
-      .limit(12),
+      .limit(40),
+    loadExcludedBusinessIds(supabase, exclusions),
   ]);
 
   const activeBusinessesCount = countOrThrow('active businesses', activeBusinessesResult);
@@ -473,15 +539,51 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
   const inRouteInvitesCount = countOrThrow('in route invitations', inRouteInvitesResult);
   const createdInvites7dCount = countOrThrow('created invitations 7d', createdInvites7dResult);
   const completedInvites7dCount = countOrThrow('completed invitations 7d', completedInvites7dResult);
-  const orderMetrics = rowsOrThrow<DashboardOrderMetricRow>('order metrics', orderMetricsResult).map((row) => ({
-    ...row,
-    createdAtMs: toTimestamp(row.created_at),
-    normalizedStatus: normalizeOrderStatus(row.estado),
-    manualManagement: normalizeOrderManagementMode(row.management_mode) === 'whatsapp_manual',
-    totalAmount: toNumber(row.total),
-  }));
-  const recentOrderRows = rowsOrThrow<DashboardRecentOrderRow>('recent orders', recentOrdersResult);
-  const featuredBusinessRows = rowsOrThrow<DashboardCommerceRow>('featured businesses', featuredBusinessesResult);
+  const isExcludedBusiness = (comercioId: string | null | undefined) => {
+    const id = comercioId?.toString().trim();
+    return Boolean(id && excludedBusinessIds.has(id));
+  };
+
+  const orderMetricRows = rowsOrThrow<DashboardOrderMetricRow>(
+    'order metrics',
+    orderMetricsResult,
+  ).filter((row) => !isExcludedBusiness(row.comercio_id));
+  const recentOrderRows = rowsOrThrow<DashboardRecentOrderRow>('recent orders', recentOrdersResult)
+    .filter((row) => !isExcludedBusiness(row.comercio_id))
+    .slice(0, 8);
+
+  const rateBusinessIds = [
+    ...orderMetricRows.map((row) => row.comercio_id?.toString().trim() ?? ''),
+    ...recentOrderRows.map((row) => row.comercio_id?.toString().trim() ?? ''),
+  ].filter(Boolean);
+  const [marketUnits, businessUnits] = await Promise.all([
+    loadAdminMarketUnitsPerUsd(),
+    loadAdminBusinessUnitsPerUsd(rateBusinessIds),
+  ]);
+  const unitsForBusiness = (comercioId: string | null | undefined) =>
+    mergeUnitsPerUsd(
+      marketUnits,
+      comercioId ? businessUnits.get(comercioId.toString().trim()) : null,
+    );
+
+  const orderMetrics = orderMetricRows.map((row) => {
+    const money = extractOrderMoney(row, {
+      unitsPerUsd: unitsForBusiness(row.comercio_id),
+    });
+    return {
+      ...row,
+      createdAtMs: toTimestamp(row.created_at),
+      normalizedStatus: normalizeOrderStatus(row.estado),
+      manualManagement: normalizeOrderManagementMode(row.management_mode) === 'whatsapp_manual',
+      money,
+      totalAmount: money.amount,
+      usdEstimate: money.usdEstimate,
+    };
+  });
+  const featuredBusinessRows = rowsOrThrow<DashboardCommerceRow>(
+    'featured businesses',
+    featuredBusinessesResult,
+  ).filter((row) => !isExcludedBusiness(row.id));
 
   let auditRows: DashboardAuditRow[] = [];
   let deniedAccess24hCount = 0;
@@ -548,48 +650,39 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
     featuredProductCountByBusiness.set(businessId, (featuredProductCountByBusiness.get(businessId) ?? 0) + 1);
   }
 
-  const current7Orders = orderMetrics.filter((row) => row.createdAtMs >= current7Start.getTime());
-  const todayOrders = orderMetrics.filter((row) => row.createdAtMs >= todayStart.getTime());
+  const isBillableOrder = (row: { normalizedStatus: string }) =>
+    row.normalizedStatus !== 'cancelado';
+
+  const current7Orders = orderMetrics.filter(
+    (row) => row.createdAtMs >= current7Start.getTime() && isBillableOrder(row),
+  );
+  const todayOrders = orderMetrics.filter(
+    (row) => row.createdAtMs >= todayStart.getTime() && isBillableOrder(row),
+  );
   const yesterdayOrders = orderMetrics.filter(
-    (row) => row.createdAtMs >= yesterdayStart.getTime() && row.createdAtMs < todayStart.getTime(),
+    (row) =>
+      row.createdAtMs >= yesterdayStart.getTime() &&
+      row.createdAtMs < todayStart.getTime() &&
+      isBillableOrder(row),
   );
 
-  const revenueToday = todayOrders.reduce((sum, row) => sum + row.totalAmount, 0);
-  const revenueYesterday = yesterdayOrders.reduce((sum, row) => sum + row.totalAmount, 0);
-  const averageTicketToday = todayOrders.length > 0 ? revenueToday / todayOrders.length : 0;
-  const averageTicketYesterday = yesterdayOrders.length > 0 ? revenueYesterday / yesterdayOrders.length : 0;
+  const todayMoney = todayOrders.map((row) => row.money as AdminMoney);
+  const yesterdayMoney = yesterdayOrders.map((row) => row.money as AdminMoney);
+  const weekMoney = current7Orders.map((row) => row.money as AdminMoney);
+  const usdToday = sumUsdEstimates(todayMoney);
+  const usdYesterday = sumUsdEstimates(yesterdayMoney);
+  const usdWeek = sumUsdEstimates(weekMoney);
   const deliveredOrders7d = current7Orders.filter((row) => !row.manualManagement && row.normalizedStatus === 'entregado').length;
   const pendingOrdersToday = todayOrders.filter((row) => !row.manualManagement && ORDER_OPEN_STATUSES.has(row.normalizedStatus)).length;
   const deliveryOpenCount = pendingInvitesCount + inRouteInvitesCount;
   const deliveryCompletionRate = percentage(completedInvites7dCount, createdInvites7dCount);
-  const averageTicket7d = current7Orders.length > 0
-    ? current7Orders.reduce((sum, row) => sum + row.totalAmount, 0) / current7Orders.length
-    : 0;
   const deliveryCoverage = percentage(deliveryBusinessesCount, activeBusinessesCount);
   const whatsappCoverage = percentage(whatsappBusinessesCount, activeBusinessesCount);
 
-  const chartBuckets = Array.from({ length: 7 }, (_, index) => {
-    const date = addDays(current7Start, index);
-
-    return {
-      label: WEEKDAY_LABELS[date.getDay()],
-      key: getDayKey(toIso(date)),
-      orders: 0,
-      revenue: 0,
-    };
+  const chartPayload = await getAdminDashboardChartData({
+    range: '7d',
+    exclusions,
   });
-
-  for (const order of current7Orders) {
-    const dayKey = getDayKey(order.created_at);
-    const bucket = chartBuckets.find((entry) => entry.key === dayKey);
-
-    if (!bucket) {
-      continue;
-    }
-
-    bucket.orders += 1;
-    bucket.revenue += order.totalAmount;
-  }
 
   const orderCountByBusiness = new Map<string, number>();
 
@@ -607,6 +700,7 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
     .map((commerce) => ({
       id: commerce.id,
       name: commerce.nombre?.trim() || 'Comercio sin nombre',
+      slug: commerce.slug?.trim() || '',
       location: shortLocation(commerce.direccion),
       category: commerce.categoria?.trim() || 'Sin categoria',
       channel: businessChannelLabel(commerce),
@@ -614,11 +708,13 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       catalogSize: featuredProductCountByBusiness.get(commerce.id) ?? 0,
       updatedAtMs: toTimestamp(commerce.updated_at),
     }))
+    .filter((commerce) => commerce.orders > 0)
     .sort((left, right) => right.orders - left.orders || right.updatedAtMs - left.updatedAtMs)
-    .slice(0, 4)
+    .slice(0, 10)
     .map((commerce) => ({
       id: commerce.id,
       name: commerce.name,
+      slug: commerce.slug,
       location: commerce.location,
       category: commerce.category,
       channel: commerce.channel,
@@ -626,21 +722,24 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       catalogSize: commerce.catalogSize,
     }));
 
-  const chartData = chartBuckets.map((bucket) => ({
-    label: bucket.label,
-    orders: bucket.orders,
-    revenue: bucket.revenue,
-  }));
+  const chartData = chartPayload.points;
+  const chartAvailableCurrencies = chartPayload.availableCurrencies;
 
   const recentOrders = recentOrderRows.map((row) => {
     const normalizedStatus = normalizeOrderStatus(row.estado);
     const businessName = row.comercio_id ? commerceNameById.get(row.comercio_id) ?? 'Comercio' : 'Comercio';
+    const money = extractOrderMoney(row, {
+      unitsPerUsd: unitsForBusiness(row.comercio_id),
+    });
 
     return {
       code: formatOrderCode(row),
       business: businessName,
+      businessId: row.comercio_id?.toString().trim() || null,
       customer: row.nombre_cliente?.trim() || 'Cliente',
-      amount: toNumber(row.total),
+      amount: money.amount,
+      amountLabel: formatAdminMoney(money.amount, money.currency),
+      currency: money.currency,
       status: isWhatsappManualOrder(row.detalles) ? 'Gestionado por WhatsApp' : formatOrderStatus(normalizedStatus),
       statusTone: orderTone(normalizedStatus),
       createdLabel: formatRelativeTime(row.created_at, now),
@@ -651,10 +750,13 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
     ...recentOrderRows.map((row) => {
       const normalizedStatus = normalizeOrderStatus(row.estado);
       const businessName = row.comercio_id ? commerceNameById.get(row.comercio_id) ?? 'Comercio' : 'Comercio';
+      const money = extractOrderMoney(row, {
+        unitsPerUsd: unitsForBusiness(row.comercio_id),
+      });
 
       return {
         title: isWhatsappManualOrder(row.detalles) ? 'Pedido gestionado por WhatsApp' : `Pedido ${formatOrderStatus(normalizedStatus)}`,
-        description: `${businessName} · ${row.nombre_cliente?.trim() || 'Cliente'} · ${currencyFormatter.format(toNumber(row.total))}`,
+        description: `${businessName} · ${row.nombre_cliente?.trim() || 'Cliente'} · ${formatAdminMoney(money.amount, money.currency)}`,
         time: formatRelativeTime(row.created_at, now),
         tone: orderTone(normalizedStatus),
       } satisfies RecentActivityEntry;
@@ -681,11 +783,16 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
   return {
     heroBadge: 'Supabase conectado',
     heroDescription:
-      'Dashboard server-side con datos vivos de negocios, pedidos, catalogo y delivery sin exponer service role al navegador.',
+      'Metricas de pedidos activos (sin archivados ni cancelados). Respeta exclusiones de Ops (demos / restaurantes filtrados).',
     coverageLabel: hasAuditAccess ? 'Marketplace + delivery + seguridad' : 'Marketplace + delivery en vivo',
-    coverageHint: hasAuditAccess
-      ? 'Incluye lectura operativa y bitacora admin segun permisos del rol.'
-      : 'El rol actual ve datos operativos en vivo del negocio y delivery.',
+    coverageHint:
+      excludedBusinessIds.size > 0
+        ? `${excludedBusinessIds.size} restaurante(s) excluidos de ingresos/pedidos · ${
+            hasAuditAccess ? 'bitacora admin activa' : 'datos operativos en vivo'
+          }.`
+        : hasAuditAccess
+          ? 'Incluye lectura operativa y bitacora admin segun permisos del rol.'
+          : 'El rol actual ve datos operativos en vivo del negocio y delivery.',
     kpis: [
       {
         title: 'Negocios activos',
@@ -710,16 +817,25 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       },
       {
         title: 'Ingresos hoy',
-        value: currencyFormatter.format(revenueToday),
-        delta: formatDelta(revenueToday, revenueYesterday, 'vs ayer'),
-        hint: `${currencyFormatter.format(averageTicketToday)} ticket promedio del dia.`,
+        value: formatMoneyBreakdown(todayMoney),
+        delta:
+          usdToday.coveredCount > 0
+            ? `≈ ${formatAdminMoney(usdToday.total, 'USD')} (tasa)`
+            : 'Sin tasa USD suficiente',
+        hint:
+          usdToday.coveredCount > 0 || usdYesterday.coveredCount > 0
+            ? `${formatDelta(usdToday.total, usdYesterday.total, '≈USD vs ayer')} · ${usdToday.coveredCount}/${todayOrders.length} pedidos con tasa. Monedas nativas sin mezclar.`
+            : 'Totales por moneda de checkout (USD / EUR / COP / VES). Sin mezclar.',
         tone: 'amber',
       },
       {
-        title: 'Ticket promedio',
-        value: currencyFormatter.format(averageTicket7d),
-        delta: formatDelta(averageTicketToday, averageTicketYesterday, 'vs ayer'),
-        hint: `${deliveredOrders7d} pedidos entregados en la ventana de 7 dias.`,
+        title: 'Ticket promedio 7d',
+        value: formatAverageTicketBreakdown(weekMoney),
+        delta:
+          usdWeek.coveredCount > 0
+            ? `≈ ${formatAdminMoney(usdWeek.total / usdWeek.coveredCount, 'USD')} medio (tasa)`
+            : 'Sin tasa USD suficiente',
+        hint: `${deliveredOrders7d} entregados · ${usdWeek.coveredCount}/${current7Orders.length} con tasa · ${usdWeek.missingCount} sin tasa.`,
         tone: 'rose',
       },
       {
@@ -731,6 +847,7 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       },
     ],
     chartData,
+    chartAvailableCurrencies,
     deliveryOverview: {
       badge: `${deliveryOpenCount} abiertas`,
       title: 'Delivery operativo',
@@ -809,8 +926,8 @@ export async function getAdminDashboardData(admin: CurrentAdmin): Promise<AdminD
       {
         id: 'avg-ticket-7d',
         label: 'Ticket promedio 7d',
-        value: currencyFormatter.format(averageTicket7d),
-        description: 'Promedio real calculado sobre pedidos recientes.',
+        value: formatAverageTicketBreakdown(weekMoney),
+        description: 'Promedio por moneda de checkout (sin mezclar USD/COP/VES).',
         tone: 'violet',
       },
       {

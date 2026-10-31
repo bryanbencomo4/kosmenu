@@ -144,28 +144,26 @@ export function AdminPaymentsPanel({ admin }: { admin: CurrentAdmin }) {
   const pendingCount = queueStatus === 'pending' ? queue.length : null;
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <div className="space-y-4 sm:space-y-6">
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-[11px] font-black uppercase tracking-[0.16em] text-violet-600">
             Finanzas
           </p>
-          <h1 className="mt-1 font-[var(--font-display)] text-3xl font-black text-slate-900">
+          <h1 className="mt-1 font-[var(--font-display)] text-2xl font-black text-slate-900 sm:text-3xl">
             Pagos
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-500">
-            Cola de verificación manual con comprobantes, e historial de todos los pagos
-            (automáticos y manuales). Al aprobar o rechazar se notifica al cliente por correo
-            con el estado y el recibo.
+          <p className="mt-1 hidden max-w-2xl text-sm text-slate-500 sm:block">
+            Cola de verificación e historial. Al aprobar o rechazar se notifica por correo.
           </p>
         </div>
         <button
           type="button"
           onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:px-4"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Actualizar
+          <span className="hidden sm:inline">Actualizar</span>
         </button>
       </header>
 

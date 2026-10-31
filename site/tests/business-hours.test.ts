@@ -58,6 +58,9 @@ describe('business hours', () => {
   it('does not invent traffic origin', () => {
     expect(detectMenuOrigin('?src=qr', '')).toBe('qr');
     expect(detectMenuOrigin('?source=qr', '')).toBe('qr');
+    expect(detectMenuOrigin('?qr=1', '')).toBe('qr');
+    expect(detectMenuOrigin('?catalogo=1', '')).toBe('qr');
+    expect(detectMenuOrigin('?modo=catalogo', '')).toBe('qr');
     expect(detectMenuOrigin('', '')).toBe('direct');
     expect(detectMenuDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)')).toBe('mobile');
   });

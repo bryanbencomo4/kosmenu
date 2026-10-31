@@ -105,7 +105,7 @@ export function kioskHomeConfigToJson(config: KioskHomeConfig) {
 
 /**
  * Table QR / shared link can force catalog-only browsing via query params
- * (`?catalogo=1`, `?src=qr`, `?source=qr`, `?modo=catalogo`). Does not require
+ * (`?catalogo=1`, `?qr=1`, `?src=qr`, `?source=qr`, `?modo=catalogo`). Does not require
  * the merchant "solo catálogo" home flag. Missing or unknown params keep normal flow.
  */
 export function isCatalogModeQueryValue(raw: string | null | undefined): boolean {
@@ -118,15 +118,34 @@ function isQrSourceValue(raw: string | null | undefined): boolean {
   return value === 'qr' || value === 'qr_code';
 }
 
+function isTruthyFlag(raw: string | null | undefined): boolean {
+  const value = (raw ?? '').trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
 export function shouldForceCatalogModeFromQuery(params: {
   catalogo?: string | null;
   src?: string | null;
   source?: string | null;
   modo?: string | null;
+  qr?: string | null;
 }): boolean {
   if (isCatalogModeQueryValue(params.catalogo)) return true;
-  // App QR links use `?src=qr` (also accept `source=qr`).
+  if (isTruthyFlag(params.qr)) return true;
+  // App QR links use `?src=qr` (also accept `source=qr` / utm_source).
   if (isQrSourceValue(params.src) || isQrSourceValue(params.source)) return true;
   const modo = (params.modo ?? '').trim().toLowerCase();
   return modo === 'catalogo' || modo === 'catalog' || modo === 'qr';
+}
+
+/** True when the public menu URL should count as QR / mesa traffic for analytics. */
+export function isQrMenuTrafficSearch(search: string): boolean {
+  const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+  return shouldForceCatalogModeFromQuery({
+    catalogo: params.get('catalogo'),
+    src: params.get('src') || params.get('utm_source'),
+    source: params.get('source'),
+    modo: params.get('modo'),
+    qr: params.get('qr'),
+  });
 }

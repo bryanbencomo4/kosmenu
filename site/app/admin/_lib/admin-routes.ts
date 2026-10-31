@@ -34,6 +34,7 @@ export type AdminNavigationItem = {
   permission?: AdminPermission;
 };
 
+/** Solo rutas reales con pantalla propia (sin anclas /admin#...). */
 export const adminNavigation: readonly AdminNavigationItem[] = [
   {
     label: 'Inicio',
@@ -42,28 +43,22 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
     permission: 'dashboard.read',
   },
   {
+    label: 'Ops en vivo',
+    href: '/admin/ops',
+    icon: 'analytics',
+    permission: 'analytics.read',
+  },
+  {
     label: 'Negocios',
     href: '/admin/negocios',
     icon: 'businesses',
     permission: 'businesses.read',
   },
   {
-    label: 'Menus',
-    href: '/admin#menus',
-    icon: 'menus',
-    permission: 'menus.read',
-  },
-  {
     label: 'Pedidos',
-    href: '/admin#orders',
+    href: '/admin/pedidos',
     icon: 'orders',
     permission: 'orders.read',
-  },
-  {
-    label: 'Promocionados',
-    href: '/admin/negocios?promo=1',
-    icon: 'promoted',
-    permission: 'businesses.read',
   },
   {
     label: 'Suscripciones',
@@ -78,40 +73,16 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
     permission: 'subscriptions.read',
   },
   {
-    label: 'Envíos Kit',
-    href: '/admin/envios-kit',
-    icon: 'delivery',
-    permission: 'subscriptions.read',
-  },
-  {
     label: 'Pagos BDV',
     href: '/admin/pagos-bdv',
     icon: 'bank',
     permission: 'subscriptions.read',
   },
   {
-    label: 'Creditos IA',
-    href: '/admin#ai-credits',
-    icon: 'credits',
-    permission: 'ai_credits.read',
-  },
-  {
-    label: 'Delivery',
-    href: '/admin#delivery',
+    label: 'Envíos Kit',
+    href: '/admin/envios-kit',
     icon: 'delivery',
-    permission: 'delivery.read',
-  },
-  {
-    label: 'Clientes',
-    href: '/admin#customers',
-    icon: 'customers',
-    permission: 'analytics.read',
-  },
-  {
-    label: 'Analiticas',
-    href: '/admin#analytics',
-    icon: 'analytics',
-    permission: 'analytics.read',
+    permission: 'subscriptions.read',
   },
   {
     label: 'Sectores',
@@ -124,18 +95,6 @@ export const adminNavigation: readonly AdminNavigationItem[] = [
     href: '/admin/app-android',
     icon: 'android',
     permission: 'settings.read',
-  },
-  {
-    label: 'Configuracion',
-    href: '/admin#settings',
-    icon: 'settings',
-    permission: 'settings.read',
-  },
-  {
-    label: 'Seguridad',
-    href: '/admin#security',
-    icon: 'security',
-    permission: 'security.read',
   },
 ] as const;
 

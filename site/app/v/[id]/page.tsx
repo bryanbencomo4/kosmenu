@@ -1791,6 +1791,7 @@ export default function PublicMenuPage() {
     src: searchParams.get('src'),
     source: searchParams.get('source'),
     modo: searchParams.get('modo'),
+    qr: searchParams.get('qr'),
   });
   const [clientName, setClientName] = useState('');
   const [clientWhatsappCountry, setClientWhatsappCountry] = useState<Country>('VE');

@@ -200,10 +200,19 @@ function resolveAdminInternalPath(pathname: string) {
   return `${ADMIN_INTERNAL_PREFIX}${pathname}`;
 }
 
-function adminLoginUrl(request: NextRequest, nextPathname: string) {
-  const redirectUrl = cloneRedirectUrl(request);
+function adminLoginUrl(request: NextRequest, nextPath: string) {
+  const redirectUrl = request.nextUrl.clone();
+  const search = request.nextUrl.search || '';
+  const destination =
+    nextPath && nextPath !== '/'
+      ? `${nextPath}${search}`
+      : search
+        ? `/${search}`
+        : '/admin';
+
   redirectUrl.pathname = ADMIN_LOGIN_PATH;
-  redirectUrl.searchParams.set('next', nextPathname || '/');
+  redirectUrl.search = '';
+  redirectUrl.searchParams.set('next', destination);
   return redirectUrl;
 }
 

@@ -49,9 +49,9 @@ class ExchangeAdjustmentPanel extends StatelessWidget {
   static const Color _ink = Color(0xFFF8FAFC);
   static const Color _muted = Color(0xFFCBD5E1);
   static const Color _soft = Color(0xFF94A3B8);
-  static const Color _surface = Color(0xFF0F172A);
+  static const Color _surface = Color(0xFF1A2740);
   static const Color _border = Color(0xFF334155);
-  static const Color _field = Color(0xFF1E293B);
+  static const Color _field = Color(0xFF120E25);
   static const Color _info = Color(0xFF7DD3FC);
 
   @override
@@ -81,7 +81,7 @@ class ExchangeAdjustmentPanel extends StatelessWidget {
                 onChanged: (value) => onToggled(value == true),
                 activeColor: accent,
                 title: const Text(
-                  'Ajustar esta tasa para mi negocio',
+                  'Ajuste para mi negocio (opcional)',
                   style: TextStyle(
                     color: _ink,
                     fontSize: 14,
