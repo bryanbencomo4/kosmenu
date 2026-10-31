@@ -726,17 +726,16 @@ export function AdminDashboardChart({
             >
               ›
             </button>
-            {isZoomed ? (
-              <button
-                type="button"
-                onClick={() => resetView(data)}
-                className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700"
-                aria-label="Restablecer zoom"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Reset</span>
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => resetView(data)}
+              disabled={!isZoomed}
+              className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 disabled:opacity-35"
+              aria-label="Restablecer zoom"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Reset</span>
+            </button>
           </div>
         </div>
 
