@@ -191,25 +191,44 @@ class AiCreditTransaction {
     switch (reason) {
       case 'ai_image_generation_queue':
       case 'ai_image_generation':
-        return product.isEmpty ? 'Generación de foto' : 'Generación foto $product';
+        return product.isEmpty
+            ? 'Foto de producto con IA'
+            : 'Foto con IA · $product';
+      case 'ai_category_cover':
+        return 'Portada de categoría con IA';
       case 'menu_generation':
-        return 'Generación de menú con IA';
+        return 'Menú generado con IA';
       case 'branding_generation':
         return 'Branding con IA';
       case 'category_emoji_suggestion':
-        return 'Icono de categoría';
+        return 'Icono de categoría con IA';
       case 'product_description':
       case 'generate_product_description':
+      case 'product_description_generation':
         return product.isEmpty
-            ? 'Descripción de producto'
-            : 'Descripción $product';
+            ? 'Descripción de producto con IA'
+            : 'Descripción con IA · $product';
       case 'initial_signup_credits':
         return 'Créditos de bienvenida';
       case 'ai_credit_topup':
-        return 'Recarga';
+        return 'Recarga de créditos';
+      case 'admin_topup':
+      case 'admin_manual_topup':
+        return 'Recarga desde soporte';
+      case 'ai_usage':
+        return 'Uso de IA';
       default:
-        if ((reason ?? '').contains('refund')) return 'Reembolso';
-        return isCredit ? 'Recarga' : 'Uso de créditos IA';
+        final raw = reason ?? '';
+        if (raw.contains('refund')) {
+          return product.isEmpty
+              ? 'Reembolso de créditos IA'
+              : 'Reembolso IA · $product';
+        }
+        if (raw.trim().isEmpty) {
+          return isCredit ? 'Recarga de créditos' : 'Uso de créditos IA';
+        }
+        final readable = raw.replaceAll('_', ' ').trim();
+        return isCredit ? 'Recarga · $readable' : 'Uso · $readable';
     }
   }
 

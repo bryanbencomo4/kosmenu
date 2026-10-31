@@ -10722,6 +10722,40 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                                 ),
                               );
                             }),
+                            if (draft.transferAccounts.length <
+                                _maxTransferAccountsPerCurrency) ...[
+                              const SizedBox(height: 4),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: _setupTextHigh,
+                                    side: const BorderSide(
+                                      color: Color(0xFFC4B5FD),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    unawaited(
+                                      _openPaymentMethodEditor(
+                                        'Transferencia',
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.add_rounded,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    draft.transferAccounts.length == 1
+                                        ? 'Añadir otro método digital'
+                                        : 'Añadir otra cuenta digital',
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ],
                       ],

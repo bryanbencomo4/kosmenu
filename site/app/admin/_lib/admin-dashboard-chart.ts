@@ -16,6 +16,12 @@ import {
   loadAdminMarketUnitsPerUsd,
   mergeUnitsPerUsd,
 } from './admin-usd-rates';
+import {
+  adminBusinessDayEndExclusive,
+  adminBusinessDayLabelDate,
+  adminBusinessDayStart,
+  adminCaracasParts,
+} from './admin-business-day';
 
 export const DASHBOARD_CHART_RANGES = ['24h', '7d', '30d', '90d'] as const;
 export type DashboardChartRange = (typeof DASHBOARD_CHART_RANGES)[number];
@@ -64,7 +70,16 @@ function toIso(date: Date) {
 }
 
 function startOfLocalDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  // Align chart day buckets to 20:00 America/Caracas close.
+  return adminBusinessDayStart(date);
+}
+
+function labelDayKey(instant: Date) {
+  const label = adminBusinessDayLabelDate(instant);
+  const y = label.getUTCFullYear();
+  const m = String(label.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(label.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function startOfLocalHour(date: Date) {
@@ -80,7 +95,8 @@ function startOfLocalHour(date: Date) {
 }
 
 function dayKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  // Prefer business-day label (ends 20:00 Caracas) for daily aggregation.
+  return labelDayKey(date);
 }
 
 function hourKey(date: Date) {
@@ -171,15 +187,17 @@ function buildBuckets(range: DashboardChartRange, now: Date): {
   }
 
   if (range === '30d') {
-    const today = startOfLocalDay(now);
-    const windowStart = new Date(today.getTime() - 29 * DAY_MS);
+    const todayEnd = adminBusinessDayEndExclusive(now);
+    const windowStart = new Date(todayEnd.getTime() - 30 * DAY_MS);
     const buckets = Array.from({ length: 30 }, (_, index) => {
       const start = new Date(windowStart.getTime() + index * DAY_MS);
+      const end = new Date(start.getTime() + DAY_MS);
+      const parts = adminCaracasParts(new Date(end.getTime() - 1));
       return {
-        key: dayKey(start),
-        label: `${start.getDate()}/${start.getMonth() + 1}`,
+        key: labelDayKey(start),
+        label: `${parts.day}/${parts.month + 1}`,
         startMs: start.getTime(),
-        endMs: start.getTime() + DAY_MS,
+        endMs: end.getTime(),
       };
     });
     return { windowStart, buckets };
@@ -208,16 +226,18 @@ function buildBuckets(range: DashboardChartRange, now: Date): {
     return { windowStart: first, buckets };
   }
 
-  // 7d default
-  const today = startOfLocalDay(now);
-  const windowStart = new Date(today.getTime() - 6 * DAY_MS);
+  // 7d default — 7 business days ending at the current Caracas close window.
+  const todayEnd = adminBusinessDayEndExclusive(now);
+  const windowStart = new Date(todayEnd.getTime() - 7 * DAY_MS);
   const buckets = Array.from({ length: 7 }, (_, index) => {
     const start = new Date(windowStart.getTime() + index * DAY_MS);
+    const end = new Date(start.getTime() + DAY_MS);
+    const parts = adminCaracasParts(new Date(end.getTime() - 1));
     return {
-      key: dayKey(start),
-      label: WEEKDAY_LABELS[start.getDay()],
+      key: labelDayKey(start),
+      label: WEEKDAY_LABELS[new Date(Date.UTC(parts.year, parts.month, parts.day)).getUTCDay()],
       startMs: start.getTime(),
-      endMs: start.getTime() + DAY_MS,
+      endMs: end.getTime(),
     };
   });
   return { windowStart, buckets };

@@ -17,6 +17,7 @@ import {
   Store,
 } from 'lucide-react';
 
+import { describeAiCreditMovement } from '../_lib/admin-ai-credit-labels';
 import type { CurrentAdmin } from '../_lib/admin-auth';
 
 type BusinessDetail = {
@@ -74,6 +75,7 @@ type BusinessDetail = {
       amount: number;
       reason: string | null;
       createdAt: string | null;
+      metadata?: Record<string, unknown>;
     }>;
   };
   stats: {
@@ -184,7 +186,7 @@ export function AdminBusinessDetailPanel({
     () => toLocalDateInput(initialDetail.subscription?.currentPeriodEnd ?? null),
   );
   const [creditAmount, setCreditAmount] = useState('50');
-  const [creditReason, setCreditReason] = useState('admin_topup');
+  const [creditReason, setCreditReason] = useState('Recarga manual soporte');
 
   const dirty = useMemo(() => {
     const baseline = toForm(detail);
@@ -319,7 +321,7 @@ export function AdminBusinessDetailPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          reason: creditReason.trim() || 'admin_topup',
+          reason: creditReason.trim() || 'admin_manual_topup',
         }),
       });
       const result = await readJson<{ ok: true; data: BusinessDetail }>(response);
@@ -900,7 +902,7 @@ export function AdminBusinessDetailPanel({
                   disabled={opsWorking}
                   onChange={(event) => setCreditReason(event.target.value)}
                   className="w-full rounded-[1rem] border border-slate-200 px-3 py-2.5 text-sm outline-none ring-violet-200 focus:ring-4"
-                  placeholder="admin_topup"
+                  placeholder="Recarga manual soporte"
                 />
               </label>
               <div className="flex items-end">
@@ -920,22 +922,46 @@ export function AdminBusinessDetailPanel({
             <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
               Movimientos recientes
             </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Incluye usos desde app.elmenuxfa.com y recargas de soporte.
+            </p>
             <ul className="mt-2 divide-y divide-slate-100 rounded-[1.1rem] border border-slate-200">
               {detail.aiCredits.recent.length === 0 ? (
                 <li className="px-3 py-3 text-sm text-slate-500">Sin movimientos.</li>
               ) : (
-                detail.aiCredits.recent.map((row) => (
-                  <li key={row.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
-                    <div>
-                      <p className="font-semibold text-slate-900">
-                        {row.type === 'debit' ? '−' : '+'}
-                        {row.amount}
-                        {row.reason ? ` · ${row.reason}` : ''}
+                detail.aiCredits.recent.map((row) => {
+                  const label = describeAiCreditMovement({
+                    type: row.type,
+                    reason: row.reason,
+                    metadata: row.metadata,
+                  });
+                  const amountLabel = `${label.isCredit || row.type === 'credit' ? '+' : '−'}${row.amount}`;
+                  return (
+                    <li
+                      key={row.id}
+                      className="flex items-start justify-between gap-3 px-3 py-2.5 text-sm"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900">{label.title}</p>
+                        {label.detail ? (
+                          <p className="text-xs text-slate-500">{label.detail}</p>
+                        ) : null}
+                        <p className="text-xs text-slate-400">{formatDate(row.createdAt)}</p>
+                      </div>
+                      <p
+                        className={[
+                          'shrink-0 text-sm font-black tabular-nums',
+                          row.type === 'debit' ? 'text-amber-700' : 'text-emerald-700',
+                        ].join(' ')}
+                      >
+                        {amountLabel}{' '}
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          cr
+                        </span>
                       </p>
-                      <p className="text-xs text-slate-500">{formatDate(row.createdAt)}</p>
-                    </div>
-                  </li>
-                ))
+                    </li>
+                  );
+                })
               )}
             </ul>
           </div>

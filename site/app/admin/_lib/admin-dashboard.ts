@@ -20,6 +20,10 @@ import {
   loadAdminMarketUnitsPerUsd,
   mergeUnitsPerUsd,
 } from './admin-usd-rates';
+import {
+  adminBusinessDayEndExclusive,
+  adminBusinessDayStart,
+} from './admin-business-day';
 import { isWhatsappManualOrder, normalizeOrderManagementMode } from '../../_lib/order-management-mode';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -157,9 +161,12 @@ export type AdminDashboardData = {
 };
 
 function startOfDay(date: Date) {
-  const copy = new Date(date);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
+  // Sales day ends at 20:00 America/Caracas (not local midnight).
+  return adminBusinessDayStart(date);
+}
+
+function endOfDayExclusive(date: Date) {
+  return adminBusinessDayEndExclusive(date);
 }
 
 function addDays(date: Date, days: number) {

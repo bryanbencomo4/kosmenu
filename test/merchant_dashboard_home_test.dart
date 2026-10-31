@@ -172,7 +172,7 @@ void main() {
     );
 
     expect(find.textContaining('omg burgers!'), findsWidgets);
-    expect(find.text('Negocio abierto'), findsOneWidget);
+    expect(find.text('Mostrar al público'), findsOneWidget);
     expect(find.byIcon(Icons.menu_rounded), findsOneWidget);
   });
 }

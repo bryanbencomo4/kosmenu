@@ -8,6 +8,13 @@ class ForceUpdateScreen extends StatelessWidget {
 
   final AndroidAppRelease release;
 
+  static const String _logoAsset = 'assets/branding/full_logo_auth.webp';
+  static const Color _brand = Color(0xFF6532A8);
+  static const Color _brandDeep = Color(0xFF2B1455);
+  static const Color _brandMid = Color(0xFF5B21B6);
+  static const Color _ink = Color(0xFF15122A);
+  static const Color _muted = Color(0xFF6B6680);
+
   Future<void> _download(BuildContext context) async {
     final uri = Uri.tryParse(release.downloadUrl);
     if (uri == null) {
@@ -27,108 +34,288 @@ class ForceUpdateScreen extends StatelessWidget {
   }
 
   void _toast(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final versionLabel = release.versionName.trim().isEmpty
+        ? 'Nueva versión'
+        : 'Versión ${release.versionName.trim()}';
+    final notes = release.notes.trim();
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F7FC),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              Container(
-                width: 72,
-                height: 72,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6D28D9).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(22),
-                ),
-                child: const Icon(
-                  Icons.system_update_alt_rounded,
-                  size: 36,
-                  color: Color(0xFF6D28D9),
-                ),
-              ),
-              const SizedBox(height: 22),
-              Text(
-                'Actualización requerida',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.poppins(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFF11183C),
-                  height: 1.15,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Hay una nueva versión de elmenuxfa (${release.versionName}). '
-                'Debes instalarla para continuar usando el panel.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.manrope(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF64748B),
-                  height: 1.45,
-                ),
-              ),
-              if (release.notes.trim().isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(14),
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              _brandDeep,
+              _brandMid,
+              _brandDeep,
+            ],
+          ),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -140,
+              left: -90,
+              child: IgnorePointer(
+                child: Container(
+                  width: 300,
+                  height: 300,
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
-                  ),
-                  child: Text(
-                    release.notes,
-                    style: GoogleFonts.manrope(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF334155),
-                      height: 1.4,
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        Colors.white.withValues(alpha: 0.12),
+                        Colors.white.withValues(alpha: 0.0),
+                      ],
                     ),
                   ),
                 ),
-              ],
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: () => _download(context),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF6D28D9),
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(52),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            Positioned(
+              bottom: -160,
+              right: -100,
+              child: IgnorePointer(
+                child: Container(
+                  width: 340,
+                  height: 340,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFFA78BFA).withValues(alpha: 0.28),
+                        const Color(0xFFA78BFA).withValues(alpha: 0.0),
+                      ],
+                    ),
                   ),
                 ),
-                icon: const Icon(Icons.download_rounded),
-                label: Text(
-                  'Descargar actualización',
-                  style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+              ),
+            ),
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 28, 20, 28),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: 1),
+                      duration: const Duration(milliseconds: 520),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, t, child) {
+                        return Opacity(
+                          opacity: t,
+                          child: Transform.translate(
+                            offset: Offset(0, (1 - t) * 18),
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 22,
+                                vertical: 18,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(28),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.28),
+                                    blurRadius: 36,
+                                    offset: const Offset(0, 16),
+                                  ),
+                                ],
+                              ),
+                              child: Image.asset(
+                                _logoAsset,
+                                height: 96,
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.high,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Image.asset(
+                                        'assets/branding/isotipo.png',
+                                        height: 56,
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (context, error, stackTrace) =>
+                                            const Icon(
+                                          Icons.qr_code_2_rounded,
+                                          size: 52,
+                                          color: _brand,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        'elmenuxfa.com',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 22,
+                                          fontWeight: FontWeight.w800,
+                                          color: _ink,
+                                          letterSpacing: -0.5,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 28),
+                          Container(
+                            padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
+                            decoration: BoxDecoration(
+                              color: const Color(0xF8FFFFFF),
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                color: const Color(0xFFDDD6FE),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.22),
+                                  blurRadius: 30,
+                                  offset: const Offset(0, 14),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  'Actualización requerida',
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 26,
+                                    fontWeight: FontWeight.w800,
+                                    color: _ink,
+                                    height: 1.1,
+                                    letterSpacing: -0.6,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'Hay una versión nueva del panel. Instálala para '
+                                  'seguir recibiendo pedidos sin interrupciones.',
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 14.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: _muted,
+                                    height: 1.45,
+                                  ),
+                                ),
+                                const SizedBox(height: 18),
+                                Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF1EAFE),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      versionLabel,
+                                      style: GoogleFonts.manrope(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                        color: _brandDeep,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (notes.isNotEmpty) ...[
+                                  const SizedBox(height: 20),
+                                  Text(
+                                    'Qué incluye',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: _ink,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    notes,
+                                    style: GoogleFonts.manrope(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: const Color(0xFF475569),
+                                      height: 1.45,
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 24),
+                                FilledButton(
+                                  onPressed: () => _download(context),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: _brand,
+                                    foregroundColor: Colors.white,
+                                    minimumSize: const Size.fromHeight(54),
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(
+                                        Icons.download_rounded,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        'Descargar actualización',
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 15.5,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                Text(
+                                  'Si Android bloquea la instalación, permite '
+                                  '“Instalar apps desconocidas” para el navegador '
+                                  'o el gestor de archivos.',
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFF94A3B8),
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                'Si Android bloquea la instalación, permite “Instalar apps '
-                'desconocidas” para el navegador o gestor de archivos.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.manrope(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF94A3B8),
-                  height: 1.4,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

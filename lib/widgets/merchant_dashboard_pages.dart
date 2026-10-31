@@ -15,12 +15,29 @@ import 'package:kosmenu_app/screens/category_screen.dart';
 import 'package:kosmenu_app/screens/profile_screen.dart';
 import 'package:kosmenu_app/services/merchant_session.dart';
 import 'package:kosmenu_app/services/order_manager_service.dart';
+import 'package:kosmenu_app/utils/merchant_business_day.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum _OrdersDatePreset { all, today, yesterday, last7, thisMonth, custom }
 
 enum _OrdersFulfillmentFilter { all, delivery, pickup }
+
+/// Optional seed filters when opening Pedidos from the sales chart.
+class MerchantOrdersSeedFilter {
+  const MerchantOrdersSeedFilter({
+    this.dateRange,
+    this.currency,
+    this.revision = 0,
+  });
+
+  /// Inclusive calendar range (end day included).
+  final DateTimeRange? dateRange;
+  final String? currency;
+
+  /// Bump so the same range re-applies when tapping the chart again.
+  final int revision;
+}
 
 class MerchantOrdersWorkspace extends StatefulWidget {
   const MerchantOrdersWorkspace({
@@ -30,6 +47,7 @@ class MerchantOrdersWorkspace extends StatefulWidget {
     this.purgedOrderIds = const <String>{},
     this.errorSubtitle,
     this.onRetry,
+    this.seedFilter,
   });
 
   final List<PedidoModel> orders;
@@ -39,6 +57,7 @@ class MerchantOrdersWorkspace extends StatefulWidget {
   final Widget Function(PedidoModel pedido) itemBuilder;
   final String? errorSubtitle;
   final VoidCallback? onRetry;
+  final MerchantOrdersSeedFilter? seedFilter;
 
   @override
   State<MerchantOrdersWorkspace> createState() =>
@@ -124,10 +143,16 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    _applySeedFilter(widget.seedFilter, reload: false);
     _seedBrowseFromLive();
     if (_browse.rows.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _browse.rows.isEmpty) unawaited(_loadMore());
+      });
+    } else if (widget.seedFilter?.dateRange != null ||
+        (widget.seedFilter?.currency ?? '').isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _resetWindowsAndReload(seedLive: true);
       });
     }
   }
@@ -135,9 +160,39 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
   @override
   void didUpdateWidget(covariant MerchantOrdersWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final oldSeed = oldWidget.seedFilter;
+    final nextSeed = widget.seedFilter;
+    final seedChanged = oldSeed?.revision != nextSeed?.revision ||
+        oldSeed?.currency != nextSeed?.currency ||
+        oldSeed?.dateRange?.start != nextSeed?.dateRange?.start ||
+        oldSeed?.dateRange?.end != nextSeed?.dateRange?.end;
+    if (seedChanged && nextSeed != null) {
+      _applySeedFilter(nextSeed, reload: true);
+    }
     _syncWindowsWithLive();
     if (_browse.rows.isEmpty && !_browse.isLoading) {
       _seedBrowseFromLive();
+    }
+  }
+
+  void _applySeedFilter(MerchantOrdersSeedFilter? seed, {required bool reload}) {
+    if (seed == null) return;
+    final range = seed.dateRange;
+    if (range != null) {
+      _datePreset = _OrdersDatePreset.custom;
+      _customRange = DateTimeRange(
+        start: DateTime(range.start.year, range.start.month, range.start.day),
+        end: DateTime(range.end.year, range.end.month, range.end.day),
+      );
+    }
+    final currency = (seed.currency ?? '').trim().toUpperCase();
+    if (currency.isNotEmpty &&
+        currency != 'ALL' &&
+        currency != 'USD_ESTIMATE') {
+      _currency = currency;
+    }
+    if (reload) {
+      _resetWindowsAndReload(seedLive: true);
     }
   }
 
@@ -240,41 +295,47 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
 
   ({DateTime? start, DateTime? end}) _dateBounds() {
     final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
+    final today = merchantTodayBusinessWindow(now);
     switch (_datePreset) {
       case _OrdersDatePreset.all:
         return (start: null, end: null);
       case _OrdersDatePreset.today:
-        return (start: todayStart, end: todayStart.add(const Duration(days: 1)));
+        return (start: today.startInclusive, end: today.endExclusive);
       case _OrdersDatePreset.yesterday:
         return (
-          start: todayStart.subtract(const Duration(days: 1)),
-          end: todayStart,
+          start: today.startInclusive.subtract(const Duration(days: 1)),
+          end: today.startInclusive,
         );
       case _OrdersDatePreset.last7:
         return (
-          start: todayStart.subtract(const Duration(days: 6)),
-          end: todayStart.add(const Duration(days: 1)),
+          start: today.startInclusive.subtract(const Duration(days: 6)),
+          end: today.endExclusive,
         );
       case _OrdersDatePreset.thisMonth:
+        final label = merchantBusinessDayLabelDate(now);
         return (
-          start: DateTime(now.year, now.month, 1),
-          end: todayStart.add(const Duration(days: 1)),
+          start: merchantBusinessDayStartForLabel(
+            DateTime(label.year, label.month, 1),
+          ),
+          end: today.endExclusive,
         );
       case _OrdersDatePreset.custom:
         final range = _customRange;
         if (range == null) return (start: null, end: null);
-        final start = DateTime(
+        final startLabel = DateTime(
           range.start.year,
           range.start.month,
           range.start.day,
         );
-        final end = DateTime(
+        final endLabel = DateTime(
           range.end.year,
           range.end.month,
           range.end.day,
-        ).add(const Duration(days: 1));
-        return (start: start, end: end);
+        );
+        return (
+          start: merchantBusinessDayStartForLabel(startLabel),
+          end: merchantBusinessDayEndForLabel(endLabel),
+        );
     }
   }
 
@@ -559,8 +620,15 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
         return 'Este mes';
       case _OrdersDatePreset.custom:
         if (_customRange == null) return 'Rango';
-        return '${_customRange!.start.day}/${_customRange!.start.month}'
-            '–${_customRange!.end.day}/${_customRange!.end.month}';
+        final start = _customRange!.start;
+        final end = _customRange!.end;
+        if (start.year == end.year &&
+            start.month == end.month &&
+            start.day == end.day) {
+          return '${start.day}/${start.month}/${start.year}';
+        }
+        return '${start.day}/${start.month}'
+            '–${end.day}/${end.month}';
     }
   }
 

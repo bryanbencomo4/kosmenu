@@ -526,9 +526,9 @@ class MerchantHomeHeader extends StatelessWidget {
         Text(
           hoursCaption?.trim().isNotEmpty == true
               ? hoursCaption!
-              : businessOnline
-              ? 'Tu negocio está abierto y listo para recibir más pedidos.'
-              : 'Tu negocio está pausado. Actívalo para recibir pedidos.',
+              :               businessOnline
+              ? 'Tu menú está visible al público y listo para recibir pedidos.'
+              : 'Tu menú está oculto al público. Muéstralo para recibir pedidos.',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: GoogleFonts.poppins(
@@ -542,11 +542,11 @@ class MerchantHomeHeader extends StatelessWidget {
 
     final statusChip = PopupMenuButton<bool>(
       enabled: !isUpdatingOnline && MerchantSession.canManageSettings,
-      tooltip: 'Estado del negocio',
+      tooltip: 'Visibilidad en el menú público',
       onSelected: onToggleOnline,
       itemBuilder: (context) => const [
-        PopupMenuItem(value: true, child: Text('Negocio abierto')),
-        PopupMenuItem(value: false, child: Text('Negocio pausado')),
+        PopupMenuItem(value: true, child: Text('Mostrar al público')),
+        PopupMenuItem(value: false, child: Text('Ocultar al público')),
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -570,7 +570,9 @@ class MerchantHomeHeader extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              businessOnline ? 'Negocio abierto' : 'Negocio pausado',
+              businessOnline
+                  ? 'Mostrar al público'
+                  : 'Ocultar al público',
               style: GoogleFonts.poppins(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,

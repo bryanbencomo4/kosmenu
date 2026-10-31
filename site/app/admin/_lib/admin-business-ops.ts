@@ -23,6 +23,7 @@ export type AdminAiCreditsSummary = {
     amount: number;
     reason: string | null;
     createdAt: string | null;
+    metadata: Record<string, unknown>;
   }>;
 };
 
@@ -148,10 +149,10 @@ export async function loadAdminAiCredits(
       .maybeSingle(),
     supabase
       .from('ai_credits_transactions')
-      .select('id,type,amount,reason,created_at')
+      .select('id,type,amount,reason,created_at,metadata')
       .eq('commerce_id', businessId)
       .order('created_at', { ascending: false })
-      .limit(8),
+      .limit(12),
   ]);
 
   if (walletResult.error) throw new Error(walletResult.error.message);
@@ -173,6 +174,10 @@ export async function loadAdminAiCredits(
       amount: toFiniteNumber(row.amount),
       reason: asTrimmed(row.reason),
       createdAt: asTrimmed(row.created_at),
+      metadata:
+        row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+          ? (row.metadata as Record<string, unknown>)
+          : {},
     })),
   };
 }

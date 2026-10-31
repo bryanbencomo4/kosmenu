@@ -129,12 +129,12 @@ class MerchantShellHeader extends StatelessWidget {
             enabled:
                 !isUpdatingOnline && MerchantSession.canManageSettings,
             tooltip: MerchantSession.canManageSettings
-                ? 'Estado del negocio'
-                : 'Estado del negocio (solo lectura)',
+                ? 'Visibilidad en el menú público'
+                : 'Visibilidad en el menú público (solo lectura)',
             onSelected: onToggleOnline,
             itemBuilder: (context) => const [
-              PopupMenuItem(value: true, child: Text('Negocio abierto')),
-              PopupMenuItem(value: false, child: Text('Negocio pausado')),
+              PopupMenuItem(value: true, child: Text('Mostrar al público')),
+              PopupMenuItem(value: false, child: Text('Ocultar al público')),
             ],
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -159,7 +159,9 @@ class MerchantShellHeader extends StatelessWidget {
                   if (!isMobile) ...[
                     const SizedBox(width: 8),
                     Text(
-                      businessOnline ? 'Negocio abierto' : 'Negocio pausado',
+                      businessOnline
+                          ? 'Mostrar al público'
+                          : 'Ocultar al público',
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,

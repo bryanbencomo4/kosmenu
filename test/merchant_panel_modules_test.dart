@@ -138,8 +138,18 @@ void main() {
       'metadata': {'product_name': 'hamburguesa'},
       'created_at': '2026-09-17T12:00:00Z',
     });
-    expect(tx.title, 'Generación foto hamburguesa');
+    expect(tx.title, 'Foto con IA · hamburguesa');
     expect(tx.isCredit, isFalse);
+
+    final description = AiCreditTransaction.fromMap({
+      'id': 't2',
+      'type': 'debit',
+      'amount': 1,
+      'reason': 'product_description_generation',
+      'metadata': {'product_name': 'arepa'},
+      'created_at': '2026-09-17T12:00:00Z',
+    });
+    expect(description.title, 'Descripción con IA · arepa');
   });
 
   test('12h labels and split ranges match the public menu contract', () {

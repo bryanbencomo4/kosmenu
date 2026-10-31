@@ -37,6 +37,8 @@ import 'package:kosmenu_app/screens/delivery_settings_screen.dart';
 import 'package:kosmenu_app/screens/kiosk_home_settings_screen.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/kitchen_order/kitchen_order_widgets.dart';
+import 'package:kosmenu_app/utils/merchant_business_day.dart';
+import 'package:kosmenu_app/utils/merchant_sales_money.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_pages.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
@@ -114,8 +116,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   int _ordersReconnectAttempts = 0;
   bool _isRecoveringOrdersAuth = false;
   bool _isRestartingOrdersStream = false;
-  _SalesRange _selectedSalesRange = _SalesRange.today;
+  _SalesRange _selectedSalesRange = _SalesRange.lastWeek;
   DateTimeRange? _customSalesRange;
+  /// `all` | `usd_estimate` | currency code (COP, VES, USD…)
+  String _chartCurrencyFilter = 'all';
+  /// Business primary currency (`comercios.moneda`), used for converted totals.
+  String _businessCurrency = 'COP';
+  /// Units of each currency per 1 USD (business + market), same as admin.
+  Map<String, double> _unitsPerUsd = const <String, double>{};
+  MerchantOrdersSeedFilter? _ordersSeedFilter;
+  int _ordersSeedRevision = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
   final GlobalKey _salesSectionKey = GlobalKey();
@@ -307,7 +317,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
     final client = Supabase.instance.client;
     final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
+    final todayWindow = merchantTodayBusinessWindow(now);
+    final todayStart = todayWindow.startInclusive;
     final yesterdayStart = todayStart.subtract(const Duration(days: 1));
     final comercioFuture = client
         .from('comercios')
@@ -331,6 +342,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       },
     );
     final analyticsFuture = _loadAnalytics(client);
+    final marketRatesFuture = () async {
+      try {
+        return await client
+            .from('global_market_rates')
+            .select('bcv_rate, p2p_binance_rate, payload')
+            .order('updated_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
+      } catch (_) {
+        return null;
+      }
+    }();
     final yesterdayOrdersFuture = client
         .from('pedidos')
         .select(
@@ -348,6 +371,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       creditsFuture,
       yesterdayOrdersFuture,
       analyticsFuture,
+      marketRatesFuture,
     ]).timeout(
       const Duration(seconds: 20),
       onTimeout: () => throw TimeoutException(
@@ -413,6 +437,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final comercioRow = Map<String, dynamic>.from(
       (results[0] as Map?) ?? const <String, dynamic>{},
     );
+    final marketRow = results[6] is Map
+        ? Map<String, dynamic>.from(results[6] as Map)
+        : null;
+    _unitsPerUsd = resolveMerchantUnitsPerUsd(
+      comercioRow: comercioRow,
+      marketRow: marketRow,
+    );
+    final rawMoneda = normalizeMerchantCurrency(
+      comercioRow['moneda']?.toString(),
+      fallback: 'COP',
+    );
+    _businessCurrency = rawMoneda.isEmpty ? 'COP' : rawMoneda;
     final hasLocation =
         comercioRow['latitud'] != null ||
         comercioRow['longitud'] != null ||
@@ -1441,8 +1477,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           behavior: SnackBarBehavior.floating,
           content: Text(
             value
-                ? 'Negocio en línea y aceptando pedidos.'
-                : 'Negocio pausado para nuevos pedidos.',
+                ? 'Menú visible al público y aceptando pedidos.'
+                : 'Menú oculto al público. No acepta nuevos pedidos.',
           ),
         ),
       );
@@ -1555,14 +1591,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     _selectNav(MerchantNavDestination.plan);
   }
 
-  DateTime _startOfDay(DateTime date) =>
-      DateTime(date.year, date.month, date.day);
+  /// Sales "day" boundary: 20:00 America/Caracas (not local midnight).
+  DateTime _startOfDay(DateTime date) => merchantBusinessDayStart(date);
 
   DateTime _endOfDayExclusive(DateTime date) =>
-      DateTime(date.year, date.month, date.day + 1);
+      merchantBusinessDayEndExclusive(date);
 
   DateTime _subtractFromToday(int days) =>
-      _startOfDay(DateTime.now()).subtract(Duration(days: days));
+      merchantTodayBusinessWindow().startInclusive.subtract(Duration(days: days));
 
   String _monthShortEs(int month) {
     const names = <String>[
@@ -1690,7 +1726,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final now = DateTime.now();
     final todayStart = _startOfDay(now);
     final tomorrow = _endOfDayExclusive(now);
-    final currentMonthStart = DateTime(todayStart.year, todayStart.month);
+    final labelToday = merchantBusinessDayLabelDate(now);
+    final currentMonthStart = merchantBusinessDayStartForLabel(
+      DateTime(labelToday.year, labelToday.month, 1),
+    );
 
     switch (_selectedSalesRange) {
       case _SalesRange.today:
@@ -1763,9 +1802,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             endExclusive: tomorrow,
           );
         }
+        final startLabel = DateTime(
+          custom.start.year,
+          custom.start.month,
+          custom.start.day,
+        );
+        final endLabel = DateTime(
+          custom.end.year,
+          custom.end.month,
+          custom.end.day,
+        );
         return _SalesRangeWindow(
-          startInclusive: _startOfDay(custom.start),
-          endExclusive: _endOfDayExclusive(custom.end),
+          startInclusive: merchantBusinessDayStartForLabel(startLabel),
+          endExclusive: merchantBusinessDayEndForLabel(endLabel),
         );
     }
   }
@@ -1777,36 +1826,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     return double.tryParse(raw.replaceAll(',', '.')) ?? 0;
   }
 
-  double _resolvePedidoTotal(PedidoModel pedido) {
-    if (pedido.isArchived) return 0;
-    final direct = pedido.total;
-    if (direct != null && direct > 0) return direct;
-
-    final detalles = pedido.detalles;
-    final resumenRaw = detalles['resumen'];
-    final resumen = resumenRaw is Map
-        ? Map<String, dynamic>.from(resumenRaw)
-        : const <String, dynamic>{};
-
-    final candidates = <dynamic>[
-      detalles['total'],
-      detalles['total_pedido'],
-      detalles['monto_total'],
-      detalles['amount_total'],
-      resumen['total'],
-      resumen['monto_total'],
-    ];
-
-    for (final candidate in candidates) {
-      final parsed = _toDoubleSafe(candidate);
-      if (parsed > 0) return parsed;
+  Color _merchantCurrencyColor(String currency) {
+    switch (normalizeMerchantCurrency(currency)) {
+      case 'USD':
+        return const Color(0xFF059669);
+      case 'EUR':
+        return const Color(0xFFDB2777);
+      case 'COP':
+        return const Color(0xFF2563EB);
+      case 'VES':
+        return const Color(0xFFD97706);
+      default:
+        return const Color(0xFF64748B);
     }
+  }
 
-    final itemsTotal = pedido.items.fold<double>(
-      0,
-      (sum, item) => sum + item.total,
+  void _accumulateOrderIntoBucket(
+    PedidoModel pedido, {
+    required Map<String, double> byCurrency,
+    required void Function(double usd) addUsd,
+    required void Function() addOrder,
+  }) {
+    final money = extractMerchantOrderMoney(
+      pedido,
+      unitsPerUsd: _unitsPerUsd,
     );
-    return itemsTotal > 0 ? itemsTotal : 0;
+    if (money.amount <= 0) return;
+    addOrder();
+    byCurrency[money.currency] = (byCurrency[money.currency] ?? 0) + money.amount;
+    final usd = money.usdEstimate;
+    if (usd != null && usd > 0) addUsd(usd);
   }
 
   _SalesHistorySeries _buildSalesHistoryForSelectedRange(
@@ -1819,115 +1868,199 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         .where((pedido) => window.contains(pedido.createdAt))
         .toList(growable: false);
 
+    List<_SalesHistoryPoint> points;
+
     if (_selectedSalesRange == _SalesRange.today ||
         _selectedSalesRange == _SalesRange.yesterday) {
       final dayStart = window.startInclusive;
-      final values = List<double>.filled(24, 0);
-      final labels = List<String>.generate(24, _hourAxisLabel);
-      final tooltipLabels = List<String>.generate(
-        24,
-        (hour) => _hourTooltipLabel(dayStart, hour),
-      );
-
-      for (final pedido in filtered) {
-        final createdAt = pedido.createdAt?.toLocal();
-        if (createdAt == null) continue;
-        values[createdAt.hour] += _resolvePedidoTotal(pedido);
-      }
-
-      return _SalesHistorySeries(
-        values: values,
-        labels: labels,
-        tooltipLabels: tooltipLabels,
-      );
-    }
-
-    final spanDays = window.endExclusive
-        .difference(window.startInclusive)
-        .inDays;
-
-    if (spanDays <= 31) {
-      final values = <double>[];
-      final labels = <String>[];
-      final tooltipLabels = <String>[];
-
-      var cursor = window.startInclusive;
-      DateTime? previousBucketStart;
-      while (cursor.isBefore(window.endExclusive)) {
-        final bucketEnd = cursor.add(const Duration(days: 1));
-
-        final total = filtered.fold<double>(0, (sum, pedido) {
-          final created = pedido.createdAt?.toLocal();
-          if (created == null) return sum;
-          if (created.isBefore(cursor) || !created.isBefore(bucketEnd)) {
-            return sum;
+      final dayEnd = window.endExclusive;
+      final labelDay = merchantBusinessDayLabelDate(dayStart);
+      points = List<_SalesHistoryPoint>.generate(24, (hour) {
+        final bucketStart = dayStart.add(Duration(hours: hour));
+        final bucketEnd = bucketStart.add(const Duration(hours: 1));
+        final byCurrency = <String, double>{};
+        var usd = 0.0;
+        var orderCount = 0;
+        for (final pedido in filtered) {
+          final createdAt = pedido.createdAt;
+          if (createdAt == null) continue;
+          if (createdAt.isBefore(bucketStart) ||
+              !createdAt.isBefore(bucketEnd)) {
+            continue;
           }
-          return sum + _resolvePedidoTotal(pedido);
-        });
-
-        values.add(total);
-        labels.add(
-          _compactChartDateLabel(cursor, previous: previousBucketStart),
-        );
-        tooltipLabels.add(_fullChartDateLabel(cursor));
-        previousBucketStart = cursor;
-        cursor = bucketEnd;
-      }
-
-      return _SalesHistorySeries(
-        values: values,
-        labels: labels,
-        tooltipLabels: tooltipLabels,
-      );
-    }
-
-    final monthStarts = <DateTime>[];
-    var monthCursor = DateTime(
-      window.startInclusive.year,
-      window.startInclusive.month,
-    );
-    final monthEnd = DateTime(
-      window.endExclusive.year,
-      window.endExclusive.month,
-    );
-    while (!monthCursor.isAfter(monthEnd)) {
-      monthStarts.add(monthCursor);
-      monthCursor = DateTime(monthCursor.year, monthCursor.month + 1);
-    }
-
-    final desiredBuckets = monthStarts.length <= 12 ? monthStarts.length : 12;
-    final groupSize = (monthStarts.length / desiredBuckets).ceil();
-    final values = <double>[];
-    final labels = <String>[];
-    final tooltipLabels = <String>[];
-
-    for (var i = 0; i < monthStarts.length; i += groupSize) {
-      final bucketStart = monthStarts[i];
-      final nextIndex = (i + groupSize) < monthStarts.length
-          ? i + groupSize
-          : monthStarts.length;
-      final bucketEnd = nextIndex < monthStarts.length
-          ? monthStarts[nextIndex]
-          : window.endExclusive;
-
-      final total = filtered.fold<double>(0, (sum, pedido) {
-        final created = pedido.createdAt?.toLocal();
-        if (created == null) return sum;
-        if (created.isBefore(bucketStart) || !created.isBefore(bucketEnd)) {
-          return sum;
+          _accumulateOrderIntoBucket(
+            pedido,
+            byCurrency: byCurrency,
+            addUsd: (v) => usd += v,
+            addOrder: () => orderCount += 1,
+          );
         }
-        return sum + _resolvePedidoTotal(pedido);
+        final caracasHour =
+            bucketStart.toUtc().add(kCaracasOffsetFromUtc).hour;
+        return _SalesHistoryPoint(
+          label: _hourAxisLabel(caracasHour),
+          tooltipLabel: _hourTooltipLabel(labelDay, caracasHour),
+          orderCount: orderCount,
+          byCurrency: byCurrency,
+          usdEstimate: usd,
+          startInclusive: dayStart,
+          endExclusive: dayEnd,
+        );
       });
+    } else {
+      final spanDays = window.endExclusive
+          .difference(window.startInclusive)
+          .inDays;
 
-      values.add(total);
-      labels.add(_monthShortEs(bucketStart.month));
-      tooltipLabels.add(_fullChartDateLabel(bucketStart));
+      if (spanDays <= 31) {
+        points = <_SalesHistoryPoint>[];
+        var cursor = window.startInclusive;
+        DateTime? previousLabelDate;
+        while (cursor.isBefore(window.endExclusive)) {
+          final bucketEnd = cursor.add(const Duration(days: 1));
+          final labelDate = merchantBusinessDayLabelDate(cursor);
+          final byCurrency = <String, double>{};
+          var usd = 0.0;
+          var orderCount = 0;
+          for (final pedido in filtered) {
+            final created = pedido.createdAt;
+            if (created == null) continue;
+            if (created.isBefore(cursor) || !created.isBefore(bucketEnd)) {
+              continue;
+            }
+            _accumulateOrderIntoBucket(
+              pedido,
+              byCurrency: byCurrency,
+              addUsd: (v) => usd += v,
+              addOrder: () => orderCount += 1,
+            );
+          }
+          points.add(
+            _SalesHistoryPoint(
+              label: _compactChartDateLabel(
+                labelDate,
+                previous: previousLabelDate,
+              ),
+              tooltipLabel: _fullChartDateLabel(labelDate),
+              orderCount: orderCount,
+              byCurrency: byCurrency,
+              usdEstimate: usd,
+              startInclusive: cursor,
+              endExclusive: bucketEnd,
+            ),
+          );
+          previousLabelDate = labelDate;
+          cursor = bucketEnd;
+        }
+      } else {
+        final monthStarts = <DateTime>[];
+        var monthCursor = DateTime(
+          window.startInclusive.year,
+          window.startInclusive.month,
+        );
+        final monthEnd = DateTime(
+          window.endExclusive.year,
+          window.endExclusive.month,
+        );
+        while (!monthCursor.isAfter(monthEnd)) {
+          monthStarts.add(monthCursor);
+          monthCursor = DateTime(monthCursor.year, monthCursor.month + 1);
+        }
+
+        final desiredBuckets =
+            monthStarts.length <= 12 ? monthStarts.length : 12;
+        final groupSize = (monthStarts.length / desiredBuckets).ceil();
+        points = <_SalesHistoryPoint>[];
+
+        for (var i = 0; i < monthStarts.length; i += groupSize) {
+          final bucketStart = monthStarts[i];
+          final nextIndex = (i + groupSize) < monthStarts.length
+              ? i + groupSize
+              : monthStarts.length;
+          final bucketEnd = nextIndex < monthStarts.length
+              ? monthStarts[nextIndex]
+              : window.endExclusive;
+
+          final byCurrency = <String, double>{};
+          var usd = 0.0;
+          var orderCount = 0;
+          for (final pedido in filtered) {
+            final created = pedido.createdAt?.toLocal();
+            if (created == null) continue;
+            if (created.isBefore(bucketStart) ||
+                !created.isBefore(bucketEnd)) {
+              continue;
+            }
+            _accumulateOrderIntoBucket(
+              pedido,
+              byCurrency: byCurrency,
+              addUsd: (v) => usd += v,
+              addOrder: () => orderCount += 1,
+            );
+          }
+          points.add(
+            _SalesHistoryPoint(
+              label: _monthShortEs(bucketStart.month),
+              tooltipLabel: _fullChartDateLabel(bucketStart),
+              orderCount: orderCount,
+              byCurrency: byCurrency,
+              usdEstimate: usd,
+              startInclusive: bucketStart,
+              endExclusive: bucketEnd,
+            ),
+          );
+        }
+      }
     }
+
+    final currencies = <String>{};
+    for (final point in points) {
+      currencies.addAll(point.byCurrency.keys);
+    }
+    final sortedCurrencies = currencies.toList()..sort();
 
     return _SalesHistorySeries(
-      values: values,
-      labels: labels,
-      tooltipLabels: tooltipLabels,
+      points: points,
+      currencies: sortedCurrencies,
+      preferredCurrency: _businessCurrency,
+      unitsPerUsd: _unitsPerUsd,
+    );
+  }
+
+  void _openOrdersForSalesPoint(_SalesHistoryPoint point) {
+    final start = point.startInclusive;
+    final endExclusive = point.endExclusive;
+    final endInclusive = endExclusive.subtract(const Duration(seconds: 1));
+    final currency = _chartCurrencyFilter;
+    // Primary / Todas / ≈USD show every checkout that day; only narrow when a
+    // specific non-primary checkout currency chip is active.
+    final seedCurrency =
+        currency == 'all' ||
+            currency == 'usd_estimate' ||
+            currency == _businessCurrency
+        ? null
+        : currency;
+    setState(() {
+      _ordersSeedRevision += 1;
+      _ordersSeedFilter = MerchantOrdersSeedFilter(
+        dateRange: DateTimeRange(start: start, end: endInclusive),
+        currency: seedCurrency,
+        revision: _ordersSeedRevision,
+      );
+    });
+    _selectNav(MerchantNavDestination.orders);
+  }
+
+  _SalesRangeWindow _resolvePreviousSalesRangeWindow(
+    _SalesRangeWindow current,
+  ) {
+    final duration = current.endExclusive.difference(current.startInclusive);
+    final safeDuration = duration.inMinutes <= 0
+        ? const Duration(days: 1)
+        : duration;
+    return _SalesRangeWindow(
+      startInclusive: current.startInclusive.subtract(safeDuration),
+      endExclusive: current.startInclusive,
     );
   }
 
@@ -1962,13 +2095,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       }
     }
     return keys.length;
-  }
-
-  bool _isOnLocalDay(DateTime? date, DateTime dayStart) {
-    if (date == null) return false;
-    final local = date.toLocal();
-    return !local.isBefore(dayStart) &&
-        local.isBefore(dayStart.add(const Duration(days: 1)));
   }
 
   List<MerchantTopProduct> _topProducts(Iterable<PedidoModel> orders) {
@@ -2479,39 +2605,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                   validOrders,
                                                 );
 
-                                            final todayStart = _startOfDay(
-                                              DateTime.now(),
-                                            );
-                                            final todayOrders = metricsOrders
-                                                .where(
-                                                  (pedido) => !pedido.isArchived,
-                                                )
-                                                .where(
-                                                  (pedido) => _isOnLocalDay(
-                                                    pedido.createdAt,
-                                                    todayStart,
-                                                  ),
-                                                )
-                                                .where(
-                                                  (pedido) =>
-                                                      pedido.statusBucket !=
-                                                      OrderStatusBucket
-                                                          .canceled,
-                                                )
-                                                .toList(growable: false);
-                                            final todayActiveOrders =
-                                                todayOrders;
-                                            final todayRevenue =
-                                                todayActiveOrders.fold<double>(
-                                                  0,
-                                                  (sum, o) =>
-                                                      sum +
-                                                      _resolvePedidoTotal(o),
-                                                );
-                                            final todayCustomers =
-                                                _uniqueCustomerCount(
-                                                  todayActiveOrders,
-                                                );
                                             final publicUrl = getPublicMenuUrl(
                                               data.comercio,
                                             );
@@ -2522,6 +2615,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                             final salesWindow =
                                                 _resolveSalesRangeWindow(
                                                   metricsOrders,
+                                                );
+                                            final previousWindow =
+                                                _resolvePreviousSalesRangeWindow(
+                                                  salesWindow,
                                                 );
                                             final selectedOrders = metricsOrders
                                                 .where((o) => !o.isArchived)
@@ -2537,20 +2634,56 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                           .canceled,
                                                 )
                                                 .toList(growable: false);
+                                            final previousOrders = metricsOrders
+                                                .where((o) => !o.isArchived)
+                                                .where(
+                                                  (o) => previousWindow
+                                                      .contains(o.createdAt),
+                                                )
+                                                .where(
+                                                  (o) =>
+                                                      o.statusBucket !=
+                                                      OrderStatusBucket
+                                                          .canceled,
+                                                )
+                                                .toList(growable: false);
                                             final selectedCount =
                                                 selectedOrders.length;
+                                            final selectedSalesTotals =
+                                                summarizeMerchantSales(
+                                              selectedOrders,
+                                              unitsPerUsd: _unitsPerUsd,
+                                              preferredCurrency:
+                                                  _businessCurrency,
+                                            );
+                                            final previousSalesTotals =
+                                                summarizeMerchantSales(
+                                              previousOrders,
+                                              unitsPerUsd: _unitsPerUsd,
+                                              preferredCurrency:
+                                                  _businessCurrency,
+                                            );
+                                            final selectedCustomers =
+                                                _uniqueCustomerCount(
+                                              selectedOrders,
+                                            );
+                                            final previousCustomers =
+                                                _uniqueCustomerCount(
+                                              previousOrders,
+                                            );
                                             final selectedRevenue =
-                                                selectedOrders.fold<double>(
-                                                  0,
-                                                  (sum, o) =>
-                                                      sum +
-                                                      _resolvePedidoTotal(o),
-                                                );
+                                                selectedSalesTotals.chartAmount;
                                             final double ticketPromedio =
                                                 selectedCount == 0
                                                 ? 0.0
                                                 : (selectedRevenue /
                                                       selectedCount);
+                                            final previousTicket =
+                                                previousOrders.isEmpty
+                                                ? 0.0
+                                                : previousSalesTotals
+                                                        .chartAmount /
+                                                    previousOrders.length;
                                             final topProducts = _topProducts(
                                               selectedOrders,
                                             );
@@ -2558,82 +2691,106 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                 _buildSalesHistoryForSelectedRange(
                                                   metricsOrders,
                                                 );
+                                            final chartCurrencyFilter =
+                                                (_chartCurrencyFilter !=
+                                                            'all' &&
+                                                        _chartCurrencyFilter !=
+                                                            'usd_estimate' &&
+                                                        !salesSeries.currencies
+                                                            .contains(
+                                                              _chartCurrencyFilter,
+                                                            ))
+                                                    ? 'all'
+                                                    : _chartCurrencyFilter;
                                             final ordersLabel =
                                                 _selectedSalesRange.ordersLabel;
                                             final incomeLabel =
                                                 _selectedSalesRange.incomeLabel;
+                                            final periodShort =
+                                                _selectedSalesRange.kpiShortLabel;
                                             final kpiCards = <_CompactKpiCardData>[
                                               _CompactKpiCardData(
-                                                title: 'Pedidos hoy',
-                                                value: todayOrders.isEmpty
+                                                title: 'Pedidos $periodShort',
+                                                value: selectedOrders.isEmpty
                                                     ? '—'
-                                                    : '${todayOrders.length}',
-                                                hasData: todayOrders.isNotEmpty,
+                                                    : '$selectedCount',
+                                                hasData:
+                                                    selectedOrders.isNotEmpty,
                                                 icon:
                                                     Icons.shopping_bag_outlined,
                                                 color: _purple,
                                                 deltaPercent:
                                                     _deltaPercentVsYesterday(
                                                       todayValue:
-                                                          todayOrders.length,
-                                                      yesterdayValue: data
-                                                          .yesterdayTotalOrders,
+                                                          selectedCount,
+                                                      yesterdayValue:
+                                                          previousOrders.length,
                                                     ),
+                                                deltaLabel: 'vs período ant.',
                                               ),
                                               if (MerchantSession
                                                   .canSeeSalesKpis) ...[
                                                 _CompactKpiCardData(
-                                                  title: 'Ventas hoy',
-                                                  value: todayOrders.isEmpty
+                                                  title: 'Ventas $periodShort',
+                                                  value: selectedOrders.isEmpty
                                                       ? '—'
-                                                      : '\$${todayRevenue.toStringAsFixed(2)}',
+                                                      : _kpiSalesLabel(
+                                                          selectedSalesTotals,
+                                                        ),
                                                   hasData:
-                                                      todayOrders.isNotEmpty,
+                                                      selectedOrders.isNotEmpty,
                                                   icon: Icons
                                                       .attach_money_rounded,
                                                   color: _green,
                                                   deltaPercent:
                                                       _deltaPercentVsYesterday(
                                                         todayValue:
-                                                            todayRevenue,
+                                                            selectedSalesTotals
+                                                                .chartAmount,
                                                         yesterdayValue:
-                                                            data.lastDayRevenue,
+                                                            previousSalesTotals
+                                                                .chartAmount,
                                                       ),
+                                                  deltaLabel: 'vs período ant.',
                                                 ),
                                                 _CompactKpiCardData(
-                                                  title: 'Clientes hoy',
-                                                  value: todayCustomers == 0
+                                                  title: 'Clientes $periodShort',
+                                                  value: selectedCustomers == 0
                                                       ? '—'
-                                                      : '$todayCustomers',
-                                                  hasData: todayCustomers > 0,
+                                                      : '$selectedCustomers',
+                                                  hasData:
+                                                      selectedCustomers > 0,
                                                   icon: Icons.groups_outlined,
                                                   color: _orange,
                                                   deltaPercent:
                                                       _deltaPercentVsYesterday(
                                                         todayValue:
-                                                            todayCustomers,
-                                                        yesterdayValue: data
-                                                            .yesterdayUniqueCustomers,
+                                                            selectedCustomers,
+                                                        yesterdayValue:
+                                                            previousCustomers,
                                                       ),
+                                                  deltaLabel: 'vs período ant.',
                                                 ),
                                                 _CompactKpiCardData(
-                                                  title: 'Ticket promedio',
+                                                  title: 'Ticket prom.',
                                                   value: selectedCount == 0
                                                       ? '—'
-                                                      : '\$${ticketPromedio.toStringAsFixed(2)}',
+                                                      : formatMerchantMoneyKpi(
+                                                          ticketPromedio,
+                                                          selectedSalesTotals
+                                                              .chartCurrency,
+                                                        ),
                                                   hasData: selectedCount > 0,
                                                   icon: Icons
                                                       .receipt_long_outlined,
                                                   color: _purple,
-                                                  deltaPercent: _deltaPercentVsYesterday(
+                                                  deltaPercent:
+                                                      _deltaPercentVsYesterday(
                                                     todayValue: ticketPromedio,
                                                     yesterdayValue:
-                                                        data.yesterdayTotalOrders ==
-                                                            0
-                                                        ? 0
-                                                        : data.lastDayRevenue /
-                                                              data.yesterdayTotalOrders,
+                                                        previousTicket,
                                                   ),
+                                                  deltaLabel: 'vs período ant.',
                                                 ),
                                               ],
                                             ];
@@ -2662,6 +2819,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                     topProducts: topProducts,
                                                     publicUrl: publicUrl,
                                                     displayUrl: displayUrl,
+                                                    salesTotals:
+                                                        selectedSalesTotals,
+                                                    currencyFilter:
+                                                        chartCurrencyFilter,
+                                                    previousChartAmount:
+                                                        previousSalesTotals
+                                                            .chartAmount,
                                                   ),
                                                 ),
                                               );
@@ -2770,6 +2934,76 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                   ? 18
                                                                   : 14,
                                                             ),
+                                                            if (isMobile) ...[
+                                                              KeyedSubtree(
+                                                                key:
+                                                                    _salesSectionKey,
+                                                                child: _CompactSalesSummaryCard(
+                                                                  title:
+                                                                      'Ventas · ${_selectedSalesRange.label}',
+                                                                  salesToday:
+                                                                      selectedRevenue,
+                                                                  ordersToday:
+                                                                      selectedCount,
+                                                                  averageTicket:
+                                                                      ticketPromedio,
+                                                                  darkText:
+                                                                      _darkText,
+                                                                  mutedText:
+                                                                      _mutedText,
+                                                                  purple:
+                                                                      _purple,
+                                                                  salesSeries:
+                                                                      salesSeries,
+                                                                  currencyFilter:
+                                                                      chartCurrencyFilter,
+                                                                  onCurrencyFilterChanged:
+                                                                      (value) {
+                                                                    setState(
+                                                                      () =>
+                                                                          _chartCurrencyFilter =
+                                                                              value,
+                                                                    );
+                                                                    _bumpShell();
+                                                                  },
+                                                                  currencyColorFor:
+                                                                      _merchantCurrencyColor,
+                                                                  selectedRange:
+                                                                      _selectedSalesRange,
+                                                                  rangeLabel:
+                                                                      _activeRangeLabel(),
+                                                                  ordersLabel:
+                                                                      ordersLabel,
+                                                                  incomeLabel:
+                                                                      incomeLabel,
+                                                                  salesTotals:
+                                                                      selectedSalesTotals,
+                                                                  deltaPercent: _deltaPercentVsYesterday(
+                                                                    todayValue:
+                                                                        selectedRevenue,
+                                                                    yesterdayValue:
+                                                                        previousSalesTotals
+                                                                            .chartAmount,
+                                                                  ),
+                                                                  showMiniMetrics:
+                                                                      false,
+                                                                  emptyMessage:
+                                                                      'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                                                                  onRangeSelected:
+                                                                      (
+                                                                        range,
+                                                                      ) => _onSalesRangeSelected(
+                                                                        range,
+                                                                        metricsOrders,
+                                                                      ),
+                                                                  onOpenOrdersForPoint:
+                                                                      _openOrdersForSalesPoint,
+                                                                ),
+                                                              ),
+                                                              const SizedBox(
+                                                                height: 14,
+                                                              ),
+                                                            ],
                                                           ],
                                                           MerchantQuickActions(
                                                             onAddProduct:
@@ -2844,23 +3078,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                             child: KeyedSubtree(
                                                                               key: _salesSectionKey,
                                                                               child: _CompactSalesSummaryCard(
-                                                                                title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+                                                                                title: 'Ventas · ${_selectedSalesRange.label}',
                                                                                 salesToday: selectedRevenue,
                                                                                 ordersToday: selectedCount,
                                                                                 averageTicket: ticketPromedio,
                                                                                 darkText: _darkText,
                                                                                 mutedText: _mutedText,
                                                                                 purple: _purple,
-                                                                                salesHistory: salesSeries.values,
-                                                                                salesLabels: salesSeries.labels,
-                                                                                salesTooltipLabels: salesSeries.tooltipLabels,
+                                                                                salesSeries: salesSeries,
+                                                                                currencyFilter: chartCurrencyFilter,
+                                                                                onCurrencyFilterChanged: (value) {
+                                                                                  setState(() => _chartCurrencyFilter = value);
+                                                                                  _bumpShell();
+                                                                                },
+                                                                                currencyColorFor: _merchantCurrencyColor,
                                                                                 selectedRange: _selectedSalesRange,
                                                                                 rangeLabel: _activeRangeLabel(),
                                                                                 ordersLabel: ordersLabel,
                                                                                 incomeLabel: incomeLabel,
+                                                                                salesTotals: selectedSalesTotals,
                                                                                 deltaPercent: _deltaPercentVsYesterday(
                                                                                   todayValue: selectedRevenue,
-                                                                                  yesterdayValue: data.lastDayRevenue,
+                                                                                  yesterdayValue: previousSalesTotals.chartAmount,
                                                                                 ),
                                                                                 showMiniMetrics: false,
                                                                                 emptyMessage: 'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
@@ -2871,6 +3110,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                                                       range,
                                                                                       metricsOrders,
                                                                                     ),
+                                                                                onOpenOrdersForPoint:
+                                                                                    _openOrdersForSalesPoint,
                                                                               ),
                                                                             ),
                                                                           ),
@@ -3160,62 +3401,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                                             const SizedBox(
                                                               height: 12,
                                                             ),
-                                                            KeyedSubtree(
-                                                              key:
-                                                                  _salesSectionKey,
-                                                              child: _CompactSalesSummaryCard(
-                                                                title:
-                                                                    'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
-                                                                salesToday:
-                                                                    selectedRevenue,
-                                                                ordersToday:
-                                                                    selectedCount,
-                                                                averageTicket:
-                                                                    ticketPromedio,
-                                                                darkText:
-                                                                    _darkText,
-                                                                mutedText:
-                                                                    _mutedText,
-                                                                purple: _purple,
-                                                                salesHistory:
-                                                                    salesSeries
-                                                                        .values,
-                                                                salesLabels:
-                                                                    salesSeries
-                                                                        .labels,
-                                                                salesTooltipLabels:
-                                                                    salesSeries
-                                                                        .tooltipLabels,
-                                                                selectedRange:
-                                                                    _selectedSalesRange,
-                                                                rangeLabel:
-                                                                    _activeRangeLabel(),
-                                                                ordersLabel:
-                                                                    ordersLabel,
-                                                                incomeLabel:
-                                                                    incomeLabel,
-                                                                deltaPercent: _deltaPercentVsYesterday(
-                                                                  todayValue:
-                                                                      selectedRevenue,
-                                                                  yesterdayValue:
-                                                                      data.lastDayRevenue,
-                                                                ),
-                                                                showMiniMetrics:
-                                                                    false,
-                                                                emptyMessage:
-                                                                    'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
-                                                                onRangeSelected:
-                                                                    (
-                                                                      range,
-                                                                    ) => _onSalesRangeSelected(
-                                                                      range,
-                                                                      metricsOrders,
-                                                                    ),
-                                                              ),
-                                                            ),
-                                                            const SizedBox(
-                                                              height: 12,
-                                                            ),
                                                             MerchantAiCreditsCard(
                                                               balance: data
                                                                   .aiCreditsBalance,
@@ -3447,6 +3632,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     );
   }
 
+  String _kpiSalesLabel(MerchantSalesTotals totals) {
+    if (totals.orderCount <= 0 || totals.chartAmount <= 0) return '—';
+    // Always prefer business main currency (already converted in summarize).
+    return formatMerchantMoneyKpi(totals.chartAmount, totals.chartCurrency);
+  }
+
   Widget _salesSummaryCard({
     required double selectedRevenue,
     required int selectedCount,
@@ -3455,30 +3646,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     required String ordersLabel,
     required String incomeLabel,
     required List<PedidoModel> validOrders,
-    required _DashboardSnapshot data,
+    required MerchantSalesTotals salesTotals,
+    required String currencyFilter,
+    required double previousChartAmount,
   }) {
     return _CompactSalesSummaryCard(
-      title: 'Ventas de ${_selectedSalesRange.label.toLowerCase()}',
+      title: 'Ventas · ${_selectedSalesRange.label}',
       salesToday: selectedRevenue,
       ordersToday: selectedCount,
       averageTicket: ticketPromedio,
       darkText: _darkText,
       mutedText: _mutedText,
       purple: _purple,
-      salesHistory: salesSeries.values,
-      salesLabels: salesSeries.labels,
-      salesTooltipLabels: salesSeries.tooltipLabels,
+      salesSeries: salesSeries,
+      currencyFilter: currencyFilter,
+      onCurrencyFilterChanged: (value) {
+        setState(() => _chartCurrencyFilter = value);
+        _bumpShell();
+      },
+      currencyColorFor: _merchantCurrencyColor,
       selectedRange: _selectedSalesRange,
       rangeLabel: _activeRangeLabel(),
       ordersLabel: ordersLabel,
       incomeLabel: incomeLabel,
+      salesTotals: salesTotals,
       deltaPercent: _deltaPercentVsYesterday(
         todayValue: selectedRevenue,
-        yesterdayValue: data.lastDayRevenue,
+        yesterdayValue: previousChartAmount,
       ),
       showMiniMetrics: false,
       emptyMessage: 'Tus ventas aparecerán aquí cuando recibas pedidos reales.',
       onRangeSelected: (range) => _onSalesRangeSelected(range, validOrders),
+      onOpenOrdersForPoint: _openOrdersForSalesPoint,
     );
   }
 
@@ -3496,6 +3695,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     required List<MerchantTopProduct> topProducts,
     required String publicUrl,
     required String displayUrl,
+    required MerchantSalesTotals salesTotals,
+    required String currencyFilter,
+    required double previousChartAmount,
   }) {
     // Same window as the sales chart so peak hours match what merchants filter.
     final salesWindow = _resolveSalesRangeWindow(metricsOrders);
@@ -3514,12 +3716,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         return const SizedBox.shrink();
       case MerchantNavDestination.orders:
         return MerchantOrdersWorkspace(
+          key: ValueKey(
+            'orders-seed-${_ordersSeedFilter?.revision ?? 0}',
+          ),
           orders: validOrders,
           purgedOrderIds: _purgedOrderIds,
           errorSubtitle: ordersSnapshot.hasError
               ? _ordersErrorSubtitle(ordersSnapshot.error)
               : null,
           onRetry: _refreshDashboard,
+          seedFilter: _ordersSeedFilter,
           itemBuilder: (pedido) => _CompactRecentOrderTile(
             pedido: pedido,
             onTap: () => _openOrderDetail(pedido),
@@ -3569,7 +3775,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               ordersLabel: ordersLabel,
               incomeLabel: incomeLabel,
               validOrders: metricsOrders,
-              data: data,
+              salesTotals: salesTotals,
+              currencyFilter: currencyFilter,
+              previousChartAmount: previousChartAmount,
             ),
           ),
           topProducts: topProducts,
@@ -3877,6 +4085,7 @@ class _CompactKpiCardData {
     required this.color,
     required this.deltaPercent,
     this.hasData = true,
+    this.deltaLabel = 'vs ayer',
   });
 
   final String title;
@@ -3886,6 +4095,7 @@ class _CompactKpiCardData {
   final double deltaPercent;
   final _KpiTrendSemantics trendSemantics = _KpiTrendSemantics.growthIsPositive;
   final bool hasData;
+  final String deltaLabel;
 }
 
 enum _KpiTrendSemantics {
@@ -3985,7 +4195,7 @@ class _CompactKpiCard extends StatelessWidget {
     final trendColor = _trendColor(isUp);
     final trendValue = data.deltaPercent.abs().round();
     final label = Text(
-      '$trendValue% vs ayer',
+      '$trendValue% ${data.deltaLabel}',
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: GoogleFonts.poppins(
@@ -4042,16 +4252,23 @@ class _CompactKpiCard extends StatelessWidget {
                 child: Icon(data.icon, color: data.color, size: 16),
               ),
               const Spacer(),
-              Text(
-                data.value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.poppins(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFF11183C),
-                  height: 1,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+              SizedBox(
+                width: double.infinity,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    data.value,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF11183C),
+                      height: 1,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 2),
@@ -4122,21 +4339,27 @@ class _CompactKpiCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  child: Text(
-                    data.value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.poppins(
-                      fontSize: 30,
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFF11183C),
-                      height: 1,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      data.value,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: GoogleFonts.poppins(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF11183C),
+                        height: 1,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                _kpiTrend(iconSize: 18, fontSize: 11, compact: true),
+                Flexible(
+                  child: _kpiTrend(iconSize: 18, fontSize: 11, compact: true),
+                ),
               ],
             ),
           ],
@@ -4173,14 +4396,23 @@ class _CompactKpiCard extends StatelessWidget {
             child: Icon(data.icon, color: data.color, size: 18),
           ),
           const Spacer(),
-          Text(
-            data.value,
-            style: GoogleFonts.poppins(
-              fontSize: 34,
-              fontWeight: FontWeight.w800,
-              color: const Color(0xFF11183C),
-              height: 1,
-              fontFeatures: const [FontFeature.tabularFigures()],
+          SizedBox(
+            width: double.infinity,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                data.value,
+                maxLines: 1,
+                softWrap: false,
+                style: GoogleFonts.poppins(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF11183C),
+                  height: 1,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 1),
@@ -4596,109 +4828,6 @@ class _BusinessActionTile extends StatelessWidget {
   }
 }
 
-String _formatSalesFullCurrency(double value) {
-  final fixed = value.toStringAsFixed(2);
-  final parts = fixed.split('.');
-  final integer = parts.first.replaceAllMapped(
-    RegExp(r'\B(?=(\d{3})+(?!\d))'),
-    (_) => ',',
-  );
-  return '\$$integer.${parts.last}';
-}
-
-String _formatSalesDisplayCurrency(double value) {
-  final absolute = value.abs();
-  if (absolute >= 1000000) {
-    return '\$${(value / 1000000).toStringAsFixed(1)}M';
-  }
-  if (absolute >= 1000) {
-    return _formatSalesFullCurrency(value);
-  }
-  return _formatSalesFullCurrency(value);
-}
-
-class _ResponsiveSalesTotal extends StatelessWidget {
-  const _ResponsiveSalesTotal({
-    required this.value,
-    required this.color,
-    required this.compact,
-  });
-
-  final double? value;
-  final Color color;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final amount = value;
-    if (amount == null) {
-      return Text(
-        '—',
-        style: GoogleFonts.poppins(
-          fontSize: compact ? 32 : 38,
-          height: 0.98,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      );
-    }
-
-    final fullValue = _formatSalesFullCurrency(amount);
-    final displayValue = _formatSalesDisplayCurrency(amount);
-    final amountOnly = displayValue.substring(1);
-    final baseSize = compact ? 32.0 : 38.0;
-    final scale = amountOnly.length >= 10
-        ? 0.72
-        : amountOnly.length >= 8
-        ? 0.84
-        : amountOnly.length >= 6
-        ? 0.94
-        : 1.0;
-
-    return Tooltip(
-      message: fullValue,
-      waitDuration: const Duration(milliseconds: 350),
-      child: SizedBox(
-        height: compact ? 42 : 48,
-        width: double.infinity,
-        child: FittedBox(
-          alignment: Alignment.centerLeft,
-          fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                '\$',
-                style: GoogleFonts.poppins(
-                  fontSize: baseSize * 0.68 * scale,
-                  height: 1,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                ),
-              ),
-              const SizedBox(width: 2),
-              Text(
-                amountOnly,
-                maxLines: 1,
-                softWrap: false,
-                style: GoogleFonts.poppins(
-                  fontSize: baseSize * scale,
-                  height: 0.98,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _CompactSalesSummaryCard extends StatelessWidget {
   const _CompactSalesSummaryCard({
     required this.salesToday,
@@ -4707,18 +4836,21 @@ class _CompactSalesSummaryCard extends StatelessWidget {
     required this.darkText,
     required this.mutedText,
     required this.purple,
-    this.salesHistory,
-    this.salesLabels,
-    this.salesTooltipLabels,
+    required this.salesSeries,
+    required this.currencyFilter,
+    required this.onCurrencyFilterChanged,
+    required this.currencyColorFor,
     required this.selectedRange,
     required this.rangeLabel,
     required this.ordersLabel,
     required this.incomeLabel,
     required this.onRangeSelected,
+    required this.onOpenOrdersForPoint,
     this.title = 'Resumen de ventas',
     this.deltaPercent = 0,
     this.showMiniMetrics = true,
     this.emptyMessage,
+    this.salesTotals,
   });
 
   final double salesToday;
@@ -4727,34 +4859,39 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   final Color darkText;
   final Color mutedText;
   final Color purple;
-  final List<double>? salesHistory;
-  final List<String>? salesLabels;
-  final List<String>? salesTooltipLabels;
+  final _SalesHistorySeries salesSeries;
+  final String currencyFilter;
+  final ValueChanged<String> onCurrencyFilterChanged;
+  final Color Function(String currency) currencyColorFor;
   final _SalesRange selectedRange;
   final String rangeLabel;
   final String ordersLabel;
   final String incomeLabel;
   final ValueChanged<_SalesRange> onRangeSelected;
+  final ValueChanged<_SalesHistoryPoint> onOpenOrdersForPoint;
   final String title;
   final double deltaPercent;
   final bool showMiniMetrics;
   final String? emptyMessage;
+  final MerchantSalesTotals? salesTotals;
 
   @override
   Widget build(BuildContext context) {
     final hasSalesData = salesToday > 0 || ordersToday > 0;
-    final chartData = salesHistory == null || salesHistory!.isEmpty
+    final points = salesSeries.points;
+    final labels = points.isEmpty
+        ? const <String>['L', 'M', 'X', 'J', 'V', 'S', 'D']
+        : salesSeries.labels;
+    final tooltipLabels = points.isEmpty ? labels : salesSeries.tooltipLabels;
+    final primarySeries = points.isEmpty
         ? const <double>[0, 0, 0, 0, 0, 0, 0]
-        : salesHistory!;
-    final labels =
-        salesLabels ?? const <String>['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-    final tooltipLabels = salesTooltipLabels ?? labels;
+        : salesSeries.valuesForFilter(currencyFilter);
 
     var highlightIndex = 0;
     var peak = -1.0;
-    for (var i = 0; i < chartData.length; i++) {
-      if (chartData[i] >= peak) {
-        peak = chartData[i];
+    for (var i = 0; i < primarySeries.length; i++) {
+      if (primarySeries[i] >= peak) {
+        peak = primarySeries[i];
         highlightIndex = i;
       }
     }
@@ -4819,11 +4956,46 @@ class _CompactSalesSummaryCard extends StatelessWidget {
           ),
         );
 
+        final totals = salesTotals;
+        final preferred = salesSeries.preferredCurrency;
+        final filterIsUsd = currencyFilter == 'usd_estimate';
+        final filterIsAll = currencyFilter == 'all';
+        final filterIsPreferred = currencyFilter == preferred;
+        final heroAmount = !hasSalesData
+            ? null
+            : filterIsUsd
+            ? (totals?.usdEstimate ?? 0)
+            : (filterIsAll || filterIsPreferred)
+            ? (totals?.chartAmount ?? salesToday)
+            : (totals?.buckets
+                    .where((b) => b.currency == currencyFilter)
+                    .fold<double>(0, (sum, b) => sum + b.amount) ??
+                0);
+        final heroCurrency = filterIsUsd
+            ? 'USD'
+            : (filterIsAll || filterIsPreferred)
+            ? (totals?.chartCurrency ?? preferred)
+            : currencyFilter;
+        final heroIsConverted =
+            (filterIsAll || filterIsPreferred) &&
+            (totals?.buckets.length ?? 0) > 1 &&
+            heroCurrency == preferred;
+        final primaryLabel = heroAmount == null || heroAmount <= 0
+            ? null
+            : formatMerchantMoneyCompact(heroAmount, heroCurrency);
+        final primaryExact = heroAmount == null || heroAmount <= 0
+            ? null
+            : formatMerchantMoneyExact(heroAmount, heroCurrency);
+
         final salesTotalBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Ventas totales',
+              filterIsUsd
+                  ? 'Total ≈ USD'
+                  : heroIsConverted
+                  ? 'Total ≈ $preferred'
+                  : 'Ventas totales',
               style: GoogleFonts.poppins(
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
@@ -4831,33 +5003,72 @@ class _CompactSalesSummaryCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            _ResponsiveSalesTotal(
-              value: hasSalesData ? salesToday : null,
-              color: darkText,
-              compact: isMobile,
-            ),
-            if (hasSalesData) ...[
-              const SizedBox(height: 6),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF4F3FB),
-                  borderRadius: BorderRadius.circular(999),
+            if (primaryLabel == null)
+              Text(
+                '—',
+                style: GoogleFonts.poppins(
+                  fontSize: isMobile ? 28 : 32,
+                  height: 0.98,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
-                  ),
-                  child: Text(
-                    'Valor exacto: ${_formatSalesFullCurrency(salesToday)}',
-                    style: GoogleFonts.poppins(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      color: mutedText,
+              )
+            else
+              Tooltip(
+                message: primaryExact ?? primaryLabel,
+                waitDuration: const Duration(milliseconds: 280),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      primaryLabel,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: GoogleFonts.poppins(
+                        fontSize: isMobile ? 26 : 30,
+                        height: 1.05,
+                        fontWeight: FontWeight.w700,
+                        color: darkText,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ),
                 ),
               ),
+            if (hasSalesData &&
+                totals != null &&
+                totals.buckets.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              for (final bucket in totals.buckets.take(4))
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    '${formatMerchantMoneyExact(bucket.amount, bucket.currency)} · ${bucket.count} pedido${bucket.count == 1 ? '' : 's'}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: mutedText,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+              if (totals.usdEstimate != null &&
+                  !totals.chartIsUsd &&
+                  totals.usdCoveredOrders > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    '≈ ${formatMerchantMoneyExact(totals.usdEstimate!, 'USD')}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: purple,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
             ],
             const SizedBox(height: 8),
             if (hasSalesData)
@@ -4886,14 +5097,18 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                         size: 14,
                       ),
                       const SizedBox(width: 3),
-                      Text(
-                        '${deltaPercent.abs().round()}% vs período anterior',
-                        style: GoogleFonts.poppins(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: deltaPercent >= 0
-                              ? const Color(0xFF16A34A)
-                              : const Color(0xFFEF4444),
+                      Flexible(
+                        child: Text(
+                          '${deltaPercent.abs().round()}% vs período anterior',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: deltaPercent >= 0
+                                ? const Color(0xFF16A34A)
+                                : const Color(0xFFEF4444),
+                          ),
                         ),
                       ),
                     ],
@@ -4912,22 +5127,96 @@ class _CompactSalesSummaryCard extends StatelessWidget {
           ],
         );
 
-        final chartWidget = SizedBox(
-          height: isMobile ? 112 : 108,
-          width: double.infinity,
-          child: _SalesSummaryChart(
-            salesHistory: chartData,
-            labels: labels,
-            tooltipLabels: tooltipLabels,
-            color: purple,
-            highlightIndex: highlightIndex,
+        final currencySelector = SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _ChartFilterChip(
+                label: 'Todas',
+                selected: currencyFilter == 'all',
+                color: purple,
+                onTap: () => onCurrencyFilterChanged('all'),
+              ),
+              const SizedBox(width: 6),
+              _ChartFilterChip(
+                label: preferred,
+                selected: currencyFilter == preferred,
+                color: currencyColorFor(preferred),
+                onTap: () => onCurrencyFilterChanged(preferred),
+              ),
+              for (final code in salesSeries.currencies) ...[
+                if (code == preferred) const SizedBox.shrink() else ...[
+                  const SizedBox(width: 6),
+                  _ChartFilterChip(
+                    label: code,
+                    selected: currencyFilter == code,
+                    color: currencyColorFor(code),
+                    onTap: () => onCurrencyFilterChanged(code),
+                  ),
+                ],
+              ],
+              const SizedBox(width: 6),
+              _ChartFilterChip(
+                label: '≈ USD',
+                selected: currencyFilter == 'usd_estimate',
+                color: const Color(0xFF7C3AED),
+                onTap: () => onCurrencyFilterChanged('usd_estimate'),
+              ),
+            ],
           ),
+        );
+
+        final legend = Wrap(
+          spacing: 10,
+          runSpacing: 6,
+          children: [
+            if (currencyFilter == 'all' || currencyFilter == preferred)
+              _ChartLegendItem(
+                color: currencyColorFor(preferred),
+                label: '≈ $preferred',
+                dashed: true,
+              ),
+            if (currencyFilter == 'all')
+              for (final code in salesSeries.currencies)
+                _ChartLegendItem(
+                  color: currencyColorFor(code),
+                  label: code,
+                )
+            else if (currencyFilter == 'usd_estimate')
+              _ChartLegendItem(
+                color: const Color(0xFF7C3AED),
+                label: '≈ USD',
+                dashed: true,
+              )
+            else if (currencyFilter != preferred)
+              _ChartLegendItem(
+                color: currencyColorFor(currencyFilter),
+                label: currencyFilter,
+              ),
+          ],
+        );
+
+        final chartWidget = _SalesSummaryChart(
+          series: salesSeries,
+          currencyFilter: currencyFilter,
+          labels: labels,
+          tooltipLabels: tooltipLabels,
+          highlightIndex: highlightIndex,
+          purple: purple,
+          currencyColorFor: currencyColorFor,
+          isMobile: isMobile,
+          onOpenOrders: onOpenOrdersForPoint,
         );
 
         final ticketCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: 'Ticket promedio',
-            value: hasSalesData ? '\$${averageTicket.toStringAsFixed(2)}' : '—',
+            value: hasSalesData
+                ? formatMerchantMoneyCompact(
+                    averageTicket,
+                    heroCurrency,
+                  )
+                : '—',
             color: const Color(0xFF8B5CF6),
             icon: Icons.receipt_rounded,
           ),
@@ -4943,7 +5232,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
         final incomeCard = _SalesMiniCard(
           data: _SalesMiniData(
             label: incomeLabel,
-            value: hasSalesData ? '\$${salesToday.toStringAsFixed(2)}' : '—',
+            value: hasSalesData && primaryLabel != null ? primaryLabel : '—',
             color: const Color(0xFF22C55E),
             icon: Icons.attach_money_rounded,
           ),
@@ -5038,6 +5327,12 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                   rangeSelector,
                 ],
               ),
+              const SizedBox(height: 10),
+              currencySelector,
+              if (hasSalesData) ...[
+                const SizedBox(height: 8),
+                legend,
+              ],
               const SizedBox(height: 12),
               if (isMobile) ...[
                 salesTotalBlock,
@@ -5047,7 +5342,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 166, child: salesTotalBlock),
+                    SizedBox(width: 200, child: salesTotalBlock),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Stack(
@@ -5099,9 +5394,13 @@ class _CompactSalesSummaryCard extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          hasSalesData
+                          !hasSalesData
+                              ? 'Sin datos todavía. Tus ventas aparecerán aquí cuando recibas pedidos reales.'
+                              : deltaPercent > 0
                               ? 'Buen trabajo. Tus ventas están creciendo en este período.'
-                              : 'Sin datos todavía. Tus ventas aparecerán aquí cuando recibas pedidos reales.',
+                              : deltaPercent < 0
+                              ? 'Este período va por debajo del anterior. Revisa pedidos y promociones.'
+                              : 'Tus ventas se mantienen estables frente al período anterior.',
                           style: GoogleFonts.poppins(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -5122,20 +5421,106 @@ class _CompactSalesSummaryCard extends StatelessWidget {
   }
 }
 
-class _SalesSummaryChart extends StatefulWidget {
-  const _SalesSummaryChart({
-    required this.salesHistory,
-    required this.labels,
-    required this.tooltipLabels,
+class _ChartFilterChip extends StatelessWidget {
+  const _ChartFilterChip({
+    required this.label,
+    required this.selected,
     required this.color,
-    required this.highlightIndex,
+    required this.onTap,
   });
 
-  final List<double> salesHistory;
+  final String label;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.14) : Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? color.withValues(alpha: 0.55) : const Color(0xFFE9EAF4),
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: selected ? color : const Color(0xFF6B6F92),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChartLegendItem extends StatelessWidget {
+  const _ChartLegendItem({
+    required this.color,
+    required this.label,
+    this.dashed = false,
+  });
+
+  final Color color;
+  final String label;
+  final bool dashed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: dashed ? 16 : 8,
+          height: 3,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w600,
+            color: const Color(0xFF6B6F92),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SalesSummaryChart extends StatefulWidget {
+  const _SalesSummaryChart({
+    required this.series,
+    required this.currencyFilter,
+    required this.labels,
+    required this.tooltipLabels,
+    required this.highlightIndex,
+    required this.purple,
+    required this.currencyColorFor,
+    required this.isMobile,
+    required this.onOpenOrders,
+  });
+
+  final _SalesHistorySeries series;
+  final String currencyFilter;
   final List<String> labels;
   final List<String> tooltipLabels;
-  final Color color;
   final int highlightIndex;
+  final Color purple;
+  final Color Function(String currency) currencyColorFor;
+  final bool isMobile;
+  final ValueChanged<_SalesHistoryPoint> onOpenOrders;
 
   @override
   State<_SalesSummaryChart> createState() => _SalesSummaryChartState();
@@ -5143,97 +5528,410 @@ class _SalesSummaryChart extends StatefulWidget {
 
 class _SalesSummaryChartState extends State<_SalesSummaryChart> {
   late int _selectedIndex;
+  bool _inspectorOpen = false;
+  int _viewStart = 0;
+  int _viewEnd = 0;
 
-  void _updateSelectedIndexFromDx(double dx, double width) {
-    if (widget.salesHistory.length <= 1 || width <= 0) {
-      return;
-    }
+  List<_SalesHistoryPoint> get _allPoints => widget.series.points;
 
-    final clampedDx = dx.clamp(0.0, width);
-    final ratio = clampedDx / width;
-    final nextIndex = (ratio * (widget.salesHistory.length - 1)).round().clamp(
-      0,
-      widget.salesHistory.length - 1,
-    );
+  List<_SalesHistoryPoint> get _visiblePoints {
+    if (_allPoints.isEmpty) return const <_SalesHistoryPoint>[];
+    final start = _viewStart.clamp(0, _allPoints.length - 1);
+    final end = _viewEnd.clamp(start, _allPoints.length - 1);
+    return _allPoints.sublist(start, end + 1);
+  }
 
-    if (nextIndex == _selectedIndex) {
-      return;
-    }
+  List<double> get _activeValues {
+    final filter = widget.currencyFilter;
+    return _visiblePoints
+        .map((point) {
+          if (filter == 'usd_estimate') return point.usdEstimate;
+          if (filter == 'all' || filter == widget.series.preferredCurrency) {
+            return point.amountIn(
+              widget.series.preferredCurrency,
+              unitsPerUsd: widget.series.unitsPerUsd,
+            );
+          }
+          return point.byCurrency[filter] ?? 0.0;
+        })
+        .toList(growable: false);
+  }
 
+  bool get _canZoomIn => (_viewEnd - _viewStart) > 2;
+  bool get _canZoomOut =>
+      _viewStart > 0 || _viewEnd < (_allPoints.length - 1).clamp(0, 9999);
+  bool get _canPanLeft => _viewStart > 0;
+  bool get _canPanRight => _viewEnd < _allPoints.length - 1;
+
+  void _resetView() {
     setState(() {
-      _selectedIndex = nextIndex;
+      _viewStart = 0;
+      _viewEnd = (_allPoints.length - 1).clamp(0, 9999);
     });
+  }
+
+  void _zoom({required bool zoomIn}) {
+    final span = _viewEnd - _viewStart;
+    if (zoomIn) {
+      if (span <= 2) return;
+      final nextSpan = (span * 0.6).ceil().clamp(2, span - 1);
+      final center = ((_viewStart + _viewEnd) / 2).round();
+      var start = (center - nextSpan ~/ 2).clamp(0, _allPoints.length - 1);
+      var end = (start + nextSpan).clamp(0, _allPoints.length - 1);
+      start = (end - nextSpan).clamp(0, end);
+      setState(() {
+        _viewStart = start;
+        _viewEnd = end;
+        _inspectorOpen = false;
+      });
+      return;
+    }
+    final nextSpan = (span * 1.7).ceil().clamp(span + 1, _allPoints.length - 1);
+    final center = ((_viewStart + _viewEnd) / 2).round();
+    var start = (center - nextSpan ~/ 2).clamp(0, _allPoints.length - 1);
+    var end = (start + nextSpan).clamp(0, _allPoints.length - 1);
+    start = (end - nextSpan).clamp(0, end);
+    setState(() {
+      _viewStart = start;
+      _viewEnd = end;
+      _inspectorOpen = false;
+    });
+  }
+
+  void _pan(int direction) {
+    final span = _viewEnd - _viewStart;
+    final step = span < 4 ? 1 : span ~/ 4;
+    var start = _viewStart + direction * step;
+    var end = _viewEnd + direction * step;
+    if (start < 0) {
+      end -= start;
+      start = 0;
+    }
+    if (end > _allPoints.length - 1) {
+      final overflow = end - (_allPoints.length - 1);
+      start = (start - overflow).clamp(0, _allPoints.length - 1);
+      end = _allPoints.length - 1;
+    }
+    setState(() {
+      _viewStart = start;
+      _viewEnd = end;
+      _inspectorOpen = false;
+    });
+  }
+
+  void _selectFromDx(double dx, double width) {
+    final values = _activeValues;
+    if (values.isEmpty || width <= 0) return;
+    final clampedDx = dx.clamp(0.0, width);
+    final ratio = values.length <= 1 ? 0.0 : clampedDx / width;
+    final localIndex = values.length <= 1
+        ? 0
+        : (ratio * (values.length - 1)).round().clamp(0, values.length - 1);
+    setState(() {
+      _selectedIndex = _viewStart + localIndex;
+      _inspectorOpen = true;
+    });
+  }
+
+  void _dismissInspector() {
+    if (!_inspectorOpen) return;
+    setState(() => _inspectorOpen = false);
   }
 
   @override
   void initState() {
     super.initState();
     _selectedIndex = widget.highlightIndex;
+    _viewStart = 0;
+    _viewEnd = (widget.series.points.length - 1).clamp(0, 9999);
   }
 
   @override
   void didUpdateWidget(covariant _SalesSummaryChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.highlightIndex != oldWidget.highlightIndex ||
-        widget.salesHistory.length != oldWidget.salesHistory.length ||
-        widget.labels.length != oldWidget.labels.length ||
-        widget.tooltipLabels.length != oldWidget.tooltipLabels.length) {
+    if (widget.series.points.length != oldWidget.series.points.length ||
+        widget.currencyFilter != oldWidget.currencyFilter) {
+      _selectedIndex = widget.highlightIndex;
+      _inspectorOpen = false;
+      _viewStart = 0;
+      _viewEnd = (widget.series.points.length - 1).clamp(0, 9999);
+    } else if (widget.highlightIndex != oldWidget.highlightIndex) {
       _selectedIndex = widget.highlightIndex;
     }
   }
 
+  List<double> _normalize(List<double> values) {
+    final maxValue = values.fold<double>(0, (m, v) => v > m ? v : m);
+    if (maxValue <= 0) return List<double>.filled(values.length, 0);
+    return values.map((v) => v / maxValue).toList(growable: false);
+  }
+
+  List<({String label, String value})> _inspectorRows(_SalesHistoryPoint point) {
+    final preferred = widget.series.preferredCurrency;
+    final rows = <({String label, String value})>[];
+    final codes = widget.series.currencies.isNotEmpty
+        ? widget.series.currencies
+        : (point.byCurrency.keys.toList()..sort());
+
+    for (final code in codes) {
+      final value = point.byCurrency[code] ?? 0;
+      if (value <= 0) continue;
+      rows.add((
+        label: code,
+        value: formatMerchantMoneyExact(value, code),
+      ));
+    }
+
+    final preferredTotal = point.amountIn(
+      preferred,
+      unitsPerUsd: widget.series.unitsPerUsd,
+    );
+    if (preferredTotal > 0 &&
+        (rows.length > 1 ||
+            (rows.length == 1 && rows.first.label != preferred))) {
+      rows.add((
+        label: '≈ $preferred',
+        value: formatMerchantMoneyExact(preferredTotal, preferred),
+      ));
+    }
+
+    if (point.usdEstimate > 0 && widget.currencyFilter == 'usd_estimate') {
+      rows.add((
+        label: '≈ USD',
+        value: formatMerchantMoneyExact(point.usdEstimate, 'USD'),
+      ));
+    }
+
+    return rows;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final maxY = widget.salesHistory.reduce((a, b) => a > b ? a : b);
-    final safeHighlight = _selectedIndex.clamp(
-      0,
-      widget.salesHistory.length - 1,
-    );
-    final selectedValue = widget.salesHistory[safeHighlight];
-    final selectedLabel = widget.tooltipLabels[safeHighlight];
+    final preferred = widget.series.preferredCurrency;
+    final visible = _visiblePoints;
+    final values = _activeValues.isEmpty
+        ? const <double>[0, 0, 0, 0, 0, 0, 0]
+        : _activeValues;
+    final pointCount = values.length;
+    final localHighlight = (_selectedIndex - _viewStart).clamp(0, pointCount - 1);
+    final selectedPoint = (!_inspectorOpen || _allPoints.isEmpty)
+        ? null
+        : _allPoints[_selectedIndex.clamp(0, _allPoints.length - 1)];
+    final selectedLabel = selectedPoint?.tooltipLabel ?? '';
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isHourlyAxis = widget.labels.every((label) => label.length <= 2);
-        final maxVisibleLabels = isHourlyAxis
-            ? (constraints.maxWidth < 280 ? 6 : 8)
-            : (constraints.maxWidth < 280 ? 4 : 5);
-        final labelStep = widget.labels.length <= maxVisibleLabels
-            ? 1
-            : ((widget.labels.length - 1) / (maxVisibleLabels - 1)).ceil();
-        final xRatio = widget.salesHistory.length <= 1
-            ? 0.5
-            : safeHighlight / (widget.salesHistory.length - 1);
-        final bubbleLeft = (constraints.maxWidth * xRatio) - 38;
+    final showAll = widget.currencyFilter == 'all';
+    final showUsdOnly = widget.currencyFilter == 'usd_estimate';
+    final showPreferred = widget.currencyFilter == preferred || showAll;
+    final lineBars = <LineChartBarData>[];
+    final visibleLabels = visible.map((p) => p.label).toList(growable: false);
 
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (details) {
-            _updateSelectedIndexFromDx(
-              details.localPosition.dx,
-              constraints.maxWidth,
-            );
-          },
-          onHorizontalDragStart: (details) {
-            _updateSelectedIndexFromDx(
-              details.localPosition.dx,
-              constraints.maxWidth,
-            );
-          },
-          onHorizontalDragUpdate: (details) {
-            _updateSelectedIndexFromDx(
-              details.localPosition.dx,
-              constraints.maxWidth,
-            );
-          },
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IgnorePointer(
+    if (showAll) {
+      for (final code in widget.series.currencies) {
+        final raw = visible
+            .map((p) => p.byCurrency[code] ?? 0.0)
+            .toList(growable: false);
+        final normalized = _normalize(raw);
+        final color = widget.currencyColorFor(code);
+        lineBars.add(
+          LineChartBarData(
+            spots: [
+              for (var i = 0; i < normalized.length; i++)
+                FlSpot(i.toDouble(), normalized[i]),
+            ],
+            isCurved: true,
+            color: color,
+            barWidth: 2.2,
+            isStrokeCapRound: true,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, barData, index) {
+                final isHighlight = _inspectorOpen && index == localHighlight;
+                return FlDotCirclePainter(
+                  radius: isHighlight ? 4.2 : 2.0,
+                  color: color,
+                  strokeWidth: isHighlight ? 2 : 0,
+                  strokeColor: Colors.white,
+                );
+              },
+            ),
+            belowBarData: BarAreaData(show: false),
+          ),
+        );
+      }
+    }
+
+    if (showPreferred || showUsdOnly) {
+      final raw = showUsdOnly
+          ? visible.map((p) => p.usdEstimate).toList(growable: false)
+          : values;
+      final color = showUsdOnly
+          ? const Color(0xFF7C3AED)
+          : widget.currencyColorFor(preferred);
+      final normalized = _normalize(raw);
+      lineBars.add(
+        LineChartBarData(
+          spots: [
+            for (var i = 0; i < normalized.length; i++)
+              FlSpot(i.toDouble(), normalized[i]),
+          ],
+          isCurved: true,
+          color: color,
+          barWidth: 2.4,
+          dashArray: const [6, 4],
+          isStrokeCapRound: true,
+          dotData: FlDotData(
+            show: !showAll,
+            getDotPainter: (spot, percent, barData, index) {
+              final isHighlight = _inspectorOpen && index == localHighlight;
+              return FlDotCirclePainter(
+                radius: isHighlight ? 4.8 : 2.2,
+                color: color,
+                strokeWidth: isHighlight ? 2 : 0,
+                strokeColor: Colors.white,
+              );
+            },
+          ),
+          belowBarData: BarAreaData(show: false),
+        ),
+      );
+    } else if (!showAll) {
+      final color = widget.currencyColorFor(widget.currencyFilter);
+      final maxY = values.fold<double>(0, (m, v) => v > m ? v : m);
+      final scale = maxY <= 0 ? 1.0 : maxY;
+      lineBars.add(
+        LineChartBarData(
+          spots: [
+            for (var i = 0; i < values.length; i++)
+              FlSpot(i.toDouble(), values[i] / scale),
+          ],
+          isCurved: true,
+          color: color,
+          barWidth: 2.4,
+          isStrokeCapRound: true,
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (spot, percent, barData, index) {
+              final isHighlight = _inspectorOpen && index == localHighlight;
+              return FlDotCirclePainter(
+                radius: isHighlight ? 4.8 : 2.2,
+                color: color,
+                strokeWidth: isHighlight ? 2 : 0,
+                strokeColor: Colors.white,
+              );
+            },
+          ),
+          belowBarData: BarAreaData(show: false),
+        ),
+      );
+    }
+
+    final inspectorRows =
+        selectedPoint == null ? const <({String label, String value})>[] : _inspectorRows(selectedPoint);
+
+    Widget zoomBtn({
+      required IconData icon,
+      required VoidCallback? onPressed,
+      required String tooltip,
+    }) {
+      return IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        icon: Icon(icon, size: 18),
+        color: onPressed == null
+            ? const Color(0xFFC4C7D8)
+            : const Color(0xFF4B5563),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Text(
+              _canZoomOut || _canZoomIn
+                  ? 'Zoom ${_viewStart + 1}–${_viewEnd + 1} / ${_allPoints.length}'
+                  : 'Vista completa',
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF9CA3AF),
+              ),
+            ),
+            const Spacer(),
+            zoomBtn(
+              icon: Icons.chevron_left_rounded,
+              onPressed: _canPanLeft ? () => _pan(-1) : null,
+              tooltip: 'Desplazar',
+            ),
+            zoomBtn(
+              icon: Icons.remove_rounded,
+              onPressed: _canZoomOut ? () => _zoom(zoomIn: false) : null,
+              tooltip: 'Alejar',
+            ),
+            zoomBtn(
+              icon: Icons.add_rounded,
+              onPressed: _canZoomIn ? () => _zoom(zoomIn: true) : null,
+              tooltip: 'Acercar',
+            ),
+            zoomBtn(
+              icon: Icons.chevron_right_rounded,
+              onPressed: _canPanRight ? () => _pan(1) : null,
+              tooltip: 'Desplazar',
+            ),
+            zoomBtn(
+              icon: Icons.refresh_rounded,
+              onPressed: (_viewStart != 0 ||
+                      _viewEnd != (_allPoints.length - 1).clamp(0, 9999))
+                  ? _resetView
+                  : null,
+              tooltip: 'Reset',
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          height: widget.isMobile ? 148 : 156,
+          width: double.infinity,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isHourlyAxis =
+                  visibleLabels.every((label) => label.length <= 2);
+              final maxVisibleLabels = isHourlyAxis
+                  ? (constraints.maxWidth < 280 ? 6 : 8)
+                  : (constraints.maxWidth < 280 ? 4 : 5);
+              final labelStep = visibleLabels.length <= maxVisibleLabels
+                  ? 1
+                  : ((visibleLabels.length - 1) / (maxVisibleLabels - 1))
+                        .ceil();
+
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (details) {
+                  _selectFromDx(
+                    details.localPosition.dx,
+                    constraints.maxWidth,
+                  );
+                },
+                onHorizontalDragStart: (details) {
+                  _selectFromDx(
+                    details.localPosition.dx,
+                    constraints.maxWidth,
+                  );
+                },
+                onHorizontalDragUpdate: (details) {
+                  _selectFromDx(
+                    details.localPosition.dx,
+                    constraints.maxWidth,
+                  );
+                },
                 child: LineChart(
                   LineChartData(
                     lineTouchData: const LineTouchData(enabled: false),
-                    gridData: FlGridData(show: false),
+                    gridData: const FlGridData(show: false),
                     titlesData: FlTitlesData(
                       leftTitles: const AxisTitles(
                         sideTitles: SideTitles(showTitles: false),
@@ -5251,24 +5949,19 @@ class _SalesSummaryChartState extends State<_SalesSummaryChart> {
                           interval: 1,
                           getTitlesWidget: (value, meta) {
                             final index = value.toInt();
-                            if (index < 0 || index >= widget.labels.length) {
+                            if (index < 0 || index >= visibleLabels.length) {
                               return const SizedBox.shrink();
                             }
-
-                            final isBoundary =
-                                index == 0 || index == widget.labels.length - 1;
+                            final isBoundary = index == 0 ||
+                                index == visibleLabels.length - 1;
                             final shouldShow =
                                 isBoundary || index % labelStep == 0;
-                            if (!shouldShow) {
-                              return const SizedBox.shrink();
-                            }
-
-                            final text = widget.labels[index];
+                            if (!shouldShow) return const SizedBox.shrink();
                             return SideTitleWidget(
                               meta: meta,
                               space: 6,
                               child: Text(
-                                text,
+                                visibleLabels[index],
                                 style: GoogleFonts.poppins(
                                   fontSize: isHourlyAxis ? 10 : 9,
                                   fontWeight: FontWeight.w500,
@@ -5282,92 +5975,146 @@ class _SalesSummaryChartState extends State<_SalesSummaryChart> {
                     ),
                     borderData: FlBorderData(show: false),
                     minX: 0,
-                    maxX: (widget.salesHistory.length - 1).toDouble(),
+                    maxX: (pointCount - 1).toDouble().clamp(0, double.infinity),
                     minY: 0,
-                    maxY: maxY <= 0 ? 1 : maxY * 1.28,
+                    maxY: 1.15,
                     extraLinesData: ExtraLinesData(
                       verticalLines: [
-                        VerticalLine(
-                          x: safeHighlight.toDouble(),
-                          color: widget.color.withValues(alpha: 0.28),
-                          strokeWidth: 1,
-                          dashArray: const [4, 4],
-                        ),
+                        if (_inspectorOpen)
+                          VerticalLine(
+                            x: localHighlight.toDouble(),
+                            color: widget.purple.withValues(alpha: 0.28),
+                            strokeWidth: 1,
+                            dashArray: const [4, 4],
+                          ),
                       ],
                     ),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: [
-                          for (int i = 0; i < widget.salesHistory.length; i++)
-                            FlSpot(i.toDouble(), widget.salesHistory[i]),
-                        ],
-                        isCurved: true,
-                        color: widget.color,
-                        barWidth: 2.2,
-                        isStrokeCapRound: true,
-                        dotData: FlDotData(
-                          show: true,
-                          getDotPainter: (spot, percent, barData, index) {
-                            final isHighlight = index == safeHighlight;
-                            return FlDotCirclePainter(
-                              radius: isHighlight ? 4.8 : 2.4,
-                              color: widget.color,
-                              strokeWidth: isHighlight ? 2 : 0,
-                              strokeColor: Colors.white,
-                            );
-                          },
-                        ),
-                        belowBarData: BarAreaData(show: false),
-                      ),
-                    ],
+                    lineBarsData: lineBars,
                   ),
                   duration: const Duration(milliseconds: 120),
                 ),
-              ),
-              Positioned(
-                left: bubbleLeft.clamp(0, constraints.maxWidth - 88),
-                top: -8,
-                child: IgnorePointer(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF312E81),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          selectedLabel,
-                          style: GoogleFonts.poppins(
-                            fontSize: 8,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white.withValues(alpha: 0.86),
-                            height: 1,
-                          ),
+              );
+            },
+          ),
+        ),
+        if (selectedPoint != null) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F7FC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE8EAF2)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        selectedLabel,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF11183C),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '\$${selectedValue.toStringAsFixed(2)}',
-                          style: GoogleFonts.poppins(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            height: 1,
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
+                      ),
+                      onPressed: _dismissInspector,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      color: const Color(0xFF6B6F92),
+                      tooltip: 'Cerrar',
+                    ),
+                  ],
+                ),
+                Text(
+                  '${selectedPoint.orderCount} pedido${selectedPoint.orderCount == 1 ? '' : 's'}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: const Color(0xFF6B6F92),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (inspectorRows.isEmpty)
+                  Text(
+                    'Sin ventas',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF6B6F92),
+                    ),
+                  )
+                else
+                  for (final row in inspectorRows)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 72,
+                            child: Text(
+                              row.label,
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: row.label.startsWith('≈')
+                                    ? widget.purple
+                                    : widget.currencyColorFor(
+                                        row.label.replaceFirst('≈ ', ''),
+                                      ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                          Expanded(
+                            child: Text(
+                              row.value,
+                              style: GoogleFonts.poppins(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF11183C),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => widget.onOpenOrders(selectedPoint),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF6D28D9),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Ver pedidos',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        );
-      },
+        ],
+      ],
     );
   }
 }
@@ -5424,18 +6171,21 @@ class _SalesMiniCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              data.value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.poppins(
-                fontSize: 25,
-                height: 0.95,
-                color: const Color(0xFF11183C),
-                fontWeight: FontWeight.w700,
+          SizedBox(
+            width: double.infinity,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                data.value,
+                maxLines: 1,
+                softWrap: false,
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  height: 0.95,
+                  color: const Color(0xFF11183C),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
@@ -5898,8 +6648,8 @@ class _CompactBusinessInfoCard extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             businessOnline
-                                ? 'Negocio en línea y visible para tus clientes'
-                                : 'Negocio pausado temporalmente',
+                                ? 'Mostrar al público'
+                                : 'Ocultar al público',
                             style: GoogleFonts.poppins(
                               fontSize: 12.4,
                               fontWeight: FontWeight.w700,
@@ -6156,6 +6906,33 @@ extension _SalesRangeUi on _SalesRange {
     }
   }
 
+  String get kpiShortLabel {
+    switch (this) {
+      case _SalesRange.today:
+        return 'hoy';
+      case _SalesRange.yesterday:
+        return 'ayer';
+      case _SalesRange.lastWeek:
+        return 'semana';
+      case _SalesRange.lastFortnight:
+        return 'quincena';
+      case _SalesRange.thisMonth:
+        return 'mes';
+      case _SalesRange.lastMonth:
+        return '30d';
+      case _SalesRange.last3Months:
+        return '3m';
+      case _SalesRange.last6Months:
+        return '6m';
+      case _SalesRange.lastYear:
+        return 'año';
+      case _SalesRange.allTime:
+        return 'total';
+      case _SalesRange.custom:
+        return 'rango';
+    }
+  }
+
   String get ordersLabel {
     switch (this) {
       case _SalesRange.today:
@@ -6227,16 +7004,76 @@ class _SalesRangeWindow {
   }
 }
 
-class _SalesHistorySeries {
-  const _SalesHistorySeries({
-    required this.values,
-    required this.labels,
-    required this.tooltipLabels,
+class _SalesHistoryPoint {
+  const _SalesHistoryPoint({
+    required this.label,
+    required this.tooltipLabel,
+    required this.orderCount,
+    required this.byCurrency,
+    required this.usdEstimate,
+    required this.startInclusive,
+    required this.endExclusive,
   });
 
-  final List<double> values;
-  final List<String> labels;
-  final List<String> tooltipLabels;
+  final String label;
+  final String tooltipLabel;
+  final int orderCount;
+  final Map<String, double> byCurrency;
+  final double usdEstimate;
+  final DateTime startInclusive;
+  final DateTime endExclusive;
+
+  double amountIn(
+    String currency, {
+    required Map<String, double> unitsPerUsd,
+  }) {
+    return sumAmountsInCurrency(
+      byCurrency: byCurrency,
+      toCurrency: currency,
+      unitsPerUsd: unitsPerUsd,
+      usdEstimate: usdEstimate,
+    );
+  }
+}
+
+class _SalesHistorySeries {
+  const _SalesHistorySeries({
+    required this.points,
+    required this.currencies,
+    required this.preferredCurrency,
+    required this.unitsPerUsd,
+  });
+
+  final List<_SalesHistoryPoint> points;
+  final List<String> currencies;
+  final String preferredCurrency;
+  final Map<String, double> unitsPerUsd;
+
+  List<String> get labels =>
+      points.map((point) => point.label).toList(growable: false);
+
+  List<String> get tooltipLabels =>
+      points.map((point) => point.tooltipLabel).toList(growable: false);
+
+  List<double> valuesForFilter(String filter) {
+    if (filter == 'usd_estimate') {
+      return points.map((point) => point.usdEstimate).toList(growable: false);
+    }
+    if (filter == 'all' || filter == preferredCurrency) {
+      // Default / primary: all checkouts expressed in business currency.
+      return points
+          .map(
+            (point) => point.amountIn(
+              preferredCurrency,
+              unitsPerUsd: unitsPerUsd,
+            ),
+          )
+          .toList(growable: false);
+    }
+    return points
+        .map((point) => point.byCurrency[filter] ?? 0)
+        .toList(growable: false);
+  }
 }
 
 class _DashboardSnapshot {
