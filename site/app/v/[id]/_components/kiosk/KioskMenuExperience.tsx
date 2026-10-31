@@ -2,7 +2,14 @@
 
 import { Caveat, Manrope } from 'next/font/google';
 import { ArrowLeft, ArrowRight, Plus, Search, ShoppingBag, SlidersHorizontal, Star, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import { KioskHome } from './KioskHome';
@@ -32,6 +39,13 @@ const titleFont = Manrope({
   subsets: ['latin'],
   weight: ['700', '800'],
 });
+
+export type KioskMenuShellHandle = {
+  /** Browser/system back: pop products → categories → home. Returns true if handled. */
+  handleBack: () => boolean;
+  /** Synthetic history depth for this shell (0 at session root). */
+  historyDepth: () => number;
+};
 
 type KioskMenuExperienceProps = {
   businessName: string;
@@ -84,61 +98,146 @@ type KioskMenuExperienceProps = {
   themeMode: MenuThemeMode;
   onToggleTheme: () => void;
   stickyOffsetClass?: string;
+  onHistoryDepthChange?: (depth: number) => void;
 };
 
-export function KioskMenuExperience({
-  businessName,
-  logoUrl,
-  ratingAverage,
-  ratingCount,
-  initialLetter,
-  locationLabel,
-  operatingStateLabels = [],
-  socialLinks,
-  tagline,
-  isOpen,
-  openCaption,
-  closedCaption,
-  supportsDelivery,
-  homeConfig = DEFAULT_KIOSK_HOME_CONFIG,
-  paymentGroups = [],
-  fulfillment,
-  catalogMode = false,
-  catalogOnlySession = false,
-  assistedMode = false,
-  onSelectFulfillment,
-  onResetFulfillment,
-  onEnterCatalog,
-  onLeaveCatalog,
-  categories,
-  productsByCategory,
-  searchQuery,
-  onSearchChange,
-  cartCount,
-  cartTotalLabel,
-  onAddProduct,
-  onPay,
-  payCtaLabel = 'Ir a pagar',
-  addedPrompt,
-  onContinueAdding,
-  onPayFromPrompt,
-  voucher,
-  onTrackVoucher,
-  onNewOrder,
-  tickerEntries,
-  currencies,
-  selectedCurrency,
-  onSelectCurrency,
-  themeMode,
-  onToggleTheme,
-  stickyOffsetClass,
-}: KioskMenuExperienceProps) {
+function kioskSessionLocksHome(options: {
+  assistedMode: boolean;
+  catalogOnlySession: boolean;
+  catalogMode: boolean;
+}) {
+  return options.assistedMode || (options.catalogOnlySession && options.catalogMode);
+}
+
+function kioskScreenHistoryDepth(
+  screen: KioskScreen,
+  options: {
+    assistedMode: boolean;
+    catalogOnlySession: boolean;
+    catalogMode: boolean;
+  },
+) {
+  const locksHome = kioskSessionLocksHome(options);
+  if (screen === 'products') return locksHome ? 1 : 2;
+  if (screen === 'categories') return locksHome ? 0 : 1;
+  return 0;
+}
+
+export const KioskMenuExperience = forwardRef<
+  KioskMenuShellHandle,
+  KioskMenuExperienceProps
+>(function KioskMenuExperience(
+  {
+    businessName,
+    logoUrl,
+    ratingAverage,
+    ratingCount,
+    initialLetter,
+    locationLabel,
+    operatingStateLabels = [],
+    socialLinks,
+    tagline,
+    isOpen,
+    openCaption,
+    closedCaption,
+    supportsDelivery,
+    homeConfig = DEFAULT_KIOSK_HOME_CONFIG,
+    paymentGroups = [],
+    fulfillment,
+    catalogMode = false,
+    catalogOnlySession = false,
+    assistedMode = false,
+    onSelectFulfillment,
+    onResetFulfillment,
+    onEnterCatalog,
+    onLeaveCatalog,
+    categories,
+    productsByCategory,
+    searchQuery,
+    onSearchChange,
+    cartCount,
+    cartTotalLabel,
+    onAddProduct,
+    onPay,
+    payCtaLabel = 'Ir a pagar',
+    addedPrompt,
+    onContinueAdding,
+    onPayFromPrompt,
+    voucher,
+    onTrackVoucher,
+    onNewOrder,
+    tickerEntries,
+    currencies,
+    selectedCurrency,
+    onSelectCurrency,
+    themeMode,
+    onToggleTheme,
+    stickyOffsetClass,
+    onHistoryDepthChange,
+  },
+  ref,
+) {
   const browseOnly = !catalogMode && (!fulfillment || !isOpen);
   useLockBodyScroll(Boolean(addedPrompt && !browseOnly));
   const [screen, setScreen] = useState<KioskScreen>(
     assistedMode || fulfillment ? 'categories' : 'home',
   );
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const sessionOpts = {
+    assistedMode,
+    catalogOnlySession,
+    catalogMode,
+  };
+
+  function goBackInShell() {
+    onSearchChange('');
+    if (screen === 'products') {
+      setScreen('categories');
+      setActiveCategoryId(null);
+      return true;
+    }
+    if (screen !== 'categories') {
+      return false;
+    }
+    if (assistedMode) {
+      return false;
+    }
+    if (catalogOnlySession && catalogMode) {
+      return false;
+    }
+    setScreen('home');
+    setActiveCategoryId(null);
+    if (fulfillment) onResetFulfillment();
+    if (catalogMode) onLeaveCatalog();
+    return true;
+  }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      handleBack: goBackInShell,
+      historyDepth: () => kioskScreenHistoryDepth(screen, sessionOpts),
+    }),
+    // screen/sessionOpts drive depth; handlers close over latest values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [screen, assistedMode, catalogOnlySession, catalogMode, fulfillment],
+  );
+
+  useEffect(() => {
+    onHistoryDepthChange?.(
+      kioskScreenHistoryDepth(screen, {
+        assistedMode,
+        catalogOnlySession,
+        catalogMode,
+      }),
+    );
+  }, [
+    screen,
+    assistedMode,
+    catalogOnlySession,
+    catalogMode,
+    onHistoryDepthChange,
+  ]);
 
   useEffect(() => {
     if (assistedMode || fulfillment) {
@@ -323,28 +422,7 @@ export function KioskMenuExperience({
           <button
             type="button"
             onClick={() => {
-              onSearchChange('');
-              if (screen === 'products') {
-                setScreen('categories');
-                setActiveCategoryId(null);
-                return;
-              }
-              // Waiters stay in categories (no home with delivery / para llevar).
-              if (assistedMode) {
-                setScreen('categories');
-                setActiveCategoryId(null);
-                return;
-              }
-              // Mesa QR catalog stays in catalog — no WhatsApp fulfillment home.
-              if (catalogOnlySession && catalogMode) {
-                setScreen('categories');
-                setActiveCategoryId(null);
-                return;
-              }
-              setScreen('home');
-              setActiveCategoryId(null);
-              if (fulfillment) onResetFulfillment();
-              if (catalogMode) onLeaveCatalog();
+              goBackInShell();
             }}
             className="grid h-11 w-11 place-items-center rounded-[14px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
             aria-label="Volver"
@@ -693,7 +771,7 @@ export function KioskMenuExperience({
       ) : null}
     </section>
   );
-}
+});
 
 function EmptyState({ message }: { message: string }) {
   return (

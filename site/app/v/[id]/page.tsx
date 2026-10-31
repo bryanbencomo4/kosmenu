@@ -33,8 +33,17 @@ import { getOrCreateUpsellSessionId, trackUpsellEvent, type UpsellSurface } from
 import { AddToCartUpsellSheet, type AddToCartSuggestion } from './_components/upsell/AddToCartUpsellSheet';
 import { ProductOptionsSheet } from './_components/ProductOptionsSheet';
 import { ProductImageLightbox } from './_components/ProductImageLightbox';
-import { KioskMenuExperience } from './_components/kiosk/KioskMenuExperience';
+import {
+  KioskMenuExperience,
+  type KioskMenuShellHandle,
+} from './_components/kiosk/KioskMenuExperience';
 import { KioskCheckout } from './_components/kiosk/KioskCheckout';
+import {
+  allowMenuShellHistoryLeave,
+  attachMenuShellHistory,
+  detachMenuShellHistory,
+  setMenuShellHistoryDepth,
+} from './_lib/menu-shell-history';
 import { DeliveryNoteField } from './_components/kiosk/DeliveryNoteField';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import {
@@ -1867,6 +1876,8 @@ export default function PublicMenuPage() {
   const cartHydratedRef = useRef(false);
   const leaveGuardArmedRef = useRef(false);
   const allowLeaveRef = useRef(false);
+  const kioskShellRef = useRef<KioskMenuShellHandle | null>(null);
+  const [kioskHistoryDepth, setKioskHistoryDepth] = useState(0);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [cartCacheReady, setCartCacheReady] = useState(false);
   const [abandonedCartPrompt, setAbandonedCartPrompt] = useState<CachedCheckoutCart | null>(null);
@@ -2402,92 +2413,164 @@ export default function PublicMenuPage() {
     });
   }, [abandonedCartPrompt, cartCacheReady, cartItems, commerceIdentifier, kioskFulfillment, kioskVoucher]);
 
+  const hasActiveCart = cartCount > 0 && !kioskVoucher;
+
+  const menuOverlayHistoryDepth = useMemo(() => {
+    let depth = 0;
+    if (catalogReady) depth += 1;
+    if (kioskAddedPrompt) depth += 1;
+    if (expandedProductImage) depth += 1;
+    if (isInfoOpen) depth += 1;
+    if (isQuickActionsOpen) depth += 1;
+    if (addToCartSheet.open) depth += 1;
+    if (productOptionsSheet.open) depth += 1;
+    if (isMapPickerOpen) depth += 1;
+    if (isPreCheckoutUpsellOpen) depth += 1;
+    if (paymentProofLightboxUrl) depth += 1;
+    if (isConfirmOpen) {
+      depth += 1 + Math.max(0, checkoutStep);
+    }
+    if (isOrderReviewOpen) depth += 1;
+    if (abandonedCartPrompt) depth += 1;
+    if (leaveConfirmOpen) depth += 1;
+    return depth;
+  }, [
+    abandonedCartPrompt,
+    addToCartSheet.open,
+    catalogReady,
+    checkoutStep,
+    expandedProductImage,
+    isConfirmOpen,
+    isInfoOpen,
+    isMapPickerOpen,
+    isOrderReviewOpen,
+    isPreCheckoutUpsellOpen,
+    isQuickActionsOpen,
+    kioskAddedPrompt,
+    leaveConfirmOpen,
+    paymentProofLightboxUrl,
+    productOptionsSheet.open,
+  ]);
+
+  const menuShellHistoryDepth = useMemo(() => {
+    const kioskDepth = catalogReady ? 0 : kioskHistoryDepth;
+    const overlays = menuOverlayHistoryDepth;
+    const atBrowseRoot = kioskDepth === 0 && overlays === 0;
+    const cartGuard = hasActiveCart && atBrowseRoot ? 1 : 0;
+    return kioskDepth + overlays + cartGuard;
+  }, [catalogReady, hasActiveCart, kioskHistoryDepth, menuOverlayHistoryDepth]);
+
+  const menuBrowserBackRef = useRef<() => void>(() => {});
+  menuBrowserBackRef.current = () => {
+    if (allowLeaveRef.current) {
+      allowLeaveRef.current = false;
+      leaveGuardArmedRef.current = false;
+      return;
+    }
+
+    // Highest UI layers first (same order users expect from in-app back).
+    if (leaveConfirmOpen) {
+      setLeaveConfirmOpen(false);
+      return;
+    }
+    if (abandonedCartPrompt) {
+      setAbandonedCartPrompt(null);
+      return;
+    }
+    if (paymentProofLightboxUrl) {
+      setPaymentProofLightboxUrl(null);
+      return;
+    }
+    if (isOrderReviewOpen) {
+      setIsOrderReviewOpen(false);
+      return;
+    }
+    if (isMapPickerOpen) {
+      setIsMapPickerOpen(false);
+      return;
+    }
+    if (productOptionsSheet.open) {
+      setProductOptionsSheet({ open: false, productId: null });
+      return;
+    }
+    if (addToCartSheet.open) {
+      setAddToCartSheet({ open: false, suggestions: [] });
+      return;
+    }
+    if (isPreCheckoutUpsellOpen) {
+      setIsPreCheckoutUpsellOpen(false);
+      return;
+    }
+    if (isConfirmOpen) {
+      if (checkoutStep > 0) {
+        if (checkoutStep === 3 && deliveryMode !== 'delivery') {
+          setCheckoutStep(1);
+        } else {
+          setCheckoutStep((prev) => Math.max(0, prev - 1));
+        }
+      } else {
+        setIsConfirmOpen(false);
+      }
+      return;
+    }
+    if (expandedProductImage) {
+      setExpandedProductImage(null);
+      return;
+    }
+    if (isInfoOpen) {
+      setIsInfoOpen(false);
+      return;
+    }
+    if (isQuickActionsOpen) {
+      setIsQuickActionsOpen(false);
+      return;
+    }
+    if (kioskAddedPrompt) {
+      setKioskAddedPrompt(null);
+      return;
+    }
+    if (catalogReady) {
+      returnToCatalogMenu();
+      return;
+    }
+    if (kioskShellRef.current?.handleBack()) {
+      return;
+    }
+
+    if (hasActiveCart) {
+      leaveGuardArmedRef.current = true;
+      setLeaveConfirmOpen(true);
+      return;
+    }
+
+    leaveGuardArmedRef.current = false;
+  };
+
+  const hasActiveCartRef = useRef(hasActiveCart);
+  hasActiveCartRef.current = hasActiveCart;
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const hasActiveCart = cartCount > 0 && !kioskVoucher;
 
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!hasActiveCart || allowLeaveRef.current) return;
+      if (!hasActiveCartRef.current || allowLeaveRef.current) return;
       event.preventDefault();
       event.returnValue = '';
     };
 
     window.addEventListener('beforeunload', onBeforeUnload);
+    attachMenuShellHistory(() => menuBrowserBackRef.current());
 
-    if (hasActiveCart && !leaveGuardArmedRef.current) {
-      window.history.pushState({ elmenuxfaCartGuard: true }, '');
-      leaveGuardArmedRef.current = true;
-    }
-    if (!hasActiveCart) {
-      leaveGuardArmedRef.current = false;
-    }
-
-    const onPopState = () => {
-      if (allowLeaveRef.current) {
-        allowLeaveRef.current = false;
-        leaveGuardArmedRef.current = false;
-        return;
-      }
-
-      // Prefer closing nested UI layers before asking to abandon the purchase.
-      if (isMapPickerOpen) {
-        window.history.pushState({ elmenuxfaCartGuard: true }, '');
-        leaveGuardArmedRef.current = true;
-        setIsMapPickerOpen(false);
-        return;
-      }
-      if (productOptionsSheet.open) {
-        window.history.pushState({ elmenuxfaCartGuard: true }, '');
-        leaveGuardArmedRef.current = true;
-        setProductOptionsSheet({ open: false, productId: null });
-        return;
-      }
-      if (isPreCheckoutUpsellOpen) {
-        window.history.pushState({ elmenuxfaCartGuard: true }, '');
-        leaveGuardArmedRef.current = true;
-        setIsPreCheckoutUpsellOpen(false);
-        return;
-      }
-      if (isConfirmOpen) {
-        window.history.pushState({ elmenuxfaCartGuard: true }, '');
-        leaveGuardArmedRef.current = true;
-        if (checkoutStep > 0) {
-          if (checkoutStep === 3 && deliveryMode !== 'delivery') {
-            setCheckoutStep(1);
-          } else {
-            setCheckoutStep((prev) => Math.max(0, prev - 1));
-          }
-        } else {
-          setIsConfirmOpen(false);
-        }
-        return;
-      }
-
-      if (!hasActiveCart) {
-        leaveGuardArmedRef.current = false;
-        return;
-      }
-
-      window.history.pushState({ elmenuxfaCartGuard: true }, '');
-      leaveGuardArmedRef.current = true;
-      setLeaveConfirmOpen(true);
-    };
-
-    window.addEventListener('popstate', onPopState);
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload);
-      window.removeEventListener('popstate', onPopState);
+      detachMenuShellHistory();
     };
-  }, [
-    cartCount,
-    checkoutStep,
-    deliveryMode,
-    isConfirmOpen,
-    isMapPickerOpen,
-    isPreCheckoutUpsellOpen,
-    kioskVoucher,
-    productOptionsSheet.open,
-  ]);
+  }, []);
+
+  useEffect(() => {
+    setMenuShellHistoryDepth(menuShellHistoryDepth);
+    leaveGuardArmedRef.current = hasActiveCart;
+  }, [hasActiveCart, menuShellHistoryDepth]);
 
   function getProductCartQuantity(productId: string) {
     return Object.entries(cart).reduce((sum, [cartKey, quantity]) => {
@@ -5754,10 +5837,11 @@ export default function PublicMenuPage() {
   function confirmLeavePurchase() {
     allowLeaveRef.current = true;
     leaveGuardArmedRef.current = false;
+    allowMenuShellHistoryLeave();
     setLeaveConfirmOpen(false);
     setIsConfirmOpen(false);
     if (typeof window === 'undefined') return;
-    // Pop the guard entry, then leave the menu page.
+    // Pop remaining synthetic entries, then leave the menu page.
     window.history.back();
     window.setTimeout(() => {
       allowLeaveRef.current = true;
@@ -6324,6 +6408,7 @@ export default function PublicMenuPage() {
           />
         ) : (
         <KioskMenuExperience
+          ref={kioskShellRef}
           businessName={comercioNombre}
           logoUrl={comercioLogoUrl || null}
           ratingAverage={toNumberOrNull(menuData.comercio.rating_average) ?? 0}
@@ -6399,6 +6484,7 @@ export default function PublicMenuPage() {
           themeMode={themeMode}
           onToggleTheme={toggleKioskTheme}
           stickyOffsetClass={isOwnerPreview ? 'top-12' : 'top-0'}
+          onHistoryDepthChange={setKioskHistoryDepth}
         />
         )}
 

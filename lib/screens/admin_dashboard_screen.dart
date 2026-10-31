@@ -31,6 +31,7 @@ import 'package:kosmenu_app/screens/magic_onboarding_screen.dart';
 import 'package:kosmenu_app/screens/merchant_client_profile_screen.dart';
 import 'package:kosmenu_app/screens/order_detail_screen.dart';
 import 'package:kosmenu_app/services/merchant_deep_link.dart';
+import 'package:kosmenu_app/services/merchant_shell_history.dart';
 import 'package:kosmenu_app/screens/product_form_screen.dart';
 import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/screens/delivery_settings_screen.dart';
@@ -135,8 +136,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   bool _sidebarCollapsed = false;
   MerchantNavDestination _selectedNav = MerchantNavDestination.home;
   bool _shellHasPushedRoute = false;
+  int _contentOverlayDepth = 0;
   ComercioModel? _cachedComercio;
-  late final NavigatorObserver _contentNavObserver;
+  late NavigatorObserver _contentNavObserver;
 
   bool get _hasComercioId => SupabaseConfig.hasCurrentComercioId;
 
@@ -159,7 +161,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _contentNavObserver = _DashboardContentNavObserver(_syncShellStack);
+    _contentNavObserver = _DashboardContentNavObserver(_onContentStackChanged);
+    MerchantShellHistory.attach(onBrowserBack: _onBrowserHistoryBack);
     _snapshotFuture = _fetchSnapshot();
     _ordersStream = _buildOrdersStream();
     _bindAuthStateRecovery();
@@ -172,6 +175,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       unawaited(_openPendingMerchantOrder());
       unawaited(_loadMetricsOrders());
       unawaited(_loadTotalOrdersCount());
+      _syncBrowserHistory();
     });
   }
 
@@ -294,6 +298,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   @override
   void dispose() {
+    MerchantShellHistory.detach();
     WidgetsBinding.instance.removeObserver(this);
     _ordersSubscription?.cancel();
     _authStateSubscription?.cancel();
@@ -2256,13 +2261,75 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     _shellRevision.value++;
   }
 
-  void _syncShellStack() {
+  void _onContentStackChanged(int overlayDepth) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final pushed = _contentNavKey.currentState?.canPop() ?? false;
-      if (pushed == _shellHasPushedRoute) return;
-      setState(() => _shellHasPushedRoute = pushed);
+      // Trust canPop as source of truth after popUntil races.
+      final resolvedDepth = !pushed
+          ? 0
+          : (overlayDepth < 1 ? 1 : overlayDepth);
+      if (pushed == _shellHasPushedRoute &&
+          resolvedDepth == _contentOverlayDepth) {
+        _syncBrowserHistory();
+        return;
+      }
+      setState(() {
+        _shellHasPushedRoute = pushed;
+        _contentOverlayDepth = resolvedDepth;
+      });
+      _syncBrowserHistory();
     });
+  }
+
+  int _shellHistoryDepth() {
+    var depth = 0;
+    if (_selectedNav != MerchantNavDestination.home) {
+      depth += 1;
+    }
+    if (_contentOverlayDepth > 0) {
+      depth += _contentOverlayDepth;
+    } else if (_shellHasPushedRoute) {
+      depth += 1;
+    }
+    return depth;
+  }
+
+  bool get _shellCanExit {
+    if (_scaffoldKey.currentState?.isDrawerOpen == true) return false;
+    if (_contentNavKey.currentState?.canPop() == true) return false;
+    if (_selectedNav != MerchantNavDestination.home) return false;
+    return true;
+  }
+
+  bool _handleShellSystemBack() {
+    if (_scaffoldKey.currentState?.isDrawerOpen == true) {
+      Navigator.of(context).pop();
+      return true;
+    }
+    final nav = _contentNavKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.pop();
+      return true;
+    }
+    if (_selectedNav != MerchantNavDestination.home) {
+      _selectNav(MerchantNavDestination.home);
+      return true;
+    }
+    return false;
+  }
+
+  void _onBrowserHistoryBack() {
+    if (!mounted) return;
+    _handleShellSystemBack();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncBrowserHistory();
+    });
+  }
+
+  void _syncBrowserHistory() {
+    if (!kIsWeb || !mounted) return;
+    MerchantShellHistory.setDepth(_shellHistoryDepth());
   }
 
   void _selectNav(MerchantNavDestination destination) {
@@ -2274,12 +2341,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       Navigator.of(context).pop();
     }
     _contentNavKey.currentState?.popUntil((route) => route.isFirst);
+    _contentOverlayDepth = 0;
     if (_selectedNav == destination) {
       _bumpShell();
+      _syncBrowserHistory();
       return;
     }
-    setState(() => _selectedNav = destination);
+    setState(() {
+      _selectedNav = destination;
+      _shellHasPushedRoute = false;
+    });
     _bumpShell();
+    _syncBrowserHistory();
   }
 
   void _resetContentNavigator() {
@@ -2287,8 +2360,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     setState(() {
       _contentNavKey = GlobalKey<NavigatorState>();
       _shellHasPushedRoute = false;
+      _contentOverlayDepth = 0;
+      _contentNavObserver = _DashboardContentNavObserver(_onContentStackChanged);
     });
     _bumpShell();
+    _syncBrowserHistory();
   }
 
   Future<T?> _pushInShell<T>(Widget page, {bool standalone = false}) {
@@ -2442,7 +2518,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           selected: _selectedNav,
           onSelect: _selectNav,
           onResetContent: _resetContentNavigator,
-          child: SafeArea(
+          child: PopScope(
+            canPop: _shellCanExit,
+            onPopInvokedWithResult: (didPop, result) {
+              if (didPop) return;
+              _handleShellSystemBack();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _syncBrowserHistory();
+              });
+            },
+            child: SafeArea(
             // Header paints its own top inset so the bar background reaches the
             // status bar; keep left/right/bottom clear of system gestures.
             top: false,
@@ -3625,6 +3710,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 ),
               ],
             ),
+          ),
           ),
           ),
         );
@@ -7377,26 +7463,36 @@ class _CatalogUpdateBanner extends StatelessWidget {
 class _DashboardContentNavObserver extends NavigatorObserver {
   _DashboardContentNavObserver(this.onStackChanged);
 
-  final VoidCallback onStackChanged;
+  final void Function(int overlayDepth) onStackChanged;
+  int _overlayDepth = 0;
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    onStackChanged();
+    if (previousRoute != null) {
+      _overlayDepth += 1;
+    }
+    onStackChanged(_overlayDepth);
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    onStackChanged();
+    if (_overlayDepth > 0) {
+      _overlayDepth -= 1;
+    }
+    onStackChanged(_overlayDepth);
   }
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    onStackChanged();
+    if (_overlayDepth > 0) {
+      _overlayDepth -= 1;
+    }
+    onStackChanged(_overlayDepth);
   }
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    onStackChanged();
+    onStackChanged(_overlayDepth);
   }
 }
 
