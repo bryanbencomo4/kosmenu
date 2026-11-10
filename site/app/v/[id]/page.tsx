@@ -6455,6 +6455,7 @@ export default function PublicMenuPage() {
           isOpen={!scheduleClosed}
           openCaption={kioskOpenCaption}
           closedCaption={kioskClosedCaption}
+          businessHours={menuData?.comercio?.horarios ?? null}
           supportsDelivery={supportsDelivery}
           homeConfig={kioskHomeConfig}
           paymentGroups={publicPaymentGroups}

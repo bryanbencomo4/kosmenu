@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatPaymentMethodDetails,
   parsePaymentMethodFields,
+  paymentClipboardValue,
   paymentMethodLabelFromRow,
 } from '../app/_lib/payment-method-display';
 
@@ -43,8 +44,8 @@ describe('formatPaymentMethodDetails', () => {
       }),
     ).toEqual({
       fields: [
-        { label: 'ID', value: '1225317379' },
-        { label: 'Usuario', value: 'Maicol-666' },
+        { label: 'ID', value: '1225317379', type: 'texto', kind: 'text' },
+        { label: 'Usuario', value: 'Maicol-666', type: 'texto', kind: 'text' },
       ],
       note: null,
     });
@@ -74,5 +75,31 @@ describe('formatPaymentMethodDetails', () => {
       'Titular: Maria Perez',
       'Número: 0134-1234-56-7890123456',
     ]);
+  });
+});
+
+describe('paymentClipboardValue', () => {
+  it('strips VE country code and adds leading 0 for bank paste', () => {
+    expect(
+      paymentClipboardValue({ label: 'TELF', value: '+584126159179', type: 'telefono' }),
+    ).toBe('04126159179');
+    expect(
+      paymentClipboardValue({ label: 'Teléfono', value: '0412-6159179' }),
+    ).toBe('04126159179');
+    expect(
+      paymentClipboardValue({ label: 'Teléfono', value: '4126159179' }),
+    ).toBe('04126159179');
+  });
+
+  it('strips document letter prefixes for bank paste', () => {
+    expect(
+      paymentClipboardValue({ label: 'DOCUMENTO', value: 'J-503354356', type: 'cedula' }),
+    ).toBe('503354356');
+    expect(paymentClipboardValue({ label: 'Cédula', value: 'V12345678' })).toBe('12345678');
+  });
+
+  it('leaves bank names and free text unchanged', () => {
+    expect(paymentClipboardValue({ label: 'BANCO', value: 'BANESCO' })).toBe('BANESCO');
+    expect(paymentClipboardValue({ label: 'Usuario', value: 'Maicol-666' })).toBe('Maicol-666');
   });
 });

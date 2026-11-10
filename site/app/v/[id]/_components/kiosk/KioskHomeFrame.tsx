@@ -103,35 +103,43 @@ export function HeaderSeamWave() {
   // Same crest as FooterWave (N-curve)
   const crest = 'M0 36C220 8 440 4 720 28C1000 52 1220 64 1440 26';
   return (
-    <svg
-      className="pointer-events-none block h-12 w-full sm:h-[3.35rem]"
-      viewBox="0 0 1440 80"
-      preserveAspectRatio="none"
-      aria-hidden
-    >
-      {/* White panel from crest down — photo shows only above the curve */}
-      <path d={`${crest}V80H0V36Z`} fill="var(--menu-background)" />
-      {/* Brand ribbon — footer palette, same N shape */}
-      <path
-        d="M0 36C220 8 440 4 720 28C1000 52 1220 64 1440 26V44C1220 70 1000 62 720 42C440 22 220 26 0 48Z"
-        fill="color-mix(in srgb, var(--menu-primary) 55%, white)"
+    <div className="relative">
+      <svg
+        className="pointer-events-none block h-12 w-full sm:h-[3.35rem]"
+        viewBox="0 0 1440 80"
+        preserveAspectRatio="none"
+        aria-hidden
+      >
+        {/* White panel from crest down — photo shows only above the curve */}
+        <path d={`${crest}V80H0V36Z`} fill="var(--menu-background)" />
+        {/* Brand ribbon — footer palette, same N shape */}
+        <path
+          d="M0 36C220 8 440 4 720 28C1000 52 1220 64 1440 26V44C1220 70 1000 62 720 42C440 22 220 26 0 48Z"
+          fill="color-mix(in srgb, var(--menu-primary) 55%, white)"
+        />
+        <path
+          d="M0 40C240 12 480 8 760 32C1040 54 1240 64 1440 34V50C1240 68 1040 62 760 44C480 24 240 28 0 54Z"
+          fill="color-mix(in srgb, var(--menu-primary) 78%, var(--menu-accent))"
+        />
+        <path
+          d="M0 44C260 16 520 12 800 36C1080 56 1280 66 1440 40V54C1280 68 1080 62 800 46C520 28 260 32 0 58Z"
+          fill="var(--menu-primary)"
+        />
+        <path
+          d={crest}
+          fill="none"
+          stroke="color-mix(in srgb, var(--menu-accent) 70%, white)"
+          strokeWidth="3"
+          strokeLinecap="round"
+        />
+      </svg>
+      {/* Kill desktop subpixel hairline where SVG meets the panel (hero bg bleed). */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] translate-y-[1px]"
+        style={{ backgroundColor: 'var(--menu-background)' }}
       />
-      <path
-        d="M0 40C240 12 480 8 760 32C1040 54 1240 64 1440 34V50C1240 68 1040 62 760 44C480 24 240 28 0 54Z"
-        fill="color-mix(in srgb, var(--menu-primary) 78%, var(--menu-accent))"
-      />
-      <path
-        d="M0 44C260 16 520 12 800 36C1080 56 1280 66 1440 40V54C1280 68 1080 62 800 46C520 28 260 32 0 58Z"
-        fill="var(--menu-primary)"
-      />
-      <path
-        d={crest}
-        fill="none"
-        stroke="color-mix(in srgb, var(--menu-accent) 70%, white)"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-    </svg>
+    </div>
   );
 }
 
@@ -301,23 +309,48 @@ export function StatusBadge({
   isOpen,
   openCaption,
   closedCaption,
+  onClick,
 }: {
   isOpen: boolean;
   openCaption: string;
   closedCaption: string;
+  /** When set, badge opens the weekly hours sheet. */
+  onClick?: () => void;
 }) {
-  return (
-    <div
-      className="kiosk-enter inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-semibold"
-      style={{
-        animationDelay: '160ms',
-        ...(isOpen
-          ? { backgroundColor: '#14532d', color: '#86efac' }
-          : { backgroundColor: '#4c0519', color: '#fda4af' }),
-      }}
-    >
+  const label = isOpen ? openCaption || 'Abierto ahora' : closedCaption || 'Cerrado';
+  const className =
+    'kiosk-enter inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-semibold';
+  const style = {
+    animationDelay: '160ms',
+    ...(isOpen
+      ? { backgroundColor: '#14532d', color: '#86efac' }
+      : { backgroundColor: '#4c0519', color: '#fda4af' }),
+  } as const;
+
+  const content = (
+    <>
       <span className={`h-2 w-2 rounded-full ${isOpen ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-      {isOpen ? openCaption || 'Abierto ahora' : closedCaption || 'Cerrado'}
+      {label}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${className} transition active:scale-[0.98]`}
+        style={style}
+        aria-label={`${label}. Ver horarios de la semana.`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={className} style={style}>
+      {content}
     </div>
   );
 }
@@ -327,13 +360,14 @@ export function PrimaryCTA({ onClick, children }: { onClick: () => void; childre
     <button
       type="button"
       onClick={onClick}
-      className="kiosk-enter flex h-[3.65rem] w-full items-center rounded-full px-5 text-[17px] font-semibold tracking-[-0.01em] transition active:scale-[0.985] sm:h-[3.8rem] sm:text-[18px]"
+      className="kiosk-enter flex h-[3.65rem] w-full items-center rounded-full px-5 text-[17px] font-extrabold tracking-[-0.01em] transition active:scale-[0.985] sm:h-[3.8rem] sm:text-[18px]"
       style={{
         animationDelay: '200ms',
         background:
           'linear-gradient(180deg, color-mix(in srgb, var(--menu-primary) 72%, white) 0%, var(--menu-primary) 48%, color-mix(in srgb, var(--menu-primary) 92%, #0a0a0a) 100%)',
         color: '#ffffff',
         boxShadow: '0 14px 32px color-mix(in srgb, var(--menu-primary) 38%, transparent)',
+        fontWeight: 800,
       }}
     >
       {/* Equal side rails keep the label optically centered */}
@@ -341,7 +375,9 @@ export function PrimaryCTA({ onClick, children }: { onClick: () => void; childre
         <BookOpen className="h-5 w-5" strokeWidth={2.05} aria-hidden />
         <span className="h-[1.35rem] w-px bg-white/50" aria-hidden />
       </span>
-      <span className="min-w-0 flex-1 text-center leading-none">{children ?? 'Ver menú'}</span>
+      <span className="min-w-0 flex-1 text-center leading-none" style={{ fontWeight: 800 }}>
+        {children ?? 'Ver menú'}
+      </span>
       <span className="inline-flex w-[3.25rem] shrink-0 items-center justify-end">
         <ChevronRight className="h-5 w-5" strokeWidth={2.4} aria-hidden />
       </span>
@@ -377,8 +413,7 @@ export function ActionCards({
         <a href={mapsHref} target="_blank" rel="noopener noreferrer" className={pillClass} style={pillStyle}>
           <MapPin
             className="h-[1.2rem] w-[1.2rem] shrink-0"
-            strokeWidth={1.6}
-            fill="currentColor"
+            strokeWidth={2.05}
             style={iconStyle}
             aria-hidden
           />
@@ -388,8 +423,7 @@ export function ActionCards({
         <div className={`${pillClass} opacity-80`} style={pillStyle}>
           <MapPin
             className="h-[1.2rem] w-[1.2rem] shrink-0"
-            strokeWidth={1.6}
-            fill="currentColor"
+            strokeWidth={2.05}
             style={iconStyle}
             aria-hidden
           />
@@ -416,31 +450,45 @@ export function SecondaryLinks(props: {
 export function FooterWave() {
   return (
     <footer className="kiosk-footer-enter relative z-10 shrink-0">
-      <svg className="block h-11 w-full sm:h-12" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden>
-        {/* Lighter primary nuance */}
-        <path
-          d="M0 36C220 8 440 4 720 28C1000 52 1220 64 1440 26V80H0V36Z"
-          fill="color-mix(in srgb, var(--menu-primary) 55%, white)"
+      <div className="relative">
+        {/* Cover subpixel hairline where footer meets the panel above. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[2px] -translate-y-[1px]"
+          style={{ backgroundColor: 'var(--menu-background)' }}
         />
-        {/* Primary + accent blend */}
-        <path
-          d="M0 46C260 16 500 12 780 34C1060 56 1260 66 1440 38V80H0V46Z"
-          fill="color-mix(in srgb, var(--menu-primary) 78%, var(--menu-accent))"
+        <svg className="relative block h-11 w-full sm:h-12" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden>
+          {/* Lighter primary nuance */}
+          <path
+            d="M0 36C220 8 440 4 720 28C1000 52 1220 64 1440 26V80H0V36Z"
+            fill="color-mix(in srgb, var(--menu-primary) 55%, white)"
+          />
+          {/* Primary + accent blend */}
+          <path
+            d="M0 46C260 16 500 12 780 34C1060 56 1260 66 1440 38V80H0V46Z"
+            fill="color-mix(in srgb, var(--menu-primary) 78%, var(--menu-accent))"
+          />
+          {/* Solid primary body */}
+          <path
+            d="M0 54C300 26 560 22 840 42C1100 58 1300 66 1440 46V80H0V54Z"
+            fill="var(--menu-primary)"
+          />
+          {/* Accent highlight edge */}
+          <path
+            d="M0 46C260 16 500 12 780 34C1060 56 1260 66 1440 38"
+            fill="none"
+            stroke="color-mix(in srgb, var(--menu-accent) 65%, white)"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
+        </svg>
+        {/* Cover subpixel hairline between wave SVG and solid footer body. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] translate-y-[1px]"
+          style={{ backgroundColor: 'var(--menu-primary)' }}
         />
-        {/* Solid primary body */}
-        <path
-          d="M0 54C300 26 560 22 840 42C1100 58 1300 66 1440 46V80H0V54Z"
-          fill="var(--menu-primary)"
-        />
-        {/* Accent highlight edge */}
-        <path
-          d="M0 46C260 16 500 12 780 34C1060 56 1260 66 1440 38"
-          fill="none"
-          stroke="color-mix(in srgb, var(--menu-accent) 65%, white)"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-        />
-      </svg>
+      </div>
       <div
         className="px-5 pb-[max(0.85rem,env(safe-area-inset-bottom))] pt-1 text-center"
         style={{

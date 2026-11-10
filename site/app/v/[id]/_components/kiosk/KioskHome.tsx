@@ -41,6 +41,7 @@ import {
   RestaurantMeta,
   StatusBadge,
 } from './KioskHomeFrame';
+import { BusinessHoursSheet } from './BusinessHoursSheet';
 import { OperatingCoverage } from './OperatingCoverage';
 import type { KioskFulfillment } from './kiosk-types';
 import type { MenuThemeMode } from '../../_lib/menu-theme';
@@ -55,6 +56,8 @@ type KioskHomeProps = {
   isOpen: boolean;
   closedCaption: string;
   openCaption: string;
+  /** Raw `comercio.horarios` — unlocks weekly hours sheet on the status badge. */
+  businessHours?: unknown;
   locationLabel: string | null;
   /** Resolved Venezuela state labels for virtual businesses (e.g. "Miranda"). */
   operatingStateLabels?: string[];
@@ -296,6 +299,7 @@ export function KioskHome({
   isOpen,
   closedCaption,
   openCaption,
+  businessHours = null,
   locationLabel,
   operatingStateLabels = [],
   socialLinks = [],
@@ -311,6 +315,7 @@ export function KioskHome({
 }: KioskHomeProps) {
   const homeRef = useRef<HTMLElement>(null);
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
+  const [hoursSheetOpen, setHoursSheetOpen] = useState(false);
   const [homeMenuOpen, setHomeMenuOpen] = useState(false);
   const [sheetTheme, setSheetTheme] = useState<CSSProperties>({});
   const payableGroups = paymentGroups.filter((group) => group.methods.length > 0);
@@ -323,7 +328,7 @@ export function KioskHome({
 
   useEffect(() => {
     if (!homeRef.current) return;
-    if (!paymentSheetOpen && !homeMenuOpen && coverageLabels.length === 0) return;
+    if (!paymentSheetOpen && !hoursSheetOpen && !homeMenuOpen && coverageLabels.length === 0) return;
     const computed = getComputedStyle(homeRef.current);
     const names = [
       '--menu-background',
@@ -342,7 +347,7 @@ export function KioskHome({
       if (value) next[name] = value;
     }
     setSheetTheme(next);
-  }, [paymentSheetOpen, homeMenuOpen, coverageLabels.length]);
+  }, [paymentSheetOpen, hoursSheetOpen, homeMenuOpen, coverageLabels.length]);
 
   return (
     <section
@@ -436,7 +441,12 @@ export function KioskHome({
                   ratingCount={ratingCount}
                 />
                 <div className="mt-2.5">
-                  <StatusBadge isOpen={isOpen} openCaption={openCaption} closedCaption={closedCaption} />
+                  <StatusBadge
+                    isOpen={isOpen}
+                    openCaption={openCaption}
+                    closedCaption={closedCaption}
+                    onClick={() => setHoursSheetOpen(true)}
+                  />
                 </div>
                 {coverageLabels.length > 0 ? (
                   <div className="mt-3">
@@ -474,6 +484,16 @@ export function KioskHome({
               socialLinks={showSocials ? socialLinks : []}
               themeStyle={sheetTheme}
               onClose={() => setHomeMenuOpen(false)}
+            />,
+            document.body,
+          )
+        : null}
+      {hoursSheetOpen
+        ? createPortal(
+            <BusinessHoursSheet
+              horarios={businessHours}
+              themeStyle={sheetTheme}
+              onClose={() => setHoursSheetOpen(false)}
             />,
             document.body,
           )

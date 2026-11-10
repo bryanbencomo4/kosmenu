@@ -79,6 +79,8 @@ type KioskMenuExperienceProps = {
   isOpen: boolean;
   openCaption: string;
   closedCaption: string;
+  /** Raw `comercio.horarios` for the home status badge sheet. */
+  businessHours?: unknown;
   supportsDelivery: boolean;
   homeConfig?: KioskHomeConfig;
   paymentGroups?: Array<{
@@ -160,6 +162,7 @@ export const KioskMenuExperience = forwardRef<
     isOpen,
     openCaption,
     closedCaption,
+    businessHours = null,
     supportsDelivery,
     homeConfig = DEFAULT_KIOSK_HOME_CONFIG,
     paymentGroups = [],
@@ -409,6 +412,7 @@ export const KioskMenuExperience = forwardRef<
           isOpen={isOpen}
           closedCaption={closedCaption}
           openCaption={openCaption}
+          businessHours={businessHours}
           locationLabel={locationLabel}
           operatingStateLabels={operatingStateLabels}
           socialLinks={socialLinks}

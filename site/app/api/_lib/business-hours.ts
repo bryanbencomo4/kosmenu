@@ -123,6 +123,46 @@ export function isScheduleConfigured(schedule: BusinessSchedule) {
   return DAY_KEYS.some((key) => schedule.days[key]?.open && schedule.days[key].ranges.length > 0);
 }
 
+export type BusinessScheduleDayRow = {
+  key: (typeof DAY_KEYS)[number];
+  label: string;
+  isToday: boolean;
+  closed: boolean;
+  hoursLabel: string;
+};
+
+/** Weekly rows for public hours sheets (Caracas weekday + 12h labels). */
+export function listBusinessScheduleDayRows(
+  raw: unknown,
+  now = new Date(),
+): BusinessScheduleDayRow[] {
+  const schedule = parseBusinessSchedule(raw);
+  const todayKey = caracasParts(now).key;
+  return DAY_KEYS.map((key) => {
+    const day = schedule.days[key];
+    const rawLabel = DAY_LABELS[key];
+    const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
+    if (!day?.open || day.ranges.length === 0) {
+      return { key, label, isToday: key === todayKey, closed: true, hoursLabel: 'Cerrado' };
+    }
+    const ranges = [...day.ranges].sort(
+      (a, b) => parseMinutes(a.start) - parseMinutes(b.start),
+    );
+    const allDay = ranges.some(
+      (range) => parseMinutes(range.start) === 0 && parseMinutes(range.end) >= 23 * 60 + 59,
+    );
+    return {
+      key,
+      label,
+      isToday: key === todayKey,
+      closed: false,
+      hoursLabel: allDay
+        ? '24 horas'
+        : ranges.map((range) => `${formatHour(range.start)} – ${formatHour(range.end)}`).join(', '),
+    };
+  });
+}
+
 function nextOpenLabel(schedule: BusinessSchedule, now = new Date()): string | null {
   const current = caracasParts(now);
   const startIndex = DAY_KEYS.indexOf(current.key);

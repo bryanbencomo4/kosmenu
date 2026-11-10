@@ -3,7 +3,10 @@
 import { Check, Copy, Info } from 'lucide-react';
 import { useState } from 'react';
 
-import type { PaymentDisplayField } from '../../../_lib/payment-method-display';
+import {
+  paymentClipboardValue,
+  type PaymentDisplayField,
+} from '../../../_lib/payment-method-display';
 
 type PaymentCopyFieldsProps = {
   fields: PaymentDisplayField[];
@@ -124,7 +127,8 @@ export function PaymentCopyFields({
               onClick={async (event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                const ok = await copyText(field.value);
+                // Display stays formatted; clipboard is bank-paste safe (digits / no +58, J-…).
+                const ok = await copyText(paymentClipboardValue(field));
                 if (!ok) return;
                 setCopiedKey(key);
                 window.setTimeout(() => {

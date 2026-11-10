@@ -11,6 +11,7 @@ import {
   KIT_EXTRAS_UNIT_USD,
   KIT_GIFT_QTY,
 } from '../../_lib/kit-shipments';
+import { paymentClipboardValue } from '../../_lib/payment-method-display';
 import { businessBenefitsHref } from '../../_lib/public-site-config';
 
 type AccountField = { label: string; value: string; copyable: boolean };
@@ -79,7 +80,7 @@ export function KitCheckoutForm() {
 
   async function copyField(label: string, value: string) {
     try {
-      await navigator.clipboard.writeText(value);
+      await navigator.clipboard.writeText(paymentClipboardValue({ label, value }));
       setCopiedKey(label);
       window.setTimeout(() => setCopiedKey(null), 1600);
     } catch {
