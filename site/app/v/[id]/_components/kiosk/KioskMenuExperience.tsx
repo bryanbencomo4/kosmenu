@@ -1,6 +1,5 @@
 'use client';
 
-import { Caveat, Manrope } from 'next/font/google';
 import { ArrowLeft, ArrowRight, Plus, Search, ShoppingBag, SlidersHorizontal, Star, X } from 'lucide-react';
 import {
   forwardRef,
@@ -28,17 +27,37 @@ import {
   type KioskVoucherData,
 } from './kiosk-types';
 import { DEFAULT_KIOSK_HOME_CONFIG, type KioskHomeConfig } from '../../../../_lib/kiosk-home-config';
+import { parseCategoryUpsellKind } from '../../../../_lib/pre-checkout-upsell';
 import type { MenuThemeMode } from '../../_lib/menu-theme';
 
-const hintFont = Caveat({
-  subsets: ['latin'],
-  weight: ['500', '600'],
-});
+/** Cap hero slides — keeps home bandwidth tiny (next slide loads only after current is ready). */
+const MAX_HOME_HERO_IMAGES = 5;
 
-const titleFont = Manrope({
-  subsets: ['latin'],
-  weight: ['700', '800'],
-});
+function isMainCategoryRole(role: string | null | undefined) {
+  return parseCategoryUpsellKind(role) === null;
+}
+
+function collectCategoryProductImages(
+  cats: KioskCategory[],
+  productsByCategory: Record<string, KioskProduct[]>,
+  limit: number,
+) {
+  const out: Array<{ imageUrl: string; imageSourceUrl: string }> = [];
+  const seen = new Set<string>();
+  for (const category of cats) {
+    for (const product of productsByCategory[category.id] ?? []) {
+      const imageUrl = (product.imageUrl ?? '').trim();
+      if (!imageUrl || seen.has(imageUrl)) continue;
+      seen.add(imageUrl);
+      out.push({
+        imageUrl,
+        imageSourceUrl: (product.imageSourceUrl ?? product.imageUrl ?? '').trim() || imageUrl,
+      });
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
 
 export type KioskMenuShellHandle = {
   /** Browser/system back: pop products → categories → home. Returns true if handled. */
@@ -76,6 +95,7 @@ type KioskMenuExperienceProps = {
   onResetFulfillment: () => void;
   onEnterCatalog: () => void;
   onLeaveCatalog: () => void;
+  directionsUrl?: string | null;
   categories: KioskCategory[];
   productsByCategory: Record<string, KioskProduct[]>;
   searchQuery: string;
@@ -151,6 +171,7 @@ export const KioskMenuExperience = forwardRef<
     onResetFulfillment,
     onEnterCatalog,
     onLeaveCatalog,
+    directionsUrl = null,
     categories,
     productsByCategory,
     searchQuery,
@@ -177,7 +198,13 @@ export const KioskMenuExperience = forwardRef<
   },
   ref,
 ) {
-  const browseOnly = !catalogMode && (!fulfillment || !isOpen);
+  const hasOrderMode =
+    homeConfig.comerAqui ||
+    homeConfig.paraLlevar ||
+    (homeConfig.delivery && supportsDelivery);
+  // Fulfillment is chosen while assembling the order, so an open menu can be ordered
+  // before a mode is selected. Closed, catalog-locked, or mode-less menus stay view-only.
+  const browseOnly = !assistedMode && !catalogMode && (!isOpen || !hasOrderMode);
   useLockBodyScroll(Boolean(addedPrompt && !browseOnly));
   const [screen, setScreen] = useState<KioskScreen>(
     assistedMode || fulfillment ? 'categories' : 'home',
@@ -317,6 +344,18 @@ export const KioskMenuExperience = forwardRef<
     [categories, productsByCategory],
   );
 
+  /**
+   * Home hero slides: prefer product photos from main/normal categories when those exist;
+   * otherwise fall back to other categories. Empty → logo fallback in KioskHome.
+   */
+  const homeHeroImages = useMemo(() => {
+    const mainCats = categories.filter((category) => isMainCategoryRole(category.role));
+    if (mainCats.length > 0) {
+      return collectCategoryProductImages(mainCats, productsByCategory, MAX_HOME_HERO_IMAGES);
+    }
+    return collectCategoryProductImages(categories, productsByCategory, MAX_HOME_HERO_IMAGES);
+  }, [categories, productsByCategory]);
+
   const searchHits = useMemo(() => {
     if (!searchQueryFolded) return null;
     const categoryHits = categories
@@ -358,10 +397,9 @@ export const KioskMenuExperience = forwardRef<
     );
   }
 
-  if (!assistedMode && !fulfillment && screen === 'home') {
+  if (!assistedMode && screen === 'home') {
     return (
       <div className="relative flex h-[100svh] max-h-[100svh] flex-col overflow-hidden bg-[var(--menu-background)] text-[var(--menu-text)]">
-        <div className={stickyChromeClass}>{topBar}</div>
         <KioskHome
           businessName={businessName}
           logoUrl={logoUrl}
@@ -380,6 +418,8 @@ export const KioskMenuExperience = forwardRef<
           paymentGroups={paymentGroups}
           themeMode={themeMode}
           catalogOnlySession={catalogOnlySession}
+          directionsUrl={directionsUrl}
+          heroImages={homeHeroImages}
           onToggleTheme={onToggleTheme}
           onSelect={(next) => {
             if (catalogOnlySession) return;
@@ -432,9 +472,9 @@ export const KioskMenuExperience = forwardRef<
           )}
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--menu-text-muted)]">
-              {catalogMode ? 'Catálogo' : fulfillment ? FULFILLMENT_LABEL[fulfillment] : 'Solo consulta'}
+              {catalogMode ? 'Catálogo' : fulfillment ? FULFILLMENT_LABEL[fulfillment] : isOpen ? 'Menú' : 'Solo consulta'}
             </p>
-            <h2 className={`${titleFont.className} truncate text-lg font-extrabold tracking-[-0.03em] text-[var(--menu-text)]`}>
+            <h2 className={`truncate text-lg font-extrabold tracking-[-0.03em] text-[var(--menu-text)]`}>
               {screen === 'products' ? activeCategory?.name || 'Productos' : 'Categorías'}
             </h2>
             <p className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-[var(--menu-text-muted)]" aria-label={
@@ -492,13 +532,13 @@ export const KioskMenuExperience = forwardRef<
 
       <div className="relative z-10 mx-auto w-full max-w-5xl flex-1 px-5 py-4 pb-36">
         <p
-          className={`${hintFont.className} kiosk-enter mb-4 text-[22px] font-semibold sm:text-[26px]`}
+          className={`kiosk-enter mb-4 text-[22px] font-semibold sm:text-[26px]`}
           style={{ color: 'color-mix(in srgb, var(--menu-primary) 72%, var(--menu-text))' }}
         >
           {browseOnly
-            ? isOpen
-              ? 'Solo consulta. Para pedir, vuelve y elige cómo lo quieres.'
-              : 'Estamos cerrados. Puedes ver el menú y pedir cuando abramos.'
+            ? !isOpen
+              ? 'Estamos cerrados. Puedes ver el menú y pedir cuando abramos.'
+              : 'Este negocio no tiene modalidades de pedido activas.'
             : screen === 'products'
               ? 'Arma tu pedido a tu ritmo.'
               : '¿Qué se te antoja hoy?'}
@@ -536,7 +576,7 @@ export const KioskMenuExperience = forwardRef<
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">Categoría</p>
-                      <p className={`${titleFont.className} truncate text-base font-extrabold text-[var(--menu-text)]`}>{hit.category.name}</p>
+                      <p className={`truncate text-base font-extrabold text-[var(--menu-text)]`}>{hit.category.name}</p>
                       <p className="mt-0.5 text-xs text-[var(--menu-text-muted)]">
                         {hit.category.productCount} {hit.category.productCount === 1 ? 'producto' : 'productos'}
                       </p>
@@ -567,7 +607,7 @@ export const KioskMenuExperience = forwardRef<
                       <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
                         Producto · {hit.category.name}
                       </p>
-                      <p className={`${titleFont.className} truncate text-base font-extrabold text-[var(--menu-text)]`}>{hit.product.name}</p>
+                      <p className={`truncate text-base font-extrabold text-[var(--menu-text)]`}>{hit.product.name}</p>
                       <p className="mt-0.5 text-sm font-bold text-[var(--menu-text)]">{hit.product.priceLabel}</p>
                     </div>
                   </button>
@@ -618,7 +658,7 @@ export const KioskMenuExperience = forwardRef<
                   </div>
                   <div className="flex h-11 shrink-0 items-center px-3 py-2">
                     <p
-                      className={`${titleFont.className} truncate text-sm font-extrabold text-[var(--menu-text)]`}
+                      className={`truncate text-sm font-extrabold text-[var(--menu-text)]`}
                     >
                       {category.name}
                     </p>
@@ -659,7 +699,7 @@ export const KioskMenuExperience = forwardRef<
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col justify-between self-stretch p-3.5">
                   <div>
-                    <h3 className={`${titleFont.className} text-base font-extrabold leading-5 text-[var(--menu-text)]`}>
+                    <h3 className={`text-base font-extrabold leading-5 text-[var(--menu-text)]`}>
                       {product.name}
                     </h3>
                     {product.description ? (
@@ -715,7 +755,7 @@ export const KioskMenuExperience = forwardRef<
           <div className="mx-auto flex w-full max-w-5xl items-center gap-3 rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">Tu pedido</p>
-              <p className={`${titleFont.className} truncate text-lg font-extrabold text-[var(--menu-text)]`}>
+              <p className={`truncate text-lg font-extrabold text-[var(--menu-text)]`}>
                 {cartCount} {cartCount === 1 ? 'item' : 'items'} · {cartTotalLabel}
               </p>
             </div>
@@ -740,11 +780,11 @@ export const KioskMenuExperience = forwardRef<
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-4 sm:items-center">
           <div className="w-full max-w-md rounded-[22px] bg-[var(--menu-surface)] p-5 text-[var(--menu-text)] shadow-[var(--menu-shadow)]">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--menu-text-muted)]">Agregado</p>
-            <h3 className={`${titleFont.className} mt-2 text-2xl font-extrabold tracking-[-0.04em]`}>
+            <h3 className={`mt-2 text-2xl font-extrabold tracking-[-0.04em]`}>
               {addedPrompt.productName}
             </h3>
             <p
-              className={`${hintFont.className} mt-2 text-[22px] font-semibold leading-7`}
+              className={`mt-2 text-[22px] font-semibold leading-7`}
               style={{ color: 'color-mix(in srgb, var(--menu-primary) 72%, var(--menu-text))' }}
             >
               ¿Seguimos armando el pedido o vamos a pagar?

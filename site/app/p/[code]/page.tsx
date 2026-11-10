@@ -160,8 +160,7 @@ const pageStyle: CSSProperties = {
   padding: '24px 16px 40px',
   background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)',
   color: '#0f172a',
-  fontFamily:
-    'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+  fontFamily: 'var(--font-body), "Poppins", system-ui, sans-serif',
   boxSizing: 'border-box',
 };
 

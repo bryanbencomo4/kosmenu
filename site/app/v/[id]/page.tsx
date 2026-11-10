@@ -17,6 +17,7 @@ import {
   displayProductImage,
   MENU_IMAGE_WIDTH,
   optimizeMenuImageUrl,
+  optimizeStorageImageUrl,
   resolveCategoryCover,
   resolveHeroCover,
 } from './_lib/product-image';
@@ -42,6 +43,7 @@ import {
   allowMenuShellHistoryLeave,
   attachMenuShellHistory,
   detachMenuShellHistory,
+  isMenuShellHistorySyncing,
   setMenuShellHistoryDepth,
 } from './_lib/menu-shell-history';
 import { DeliveryNoteField } from './_components/kiosk/DeliveryNoteField';
@@ -120,6 +122,7 @@ import {
 } from '../../_lib/menu-product-options';
 import { consumeRepeatOrder } from '../../_lib/repeat-order';
 import { buildClientOrderSummary } from '../../_lib/whatsapp-order-format';
+import { merchantOrderShareHref } from '../../_lib/public-site-config';
 import { normalizeOrderManagementMode } from '../../_lib/order-management-mode';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
 import { trackMenuFunnelEvent, trackPublicMenuVisit } from './_lib/track-menu-analytics';
@@ -406,7 +409,6 @@ type DeliveryPointSelectionSource = 'none' | 'business-default' | 'user';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const publicBaseUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://elmenuxfa.com').replace(/\/$/, '');
-const appBaseUrl = (process.env.NEXT_PUBLIC_APP_SITE_URL ?? 'https://app.elmenuxfa.com').replace(/\/$/, '');
 const kioskVoucherStorageKeyPrefix = 'elmenuxfa:order-success:';
 const splashLogoCacheKeyPrefix = 'elmenuxfa:splash-logo:';
 const splashNameCacheKeyPrefix = 'elmenuxfa:splash-name:';
@@ -963,15 +965,6 @@ function formatCop(value: number | null | undefined) {
   }).format(safeValue);
 }
 
-function normalizeFontName(value: string | null | undefined) {
-  const font = (value ?? '').trim();
-  return font.length > 0 ? font : '';
-}
-
-function fontFamilyCssValue(fontName: string, fallback: string) {
-  return fontName ? `"${fontName.replace(/"/g, '')}", ${fallback}` : fallback;
-}
-
 function borderRadiusByStyle(style: string | null | undefined) {
   if (style === 'pill') return '999px';
   if (style === 'sharp') return '2px';
@@ -989,18 +982,6 @@ function clampItemsPerRow(value: number | null | undefined, layoutType: 'list' |
   const fallback = layoutType === 'grid' ? 2 : 1;
   const parsed = typeof value === 'number' ? Math.round(value) : fallback;
   return Math.min(3, Math.max(1, parsed));
-}
-
-function getGoogleFontsUrl(branding: BrandingConfig | null | undefined) {
-  const titleFont = normalizeFontName(branding?.fuente_titulos);
-  const bodyFont = normalizeFontName(branding?.fuente_cuerpo);
-  if (!titleFont && !bodyFont) {
-    return '';
-  }
-
-  const safeTitle = (titleFont || 'Montserrat').replace(/\s+/g, '+');
-  const safeBody = (bodyFont || 'Roboto').replace(/\s+/g, '+');
-  return `https://fonts.googleapis.com/css2?family=${safeTitle}:wght@500;700;800&family=${safeBody}:wght@400;500;600&display=swap`;
 }
 
 function safeImageSrc(
@@ -1749,6 +1730,9 @@ function getBrowserCurrentPoint() {
   });
 }
 
+/** Survives React Strict Mode remounts so skeleton→color only runs once per menu id. */
+const bootRevealCompletedIds = new Set<string>();
+
 function readOwnerPreviewAccessTokenFromHash() {
   if (typeof window === 'undefined') {
     return '';
@@ -1779,6 +1763,12 @@ export default function PublicMenuPage() {
   const isOwnerPreview = (pathname ?? '').startsWith('/preview/');
 
   const [loading, setLoading] = useState(true);
+  const bootAlreadyRevealed =
+    Boolean(commerceIdentifier) && bootRevealCompletedIds.has(commerceIdentifier);
+  /** Soft grayscale→color handoff: keep skeleton over content, then fade it out (once). */
+  const [bootSkeletonVisible, setBootSkeletonVisible] = useState(!bootAlreadyRevealed);
+  const [bootSkeletonOpaque, setBootSkeletonOpaque] = useState(!bootAlreadyRevealed);
+  const bootRevealDoneRef = useRef(bootAlreadyRevealed);
   const [error, setError] = useState<string | null>(null);
   const [isDraftMode, setIsDraftMode] = useState(false);
   const [ownerPreviewToken, setOwnerPreviewToken] = useState<string | null>(null);
@@ -1886,6 +1876,7 @@ export default function PublicMenuPage() {
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [expandedProductImage, setExpandedProductImage] = useState<{
     src: string;
+    sourceUrl: string | null;
     previewSrc: string | null;
     alt: string;
     title: string;
@@ -2559,7 +2550,12 @@ export default function PublicMenuPage() {
     };
 
     window.addEventListener('beforeunload', onBeforeUnload);
-    attachMenuShellHistory(() => menuBrowserBackRef.current());
+    attachMenuShellHistory(() => {
+      // Ignore pops that belong to our own history sync (closing a sheet,
+      // finishing a step, etc). Those must never re-enter shell back.
+      if (isMenuShellHistorySyncing()) return;
+      menuBrowserBackRef.current();
+    });
 
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload);
@@ -2696,6 +2692,46 @@ export default function PublicMenuPage() {
       window.cancelAnimationFrame(frameId);
     };
   }, [loading, menuData, prefersReducedMotion]);
+
+  // Grayscale skeleton → color once. Keep enter-motion suppressed forever on this page so
+  // unmounting the overlay does not restart kiosk-enter (that was the “second transition”).
+  useEffect(() => {
+    if (bootRevealDoneRef.current) {
+      setBootSkeletonOpaque(false);
+      setBootSkeletonVisible(false);
+      return;
+    }
+    if (loading) return;
+
+    const markDone = () => {
+      bootRevealDoneRef.current = true;
+      if (commerceIdentifier) bootRevealCompletedIds.add(commerceIdentifier);
+    };
+
+    if (prefersReducedMotion) {
+      markDone();
+      setBootSkeletonOpaque(false);
+      setBootSkeletonVisible(false);
+      return;
+    }
+
+    let cancelled = false;
+    const fadeFrame = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      setBootSkeletonOpaque(false);
+    });
+    const hideTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      markDone();
+      setBootSkeletonVisible(false);
+    }, 380);
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(fadeFrame);
+      window.clearTimeout(hideTimer);
+    };
+  }, [loading, prefersReducedMotion, commerceIdentifier]);
 
   useEffect(() => {
     if (filteredCategorias.length === 0) {
@@ -2873,28 +2909,17 @@ export default function PublicMenuPage() {
   const itemsPerRow = clampItemsPerRow(undefined, layoutType);
   const showImages = layoutType !== 'compact';
   const borderRadius = borderRadiusByStyle(null);
-  const headingFont = normalizeFontName(menuData?.comercio.menu_font) || 'Poppins';
-
-  const googleFontsUrl = useMemo(
-    () =>
-      getGoogleFontsUrl({
-        fuente_titulos: headingFont,
-        fuente_cuerpo: 'Inter',
-      }),
-    [headingFont],
-  );
-
   const containerStyle = useMemo(
     () =>
       ({
         ...menuThemeCssVars(menuTheme),
         '--border-radius': borderRadius,
-        '--font-title': fontFamilyCssValue(headingFont, 'Poppins, sans-serif'),
-        '--font-body': fontFamilyCssValue('Inter', 'system-ui, sans-serif'),
+        '--font-title': 'var(--font-display), "Poppins", system-ui, sans-serif',
+        '--font-body': 'var(--font-body), "Poppins", system-ui, sans-serif',
         color: 'var(--menu-text)',
         fontFamily: 'var(--font-body)',
       }) as React.CSSProperties,
-    [menuTheme, borderRadius, headingFont],
+    [menuTheme, borderRadius],
   );
 
   const titleFontStyle = useMemo(() => ({ fontFamily: 'var(--font-title)' }) as React.CSSProperties, []);
@@ -2936,6 +2961,7 @@ export default function PublicMenuPage() {
     ? `${businessLat},${businessLng}`
     : comercioAddress || `${comercioNombre} ${resolvedSlug}`;
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
+  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mapQuery)}`;
   const mapEmbedUrl = hasBusinessCoords
     ? `https://www.google.com/maps?q=${encodeURIComponent(`${businessLat},${businessLng}`)}&z=16&output=embed`
     : `https://www.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=15&output=embed`;
@@ -3704,7 +3730,8 @@ export default function PublicMenuPage() {
       ),
     [checkoutSummaryItems],
   );
-  const canGoNextFromStep0 = checkoutSummaryItems.length > 0;
+  const canGoNextFromStep0 =
+    checkoutSummaryItems.length > 0 && (isAssistedMode || Boolean(kioskFulfillment));
   const canGoNextFromStep1 =
     isClientNameValid &&
     isClientTableValid &&
@@ -3746,6 +3773,7 @@ export default function PublicMenuPage() {
           ),
           coverSourceUrl: coverSource,
           productCount: categoria.productos.length,
+          role: (categoria.rol ?? '').toString().trim() || null,
         };
       }),
     [categoriasConProductos, comercioLogoUrl],
@@ -3963,7 +3991,9 @@ export default function PublicMenuPage() {
     const name = input.customerName.trim();
     const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : '';
     const payingCash = paymentLabel.toLowerCase().includes('efectivo');
-    const orderLink = (persisted.orderUrl || '').trim();
+    // Panel URL so a logged-in merchant opens the order in app.elmenuxfa.com;
+    // guests still fall through to the public /o/{code} tracker via shortCode.
+    const orderLink = merchantOrderShareHref(persisted.orderId, persisted.orderUrl);
     const orderLinkBlock = orderLink ? `\n\n🔗 Ver pedido:\n${orderLink}` : '';
     const message = proofPublicUrl
       ? `👋 Hola, mi nombre es *${name}*.\n\n🧾 Aquí está mi comprobante del pedido *${persisted.orderId}*:\n${proofPublicUrl}${orderLinkBlock}`
@@ -5369,16 +5399,7 @@ export default function PublicMenuPage() {
       (responsePayload?.data?.trackingUrl ?? `${publicBaseUrl}/orders/${encodeURIComponent(orderId)}`)
         .toString()
         .trim();
-    let smartOrderUrl = `${appBaseUrl}/orders/view/${encodeURIComponent(orderId)}?fallback=${encodeURIComponent(orderUrl)}`;
-    try {
-      const parsedOrderUrl = new URL(orderUrl);
-      const shortCodeMatch = parsedOrderUrl.pathname.match(/^\/o\/([A-Za-z0-9_-]{10})$/);
-      if (shortCodeMatch) {
-        smartOrderUrl = `${appBaseUrl}/orders/view/${encodeURIComponent(orderId)}?shortCode=${encodeURIComponent(shortCodeMatch[1])}`;
-      }
-    } catch {
-      // Keep the full fallback URL when the tracking URL is not absolute.
-    }
+    const smartOrderUrl = merchantOrderShareHref(orderId, orderUrl);
 
     const detailedMessage = responsePayload?.data?.merchantWhatsappText;
     const customizationTotalCheckout = typeof responsePayload?.data?.customizationTotalCheckout === 'number' &&
@@ -5472,7 +5493,10 @@ export default function PublicMenuPage() {
       return;
     }
     if (!kioskFulfillment) {
-      return;
+      if (checkoutFulfillmentOptions.length === 0) return;
+      if (checkoutFulfillmentOptions.length === 1) {
+        selectKioskFulfillment(checkoutFulfillmentOptions[0]);
+      }
     }
     if (
       shouldShowPreCheckoutUpsell({
@@ -5859,7 +5883,11 @@ export default function PublicMenuPage() {
       return;
     }
     if (checkoutStep === 0 && !canGoNextFromStep0) {
-      setCheckoutError('Agrega al menos un producto para continuar con el pedido.');
+      setCheckoutError(
+        checkoutSummaryItems.length > 0 && !kioskFulfillment
+          ? 'Elige cómo quieres tu pedido para continuar.'
+          : 'Agrega al menos un producto para continuar con el pedido.',
+      );
       return;
     }
     if (checkoutStep === 1 && !canGoNextFromStep1) {
@@ -6048,19 +6076,10 @@ export default function PublicMenuPage() {
   return (
     <>
       <Head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {supabaseUrl ? (
           <>
             <link rel="preconnect" href={supabaseUrl} crossOrigin="" />
             <link rel="dns-prefetch" href={supabaseUrl} />
-          </>
-        ) : null}
-        {googleFontsUrl ? (
-          <>
-            <link rel="preconnect" href="https://fonts.googleapis.com" />
-            <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-            <link rel="stylesheet" href={googleFontsUrl} />
           </>
         ) : null}
       </Head>
@@ -6340,6 +6359,20 @@ export default function PublicMenuPage() {
           }
         }
 
+        /* Skeleton → color: suppress staggered entrances while the grayscale overlay fades */
+        main[data-kiosk-boot-reveal] .kos-motion-enter,
+        main[data-kiosk-boot-reveal] .kos-motion-enter[data-motion-in='true'],
+        main[data-kiosk-boot-reveal] .kos-float-subtle,
+        main[data-kiosk-boot-reveal] .kos-loader-aura,
+        main[data-kiosk-boot-reveal] .kos-loader-orbit,
+        main[data-kiosk-boot-reveal] .kos-loader-orbit-reverse,
+        main[data-kiosk-boot-reveal] .kos-loader-dot {
+          animation: none !important;
+          opacity: 1 !important;
+          transform: none !important;
+          transition-duration: 1ms !important;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .kos-motion-enter,
           .kos-motion-enter[data-motion-in='true'],
@@ -6378,6 +6411,7 @@ export default function PublicMenuPage() {
       <main
         className={`min-h-[100svh] min-h-[100dvh] ${isOwnerPreview ? 'pt-12' : ''}`}
         data-menu-theme={themeMode}
+        data-kiosk-boot-reveal="1"
         style={{
           ...containerStyle,
           background: 'var(--menu-background)',
@@ -6431,6 +6465,7 @@ export default function PublicMenuPage() {
           onSelectFulfillment={selectKioskFulfillment}
           onResetFulfillment={resetKioskFulfillment}
           onEnterCatalog={enterCatalogMode}
+          directionsUrl={directionsUrl}
           onLeaveCatalog={leaveCatalogMode}
           categories={kioskCategories}
           productsByCategory={kioskProductsByCategory}
@@ -6558,7 +6593,7 @@ export default function PublicMenuPage() {
           open={productOptionsSheet.open && !kioskVoucher}
           canAdd={
             !scheduleClosed &&
-            (catalogMode || Boolean(kioskFulfillment)) &&
+            (catalogMode || isAssistedMode || checkoutFulfillmentOptions.length > 0) &&
             productById.get(productOptionsSheet.productId ?? '')?.disponible !== false
           }
           product={
@@ -6601,19 +6636,22 @@ export default function PublicMenuPage() {
             if (!productId) return;
             const product = productById.get(productId);
             if (!product) return;
+            const original = (product.imagen_url ?? '').trim();
             const previewSrc = displayProductImage(
-              product.imagen_url,
+              original,
               comercioLogoUrl,
               MENU_IMAGE_WIDTH.sheet,
             );
-            const src = displayProductImage(
-              product.imagen_url,
-              comercioLogoUrl,
-              MENU_IMAGE_WIDTH.lightbox,
-            );
+            // Prefer hot transform for the lightbox — cold WebP may 404 until
+            // variants are generated after a fresh upload.
+            const src =
+              optimizeStorageImageUrl(original, MENU_IMAGE_WIDTH.lightbox, 82) ||
+              original ||
+              displayProductImage(original, comercioLogoUrl, MENU_IMAGE_WIDTH.lightbox);
             if (!src) return;
             setExpandedProductImage({
               src,
+              sourceUrl: original || null,
               previewSrc,
               alt: product.nombre,
               title: product.nombre,
@@ -6640,6 +6678,7 @@ export default function PublicMenuPage() {
         {expandedProductImage ? (
           <ProductImageLightbox
             src={expandedProductImage.src}
+            sourceUrl={expandedProductImage.sourceUrl}
             previewSrc={expandedProductImage.previewSrc}
             alt={expandedProductImage.alt}
             title={expandedProductImage.title}
@@ -7219,6 +7258,34 @@ export default function PublicMenuPage() {
           >
                   {checkoutStep === 0 ? (
                     <div className="space-y-4">
+                      {!isAssistedMode && checkoutFulfillmentOptions.length > 0 ? (
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
+                          <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                            Cómo lo quieres
+                          </p>
+                          <div className="mt-3 grid gap-2">
+                            {checkoutFulfillmentOptions.map((option) => {
+                              const selected = kioskFulfillment === option;
+                              return (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  onClick={() => changeCheckoutFulfillment(option)}
+                                  className="flex min-h-12 items-center justify-between rounded-2xl border px-4 text-left text-sm font-black"
+                                  style={{
+                                    borderColor: selected ? 'var(--primary-color)' : 'var(--menu-border)',
+                                    backgroundColor: selected ? 'color-mix(in srgb, var(--primary-color) 12%, var(--menu-surface))' : 'var(--menu-surface-alt)',
+                                    color: 'var(--menu-text)',
+                                  }}
+                                >
+                                  {FULFILLMENT_LABEL[option]}
+                                  {selected ? <span className="text-xs font-bold" style={{ color: 'var(--primary-color)' }}>Elegido</span> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
                       {checkoutSummaryItems.length > 0 ? (
                         <div className="space-y-3">
                           {checkoutSummaryItems.map((item, index) => (
@@ -8626,6 +8693,19 @@ export default function PublicMenuPage() {
         ) : null}
 
       </main>
+      {bootSkeletonVisible ? (
+        <div
+          className="fixed inset-0 z-[220]"
+          style={{
+            opacity: bootSkeletonOpaque ? 1 : 0,
+            transition: prefersReducedMotion ? 'none' : 'opacity 360ms ease',
+            pointerEvents: 'none',
+          }}
+          aria-hidden
+        >
+          <PublicMenuSkeletonLoader businessName={comercioNombre} />
+        </div>
+      ) : null}
     </>
   );
 }

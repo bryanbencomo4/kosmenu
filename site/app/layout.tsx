@@ -1,23 +1,11 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
-import { Montserrat, Roboto } from 'next/font/google';
 
+import { appFont } from './_lib/fonts';
 import { publicSiteUrl } from './_lib/public-site-config';
 import { SupabaseRecoveryRedirectGuard } from './_components/SupabaseRecoveryRedirectGuard';
 import { CookieConsentBanner } from '../components/CookieConsentBanner';
 import { WhatsAppChatWidget } from '../components/WhatsAppChatWidget';
-
-const displayFont = Montserrat({
-  subsets: ['latin'],
-  variable: '--font-display',
-  weight: ['600', '700', '800'],
-});
-
-const bodyFont = Roboto({
-  subsets: ['latin'],
-  variable: '--font-body',
-  weight: ['400', '500', '700'],
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL(publicSiteUrl),
@@ -57,8 +45,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <body className={`${displayFont.variable} ${bodyFont.variable}`}>
+    <html lang="es" className={appFont.variable}>
+      <body className={appFont.className}>
         <SupabaseRecoveryRedirectGuard />
         {children}
         <WhatsAppChatWidget />

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Caveat, Manrope } from 'next/font/google';
 import {
   Banknote,
   Camera,
@@ -19,16 +18,6 @@ import { prepareComprobanteFile } from '../../../../_lib/prepare-comprobante-fil
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import type { CatalogPaymentGroup } from '../upsell/PreCheckoutUpsellSheet';
 import { KioskImage } from './KioskImage';
-
-const titleFont = Manrope({
-  subsets: ['latin'],
-  weight: ['700', '800'],
-});
-
-const scriptFont = Caveat({
-  subsets: ['latin'],
-  weight: ['500', '600'],
-});
 
 export type CatalogReadyItem = {
   name: string;
@@ -293,7 +282,7 @@ export function KioskCatalogReady({
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className={`${titleFont.className} truncate text-[18px] font-extrabold tracking-[-0.03em]`}>
+            <h1 className={`truncate text-[18px] font-extrabold tracking-[-0.03em]`}>
               Resumen del pedido
             </h1>
             <span
@@ -333,7 +322,7 @@ export function KioskCatalogReady({
                     Al terminar de comer
                   </p>
                   <p
-                    className={`${scriptFont.className} mt-0.5 text-[1.45rem] leading-none`}
+                    className={`italic font-extrabold mt-0.5 text-[1.45rem] leading-none`}
                     style={{ color: '#128C7E' }}
                   >
                     {whatsappSent ? 'Listo, ya avisaste' : 'Avisa por WhatsApp'}
@@ -372,7 +361,7 @@ export function KioskCatalogReady({
                       WhatsApp del local
                     </span>
                     <span
-                      className={`${titleFont.className} mt-0.5 block text-[17px] font-extrabold tracking-[-0.02em] text-[var(--menu-text)]`}
+                      className={`mt-0.5 block text-[17px] font-extrabold tracking-[-0.02em] text-[var(--menu-text)]`}
                     >
                       {waDisplay}
                     </span>
@@ -428,7 +417,7 @@ export function KioskCatalogReady({
           </ul>
           <div className="mt-4 flex items-center justify-between border-t border-dashed border-[var(--menu-border)] pt-3">
             <span className="text-sm font-semibold text-[var(--menu-text-muted)]">Total</span>
-            <span className={`${titleFont.className} text-xl font-extrabold tracking-[-0.04em]`}>
+            <span className={`text-xl font-extrabold tracking-[-0.04em]`}>
               {totalLabel}
             </span>
           </div>
@@ -505,7 +494,7 @@ export function KioskCatalogReady({
                 </p>
                 <h2
                   id="catalog-wa-title"
-                  className={`${titleFont.className} mt-0.5 text-[18px] font-extrabold tracking-[-0.03em]`}
+                  className={`mt-0.5 text-[18px] font-extrabold tracking-[-0.03em]`}
                 >
                   Cómo vas a pagar
                 </h2>

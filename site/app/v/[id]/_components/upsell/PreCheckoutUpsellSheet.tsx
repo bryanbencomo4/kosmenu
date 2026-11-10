@@ -1,6 +1,5 @@
 'use client';
 
-import { Caveat } from 'next/font/google';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Minus, Plus, ShoppingBag, ShoppingCart, Trash2, X } from 'lucide-react';
 
@@ -12,11 +11,6 @@ import {
   UpsellOptionConfigurator,
   type UpsellConfigurableProduct,
 } from './UpsellOptionConfigurator';
-
-const hintFont = Caveat({
-  subsets: ['latin'],
-  weight: ['500', '600'],
-});
 
 const VISIBLE_PRODUCTS = 4;
 
@@ -464,7 +458,7 @@ export function PreCheckoutUpsellSheet({
               <div className="mb-3 flex items-start justify-between gap-3">
                 <h2
                   id="pre-checkout-upsell-title"
-                  className={`${hintFont.className} max-w-[22rem] text-[30px] font-semibold leading-[1.12] sm:max-w-[30rem] sm:text-[36px] lg:text-[40px]`}
+                  className={`italic font-extrabold max-w-[22rem] text-[30px] font-semibold leading-[1.12] sm:max-w-[30rem] sm:text-[36px] lg:text-[40px]`}
                 >
                   {paymentsView ? (
                     <>

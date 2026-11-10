@@ -1,14 +1,8 @@
 'use client';
 
-import { Manrope } from 'next/font/google';
 import { Check } from 'lucide-react';
 
 import { FULFILLMENT_LABEL, type KioskVoucherData } from './kiosk-types';
-
-const titleFont = Manrope({
-  subsets: ['latin'],
-  weight: ['700', '800'],
-});
 
 type KioskVoucherProps = {
   voucher: KioskVoucherData;
@@ -63,7 +57,7 @@ export function KioskVoucher({
             <Check className="h-3.5 w-3.5" strokeWidth={2.6} />
             {voucher.managementMode === 'whatsapp_manual' ? 'Gestionado por WhatsApp' : 'Pedido recibido'}
           </span>
-          <h1 className={`${titleFont.className} mt-3 text-[32px] font-extrabold tracking-[-0.05em] text-[var(--menu-text)]`}>
+          <h1 className={`mt-3 text-[32px] font-extrabold tracking-[-0.05em] text-[var(--menu-text)]`}>
             {voucher.orderId}
           </h1>
           <p className="mt-1 text-sm font-medium text-[var(--menu-text-muted)]">
@@ -86,7 +80,7 @@ export function KioskVoucher({
           </ul>
           <div className="mt-5 flex items-center justify-between border-t border-dashed border-[var(--menu-border)] pt-4">
             <span className="text-sm font-semibold text-[var(--menu-text-muted)]">Total</span>
-            <span className={`${titleFont.className} text-2xl font-extrabold tracking-[-0.04em] text-[var(--menu-text)]`}>
+            <span className={`text-2xl font-extrabold tracking-[-0.04em] text-[var(--menu-text)]`}>
               {voucher.totalLabel}
             </span>
           </div>

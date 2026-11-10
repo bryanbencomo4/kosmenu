@@ -73,6 +73,8 @@ type KioskImageProps = {
    * @deprecated Prefer cold WebP. Hot `/render/` is slower under concurrency and caches only 1h.
    */
   preferHot?: boolean;
+  /** Fires once the sharp layer is ready (`true`) or the cascade gave up (`false`). */
+  onReady?: (ok: boolean) => void;
 };
 
 function queueLazyVariants(imageUrl: string) {
@@ -136,10 +138,14 @@ export function KioskImage({
   fit = 'cover',
   showBlurFill,
   preferHot = false,
+  onReady,
 }: KioskImageProps) {
   const imageRef = useRef<HTMLImageElement | null>(null);
   const blurRef = useRef<HTMLImageElement | null>(null);
   const loadGenRef = useRef(0);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  const readyNotifiedGenRef = useRef(0);
   /** Wall clock for the whole attempt cycle (phases + one auto-retry). Manual retry resets. */
   const attemptStartedAtRef = useRef(0);
   const cascadeStartedAtRef = useRef(0);
@@ -365,6 +371,13 @@ export function KioskImage({
     clearPhaseTimer();
     clearRetryTimer();
   }, []);
+
+  useEffect(() => {
+    if (!sharpReady) return;
+    if (readyNotifiedGenRef.current === loadGenRef.current) return;
+    readyNotifiedGenRef.current = loadGenRef.current;
+    onReadyRef.current?.(!failed && Boolean(activeSrc));
+  }, [sharpReady, failed, activeSrc]);
 
   function handleSharpLoad() {
     if (!isCurrentImageResponse(imageRef.current)) return;

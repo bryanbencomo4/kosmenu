@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 vi.stubGlobal('React', React);
 afterAll(() => vi.unstubAllGlobals());
 
-vi.mock('next/font/google', () => ({ Manrope: () => ({ className: 'test-font' }) }));
+vi.mock('next/font/google', () => ({ Poppins: () => ({ className: 'test-font', variable: 'test-font-var' }) }));
 
 import { OrderReceipt } from '../app/orders/[orderId]/_components/OrderReceipt';
 
@@ -34,7 +34,7 @@ const props: ComponentProps<typeof OrderReceipt> = {
   serviceRatingLoading: false, serviceRatingMessage: '', onRateService: () => {},
   colors: {
     primary: '#FFAA00', secondary: '#111111', background: '#FFFFFF', surface: '#FFFFFF',
-    onPrimary: '#111111', titleFont: 'Manrope', bodyFont: 'Manrope',
+    onPrimary: '#111111', titleFont: 'Poppins', bodyFont: 'Poppins',
   },
 };
 

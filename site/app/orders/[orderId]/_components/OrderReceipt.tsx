@@ -1,14 +1,8 @@
 'use client';
 
-import { Manrope } from 'next/font/google';
 import Link from 'next/link';
 import { ArrowLeft, Check, CheckCircle2, Clock3, MapPin, Package, RotateCcw, Star, Truck } from 'lucide-react';
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-
-const headingFont = Manrope({
-  subsets: ['latin'],
-  weight: ['700', '800'],
-});
 
 type TimelineItem = {
   key: string;
@@ -288,7 +282,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
               onPrimary={props.colors.onPrimary}
             />
           )}
-          <p className={`${headingFont.className} mt-3 text-[22px] font-extrabold leading-tight tracking-[-0.04em] text-[#111827]`}>
+          <p className={`mt-3 text-[22px] font-extrabold leading-tight tracking-[-0.04em] text-[#111827]`}>
             {props.businessName || 'Comercio'}
           </p>
           <p className="mt-1 text-sm text-slate-500">
@@ -314,7 +308,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
             {copy.title}
           </span>
           <p
-            className={`${headingFont.className} mt-2 ${manualManagement ? 'text-base leading-6 tracking-normal' : 'text-[22px] leading-7 tracking-[-0.04em]'} font-extrabold text-[#111827]`}
+            className={`mt-2 ${manualManagement ? 'text-base leading-6 tracking-normal' : 'text-[22px] leading-7 tracking-[-0.04em]'} font-extrabold text-[#111827]`}
             style={{ fontFamily: props.colors.titleFont }}
           >
             {copy.headline}
@@ -410,7 +404,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
                 <Star className="h-5 w-5 fill-amber-400" />
               </span>
               <div className="min-w-0 flex-1">
-                <h2 className={`${headingFont.className} text-base font-extrabold text-slate-900`}>
+                <h2 className={`text-base font-extrabold text-slate-900`}>
                   {props.customerServiceRating !== null && !editingServiceRating
                     ? 'Gracias por calificar'
                     : '¿Cómo fue el servicio?'}

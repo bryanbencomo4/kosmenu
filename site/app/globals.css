@@ -23,13 +23,15 @@
 }
 
 :root {
+  /* Body shares the same next/font Poppins family as display (no second download). */
+  --font-body: var(--font-display);
   --brand-primary: var(--color-accent);
   --brand-on-primary: #ffffff;
   --brand-background: var(--color-canvas);
   --brand-surface: var(--color-surface);
   --brand-surface-muted: var(--color-surface-muted);
-  --brand-title-font: var(--font-display, 'Montserrat', sans-serif);
-  --brand-body-font: var(--font-body, 'Roboto', sans-serif);
+  --brand-title-font: var(--font-display), 'Poppins', system-ui, sans-serif;
+  --brand-body-font: var(--font-body), 'Poppins', system-ui, sans-serif;
 }
 
 html,
@@ -41,8 +43,18 @@ body {
   background: var(--brand-background);
   color: var(--color-text-strong);
   font-family: var(--brand-body-font);
+  font-weight: 400;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Inherit Poppins on form controls (browsers often reset these to system UI). */
+button,
+input,
+select,
+textarea,
+optgroup {
+  font: inherit;
 }
 
 * {

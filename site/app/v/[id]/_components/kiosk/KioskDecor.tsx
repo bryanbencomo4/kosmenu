@@ -3,11 +3,29 @@
 type KioskDecorProps = {
   density?: 'full' | 'lite';
   tone?: 'brand' | 'muted';
+  /** Home frame: solid corner arcs and the pizza mark from the kiosk mock. */
+  variant?: 'line' | 'home';
 };
 
-export function KioskDecor({ density = 'full', tone = 'brand' }: KioskDecorProps) {
+export function KioskDecor({ density = 'full', tone = 'brand', variant = 'line' }: KioskDecorProps) {
   const stroke = tone === 'muted' ? 'var(--menu-border)' : 'var(--menu-primary)';
   const showSecondary = density === 'full';
+
+  if (variant === 'home') {
+    // Home hero: soft brand glow only — no line-art figures over the product photo.
+    return (
+      <div className="pointer-events-none absolute inset-0 select-none overflow-hidden" aria-hidden>
+        <div
+          className="absolute -left-10 top-8 h-40 w-40 rounded-full opacity-40 blur-3xl"
+          style={{ background: 'color-mix(in srgb, var(--menu-primary) 36%, transparent)' }}
+        />
+        <div
+          className="absolute -right-8 top-2 h-36 w-36 rounded-full opacity-30 blur-3xl"
+          style={{ background: 'color-mix(in srgb, var(--menu-primary) 28%, transparent)' }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="pointer-events-none absolute inset-0 select-none overflow-hidden" aria-hidden>
@@ -91,6 +109,10 @@ export function KioskMotionStyles() {
       .kiosk-footer-enter {
         animation: kiosk-footer-in 560ms cubic-bezier(0.22, 1, 0.36, 1) 160ms both;
       }
+      .kiosk-brush-enter {
+        animation: kiosk-brush-in 520ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
+        transform-origin: center;
+      }
       .kiosk-card .kiosk-chevron {
         transition: transform 200ms ease;
       }
@@ -105,8 +127,21 @@ export function KioskMotionStyles() {
         from { opacity: 0; transform: translateY(18px); }
         to { opacity: 1; transform: translateY(0); }
       }
+      @keyframes kiosk-brush-in {
+        from { opacity: 0; transform: scaleX(0.78) scaleY(0.92); }
+        to { opacity: 1; transform: scaleX(1) scaleY(1); }
+      }
       @media (prefers-reduced-motion: reduce) {
-        .kiosk-enter, .kiosk-card, .kiosk-footer-enter { animation: none; }
+        .kiosk-enter, .kiosk-card, .kiosk-footer-enter, .kiosk-brush-enter { animation: none; }
+      }
+      /* First paint after skeleton: color reveal only — no entrance motion */
+      [data-kiosk-boot-reveal] .kiosk-enter,
+      [data-kiosk-boot-reveal] .kiosk-card,
+      [data-kiosk-boot-reveal] .kiosk-footer-enter,
+      [data-kiosk-boot-reveal] .kiosk-brush-enter {
+        animation: none !important;
+        opacity: 1 !important;
+        transform: none !important;
       }
     `}</style>
   );

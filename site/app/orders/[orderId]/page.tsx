@@ -357,11 +357,6 @@ function readableOnColor(hex: string) {
   return luminance > 0.62 ? '#111827' : '#FFFFFF';
 }
 
-function fontFamilyCssValue(primary: string | null | undefined, fallback: string) {
-  const value = (primary ?? '').toString().trim();
-  return value ? `${value}, ${fallback}` : fallback;
-}
-
 function convertFromCop(amountInCop: number, currency: string, exchangeRate: number) {
   const safeAmount = Number.isFinite(amountInCop) ? amountInCop : 0;
   const normalizedCurrency = normalizeCurrencyCode(currency);
@@ -907,8 +902,9 @@ function OrderTrackingPageInner() {
   const trackingOnPrimary = branding?.colores_personalizados?.text_on_primary
     ? normalizeHexColor(branding.colores_personalizados.text_on_primary, readableOnColor(trackingPrimary))
     : readableOnColor(trackingPrimary);
-  const titleFontFamily = fontFamilyCssValue(branding?.fuente_titulos, 'Montserrat, sans-serif');
-  const bodyFontFamily = fontFamilyCssValue(branding?.fuente_cuerpo, 'Roboto, sans-serif');
+  // Poppins from root next/font — keep CSS vars, never load merchant Google Fonts at runtime.
+  const titleFontFamily = 'var(--font-display), "Poppins", system-ui, sans-serif';
+  const bodyFontFamily = 'var(--font-body), "Poppins", system-ui, sans-serif';
 
   useEffect(() => {
     const slug = (comercio?.slug ?? '').trim();

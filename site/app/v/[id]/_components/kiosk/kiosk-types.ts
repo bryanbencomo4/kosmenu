@@ -10,6 +10,8 @@ export type KioskCategory = {
   /** Original Storage URL for cold-variant upgrade / hot fallback. */
   coverSourceUrl?: string | null;
   productCount: number;
+  /** Merchant category role (`normal`, `bebida`, …). Null/empty ≈ main/normal. */
+  role?: string | null;
 };
 
 export type KioskProduct = {

@@ -1,17 +1,11 @@
 'use client';
 
-import { Manrope } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { ArrowLeft, X } from 'lucide-react';
 
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import { KioskDecor, KioskMotionStyles } from './KioskDecor';
 import type { KioskFulfillment } from './kiosk-types';
-
-const titleFont = Manrope({
-  subsets: ['latin'],
-  weight: ['700', '800'],
-});
 
 export type KioskCheckoutStep = {
   id: number;
@@ -78,7 +72,7 @@ export function KioskCheckout({
             <X className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <h2 className={`${titleFont.className} truncate text-xl font-extrabold tracking-[-0.04em] text-[var(--menu-text)]`}>
+            <h2 className={`truncate text-xl font-extrabold tracking-[-0.04em] text-[var(--menu-text)]`}>
               {title}
             </h2>
             <p className="truncate text-sm font-medium text-[var(--menu-text-muted)]">{subtitle}</p>
@@ -144,7 +138,7 @@ export function KioskCheckout({
         <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3 rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">Total</p>
-            <p className={`${titleFont.className} text-[28px] font-extrabold tracking-[-0.05em] text-[var(--menu-text)]`}>
+            <p className={`text-[28px] font-extrabold tracking-[-0.05em] text-[var(--menu-text)]`}>
               {totalLabel}
             </p>
             <p className="text-xs font-medium text-[var(--menu-text-muted)]">{itemsLabel}</p>
