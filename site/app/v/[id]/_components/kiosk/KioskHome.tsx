@@ -353,96 +353,119 @@ export function KioskHome({
     >
       <KioskMotionStyles />
 
-      <div className="kiosk-scrollbar relative z-10 mx-auto flex min-h-0 w-full max-w-[480px] flex-1 flex-col overflow-y-auto overscroll-none sm:max-w-[520px]">
-        {/* Dark hero: photo fills under the N-seam (reference composition) */}
-        <div className="relative shrink-0">
-          <div
-            className="relative min-h-[min(36vh,300px)] overflow-hidden px-5 pb-16 pt-3.5 sm:min-h-[320px] sm:px-6 sm:pb-[4.5rem] sm:pt-5"
-            style={{
-              background:
-                'linear-gradient(165deg, #050607 0%, #101218 42%, color-mix(in srgb, var(--menu-primary) 24%, #0a0b0e) 100%)',
-            }}
-          >
-            <HeroProductBackdrop
-              slides={heroImages}
-              logoUrl={logoUrl}
-              businessName={businessName}
-              initialLetter={initialLetter}
-            />
-            <div
-              className="absolute inset-0 z-[1]"
-              style={{
-                background: hasHeroPhotos
-                  ? 'linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.06) 40%, rgba(0,0,0,0.14) 72%, color-mix(in srgb, var(--menu-primary) 8%, rgba(0,0,0,0.22)) 100%)'
-                  : 'radial-gradient(110% 90% at 82% 12%, color-mix(in srgb, var(--menu-primary) 42%, transparent), transparent 52%), radial-gradient(80% 70% at 8% 78%, color-mix(in srgb, var(--menu-primary) 28%, transparent), transparent 58%)',
-              }}
-              aria-hidden
-            />
-            <div className="absolute inset-0 z-[2]">
-              <KioskDecor variant="home" />
-            </div>
-            <div className="relative z-30 flex items-center justify-start">
-              <HomeMenuButton onOpen={() => setHomeMenuOpen(true)} />
-            </div>
-            <div className="relative z-10 mt-5 mb-2 flex items-center justify-center px-2 sm:mt-6">
-              <HeroHeadline />
-            </div>
-            {/* Seam inside hero — crest cuts the photo, no white gap */}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[15]">
-              <HeaderSeamWave />
-            </div>
-          </div>
+      {/* Desktop: brand stage behind a phone-width home panel (avoids sparse full-bleed white). */}
+      <div
+        className="pointer-events-none absolute inset-0 hidden lg:block"
+        style={{
+          background: `
+            radial-gradient(90% 70% at 50% 0%, color-mix(in srgb, var(--menu-primary) 70%, white), transparent 58%),
+            radial-gradient(70% 55% at 12% 88%, color-mix(in srgb, var(--menu-accent) 35%, transparent), transparent 60%),
+            linear-gradient(160deg,
+              color-mix(in srgb, var(--menu-primary) 88%, #0b1210) 0%,
+              var(--menu-primary) 48%,
+              color-mix(in srgb, var(--menu-primary) 78%, var(--menu-accent)) 100%)
+          `,
+        }}
+        aria-hidden
+      />
 
-          {/* Logo mid sits on the seam crest */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex translate-y-[42%] justify-center">
-            <div className="pointer-events-auto">
-              <RestaurantLogo logoUrl={logoUrl} businessName={businessName} initialLetter={initialLetter} />
-            </div>
-          </div>
-        </div>
-
-        {/* Light commercial panel — compact stack like the reference */}
+      <div className="relative z-10 mx-auto flex min-h-0 w-full flex-1 flex-col lg:items-center lg:justify-center lg:px-8 lg:py-6">
         <div
-          className="relative z-10 flex min-h-0 flex-1 flex-col px-5 pb-5 pt-[5.25rem] sm:px-6 sm:pb-6 sm:pt-[5.75rem]"
+          className="kiosk-home-shell kiosk-scrollbar relative mx-auto flex min-h-0 w-full max-w-[430px] flex-1 flex-col overflow-hidden overscroll-none lg:max-h-[min(52rem,calc(100dvh-3rem))] lg:flex-none lg:rounded-[2rem] lg:shadow-[0_32px_90px_rgba(0,0,0,0.32)]"
           style={{ backgroundColor: 'var(--menu-background)' }}
         >
-          <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col items-center justify-center gap-0">
-            <RestaurantMeta
-              businessName={businessName}
-              nameFontClassName=""
-              showRating={homeConfig.calificacion}
-              ratingAverage={ratingAverage}
-              ratingCount={ratingCount}
-            />
-            <div className="mt-2.5">
-              <StatusBadge isOpen={isOpen} openCaption={openCaption} closedCaption={closedCaption} />
-            </div>
-            {coverageLabels.length > 0 ? (
-              <div className="mt-3">
-                <OperatingCoverage stateLabels={coverageLabels} themeStyle={sheetTheme} />
-              </div>
-            ) : null}
-
-            <div className="mt-5 w-full sm:mt-6">
-              <PrimaryCTA
-                onClick={() => {
-                  if (catalogOnlySession) onOpenCatalog();
-                  else onBrowseMenu();
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none">
+            {/* Dark hero: photo fills under the N-seam (reference composition) */}
+            <div className="relative shrink-0">
+              <div
+                className="relative min-h-[min(36vh,300px)] overflow-hidden px-5 pb-16 pt-3.5 sm:min-h-[300px] sm:px-6 sm:pb-[4.5rem] sm:pt-5 lg:min-h-[280px]"
+                style={{
+                  background:
+                    'linear-gradient(165deg, #050607 0%, #101218 42%, color-mix(in srgb, var(--menu-primary) 24%, #0a0b0e) 100%)',
                 }}
-              />
+              >
+                <HeroProductBackdrop
+                  slides={heroImages}
+                  logoUrl={logoUrl}
+                  businessName={businessName}
+                  initialLetter={initialLetter}
+                />
+                <div
+                  className="absolute inset-0 z-[1]"
+                  style={{
+                    background: hasHeroPhotos
+                      ? 'linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.06) 40%, rgba(0,0,0,0.14) 72%, color-mix(in srgb, var(--menu-primary) 8%, rgba(0,0,0,0.22)) 100%)'
+                      : 'radial-gradient(110% 90% at 82% 12%, color-mix(in srgb, var(--menu-primary) 42%, transparent), transparent 52%), radial-gradient(80% 70% at 8% 78%, color-mix(in srgb, var(--menu-primary) 28%, transparent), transparent 58%)',
+                  }}
+                  aria-hidden
+                />
+                <div className="absolute inset-0 z-[2]">
+                  <KioskDecor variant="home" />
+                </div>
+                <div className="relative z-30 flex items-center justify-start">
+                  <HomeMenuButton onOpen={() => setHomeMenuOpen(true)} />
+                </div>
+                <div className="relative z-10 mt-5 mb-2 flex items-center justify-center px-2 sm:mt-6">
+                  <HeroHeadline />
+                </div>
+                {/* Seam inside hero — crest cuts the photo, no white gap */}
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[15]">
+                  <HeaderSeamWave />
+                </div>
+              </div>
+
+              {/* Logo mid sits on the seam crest */}
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex translate-y-[42%] justify-center">
+                <div className="pointer-events-auto">
+                  <RestaurantLogo logoUrl={logoUrl} businessName={businessName} initialLetter={initialLetter} />
+                </div>
+              </div>
             </div>
-            <div className="mt-3 w-full">
-              <ActionCards
-                mapsHref={mapsHref}
-                locationFallback={locationLabel?.trim() || 'Sin ubicación'}
-                onOpenPayments={() => setPaymentSheetOpen(true)}
-              />
+
+            {/* Light commercial panel — compact stack like the reference */}
+            <div
+              className="relative z-10 flex min-h-0 flex-1 flex-col px-5 pb-5 pt-[5.25rem] sm:px-6 sm:pb-6 sm:pt-[5.75rem]"
+              style={{ backgroundColor: 'var(--menu-background)' }}
+            >
+              <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col items-center justify-center gap-0">
+                <RestaurantMeta
+                  businessName={businessName}
+                  nameFontClassName=""
+                  showRating={homeConfig.calificacion}
+                  ratingAverage={ratingAverage}
+                  ratingCount={ratingCount}
+                />
+                <div className="mt-2.5">
+                  <StatusBadge isOpen={isOpen} openCaption={openCaption} closedCaption={closedCaption} />
+                </div>
+                {coverageLabels.length > 0 ? (
+                  <div className="mt-3">
+                    <OperatingCoverage stateLabels={coverageLabels} themeStyle={sheetTheme} />
+                  </div>
+                ) : null}
+
+                <div className="mt-5 w-full sm:mt-6">
+                  <PrimaryCTA
+                    onClick={() => {
+                      if (catalogOnlySession) onOpenCatalog();
+                      else onBrowseMenu();
+                    }}
+                  />
+                </div>
+                <div className="mt-3 w-full">
+                  <ActionCards
+                    mapsHref={mapsHref}
+                    locationFallback={locationLabel?.trim() || 'Sin ubicación'}
+                    onOpenPayments={() => setPaymentSheetOpen(true)}
+                  />
+                </div>
+              </div>
             </div>
           </div>
+
+          <FooterWave />
         </div>
       </div>
-
-      <FooterWave />
       {homeMenuOpen
         ? createPortal(
             <HomeOptionsSheet
