@@ -18,7 +18,7 @@ import { KioskImage } from './KioskImage';
 import { pickKioskGreeting } from './kiosk-greetings';
 import type { MenuThemeMode } from '../../_lib/menu-theme';
 
-const FALLBACK_GREETING = '¿Listo para pedir algo rico?';
+const FALLBACK_GREETING = '¿Listo para pedir algo rico? 😋';
 
 /** Split greeting for brush layout: white lead + secondary accent line. */
 function splitGreetingLines(greeting: string): { lead: string; accent: string } {
