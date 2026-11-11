@@ -20,6 +20,44 @@ import type { MenuThemeMode } from '../../_lib/menu-theme';
 
 const FALLBACK_GREETING = '¿Listo para pedir algo rico? 😋';
 
+/** Bright accent yellow matching Flutter AccentRays reference. */
+const ACCENT_RAY_COLOR = '#FFCC00';
+
+/**
+ * Three rounded yellow strokes — vector equivalent of Flutter CustomPainter AccentRays.
+ * Zero assets, no animation, pointer-events none.
+ */
+export function AccentRays({
+  mirrored = false,
+  size = 44,
+  className = '',
+}: {
+  mirrored?: boolean;
+  size?: number;
+  className?: string;
+}) {
+  const height = size * 1.08;
+  const stroke = 12.5; // viewBox width 100 → size.width * 0.125
+  return (
+    <svg
+      width={size}
+      height={height}
+      viewBox="0 0 100 108"
+      fill="none"
+      aria-hidden
+      className={`pointer-events-none select-none ${className}`.trim()}
+      style={{ transform: mirrored ? 'scaleX(-1)' : undefined }}
+    >
+      <g stroke={ACCENT_RAY_COLOR} strokeWidth={stroke} strokeLinecap="round">
+        {/* Same normalized segments as Flutter _AccentRaysPainter */}
+        <line x1="10" y1="64" x2="38" y2="80" />
+        <line x1="27" y1="27" x2="51" y2="52" />
+        <line x1="69" y1="6" x2="76" y2="35" />
+      </g>
+    </svg>
+  );
+}
+
 /** Split greeting for brush layout: white lead + secondary accent line. */
 function splitGreetingLines(greeting: string): { lead: string; accent: string } {
   const text = greeting.trim();
@@ -167,23 +205,11 @@ export function HeroHeadline({ fontClassName = '' }: { fontClassName?: string } 
 
   return (
     <div
-      className="kiosk-enter relative mx-auto w-[min(88vw,21.5rem)] -rotate-[3deg] sm:w-[23rem]"
+      className="kiosk-enter relative mx-auto w-[min(90vw,23rem)] -rotate-[3deg] sm:w-[24.5rem]"
       style={{ animationDelay: '40ms' }}
     >
-      {/* Accent marks (follow the same diagonal as the stack) */}
-      <svg
-        className="pointer-events-none absolute -left-0.5 top-[18%] z-[2] h-9 w-7 sm:-left-1 sm:h-10 sm:w-8"
-        viewBox="0 0 28 36"
-        fill="none"
-        aria-hidden
-      >
-        <path d="M8 30L3 16" stroke={secondary} strokeWidth="2.6" strokeLinecap="round" />
-        <path d="M15 26L11 8" stroke={secondary} strokeWidth="2.6" strokeLinecap="round" />
-        <path d="M22 28L20 12" stroke={secondary} strokeWidth="2.4" strokeLinecap="round" />
-      </svg>
-
-      {/* Stack: masked brush (merchant color) + editable rotating greeting. */}
-      <div className="relative flex min-h-[5.1rem] items-center justify-center sm:min-h-[5.6rem]">
+      {/* Stack: masked brush + greeting + AccentRays (left of title, like Flutter banner). */}
+      <div className="relative flex min-h-[5.4rem] items-center justify-center overflow-visible sm:min-h-[5.9rem]">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-x-0 top-1/2 w-full -translate-y-1/2 drop-shadow-[0_10px_18px_rgba(0,0,0,0.35)]"
@@ -196,8 +222,16 @@ export function HeroHeadline({ fontClassName = '' }: { fontClassName?: string } 
             }}
           />
         </div>
+        {/* Rays sit on the brush, left of the centered title — not Unicode dashes. */}
+        <div
+          className="pointer-events-none absolute left-[2%] top-[8%] z-[2] sm:left-[1%] sm:top-[6%]"
+          aria-hidden
+        >
+          <AccentRays size={42} className="sm:hidden" />
+          <AccentRays size={48} className="hidden sm:block" />
+        </div>
         <p
-          className={`${fontClassName} relative z-[1] max-w-[90%] px-4 text-center text-[clamp(22px,6.2vw,30px)] font-extrabold italic leading-[1.05] tracking-[-0.01em]`.trim()}
+          className={`${fontClassName} relative z-[1] max-w-[86%] px-5 text-center text-[clamp(24px,6.6vw,34px)] font-extrabold italic leading-[1.02] tracking-[-0.015em]`.trim()}
           style={{
             textShadow: '0 2px 0 rgba(0,0,0,0.45), 0 4px 12px rgba(0,0,0,0.5)',
           }}
@@ -272,11 +306,11 @@ export function RestaurantMeta({
 }) {
   return (
     <div className="kiosk-enter flex flex-col items-center text-center" style={{ animationDelay: '130ms' }}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--menu-text-muted)]">
+      <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-[var(--menu-text-muted)]">
         — Menú inteligente —
       </p>
       <h1
-        className={`${nameFontClassName} mt-2 max-w-[min(94vw,16ch)] break-words text-[clamp(30px,8vw,44px)] font-extrabold leading-[1.02] tracking-[-0.045em] text-[var(--menu-text)]`.trim()}
+        className={`${nameFontClassName} mt-2 max-w-[min(94vw,16ch)] break-words text-[clamp(34px,8.5vw,48px)] font-extrabold leading-[1.02] tracking-[-0.05em] text-[var(--menu-text)]`.trim()}
       >
         {businessName}
       </h1>
@@ -357,31 +391,39 @@ export function StatusBadge({
 
 export function PrimaryCTA({ onClick, children }: { onClick: () => void; children?: ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="kiosk-enter flex h-[3.65rem] w-full items-center rounded-full px-5 text-[17px] font-extrabold tracking-[-0.01em] transition active:scale-[0.985] sm:h-[3.8rem] sm:text-[18px]"
-      style={{
-        animationDelay: '200ms',
-        background:
-          'linear-gradient(180deg, color-mix(in srgb, var(--menu-primary) 72%, white) 0%, var(--menu-primary) 48%, color-mix(in srgb, var(--menu-primary) 92%, #0a0a0a) 100%)',
-        color: '#ffffff',
-        boxShadow: '0 14px 32px color-mix(in srgb, var(--menu-primary) 38%, transparent)',
-        fontWeight: 800,
-      }}
-    >
-      {/* Equal side rails keep the label optically centered */}
-      <span className="inline-flex w-[3.25rem] shrink-0 items-center gap-2.5">
-        <BookOpen className="h-5 w-5" strokeWidth={2.05} aria-hidden />
-        <span className="h-[1.35rem] w-px bg-white/50" aria-hidden />
-      </span>
-      <span className="min-w-0 flex-1 text-center leading-none" style={{ fontWeight: 800 }}>
-        {children ?? 'Ver menú'}
-      </span>
-      <span className="inline-flex w-[3.25rem] shrink-0 items-center justify-end">
-        <ChevronRight className="h-5 w-5" strokeWidth={2.4} aria-hidden />
-      </span>
-    </button>
+    <div className="kiosk-enter relative overflow-visible" style={{ animationDelay: '200ms' }}>
+      {/* Rays in the side gutters — farther from the pill than Flutter’s -15/-22 so they don’t hug the curve. */}
+      <div className="pointer-events-none absolute left-[-26px] top-[-28px] z-[1]" aria-hidden>
+        <AccentRays size={46} />
+      </div>
+      <div className="pointer-events-none absolute right-[-26px] top-[-28px] z-[1]" aria-hidden>
+        <AccentRays size={46} mirrored />
+      </div>
+      <button
+        type="button"
+        onClick={onClick}
+        className="relative z-0 flex h-[3.85rem] w-full items-center rounded-full px-5 text-[18px] font-extrabold tracking-[-0.01em] transition active:scale-[0.985] sm:h-[4rem] sm:text-[19px]"
+        style={{
+          background:
+            'linear-gradient(180deg, color-mix(in srgb, var(--menu-primary) 72%, white) 0%, var(--menu-primary) 48%, color-mix(in srgb, var(--menu-primary) 92%, #0a0a0a) 100%)',
+          color: '#ffffff',
+          boxShadow: '0 14px 32px color-mix(in srgb, var(--menu-primary) 38%, transparent)',
+          fontWeight: 800,
+        }}
+      >
+        {/* Equal side rails keep the label optically centered */}
+        <span className="inline-flex w-[3.25rem] shrink-0 items-center gap-2.5">
+          <BookOpen className="h-5 w-5" strokeWidth={2.05} aria-hidden />
+          <span className="h-[1.35rem] w-px bg-white/50" aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1 text-center leading-none" style={{ fontWeight: 800 }}>
+          {children ?? 'Ver menú'}
+        </span>
+        <span className="inline-flex w-[3.25rem] shrink-0 items-center justify-end">
+          <ChevronRight className="h-5 w-5" strokeWidth={2.4} aria-hidden />
+        </span>
+      </button>
+    </div>
   );
 }
 

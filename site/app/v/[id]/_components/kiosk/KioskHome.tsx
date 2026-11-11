@@ -454,20 +454,21 @@ export function KioskHome({
                   </div>
                 ) : null}
 
-                <div className="mt-5 w-full sm:mt-6">
+                {/* Slightly inset so AccentRays sit in the side gutters, not glued to the pill. */}
+                <div className="relative mx-auto mt-6 w-[calc(100%-1.75rem)] max-w-[22.5rem] overflow-visible pt-4 sm:mt-7 sm:w-[calc(100%-2.25rem)] sm:pt-4">
                   <PrimaryCTA
                     onClick={() => {
                       if (catalogOnlySession) onOpenCatalog();
                       else onBrowseMenu();
                     }}
                   />
-                </div>
-                <div className="mt-3 w-full">
-                  <ActionCards
-                    mapsHref={mapsHref}
-                    locationFallback={locationLabel?.trim() || 'Sin ubicación'}
-                    onOpenPayments={() => setPaymentSheetOpen(true)}
-                  />
+                  <div className="mt-3 w-full">
+                    <ActionCards
+                      mapsHref={mapsHref}
+                      locationFallback={locationLabel?.trim() || 'Sin ubicación'}
+                      onOpenPayments={() => setPaymentSheetOpen(true)}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
