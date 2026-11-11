@@ -2,6 +2,7 @@
 
 import { Check } from 'lucide-react';
 
+import { handleWhatsAppLinkClick } from '../../../../_lib/whatsapp-href';
 import { FULFILLMENT_LABEL, type KioskVoucherData } from './kiosk-types';
 
 type KioskVoucherProps = {
@@ -100,6 +101,7 @@ export function KioskVoucher({
               href={voucher.whatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(event) => handleWhatsAppLinkClick(voucher.whatsappUrl!, event)}
               className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[16px] bg-[#25D366] text-sm font-bold text-white"
             >
               <WhatsAppMark className="h-5 w-5" />

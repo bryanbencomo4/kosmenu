@@ -210,7 +210,7 @@ export function HeroHeadline({ fontClassName = '' }: { fontClassName?: string } 
       style={{ animationDelay: '40ms' }}
     >
       {/* Stack: masked brush + greeting + AccentRays (left of title, like Flutter banner). */}
-      <div className="relative flex min-h-[5.4rem] items-center justify-center overflow-visible">
+      <div className="kiosk-home-brush relative flex min-h-[5.4rem] items-center justify-center overflow-visible">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-x-0 top-1/2 w-full -translate-y-1/2 drop-shadow-[0_10px_18px_rgba(0,0,0,0.35)]"
@@ -231,7 +231,7 @@ export function HeroHeadline({ fontClassName = '' }: { fontClassName?: string } 
           <AccentRays size={42} />
         </div>
         <p
-          className={`${fontClassName} relative z-[1] max-w-[86%] px-5 text-center text-[clamp(24px,6.6cqw,34px)] font-extrabold italic leading-[1.02] tracking-[-0.015em]`.trim()}
+          className={`${fontClassName} kiosk-home-brush-text relative z-[1] max-w-[86%] px-5 text-center text-[clamp(24px,6.6cqw,34px)] font-extrabold italic leading-[1.02] tracking-[-0.015em]`.trim()}
           style={{
             textShadow: '0 2px 0 rgba(0,0,0,0.45), 0 4px 12px rgba(0,0,0,0.5)',
           }}
@@ -263,7 +263,7 @@ export function RestaurantLogo({
   return (
     <div className="kiosk-enter relative grid place-items-center" style={{ animationDelay: '90ms' }}>
       <div
-        className="relative rounded-[30px] p-[5px]"
+        className="kiosk-home-logo-box relative rounded-[30px] p-[5px]"
         style={{
           backgroundColor: '#ffffff',
           boxShadow:
@@ -279,11 +279,11 @@ export function RestaurantLogo({
             priority
             fit="contain"
             showBlurFill={false}
-            className="relative h-[min(38cqw,148px)] w-[min(38cqw,148px)] rounded-[25px] bg-[var(--menu-surface)]"
+            className="kiosk-home-logo-media relative h-[min(38cqw,148px)] w-[min(38cqw,148px)] rounded-[25px] bg-[var(--menu-surface)]"
           />
         ) : (
           <div
-            className="relative grid h-[min(38cqw,148px)] w-[min(38cqw,148px)] place-items-center rounded-[25px] text-5xl font-black"
+            className="kiosk-home-logo-media relative grid h-[min(38cqw,148px)] w-[min(38cqw,148px)] place-items-center rounded-[25px] text-5xl font-black"
             style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
           >
             {initialLetter}
@@ -309,17 +309,17 @@ export function RestaurantMeta({
 }) {
   return (
     <div className="kiosk-enter flex flex-col items-center text-center" style={{ animationDelay: '130ms' }}>
-      <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-[var(--menu-text-muted)]">
+      <p className="kiosk-home-eyebrow text-[12px] font-bold uppercase tracking-[0.3em] text-[var(--menu-text-muted)]">
         — Menú inteligente —
       </p>
       <h1
-        className={`${nameFontClassName} mt-2 max-w-[min(94cqw,16ch)] break-words text-[clamp(34px,8.5cqw,48px)] font-extrabold leading-[1.02] tracking-[-0.05em] text-[var(--menu-text)]`.trim()}
+        className={`${nameFontClassName} kiosk-home-title mt-2 max-w-[min(94cqw,16ch)] break-words text-[clamp(34px,8.5cqw,48px)] font-extrabold leading-[1.02] tracking-[-0.05em] text-[var(--menu-text)]`.trim()}
       >
         {businessName}
       </h1>
       {showRating ? (
         <p
-          className="mt-2 flex items-center justify-center gap-1 text-[13px] font-medium text-[var(--menu-text-muted)]"
+          className="kiosk-home-rating mt-2 flex items-center justify-center gap-1 text-[13px] font-medium text-[var(--menu-text-muted)]"
           aria-label={
             ratingCount > 0
               ? `Calificación ${ratingAverage.toFixed(1)} de 5, ${ratingCount} calificaciones`
@@ -356,7 +356,7 @@ export function StatusBadge({
 }) {
   const label = isOpen ? openCaption || 'Abierto ahora' : closedCaption || 'Cerrado';
   const className =
-    'kiosk-enter inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-semibold';
+    'kiosk-enter kiosk-home-badge-pill inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-semibold';
   const style = {
     animationDelay: '160ms',
     ...(isOpen
@@ -405,7 +405,7 @@ export function PrimaryCTA({ onClick, children }: { onClick: () => void; childre
       <button
         type="button"
         onClick={onClick}
-        className="relative z-0 flex h-[3.85rem] w-full items-center rounded-full px-5 text-[18px] font-extrabold tracking-[-0.01em] transition active:scale-[0.985]"
+        className="kiosk-home-cta relative z-0 flex h-[3.85rem] w-full items-center rounded-full px-5 text-[18px] font-extrabold tracking-[-0.01em] transition active:scale-[0.985]"
         style={{
           background:
             'linear-gradient(180deg, color-mix(in srgb, var(--menu-primary) 72%, white) 0%, var(--menu-primary) 48%, color-mix(in srgb, var(--menu-primary) 92%, #0a0a0a) 100%)',
@@ -448,12 +448,12 @@ export function ActionCards({
   } as const;
 
   const pillClass =
-    'flex h-[3.15rem] items-center justify-center gap-2 rounded-full border px-3 text-[13px] font-bold tracking-[-0.01em] transition active:scale-[0.985]';
+    'kiosk-home-action-pill flex h-[3.15rem] items-center justify-center gap-2 rounded-full border px-3 text-[13px] font-bold tracking-[-0.01em] transition active:scale-[0.985]';
 
   const iconStyle = { color: 'var(--menu-primary)' } as const;
 
   return (
-    <div className="kiosk-enter grid grid-cols-2 gap-[0.85rem]" style={{ animationDelay: '240ms' }}>
+    <div className="kiosk-enter kiosk-home-actions grid grid-cols-2 gap-[0.85rem]" style={{ animationDelay: '240ms' }}>
       {mapsHref ? (
         <a href={mapsHref} target="_blank" rel="noopener noreferrer" className={pillClass} style={pillStyle}>
           <MapPin
@@ -535,7 +535,7 @@ export function FooterWave() {
         />
       </div>
       <div
-        className="px-5 pb-[max(0.85rem,env(safe-area-inset-bottom))] pt-1 text-center"
+        className="kiosk-home-footer-body px-5 pb-[max(0.85rem,env(safe-area-inset-bottom))] pt-1 text-center"
         style={{
           background:
             'linear-gradient(180deg, var(--menu-primary) 0%, color-mix(in srgb, var(--menu-primary) 82%, var(--menu-accent)) 100%)',

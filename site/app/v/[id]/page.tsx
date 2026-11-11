@@ -1,7 +1,7 @@
 'use client';
 
 import Head from 'next/head';
-import { ArrowRight, ArrowUp, Banknote, Bitcoin, Building2, Camera, Check, ChevronDown, CreditCard, Facebook, Flame, ImageIcon, Info, Instagram, Mail, MapPin, Menu, MessageCircle, Music2, Phone, Share2, ShoppingCart, Smartphone, Store, Truck, User, Wallet, X, Youtube } from 'lucide-react';
+import { ArrowRight, ArrowUp, Banknote, Bike, Bitcoin, Building2, Camera, Check, ChevronDown, ChevronLeft, Clock, CreditCard, Facebook, Flame, ImageIcon, Info, Instagram, Layers, Mail, MapPin, Menu, MessageCircle, Music2, Pencil, Phone, Search, Share2, Shield, ShoppingCart, Smartphone, Store, Truck, User, Wallet, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PublicMenuSkeletonLoader } from './_components/PublicMenuSkeletonLoader';
@@ -46,14 +46,22 @@ import {
   isMenuShellHistorySyncing,
   setMenuShellHistoryDepth,
 } from './_lib/menu-shell-history';
+import { DeliveryMapPreview } from './_components/kiosk/DeliveryMapPreview';
 import { DeliveryNoteField } from './_components/kiosk/DeliveryNoteField';
+import { WhatsAppLogo } from './_components/kiosk/WhatsAppLogo';
 import { KioskImage } from './_components/kiosk/KioskImage';
 import {
   KioskCatalogReady,
   type CatalogReadyItem,
   type CatalogWhatsappSubmitInput,
 } from './_components/kiosk/KioskCatalogReady';
-import { FULFILLMENT_LABEL, type KioskFulfillment, type KioskVoucherData } from './_components/kiosk/kiosk-types';
+import {
+  CHECKOUT_FULFILLMENT_CHOICE_LABEL,
+  CHECKOUT_FULFILLMENT_SHORT_LABEL,
+  FULFILLMENT_LABEL,
+  type KioskFulfillment,
+  type KioskVoucherData,
+} from './_components/kiosk/kiosk-types';
 import {
   parseKioskHomeConfig,
   shouldForceCatalogModeFromQuery,
@@ -122,6 +130,7 @@ import {
 } from '../../_lib/menu-product-options';
 import { consumeRepeatOrder } from '../../_lib/repeat-order';
 import { buildClientOrderSummary } from '../../_lib/whatsapp-order-format';
+import { buildWhatsAppHref, handleWhatsAppLinkClick, openWhatsAppChat } from '../../_lib/whatsapp-href';
 import { merchantOrderShareHref } from '../../_lib/public-site-config';
 import { normalizeOrderManagementMode } from '../../_lib/order-management-mode';
 import { resolveBusinessScheduleStatus } from '../../api/_lib/business-hours';
@@ -441,9 +450,13 @@ type GooglePlaceResult = {
   } | null;
 };
 
+type GoogleMapTypeId = 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
+
 type GoogleMapHandle = {
   panTo(point: DeliveryPoint): void;
   setZoom(zoom: number): void;
+  setMapTypeId?(mapTypeId: GoogleMapTypeId | string): void;
+  getMapTypeId?(): string;
   addListener(event: string, listener: () => void): void;
   getCenter(): GoogleLatLngLike | null;
 };
@@ -499,7 +512,10 @@ type LeafletMapHandle = {
 };
 
 type LeafletTileLayer = {
-  addTo(map: LeafletMapHandle): void;
+  addTo(map: LeafletMapHandle): LeafletTileLayer;
+  on?(event: string, cb: () => void): void;
+  remove?: () => void;
+  removeFrom?: (map: LeafletMapHandle) => void;
 };
 
 type LeafletPolygon = {
@@ -526,7 +542,15 @@ type MapPickerHandle = {
   panTo?: (point: DeliveryPoint) => void;
   setZoom?: (zoom: number) => void;
   setView?: (coords: [number, number], zoom: number) => unknown;
+  setMapTypeId?: (mapTypeId: GoogleMapTypeId | string) => void;
 };
+
+const MAP_PICKER_LAYER_OPTIONS: Array<{ id: GoogleMapTypeId; label: string }> = [
+  { id: 'roadmap', label: 'Mapa' },
+  { id: 'satellite', label: 'Satélite' },
+  { id: 'hybrid', label: 'Híbrido' },
+  { id: 'terrain', label: 'Terreno' },
+];
 
 type ValidationDetail = {
   path?: string;
@@ -709,6 +733,131 @@ async function reverseGeocodeWithNominatim(point: DeliveryPoint) {
   } catch {
     return '';
   }
+}
+
+function parseLatLngPair(raw: string): DeliveryPoint | null {
+  const cleaned = raw.trim().replace(/[()]/g, '');
+  const match = cleaned.match(
+    /^\s*(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/,
+  );
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+function extractLatLngFromGoogleMapsUrl(rawUrl: string): DeliveryPoint | null {
+  try {
+    const url = new URL(rawUrl);
+    const host = url.hostname.toLowerCase();
+    if (
+      !host.includes('google.') &&
+      !host.includes('goo.gl') &&
+      !host.includes('maps.app.goo.gl')
+    ) {
+      return null;
+    }
+
+    const atMatch = url.pathname.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (atMatch) {
+      const point = parseLatLngPair(`${atMatch[1]},${atMatch[2]}`);
+      if (point) return point;
+    }
+
+    const dataMatch = url.pathname.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    if (dataMatch) {
+      const point = parseLatLngPair(`${dataMatch[1]},${dataMatch[2]}`);
+      if (point) return point;
+    }
+
+    for (const key of ['q', 'query', 'll', 'center', 'destination']) {
+      const value = url.searchParams.get(key);
+      if (!value) continue;
+      const decoded = decodeURIComponent(value.replace(/\+/g, ' '));
+      const point = parseLatLngPair(decoded);
+      if (point) return point;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function looksLikePlusCode(raw: string) {
+  // Open Location Code / Plus Code, e.g. RQVQ+W83 or 87G8Q2WX+JV
+  return /^[2-9CFGHJMPQRVWX]{4,8}\+[2-9CFGHJMPQRVWX]{2,3}\b/i.test(raw.trim());
+}
+
+function looksLikeMapsUrl(raw: string) {
+  return /(?:https?:\/\/)?(?:maps\.app\.goo\.gl|goo\.gl\/maps|maps\.google\.|google\.[^/\s]+\/maps)/i.test(
+    raw.trim(),
+  );
+}
+
+async function resolveMapsShortLink(raw: string): Promise<string | null> {
+  const trimmed = raw.trim();
+  if (!looksLikeMapsUrl(trimmed)) return null;
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    // no-cors can't read body; try follow redirects via a lightweight GET when possible
+    const response = await fetch(withProtocol, {
+      method: 'GET',
+      redirect: 'follow',
+      mode: 'cors',
+    });
+    if (response.url) return response.url;
+  } catch {
+    // Short links often block CORS; fall through to geocoding the raw text.
+  }
+  return withProtocol;
+}
+
+async function resolveMapPickerQuery(raw: string): Promise<{
+  point: DeliveryPoint | null;
+  geocodeQuery: string;
+}> {
+  const query = raw.trim();
+  if (!query) return { point: null, geocodeQuery: '' };
+
+  const directCoords = parseLatLngPair(query);
+  if (directCoords) return { point: directCoords, geocodeQuery: query };
+
+  if (looksLikeMapsUrl(query)) {
+    const fromUrl = extractLatLngFromGoogleMapsUrl(
+      /^https?:\/\//i.test(query) ? query : `https://${query}`,
+    );
+    if (fromUrl) return { point: fromUrl, geocodeQuery: query };
+
+    const resolved = await resolveMapsShortLink(query);
+    if (resolved) {
+      const fromResolved = extractLatLngFromGoogleMapsUrl(resolved);
+      if (fromResolved) return { point: fromResolved, geocodeQuery: query };
+      try {
+        const url = new URL(resolved);
+        const q =
+          url.searchParams.get('q') ||
+          url.searchParams.get('query') ||
+          url.searchParams.get('destination');
+        if (q) {
+          const decoded = decodeURIComponent(q.replace(/\+/g, ' '));
+          const coords = parseLatLngPair(decoded);
+          if (coords) return { point: coords, geocodeQuery: decoded };
+          return { point: null, geocodeQuery: decoded };
+        }
+      } catch {
+        // continue
+      }
+    }
+  }
+
+  if (looksLikePlusCode(query)) {
+    return { point: null, geocodeQuery: query };
+  }
+
+  return { point: null, geocodeQuery: query };
 }
 
 function normalizePhone(value: string | null | undefined) {
@@ -1825,6 +1974,10 @@ export default function PublicMenuPage() {
   const [deliveryPoint, setDeliveryPoint] = useState<DeliveryPoint | null>(null);
   const [deliveryPointSource, setDeliveryPointSource] = useState<DeliveryPointSelectionSource>('none');
   const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
+  const [isMapPickerHelpOpen, setIsMapPickerHelpOpen] = useState(false);
+  const [isMapPickerLayersOpen, setIsMapPickerLayersOpen] = useState(false);
+  const [mapPickerLayer, setMapPickerLayer] = useState<GoogleMapTypeId>('roadmap');
+  const [mapPickerSearchText, setMapPickerSearchText] = useState('');
   const [mapPickerAddress, setMapPickerAddress] = useState('');
   const [isMapPickerLoading, setIsMapPickerLoading] = useState(false);
   const [isMapCanvasReady, setIsMapCanvasReady] = useState(false);
@@ -1839,6 +1992,8 @@ export default function PublicMenuPage() {
   });
   const [mapPickerError, setMapPickerError] = useState('');
   const [mapPickerProvider, setMapPickerProvider] = useState<'google' | 'leaflet'>('google');
+  const [deliveryPreviewLocating, setDeliveryPreviewLocating] = useState(false);
+  const deliveryAutoLocateKeyRef = useRef<string | null>(null);
   const [orderNotes, setOrderNotes] = useState('');
   const [kioskFulfillment, setKioskFulfillment] = useState<KioskFulfillment | null>(null);
   const [catalogMode, setCatalogMode] = useState(false);
@@ -1894,6 +2049,7 @@ export default function PublicMenuPage() {
   const mapPickerGeocoderRef = useRef<GoogleGeocoder | null>(null);
   const mapPickerAutocompleteRef = useRef<GoogleAutocomplete | null>(null);
   const mapPickerResolveAddressRef = useRef<((point: DeliveryPoint) => void) | null>(null);
+  const leafletBaseLayerRef = useRef<LeafletTileLayer | null>(null);
   const shouldReturnToMenuOnEmptyCartRef = useRef(false);
   const orderSubmitLockRef = useRef(false);
   /** True once the upsell sheet has seen a non-empty cart (avoids closing on the add→open race). */
@@ -1944,6 +2100,11 @@ export default function PublicMenuPage() {
     }
     const saved = window.sessionStorage.getItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
     if (!isKioskFulfillment(saved)) return;
+    // Public web never restores dine-in; that mode is QR/mesa (catalog) or waiter only.
+    if (saved === 'dine_in') {
+      window.sessionStorage.removeItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`);
+      return;
+    }
     setKioskFulfillment(saved);
     setDeliveryMode(saved === 'delivery' ? 'delivery' : 'pickup');
   }, [commerceIdentifier, isAssistedMode, catalogFromUrl]);
@@ -3236,6 +3397,13 @@ export default function PublicMenuPage() {
         ? 'Gratis'
         : formatAmountByCurrency(deliveryCostConverted, selectedCurrencyCode)
       : null;
+  const mapPickerEtaLabel = (() => {
+    const km = deliveryQuote.distanceKm;
+    if (!mapPickerDeliveryCostLabel || km == null || !Number.isFinite(km)) return null;
+    const low = Math.max(15, Math.round(km * 3.5 + 12));
+    const high = low + 10;
+    return `${low} – ${high} min`;
+  })();
   const deliveryLineLabel = !isDeliveryOrder
     ? null
     : showEngineDeliveryLine
@@ -3360,7 +3528,11 @@ export default function PublicMenuPage() {
       itemCount,
       totalLabel: formatAmountByCurrency(totalConverted, selectedCurrencyCode),
       fulfillmentLabel: abandonedCartPrompt.fulfillment
-        ? FULFILLMENT_LABEL[abandonedCartPrompt.fulfillment]
+        ? CHECKOUT_FULFILLMENT_CHOICE_LABEL[
+            !isAssistedMode && abandonedCartPrompt.fulfillment === 'dine_in'
+              ? 'takeaway'
+              : abandonedCartPrompt.fulfillment
+          ]
         : null,
       savedLabel,
     };
@@ -3368,6 +3540,7 @@ export default function PublicMenuPage() {
     abandonedCartPrompt,
     businessBaseCurrency,
     categoryByProductId,
+    isAssistedMode,
     productById,
     selectedCurrencyCode,
     selectedExchangeRate,
@@ -3646,24 +3819,53 @@ export default function PublicMenuPage() {
   }, [activeCategoryId, formatUpsellPrice, visibleCategorias]);
   const checkoutStepTitles = ['Pedido', 'Cliente', 'Entrega', 'Pago'];
   const clientStepTitle = isAssistedMode ? 'Datos del cliente' : 'Tus datos';
-  const checkoutFlowSteps = isDeliveryOrder
-    ? [
-        { id: 0, title: 'Pedido' },
-        { id: 1, title: clientStepTitle },
-        { id: 2, title: 'Direccion' },
-        { id: 3, title: 'Pago' },
-      ]
-    : [
-        { id: 0, title: 'Pedido' },
-        { id: 1, title: clientStepTitle },
-        { id: 3, title: 'Pago' },
-      ];
+  // Public web: context picks the mode. QR/catalog = comer aquí (catalog-only, no picker).
+  // Link / share: delivery by default; pickup only via switch on the delivery step.
   const checkoutFulfillmentOptions: KioskFulfillment[] = [];
   if (!isAssistedMode && !catalogUrlLocked) {
-    if (kioskHomeConfig.comerAqui) checkoutFulfillmentOptions.push('dine_in');
-    if (kioskHomeConfig.paraLlevar) checkoutFulfillmentOptions.push('takeaway');
-    if (kioskHomeConfig.delivery && supportsDelivery) checkoutFulfillmentOptions.push('delivery');
+    const canDelivery = kioskHomeConfig.delivery && supportsDelivery;
+    if (canDelivery) {
+      checkoutFulfillmentOptions.push('delivery');
+      checkoutFulfillmentOptions.push('takeaway');
+    } else if (kioskHomeConfig.paraLlevar || kioskHomeConfig.comerAqui) {
+      checkoutFulfillmentOptions.push('takeaway');
+    }
   }
+  const preferredCheckoutFulfillment: KioskFulfillment | null =
+    checkoutFulfillmentOptions.includes('delivery')
+      ? 'delivery'
+      : checkoutFulfillmentOptions[0] ?? null;
+  // Keep the Entrega step in the flow whenever delivery is offered, even if the
+  // customer flips the “paso a buscarlo” switch (so they can flip back).
+  const offersDeliveryAddressStep = checkoutFulfillmentOptions.includes('delivery');
+  const checkoutFlowSteps =
+    isDeliveryOrder || offersDeliveryAddressStep
+      ? [
+          { id: 0, title: 'Pedido' },
+          { id: 1, title: clientStepTitle },
+          { id: 2, title: 'Entrega' },
+          { id: 3, title: 'Pago' },
+        ]
+      : [
+          { id: 0, title: 'Pedido' },
+          { id: 1, title: clientStepTitle },
+          { id: 3, title: 'Pago' },
+        ];
+  const publicFulfillmentIsValid =
+    Boolean(kioskFulfillment) &&
+    (checkoutFulfillmentOptions.length === 0 ||
+      checkoutFulfillmentOptions.includes(kioskFulfillment as KioskFulfillment));
+  // After removing the fulfillment card, Continuar must not wait on a null state
+  // while delivery/pickup is already known from context.
+  const effectiveCheckoutFulfillment: KioskFulfillment | null = isAssistedMode
+    ? 'dine_in'
+    : publicFulfillmentIsValid
+      ? kioskFulfillment
+      : preferredCheckoutFulfillment;
+  const prefersSelfPickup =
+    offersDeliveryAddressStep &&
+    (kioskFulfillment === 'takeaway' ||
+      (!kioskFulfillment && preferredCheckoutFulfillment === 'takeaway'));
   const selectedMethod = selectedPaymentMethod();
   const selectedPaymentLabel = selectedMethod ? paymentMethodLabel(selectedMethod) : '';
   const isCashPayment = selectedPaymentLabel.toLowerCase().includes('efectivo');
@@ -3731,7 +3933,8 @@ export default function PublicMenuPage() {
     [checkoutSummaryItems],
   );
   const canGoNextFromStep0 =
-    checkoutSummaryItems.length > 0 && (isAssistedMode || Boolean(kioskFulfillment));
+    checkoutSummaryItems.length > 0 &&
+    (isAssistedMode || Boolean(effectiveCheckoutFulfillment));
   const canGoNextFromStep1 =
     isClientNameValid &&
     isClientTableValid &&
@@ -3805,18 +4008,35 @@ export default function PublicMenuPage() {
     return map;
   }, [categoriasConProductos, comercioLogoUrl, formatUpsellPrice]);
 
-  function selectKioskFulfillment(next: KioskFulfillment) {
-    if (scheduleClosed) return;
+  function selectKioskFulfillment(next: KioskFulfillment): KioskFulfillment | null {
+    if (scheduleClosed) return null;
     // Mesa QR (?catalogo=1) stays catalog-only; do not open WhatsApp checkout paths.
-    if (catalogUrlLocked) return;
-    // Waiters only serve dine-in at the table.
-    const resolved = isAssistedMode ? 'dine_in' : next;
+    if (catalogUrlLocked) return null;
+    // Waiters only serve dine-in at the table. Public web never uses dine-in.
+    const resolved: KioskFulfillment = isAssistedMode
+      ? 'dine_in'
+      : next === 'dine_in'
+        ? 'takeaway'
+        : next;
     setKioskFulfillment(resolved);
     setDeliveryMode(resolved === 'delivery' ? 'delivery' : 'pickup');
     setSearchQuery('');
     if (typeof window !== 'undefined' && commerceIdentifier) {
       window.sessionStorage.setItem(`${kioskFulfillmentStoragePrefix}${commerceIdentifier}`, resolved);
     }
+    return resolved;
+  }
+
+  /** Public checkout no longer asks for mode on step 0 — seed delivery/pickup from context. */
+  function ensurePublicCheckoutFulfillment(): KioskFulfillment | null {
+    if (isAssistedMode) {
+      selectKioskFulfillment('dine_in');
+      return 'dine_in';
+    }
+    if (catalogUrlLocked) return null;
+    if (publicFulfillmentIsValid) return kioskFulfillment;
+    if (!preferredCheckoutFulfillment) return null;
+    return selectKioskFulfillment(preferredCheckoutFulfillment);
   }
 
   function resetKioskFulfillment() {
@@ -4001,9 +4221,9 @@ export default function PublicMenuPage() {
         ? `👋 Hola, mi nombre es *${name}*.\n\n💵 Voy a pagar en efectivo el pedido *${persisted.orderId}*.${orderLinkBlock}`
         : `👋 Hola, mi nombre es *${name}*.\n\n🧾 Pedido *${persisted.orderId}*.${orderLinkBlock}`;
 
-    const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
-    if (typeof window !== 'undefined') {
-      window.open(waUrl, '_blank', 'noopener,noreferrer');
+    const waUrl = buildWhatsAppHref(whatsappNumber, message);
+    if (typeof window !== 'undefined' && waUrl) {
+      openWhatsAppChat(whatsappNumber, message);
     }
   }
 
@@ -4068,7 +4288,9 @@ export default function PublicMenuPage() {
   const contactSummaryLine = formattedClientWhatsapp || 'Agrega tu WhatsApp';
   const deliverySummary = isDeliveryOrder
     ? normalizedDeliveryAddress || 'Aun no has definido la direccion de entrega.'
-    : 'Retiro en tienda';
+    : kioskFulfillment === 'takeaway'
+      ? 'Yo paso a buscarlo'
+      : 'Retiro en tienda';
   const compactCheckoutSummary = checkoutStep > 0;
   const renderCheckoutSummary = (variant: 'mobile' | 'desktop') => {
     const isDesktop = variant === 'desktop';
@@ -4483,6 +4705,94 @@ export default function PublicMenuPage() {
     setDeliveryMode(kioskFulfillment === 'delivery' ? 'delivery' : 'pickup');
   }, [supportsDelivery, kioskFulfillment]);
 
+  // Checkout sheet open without the old mode card: always seed delivery/pickup.
+  useEffect(() => {
+    if (!isConfirmOpen || catalogMode || scheduleClosed) return;
+    if (isAssistedMode) {
+      if (kioskFulfillment !== 'dine_in') selectKioskFulfillment('dine_in');
+      return;
+    }
+    if (catalogUrlLocked) return;
+    if (publicFulfillmentIsValid) return;
+    if (!preferredCheckoutFulfillment) return;
+    selectKioskFulfillment(preferredCheckoutFulfillment);
+    // selectKioskFulfillment is stable enough for this seed; avoid listing it to prevent loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    catalogMode,
+    catalogUrlLocked,
+    isAssistedMode,
+    isConfirmOpen,
+    kioskFulfillment,
+    preferredCheckoutFulfillment,
+    publicFulfillmentIsValid,
+    scheduleClosed,
+  ]);
+
+  // Entrega step: resolve GPS once and seed the preview map + address by default.
+  useEffect(() => {
+    if (!isConfirmOpen || checkoutStep !== 2 || !isDeliveryOrder || prefersSelfPickup) {
+      setDeliveryPreviewLocating(false);
+      return;
+    }
+    if (deliveryPointSource === 'user' && deliveryPoint) {
+      setDeliveryPreviewLocating(false);
+      return;
+    }
+
+    const attemptKey = `${commerceIdentifier || 'menu'}:delivery-preview`;
+    if (deliveryAutoLocateKeyRef.current === attemptKey) {
+      setDeliveryPreviewLocating(false);
+      return;
+    }
+
+    let cancelled = false;
+    setDeliveryPreviewLocating(true);
+
+    void (async () => {
+      const gpsPoint = await getBrowserCurrentPoint();
+      if (cancelled) return;
+
+      if (gpsPoint) {
+        setDeliveryPoint(gpsPoint);
+        setDeliveryPointSource('user');
+        const address = await reverseGeocodeWithNominatim(gpsPoint);
+        if (cancelled) return;
+        if (address) {
+          setDeliveryAddress(address);
+          setMapPickerAddress(address);
+        }
+      } else if (hasBusinessCoords && businessLat != null && businessLng != null) {
+        setDeliveryPoint({ lat: businessLat, lng: businessLng });
+        setDeliveryPointSource('business-default');
+      }
+
+      if (cancelled) return;
+      deliveryAutoLocateKeyRef.current = attemptKey;
+      setDeliveryPreviewLocating(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    businessLat,
+    businessLng,
+    checkoutStep,
+    commerceIdentifier,
+    deliveryPoint,
+    deliveryPointSource,
+    hasBusinessCoords,
+    isConfirmOpen,
+    isDeliveryOrder,
+    prefersSelfPickup,
+  ]);
+
+  useEffect(() => {
+    if (isConfirmOpen) return;
+    deliveryAutoLocateKeyRef.current = null;
+  }, [isConfirmOpen]);
+
   useEffect(() => {
     if (!isMapPickerOpen) return;
 
@@ -4510,6 +4820,7 @@ export default function PublicMenuPage() {
       mapPickerGeocoderRef.current = null;
       mapPickerAutocompleteRef.current = null;
       mapPickerResolveAddressRef.current = null;
+      leafletBaseLayerRef.current = null;
     };
 
     const resolveInitialPoint = async (): Promise<{
@@ -4548,7 +4859,8 @@ export default function PublicMenuPage() {
           maxZoom: 19,
           attribution: '&copy; OpenStreetMap',
         }).addTo(map);
-        tiles.on('load', () => {
+        leafletBaseLayerRef.current = tiles;
+        tiles.on?.('load', () => {
           if (!disposed) setIsMapCanvasReady(true);
         });
 
@@ -4658,9 +4970,15 @@ export default function PublicMenuPage() {
         const map = new google.maps.Map(mapPickerContainerRef.current, {
           center: initialPoint,
           zoom: fromGps ? 15 : 16,
+          mapTypeId: mapPickerLayer,
+          disableDefaultUI: true,
+          zoomControl: false,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
+          rotateControl: false,
+          scaleControl: false,
+          clickableIcons: false,
           gestureHandling: 'greedy',
         });
 
@@ -4803,6 +5121,7 @@ export default function PublicMenuPage() {
             if (!geometryLocation) return;
             const point = { lat: geometryLocation.lat(), lng: geometryLocation.lng() };
             const bestAddress = (place.formatted_address ?? place.name ?? '').trim();
+            if (bestAddress) setMapPickerSearchText(bestAddress);
             moveToPoint(point, bestAddress);
           });
           mapPickerAutocompleteRef.current = autocomplete;
@@ -5423,14 +5742,13 @@ export default function PublicMenuPage() {
       orderUrl,
       managementMode: normalizeOrderManagementMode(responsePayload?.data?.managementMode),
       customizationTotalCheckout,
-      waUrl: whatsappNumber
-        ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
-        : '',
+      waUrl: whatsappNumber ? buildWhatsAppHref(whatsappNumber, message) : '',
     };
   }
 
   function proceedToCheckoutSheet() {
     if (catalogMode || cartCount <= 0) return;
+    ensurePublicCheckoutFulfillment();
     const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
     void trackMenuFunnelEvent(comercioKey, 'checkout_started', {}, 'checkout');
     setCheckoutError(null);
@@ -5492,11 +5810,9 @@ export default function PublicMenuPage() {
       window.alert(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
       return;
     }
-    if (!kioskFulfillment) {
-      if (checkoutFulfillmentOptions.length === 0) return;
-      if (checkoutFulfillmentOptions.length === 1) {
-        selectKioskFulfillment(checkoutFulfillmentOptions[0]);
-      }
+    if (!ensurePublicCheckoutFulfillment() && !isAssistedMode) {
+      // No delivery/pickup available for this menu — don't open a stuck checkout.
+      return;
     }
     if (
       shouldShowPreCheckoutUpsell({
@@ -5559,7 +5875,6 @@ export default function PublicMenuPage() {
       return;
     }
     const enteringDelivery = !isDeliveryOrder && next === 'delivery';
-    const leavingDelivery = isDeliveryOrder && next !== 'delivery';
     const addressReady =
       deliveryPoint !== null &&
       deliveryPointSource === 'user' &&
@@ -5597,12 +5912,8 @@ export default function PublicMenuPage() {
         setCheckoutError(repayMessage);
         scrollCheckoutSheetToTop();
       }
-      return;
     }
-
-    if (leavingDelivery && checkoutStep === 2) {
-      setCheckoutStep(3);
-    }
+    // Pickup from review: stay put — totals update via isDeliveryOrder.
   }
 
   async function confirmOrder() {
@@ -5817,12 +6128,17 @@ export default function PublicMenuPage() {
     if (Object.keys(nextCart).length === 0) return false;
     setCart(nextCart);
     if (fulfillment) {
-      setKioskFulfillment(fulfillment);
-      setDeliveryMode(fulfillment === 'delivery' ? 'delivery' : 'pickup');
+      // Public sessions never keep dine-in from an old cart; pickup is the coherent fallback.
+      const resolved: KioskFulfillment =
+        !isAssistedMode && !catalogUrlLocked && fulfillment === 'dine_in'
+          ? 'takeaway'
+          : fulfillment;
+      setKioskFulfillment(resolved);
+      setDeliveryMode(resolved === 'delivery' ? 'delivery' : 'pickup');
       if (typeof window !== 'undefined' && commerceIdentifier) {
         window.sessionStorage.setItem(
           `${kioskFulfillmentStoragePrefix}${commerceIdentifier}`,
-          fulfillment,
+          resolved,
         );
       }
     }
@@ -5836,7 +6152,18 @@ export default function PublicMenuPage() {
     }
     const pending = abandonedCartPrompt;
     if (!pending) return;
-    const restored = applyRestoredCart(pending.items, pending.fulfillment ?? null);
+    let nextFulfillment = pending.fulfillment ?? null;
+    if (!isAssistedMode && !catalogUrlLocked) {
+      if (
+        !nextFulfillment ||
+        nextFulfillment === 'dine_in' ||
+        (checkoutFulfillmentOptions.length > 0 &&
+          !checkoutFulfillmentOptions.includes(nextFulfillment))
+      ) {
+        nextFulfillment = preferredCheckoutFulfillment;
+      }
+    }
+    const restored = applyRestoredCart(pending.items, nextFulfillment);
     setAbandonedCartPrompt(null);
     if (!restored) {
       clearCachedCheckoutCart(commerceIdentifier);
@@ -5882,13 +6209,16 @@ export default function PublicMenuPage() {
       setCheckoutError(scheduleStatus.caption || 'El restaurante está cerrado actualmente');
       return;
     }
-    if (checkoutStep === 0 && !canGoNextFromStep0) {
-      setCheckoutError(
-        checkoutSummaryItems.length > 0 && !kioskFulfillment
-          ? 'Elige cómo quieres tu pedido para continuar.'
-          : 'Agrega al menos un producto para continuar con el pedido.',
-      );
-      return;
+    if (checkoutStep === 0) {
+      const ensured = ensurePublicCheckoutFulfillment();
+      if (checkoutSummaryItems.length === 0) {
+        setCheckoutError('Agrega al menos un producto para continuar con el pedido.');
+        return;
+      }
+      if (!isAssistedMode && !ensured) {
+        setCheckoutError('No hay un modo de pedido disponible en este momento.');
+        return;
+      }
     }
     if (checkoutStep === 1 && !canGoNextFromStep1) {
       setCheckoutError(
@@ -5934,7 +6264,7 @@ export default function PublicMenuPage() {
         selectedCurrency: selectedCurrencyCode,
       });
     }
-    if (checkoutStep === 1 && !isDeliveryOrder) {
+    if (checkoutStep === 1 && !isDeliveryOrder && !offersDeliveryAddressStep) {
       setCheckoutStep(3);
       return;
     }
@@ -5947,7 +6277,6 @@ export default function PublicMenuPage() {
 
   function changeCheckoutFulfillment(next: KioskFulfillment) {
     if (next === kioskFulfillment || scheduleClosed || isAssistedMode || catalogUrlLocked) return;
-    const leavingDelivery = isDeliveryOrder && next !== 'delivery';
     const enteringDelivery = !isDeliveryOrder && next === 'delivery';
     const addressReady =
       deliveryPoint !== null &&
@@ -5956,7 +6285,7 @@ export default function PublicMenuPage() {
       normalizedDeliveryReference.length >= 3;
     selectKioskFulfillment(next);
     setCheckoutError(null);
-    if (leavingDelivery && checkoutStep === 2) setCheckoutStep(3);
+    // Stay on Entrega when switching to pickup so the switch + retiro copy remain visible.
     if (enteringDelivery && checkoutStep === 3 && !addressReady) {
       setIsOrderReviewOpen(false);
       setCheckoutStep(2);
@@ -5970,9 +6299,175 @@ export default function PublicMenuPage() {
     setMapPickerNonce((current) => current + 1);
   }
 
+  function openDeliveryMapPicker() {
+    setIsMapCanvasReady(false);
+    setMapLoadSlow(false);
+    setMapPickerError('');
+    setIsMapPickerHelpOpen(false);
+    setIsMapPickerLayersOpen(false);
+    setMapPickerSearchText(deliveryAddress || mapPickerAddress || '');
+    setIsMapPickerOpen(true);
+  }
+
+  function applyMapPickerLayer(next: GoogleMapTypeId) {
+    setMapPickerLayer(next);
+    setIsMapPickerLayersOpen(false);
+    const map = mapPickerMapRef.current;
+    if (mapPickerProvider === 'google') {
+      map?.setMapTypeId?.(next);
+      return;
+    }
+    // Leaflet fallback: swap base tiles (roadmap / satellite-ish imagery).
+    const L = getWindowWithExternalMaps().L;
+    const leafletMap = map as (LeafletMapHandle & { eachLayer?: (cb: (layer: unknown) => void) => void }) | null;
+    if (!L || !leafletMap) return;
+    const url =
+      next === 'satellite' || next === 'hybrid'
+        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+        : next === 'terrain'
+          ? 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
+          : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    try {
+      if (leafletBaseLayerRef.current?.remove) {
+        leafletBaseLayerRef.current.remove();
+      } else if (leafletBaseLayerRef.current?.removeFrom) {
+        leafletBaseLayerRef.current.removeFrom(leafletMap);
+      }
+      const tiles = L.tileLayer(url, { maxZoom: 19, attribution: 'Map data' });
+      tiles.addTo(leafletMap);
+      leafletBaseLayerRef.current = tiles;
+    } catch {
+      // Keep current tiles if swap fails.
+    }
+  }
+
+  function applyMapPickerPoint(point: DeliveryPoint, addressLabel?: string) {
+    const map = mapPickerMapRef.current;
+    setDeliveryPoint(point);
+    setDeliveryPointSource('user');
+    if (mapPickerProvider === 'google') {
+      if (map?.panTo) map.panTo(point);
+      if (map?.setZoom) map.setZoom(17);
+    } else if (map?.setView) {
+      map.setView([point.lat, point.lng], 17);
+    }
+    if (addressLabel?.trim()) {
+      setMapPickerAddress(addressLabel.trim());
+      setMapPickerError('');
+      setIsMapPickerLoading(false);
+      return;
+    }
+    mapPickerResolveAddressRef.current?.(point);
+  }
+
+  async function runMapPickerAddressSearch() {
+    const query =
+      mapPickerSearchText.trim() || mapPickerSearchInputRef.current?.value?.trim() || '';
+    if (!query) return;
+    setMapPickerError('');
+    setIsMapPickerLoading(true);
+
+    try {
+      const resolved = await resolveMapPickerQuery(query);
+      if (resolved.point) {
+        applyMapPickerPoint(resolved.point);
+        // Prefer a readable reverse-geocoded label when the input was coords/link.
+        mapPickerResolveAddressRef.current?.(resolved.point);
+        return;
+      }
+
+      if (mapPickerProvider !== 'google') {
+        setIsMapPickerLoading(false);
+        setMapPickerError('La búsqueda de texto está disponible con Google Maps.');
+        return;
+      }
+
+      const geocoder = mapPickerGeocoderRef.current;
+      const map = mapPickerMapRef.current;
+      if (!geocoder || !map) {
+        setIsMapPickerLoading(false);
+        setMapPickerError('El mapa aún se está cargando. Inténtalo de nuevo.');
+        return;
+      }
+
+      const geocodeQuery = resolved.geocodeQuery || query;
+      geocoder.geocode(
+        {
+          address: geocodeQuery,
+          componentRestrictions: looksLikePlusCode(geocodeQuery)
+            ? undefined
+            : { country: GOOGLE_MAPS_VE_COUNTRY },
+          region: GOOGLE_MAPS_VE_COUNTRY,
+        },
+        (results: GooglePlaceResult[] | null, status: string) => {
+          if (status !== 'OK' || !results?.[0]?.geometry?.location) {
+            // Retry without country bias for plus codes / odd references.
+            geocoder.geocode({ address: geocodeQuery }, (retryResults, retryStatus) => {
+              if (retryStatus !== 'OK' || !retryResults?.[0]?.geometry?.location) {
+                setIsMapPickerLoading(false);
+                setMapPickerError(
+                  'No encontramos esa ubicación. Prueba una dirección, coordenadas, Plus Code o un enlace de Google Maps.',
+                );
+                return;
+              }
+              const location = retryResults[0].geometry.location;
+              applyMapPickerPoint(
+                { lat: location.lat(), lng: location.lng() },
+                retryResults[0].formatted_address ?? geocodeQuery,
+              );
+            });
+            return;
+          }
+          const location = results[0].geometry.location;
+          applyMapPickerPoint(
+            { lat: location.lat(), lng: location.lng() },
+            results[0].formatted_address ?? geocodeQuery,
+          );
+        },
+      );
+    } catch {
+      setIsMapPickerLoading(false);
+      setMapPickerError('No pudimos interpretar esa búsqueda. Inténtalo de nuevo.');
+    }
+  }
+
+  function goToMapPickerMyLocation() {
+    if (!navigator.geolocation) {
+      setMapPickerError('Tu navegador no permite usar la ubicación GPS.');
+      return;
+    }
+    setMapPickerError('');
+    setIsMapPickerLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const point = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setDeliveryPoint(point);
+        setDeliveryPointSource('user');
+        const map = mapPickerMapRef.current;
+        if (mapPickerProvider === 'google') {
+          if (map?.panTo) map.panTo(point);
+          if (map?.setZoom) map.setZoom(15);
+        } else if (map?.setView) {
+          map.setView([point.lat, point.lng], 15);
+        }
+        mapPickerResolveAddressRef.current?.(point);
+      },
+      () => {
+        setIsMapPickerLoading(false);
+        setMapPickerError(
+          'No pudimos obtener tu GPS. Activa la ubicación del navegador e inténtalo de nuevo.',
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
+    );
+  }
+
   function goToPreviousStep() {
     setCheckoutError(null);
-    if (checkoutStep === 3 && !isDeliveryOrder) {
+    if (checkoutStep === 3 && !isDeliveryOrder && !offersDeliveryAddressStep) {
       setCheckoutStep(1);
       return;
     }
@@ -6778,9 +7273,10 @@ export default function PublicMenuPage() {
                         ) : null}
                         {whatsappNumber ? (
                           <a
-                            href={`https://wa.me/${whatsappNumber}`}
+                            href={buildWhatsAppHref(whatsappNumber)}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={(event) => handleWhatsAppLinkClick(buildWhatsAppHref(whatsappNumber), event)}
                             className="inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-black shadow-sm"
                             style={
                               receivesOrdersOnWhatsapp
@@ -6916,9 +7412,10 @@ export default function PublicMenuPage() {
                   ) : null}
                   {whatsappNumber ? (
                     <a
-                      href={`https://wa.me/${whatsappNumber}`}
+                      href={buildWhatsAppHref(whatsappNumber)}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={(event) => handleWhatsAppLinkClick(buildWhatsAppHref(whatsappNumber), event)}
                       className="flex flex-1 items-center justify-center gap-2 rounded-full px-4 py-2.5 text-center text-xs font-black uppercase tracking-[0.08em]"
                       style={
                         receivesOrdersOnWhatsapp
@@ -6944,100 +7441,151 @@ export default function PublicMenuPage() {
         ) : null}
 
         {isMapPickerOpen ? (
-          <section className="kos-modal-backdrop fixed inset-0 z-[61] bg-[var(--menu-background)] text-[var(--menu-text)]">
-            <div className="kos-sheet-panel mx-auto flex h-full max-w-2xl flex-col bg-[var(--menu-background)]">
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--menu-border)] bg-[color-mix(in_srgb,var(--menu-background)_88%,var(--menu-surface))] px-4 py-3 backdrop-blur-sm sm:px-6">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--menu-text-muted)]">Mapa</p>
-                  <h3 className="text-xl font-black text-[var(--menu-text)]" style={titleFontStyle}>Punto de entrega</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsMapPickerOpen(false)}
-                  className="rounded-full border border-[var(--menu-border)] px-3 py-1 text-xs font-semibold text-[var(--menu-text-muted)]"
-                >
-                  Cerrar
-                </button>
-              </div>
-
-              <div className="relative flex-1">
-                <div className="absolute left-3 right-3 top-3 z-10 flex gap-2 sm:left-6 sm:right-6">
-                  <input
-                    ref={mapPickerSearchInputRef}
-                    type="text"
-                    placeholder="Buscar direccion o lugar"
-                    defaultValue={deliveryAddress}
-                    className="h-10 w-full rounded-xl border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                    disabled={mapPickerProvider !== 'google'}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Enter') return;
-                      event.preventDefault();
-                      if (mapPickerProvider !== 'google') return;
-                      const query = mapPickerSearchInputRef.current?.value?.trim() ?? '';
-                      if (!query) return;
-                      const geocoder = mapPickerGeocoderRef.current;
-                      const map = mapPickerMapRef.current;
-                      if (!geocoder || !map) return;
-                      setIsMapPickerLoading(true);
-                      geocoder.geocode(
-                        {
-                          address: query,
-                          componentRestrictions: { country: GOOGLE_MAPS_VE_COUNTRY },
-                          region: GOOGLE_MAPS_VE_COUNTRY,
-                        },
-                        (results: GooglePlaceResult[] | null, status: string) => {
-                        if (status !== 'OK' || !results?.[0]?.geometry?.location) {
-                          setIsMapPickerLoading(false);
-                          return;
-                        }
-                        const location = results[0].geometry.location;
-                        const point = { lat: location.lat(), lng: location.lng() };
-                        setDeliveryPoint(point);
-                        setDeliveryPointSource('user');
-                        map.panTo(point);
-                        map.setZoom(17);
-                        setMapPickerAddress(results[0].formatted_address ?? query);
-                        setIsMapPickerLoading(false);
-                      });
-                    }}
-                  />
+          <section className="kos-modal-backdrop fixed inset-0 z-[61] bg-white text-[var(--menu-text)]">
+            <div className="kos-sheet-panel relative mx-auto flex h-full max-w-2xl flex-col bg-white">
+              <div className="shrink-0 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
+                <div className="flex items-start gap-3">
                   <button
                     type="button"
-                    disabled={mapPickerProvider !== 'google'}
                     onClick={() => {
-                      if (mapPickerProvider !== 'google') return;
-                      const query = mapPickerSearchInputRef.current?.value?.trim() ?? '';
-                      if (!query) return;
-                      const geocoder = mapPickerGeocoderRef.current;
-                      const map = mapPickerMapRef.current;
-                      if (!geocoder || !map) return;
-                      setIsMapPickerLoading(true);
-                      geocoder.geocode(
-                        {
-                          address: query,
-                          componentRestrictions: { country: GOOGLE_MAPS_VE_COUNTRY },
-                          region: GOOGLE_MAPS_VE_COUNTRY,
-                        },
-                        (results: GooglePlaceResult[] | null, status: string) => {
-                        if (status !== 'OK' || !results?.[0]?.geometry?.location) {
-                          setIsMapPickerLoading(false);
-                          return;
-                        }
-                        const location = results[0].geometry.location;
-                        const point = { lat: location.lat(), lng: location.lng() };
-                        setDeliveryPoint(point);
-                        setDeliveryPointSource('user');
-                        map.panTo(point);
-                        map.setZoom(17);
-                        setMapPickerAddress(results[0].formatted_address ?? query);
-                        setIsMapPickerLoading(false);
-                      });
+                      setIsMapPickerHelpOpen(false);
+                      setIsMapPickerOpen(false);
                     }}
-                    className="rounded-xl border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 text-xs font-bold uppercase tracking-[0.08em] text-[var(--menu-text)] disabled:opacity-50"
+                    className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[var(--menu-border)] bg-white text-[var(--menu-text)] shadow-sm"
+                    aria-label="Volver"
+                  >
+                    <ChevronLeft className="h-5 w-5" strokeWidth={2.4} />
+                  </button>
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
+                      Mapa
+                    </p>
+                    <h3
+                      className="text-[1.35rem] font-black leading-tight tracking-[-0.03em] text-[var(--menu-text)]"
+                      style={titleFontStyle}
+                    >
+                      Punto de entrega
+                    </h3>
+                    <p className="mt-1 text-[12px] font-medium leading-snug text-[var(--menu-text-muted)]">
+                      Selecciona en el mapa dónde quieres recibir tu pedido.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsMapPickerHelpOpen(true)}
+                    className="mt-0.5 shrink-0 rounded-full border border-[var(--menu-border)] px-3 py-1.5 text-[12px] font-bold text-[var(--menu-text-muted)]"
+                  >
+                    Ayuda
+                  </button>
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <label className="relative min-w-0 flex-1">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--menu-text-muted)]"
+                      strokeWidth={2.4}
+                    />
+                    <input
+                      ref={mapPickerSearchInputRef}
+                      type="text"
+                      value={mapPickerSearchText}
+                      placeholder="Dirección, coordenadas, Plus Code o link de Maps"
+                      className="h-11 w-full rounded-2xl border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] py-2 pl-10 pr-10 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                      onChange={(event) => setMapPickerSearchText(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        void runMapPickerAddressSearch();
+                      }}
+                    />
+                    {mapPickerSearchText.trim() ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMapPickerSearchText('');
+                          if (mapPickerSearchInputRef.current) {
+                            mapPickerSearchInputRef.current.value = '';
+                            mapPickerSearchInputRef.current.focus();
+                          }
+                        }}
+                        className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-[var(--menu-text-muted)] hover:bg-[var(--menu-surface)]"
+                        aria-label="Borrar búsqueda"
+                      >
+                        <X className="h-4 w-4" strokeWidth={2.4} />
+                      </button>
+                    ) : null}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void runMapPickerAddressSearch()}
+                    className="h-11 shrink-0 rounded-2xl px-4 text-sm font-black"
+                    style={{
+                      backgroundColor: 'var(--menu-primary)',
+                      color: 'var(--menu-on-primary)',
+                    }}
                   >
                     Buscar
                   </button>
                 </div>
+              </div>
+
+              {isMapPickerHelpOpen ? (
+                <div
+                  className="absolute inset-0 z-30 flex items-end bg-black/45 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-10 sm:items-center sm:justify-center"
+                  onClick={() => setIsMapPickerHelpOpen(false)}
+                >
+                  <div
+                    className="w-full max-w-md rounded-[28px] bg-white p-5 shadow-[0_24px_64px_rgba(15,23,42,0.28)]"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
+                          Ayuda
+                        </p>
+                        <h4 className="mt-1 text-lg font-black text-[var(--menu-text)]">
+                          Cómo marcar tu punto
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsMapPickerHelpOpen(false)}
+                        className="grid h-9 w-9 place-items-center rounded-full bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]"
+                        aria-label="Cerrar ayuda"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <ol className="mt-4 space-y-3 text-[13px] font-medium leading-snug text-[var(--menu-text)]">
+                      <li>1️⃣ Mueve el mapa hasta dejar el pin 📍 exactamente donde te entregan.</li>
+                      <li>2️⃣ O toca <span className="font-black">Mi ubicación</span> para usar tu GPS 📡.</li>
+                      <li>
+                        3️⃣ En el buscador puedes pegar:
+                        <ul className="mt-1.5 space-y-1 pl-1 text-[12px] text-[var(--menu-text-muted)]">
+                          <li>🏠 Una dirección o lugar (“Campo Deportivo…”)</li>
+                          <li>📌 Coordenadas (ej. 10.48, -66.90)</li>
+                          <li>#️⃣ Un Plus Code (ej. RQVQ+W83)</li>
+                          <li>🔗 Un enlace de Google Maps</li>
+                        </ul>
+                      </li>
+                      <li>4️⃣ Revisa el costo de delivery y toca <span className="font-black">Confirmar punto</span> ✅.</li>
+                    </ol>
+                    <button
+                      type="button"
+                      onClick={() => setIsMapPickerHelpOpen(false)}
+                      className="mt-5 flex h-11 w-full items-center justify-center rounded-2xl text-sm font-black"
+                      style={{
+                        backgroundColor: 'var(--menu-primary)',
+                        color: 'var(--menu-on-primary)',
+                      }}
+                    >
+                      Entendido
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="relative min-h-0 flex-1">
                 <div ref={mapPickerContainerRef} className="h-full w-full bg-[#e7e5e4]" />
                 {!isMapCanvasReady ? (
                   <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#e7e5e4] px-6 text-center">
@@ -7062,7 +7610,9 @@ export default function PublicMenuPage() {
                     ) : null}
                   </div>
                 ) : null}
-                <div className={`pointer-events-none absolute inset-0 z-[5] flex items-center justify-center ${isMapCanvasReady ? '' : 'hidden'}`}>
+                <div
+                  className={`pointer-events-none absolute inset-0 z-[5] flex items-center justify-center ${isMapCanvasReady ? '' : 'hidden'}`}
+                >
                   <div
                     className={`-mt-6 text-4xl leading-none transition-[transform] duration-200 ease-out ${
                       isMapPickerDragging
@@ -7075,95 +7625,139 @@ export default function PublicMenuPage() {
                   </div>
                 </div>
                 {isMapCanvasReady && isMapPickerLoading ? (
-                  <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface)] px-3 py-1 text-xs font-semibold text-[var(--menu-text)] shadow-sm">
-                    Buscando direccion...
+                  <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full border border-[var(--menu-border)] bg-white px-3 py-1 text-xs font-semibold text-[var(--menu-text)] shadow-sm">
+                    Buscando dirección...
+                  </div>
+                ) : null}
+                {isMapCanvasReady ? (
+                  <div className="absolute bottom-5 right-3 z-20 flex flex-col items-end gap-2">
+                    {isMapPickerLayersOpen ? (
+                      <div className="overflow-hidden rounded-2xl border border-[var(--menu-border)] bg-white shadow-lg">
+                        {MAP_PICKER_LAYER_OPTIONS.map((option) => {
+                          const selected = mapPickerLayer === option.id;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => applyMapPickerLayer(option.id)}
+                              className="flex w-full min-w-[9.5rem] items-center justify-between gap-3 px-3.5 py-2.5 text-left text-[13px] font-bold"
+                              style={{
+                                backgroundColor: selected
+                                  ? 'color-mix(in srgb, var(--menu-primary) 12%, white)'
+                                  : 'white',
+                                color: 'var(--menu-text)',
+                              }}
+                            >
+                              <span>{option.label}</span>
+                              {selected ? (
+                                <Check
+                                  className="h-4 w-4"
+                                  style={{ color: 'var(--menu-primary)' }}
+                                  strokeWidth={2.6}
+                                />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setIsMapPickerLayersOpen((open) => !open)}
+                      className="grid h-11 w-11 place-items-center rounded-full border border-[var(--menu-border)] bg-white text-[var(--menu-text)] shadow-md"
+                      aria-label="Capas del mapa"
+                      aria-expanded={isMapPickerLayersOpen}
+                    >
+                      <Layers className="h-5 w-5" strokeWidth={2.2} />
+                    </button>
                   </div>
                 ) : null}
                 {deliveryAreaZonesForMap.length > 0 ? (
-                  <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-full bg-[color-mix(in_srgb,#10B981_18%,var(--menu-surface))] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[color-mix(in_srgb,#047857_80%,var(--menu-text))] shadow-sm">
+                  <div className="pointer-events-none absolute bottom-4 left-3 z-10 rounded-full bg-[color-mix(in_srgb,#10B981_18%,white)] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-[color-mix(in_srgb,#047857_80%,var(--menu-text))] shadow-sm">
                     Zonas de entrega
                   </div>
                 ) : null}
               </div>
 
-              <div className="space-y-2 border-t border-[var(--menu-border)] bg-[var(--menu-surface)] px-4 py-3 sm:px-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">Direccion detectada</p>
-                <p className="text-sm font-semibold text-[var(--menu-text)]">
-                  {mapPickerAddress || 'Mueve el mapa para colocar el pin en el punto exacto.'}
-                </p>
+              <div className="shrink-0 rounded-t-[28px] bg-white px-4 pb-[max(0.9rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] sm:px-5">
+                <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[color-mix(in_srgb,var(--menu-text)_14%,transparent)]" />
+
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--menu-text-muted)]">
+                      Dirección seleccionada
+                    </p>
+                    <p className="mt-1 text-[15px] font-black leading-snug tracking-[-0.01em] text-[var(--menu-text)]">
+                      {mapPickerAddress || 'Mueve el mapa para colocar el pin en el punto exacto.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      mapPickerSearchInputRef.current?.focus();
+                      mapPickerSearchInputRef.current?.select();
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--menu-border)] px-3 py-1.5 text-[12px] font-bold text-[var(--menu-text)]"
+                  >
+                    <Pencil className="h-3.5 w-3.5" strokeWidth={2.4} />
+                    Editar
+                  </button>
+                </div>
+
                 {mapPickerDeliveryCostLabel ? (
-                  <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50 px-3 py-2.5">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-800/80">
-                      Costo de delivery
-                    </p>
-                    <p className="mt-0.5 text-lg font-black tracking-tight text-emerald-950">
-                      {[mapPickerDeliveryCostLabel, deliveryDistanceLabel].filter(Boolean).join(' · ')}
-                    </p>
-                    {matchedDeliveryAreaZone?.name ? (
-                      <p className="mt-0.5 text-[12px] font-medium text-emerald-900/75">
-                        Zona: {matchedDeliveryAreaZone.name}
+                  <div className="mt-3 flex items-center gap-3 rounded-[22px] border border-emerald-200/90 bg-emerald-50 px-3.5 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-800/80">
+                        Costo de delivery
                       </p>
+                      <p className="mt-0.5 text-[1.15rem] font-black tracking-tight text-[var(--menu-text)]">
+                        {[mapPickerDeliveryCostLabel, deliveryDistanceLabel]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                      {matchedDeliveryAreaZone?.name ? (
+                        <p className="mt-0.5 text-[11px] font-medium text-emerald-900/70">
+                          Zona: {matchedDeliveryAreaZone.name}
+                        </p>
+                      ) : null}
+                    </div>
+                    {mapPickerEtaLabel ? (
+                      <>
+                        <div className="h-10 w-px shrink-0 bg-emerald-200/90" />
+                        <div className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-100/90 px-3 py-2 text-[12px] font-black text-[var(--menu-text)]">
+                          <Clock className="h-3.5 w-3.5 text-emerald-700" strokeWidth={2.4} />
+                          {mapPickerEtaLabel}
+                        </div>
+                      </>
                     ) : null}
                   </div>
                 ) : deliveryOutOfZoneAllowed ? (
-                  <div className="rounded-2xl border border-amber-200/80 bg-amber-50 px-3 py-2.5 text-[12px] font-medium leading-snug text-amber-950">
+                  <div className="mt-3 rounded-[22px] border border-amber-200/80 bg-amber-50 px-3.5 py-3 text-[12px] font-medium leading-snug text-amber-950">
                     {deliveryOutOfZoneNotice}
                   </div>
                 ) : deliveryQuote.blocked ? (
-                  <div className="rounded-2xl border border-rose-200/80 bg-rose-50 px-3 py-2.5 text-[12px] font-medium leading-snug text-rose-900">
+                  <div className="mt-3 rounded-[22px] border border-rose-200/80 bg-rose-50 px-3.5 py-3 text-[12px] font-medium leading-snug text-rose-900">
                     {deliveryQuote.blockReason ||
                       'Esta ubicación está fuera de las zonas de entrega. Elige un punto dentro del área sombreada para continuar.'}
                   </div>
                 ) : deliveryAreaZonesForMap.length > 0 ? (
-                  <p className="text-[12px] font-medium text-[var(--menu-text-muted)]">
+                  <p className="mt-3 text-[12px] font-medium text-[var(--menu-text-muted)]">
                     Las áreas en verde son las zonas donde este negocio hace delivery.
                   </p>
                 ) : null}
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                  Mapa: {mapPickerProvider === 'google' ? 'Google Maps' : 'OpenStreetMap'}
-                </p>
+
                 {mapPickerError ? (
-                  <p className="text-xs font-semibold text-rose-500">{mapPickerError}</p>
+                  <p className="mt-2 text-xs font-semibold text-rose-500">{mapPickerError}</p>
                 ) : null}
-                <div className="flex items-center gap-2">
+
+                <div className="mt-3 flex items-center gap-2.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!navigator.geolocation) {
-                        setMapPickerError('Tu navegador no permite usar la ubicación GPS.');
-                        return;
-                      }
-                      setMapPickerError('');
-                      setIsMapPickerLoading(true);
-                      navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                          const point = {
-                            lat: position.coords.latitude,
-                            lng: position.coords.longitude,
-                          };
-                          setDeliveryPoint(point);
-                          setDeliveryPointSource('user');
-                          const map = mapPickerMapRef.current;
-                          if (mapPickerProvider === 'google') {
-                            if (map?.panTo) map.panTo(point);
-                            if (map?.setZoom) map.setZoom(15);
-                          } else if (map?.setView) {
-                            map.setView([point.lat, point.lng], 15);
-                          }
-                          mapPickerResolveAddressRef.current?.(point);
-                        },
-                        () => {
-                          setIsMapPickerLoading(false);
-                          setMapPickerError(
-                            'No pudimos obtener tu GPS. Activa la ubicación del navegador e inténtalo de nuevo.',
-                          );
-                        },
-                        { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
-                      );
-                    }}
-                    className="rounded-full border border-[var(--menu-border)] bg-[var(--menu-surface-alt)] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.08em] text-[var(--menu-text)]"
+                    onClick={goToMapPickerMyLocation}
+                    className="inline-flex h-12 items-center gap-1.5 rounded-2xl border border-[var(--menu-border)] bg-white px-3.5 text-[13px] font-bold text-[var(--menu-text)]"
                   >
-                    Mi ubicacion
+                    <MapPin className="h-4 w-4" strokeWidth={2.4} />
+                    Mi ubicación
                   </button>
                   <button
                     type="button"
@@ -7176,8 +7770,11 @@ export default function PublicMenuPage() {
                       }
                       setIsMapPickerOpen(false);
                     }}
-                    className="ml-auto rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.08em]"
-                    style={{ backgroundColor: 'var(--primary-color)', color: 'var(--text-on-primary)' }}
+                    className="h-12 min-w-0 flex-1 rounded-2xl px-4 text-[14px] font-black"
+                    style={{
+                      backgroundColor: 'var(--menu-primary)',
+                      color: 'var(--menu-on-primary)',
+                    }}
                   >
                     Confirmar punto
                   </button>
@@ -7209,13 +7806,15 @@ export default function PublicMenuPage() {
               checkoutStep === 0
                 ? isAssistedMode
                   ? 'Revisa el pedido antes de enviarlo a cocina.'
-                  : 'Revisa cantidades y confirma cómo quieres tu pedido.'
+                  : 'Revisa cantidades antes de continuar.'
                 : checkoutStep === 1
                   ? isAssistedMode
                     ? 'Nombre, mesa y contacto opcional para el resumen.'
-                    : 'Te avisamos por WhatsApp cuando esté listo.'
+                    : 'Te avisamos por WhatsApp cuando esté listo tu pedido.'
                   : checkoutStep === 2
-                    ? 'Indica dónde enviamos el pedido.'
+                    ? prefersSelfPickup
+                      ? 'Confirma si retiras o deja la dirección de envío.'
+                      : 'Indica dónde enviamos el pedido.'
                     : isAssistedMode
                       ? 'Pagar ahora o dejar el pago para después.'
                       : 'Elige como vas a pagar.'
@@ -7229,7 +7828,7 @@ export default function PublicMenuPage() {
                 ? 'Guardando pedido...'
                 : checkoutStep === 3
                   ? 'Listo'
-                  : checkoutStep === 1 && !isDeliveryOrder
+                  : checkoutStep === 1 && !isDeliveryOrder && !offersDeliveryAddressStep
                     ? 'Ir a pagar'
                     : checkoutStep === 2
                       ? 'Ir a pagar'
@@ -7260,34 +7859,6 @@ export default function PublicMenuPage() {
           >
                   {checkoutStep === 0 ? (
                     <div className="space-y-4">
-                      {!isAssistedMode && checkoutFulfillmentOptions.length > 0 ? (
-                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-                          <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                            Cómo lo quieres
-                          </p>
-                          <div className="mt-3 grid gap-2">
-                            {checkoutFulfillmentOptions.map((option) => {
-                              const selected = kioskFulfillment === option;
-                              return (
-                                <button
-                                  key={option}
-                                  type="button"
-                                  onClick={() => changeCheckoutFulfillment(option)}
-                                  className="flex min-h-12 items-center justify-between rounded-2xl border px-4 text-left text-sm font-black"
-                                  style={{
-                                    borderColor: selected ? 'var(--primary-color)' : 'var(--menu-border)',
-                                    backgroundColor: selected ? 'color-mix(in srgb, var(--primary-color) 12%, var(--menu-surface))' : 'var(--menu-surface-alt)',
-                                    color: 'var(--menu-text)',
-                                  }}
-                                >
-                                  {FULFILLMENT_LABEL[option]}
-                                  {selected ? <span className="text-xs font-bold" style={{ color: 'var(--primary-color)' }}>Elegido</span> : null}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ) : null}
                       {checkoutSummaryItems.length > 0 ? (
                         <div className="space-y-3">
                           {checkoutSummaryItems.map((item, index) => (
@@ -7434,51 +8005,48 @@ export default function PublicMenuPage() {
 
                   {checkoutStep === 1 ? (
                     <div className="space-y-4">
-                      <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-3 shadow-[var(--menu-shadow)]">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--menu-text-muted)]">
-                          Pedido
-                        </p>
-                        <p className="mt-1 text-base font-black">
-                          {isAssistedMode
-                            ? 'Comer aquí'
-                            : kioskFulfillment
-                              ? FULFILLMENT_LABEL[kioskFulfillment]
-                              : 'Pedido en local'}
-                          {' · '}
-                          {checkoutItemsCount} unid.
-                          {isAssistedMode && normalizedClientTable
-                            ? ` · Mesa ${normalizedClientTable}`
-                            : ''}
-                        </p>
-                      </div>
-
                       {isAssistedMode ? (
-                        <div className="grid gap-3">
-                          <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-                            <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                              <User className="h-3.5 w-3.5" strokeWidth={2.4} />
+                        <div className="overflow-hidden rounded-[22px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]">
+                          <label className="checkout-item-enter block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]">
+                                <User className="h-4 w-4" strokeWidth={2.4} />
+                              </span>
                               Nombre del cliente
                             </span>
-                            <input
-                              id="client-full-name"
-                              name="name"
-                              type="text"
-                              value={clientName}
-                              onChange={(event) => setClientName(event.target.value)}
-                              placeholder="Nombre del cliente"
-                              autoComplete="name"
-                              className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                              style={{
-                                borderColor:
-                                  isClientNameValid || clientName.trim().length === 0
-                                    ? 'var(--menu-border)'
-                                    : '#F43F5E',
-                              }}
-                              required
-                            />
+                            <div className="relative">
+                              <input
+                                id="client-full-name"
+                                name="name"
+                                type="text"
+                                value={clientName}
+                                onChange={(event) => setClientName(event.target.value)}
+                                placeholder="Nombre del cliente"
+                                autoComplete="name"
+                                className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 pr-11 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                                style={{
+                                  borderColor:
+                                    isClientNameValid || clientName.trim().length === 0
+                                      ? 'var(--menu-border)'
+                                      : '#F43F5E',
+                                }}
+                                required
+                              />
+                              {clientName.trim() ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setClientName('')}
+                                  className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-[var(--menu-text-muted)]"
+                                  aria-label="Borrar nombre"
+                                >
+                                  <X className="h-4 w-4" strokeWidth={2.4} />
+                                </button>
+                              ) : null}
+                            </div>
                           </label>
-                          <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-                            <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                          <div className="mx-4 border-t" style={{ borderColor: 'var(--menu-border)' }} />
+                          <label className="checkout-item-enter block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
                               Número de mesa
                             </span>
                             <input
@@ -7498,10 +8066,14 @@ export default function PublicMenuPage() {
                               required
                             />
                           </label>
-                          <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-                            <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                              <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
-                              WhatsApp o correo (opcional)
+                          <div className="mx-4 border-t" style={{ borderColor: 'var(--menu-border)' }} />
+                          <label className="checkout-item-enter block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              <WhatsAppLogo className="h-5 w-5" />
+                              WhatsApp o correo
+                              <span className="text-[12px] font-medium text-[var(--menu-text-muted)]">
+                                Opcional
+                              </span>
                             </span>
                             <input
                               id="client-contact-optional"
@@ -7523,153 +8095,356 @@ export default function PublicMenuPage() {
                               style={{ borderColor: 'var(--menu-border)' }}
                             />
                             <p className="mt-2 text-[11px] font-medium text-[var(--menu-text-muted)]">
-                              Opcional. Si lo dejas vacío, el pedido igual se registra.
+                              Si lo dejas vacío, el pedido igual se registra.
                             </p>
                           </label>
                         </div>
                       ) : (
-                      <div className="grid gap-3">
-                        <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '40ms' }}>
-                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                            <User className="h-3.5 w-3.5" strokeWidth={2.4} />
-                            Nombre completo
-                          </span>
-                          <input
-                            id="client-full-name"
-                            name="name"
-                            type="text"
-                            value={clientName}
-                            onChange={(event) => setClientName(event.target.value)}
-                            placeholder="Maria Fernanda Lopez"
-                            autoComplete="name"
-                            className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
-                            style={{
-                              borderColor: isClientNameValid || clientName.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
-                            }}
-                            required
-                          />
-                        </label>
+                        <div
+                          className="checkout-item-enter overflow-hidden rounded-[22px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]"
+                          style={{ animationDelay: '40ms' }}
+                        >
+                          <label className="block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2.5 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]">
+                                <User className="h-4 w-4" strokeWidth={2.4} />
+                              </span>
+                              Nombre completo
+                            </span>
+                            <div className="relative">
+                              <input
+                                id="client-full-name"
+                                name="name"
+                                type="text"
+                                value={clientName}
+                                onChange={(event) => setClientName(event.target.value)}
+                                placeholder="Maria Fernanda Lopez"
+                                autoComplete="name"
+                                className="h-12 w-full rounded-2xl border bg-[var(--menu-surface-alt)] px-4 pr-11 text-sm text-[var(--menu-text)] outline-none placeholder:text-[var(--menu-text-muted)]"
+                                style={{
+                                  borderColor:
+                                    isClientNameValid || clientName.trim().length === 0
+                                      ? 'var(--menu-border)'
+                                      : '#F43F5E',
+                                }}
+                                required
+                              />
+                              {clientName.trim() ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setClientName('')}
+                                  className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-[var(--menu-text-muted)]"
+                                  aria-label="Borrar nombre"
+                                >
+                                  <X className="h-4 w-4" strokeWidth={2.4} />
+                                </button>
+                              ) : null}
+                            </div>
+                          </label>
 
-                        <label className="checkout-item-enter block rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]" style={{ animationDelay: '90ms' }}>
-                          <span className="mb-2 inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                            <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
-                            WhatsApp
-                          </span>
-                          <div
-                            className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface-alt)]"
-                            style={{
-                              borderColor:
-                                isClientWhatsappValid || clientWhatsapp.trim().length === 0 ? 'var(--menu-border)' : '#F43F5E',
-                            }}
-                          >
-                            <PhoneInput
-                              international
-                              countryCallingCodeEditable={false}
-                              defaultCountry={clientWhatsappCountry}
-                              country={clientWhatsappCountry}
-                              value={clientWhatsapp || undefined}
-                              onChange={(value) => setClientWhatsapp(value ?? '')}
-                              onCountryChange={(country) => {
-                                if (country) setClientWhatsappCountry(country as Country);
+                          <div className="mx-4 border-t" style={{ borderColor: 'var(--menu-border)' }} />
+
+                          <label className="block p-4">
+                            <span className="mb-2.5 inline-flex items-center gap-2.5 text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
+                              <WhatsAppLogo className="h-8 w-8" />
+                              WhatsApp
+                            </span>
+                            <div
+                              className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface-alt)]"
+                              style={{
+                                borderColor:
+                                  isClientWhatsappValid || clientWhatsapp.trim().length === 0
+                                    ? 'var(--menu-border)'
+                                    : '#F43F5E',
                               }}
-                              placeholder="Ingresa tu numero"
-                              numberInputProps={{
-                                required: true,
-                                autoComplete: 'tel',
+                            >
+                              <PhoneInput
+                                international
+                                countryCallingCodeEditable={false}
+                                defaultCountry={clientWhatsappCountry}
+                                country={clientWhatsappCountry}
+                                value={clientWhatsapp || undefined}
+                                onChange={(value) => setClientWhatsapp(value ?? '')}
+                                onCountryChange={(country) => {
+                                  if (country) setClientWhatsappCountry(country as Country);
+                                }}
+                                placeholder="Ingresa tu numero"
+                                numberInputProps={{
+                                  required: true,
+                                  autoComplete: 'tel',
+                                }}
+                              />
+                            </div>
+                            <div
+                              className="mt-3 flex items-start gap-2.5 rounded-2xl px-3 py-2.5"
+                              style={{
+                                backgroundColor:
+                                  'color-mix(in srgb, #25D366 10%, var(--menu-surface-alt))',
+                                border: '1px solid color-mix(in srgb, #25D366 22%, transparent)',
                               }}
-                            />
-                          </div>
-                        </label>
-                      </div>
+                            >
+                              <Shield
+                                className="mt-0.5 h-4 w-4 shrink-0"
+                                style={{ color: '#128C7E' }}
+                                strokeWidth={2.4}
+                              />
+                              <p className="text-[12px] font-medium leading-snug text-[var(--menu-text)]">
+                                Usaremos tu número de WhatsApp solo para enviarte actualizaciones de
+                                tu pedido.
+                              </p>
+                            </div>
+                          </label>
+                        </div>
                       )}
                     </div>
                   ) : null}
 
                   {checkoutStep === 2 ? (
                     <div className="space-y-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsMapCanvasReady(false);
-                          setMapLoadSlow(false);
-                          setMapPickerError('');
-                          setIsMapPickerOpen(true);
-                        }}
-                        className="w-full rounded-[22px] p-4 text-left"
-                        style={
-                          hasDeliveryPoint
-                            ? {
-                                backgroundColor: 'var(--menu-surface)',
-                                boxShadow: 'var(--menu-shadow)',
+                      {offersDeliveryAddressStep ? (
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-3.5 shadow-[var(--menu-shadow)]">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                              <Store
+                                className="mt-0.5 h-5 w-5 shrink-0 text-[var(--menu-text-muted)]"
+                                strokeWidth={2.2}
+                              />
+                              <div className="min-w-0">
+                                <p className="text-[15px] font-black leading-tight text-[var(--menu-text)]">
+                                  Retirar en tienda
+                                </p>
+                                <p className="mt-0.5 text-[12px] font-medium leading-snug text-[var(--menu-text-muted)]">
+                                  {prefersSelfPickup
+                                    ? 'Sin envío. Retiras en el local cuando esté listo.'
+                                    : 'Actívalo si prefieres retirar en vez de delivery'}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={prefersSelfPickup}
+                              aria-label="Retirar en tienda"
+                              onClick={() =>
+                                changeCheckoutFulfillment(
+                                  prefersSelfPickup ? 'delivery' : 'takeaway',
+                                )
                               }
-                            : {
-                                backgroundColor: 'color-mix(in srgb, var(--menu-primary) 12%, var(--menu-surface))',
-                                boxShadow: '0 0 0 2px var(--menu-primary)',
-                              }
-                        }
-                      >
-                        <div className="flex items-start gap-3">
-                          <span
-                            className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl"
-                            style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
-                          >
-                            <MapPin className="h-6 w-6" strokeWidth={2.4} />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[11px] font-black uppercase tracking-[0.14em] text-[var(--menu-text-muted)]">
-                              {hasDeliveryPoint ? 'Punto en el mapa' : 'Paso necesario'}
-                            </span>
-                            <span className="mt-1 block text-sm font-bold text-[var(--menu-text)]">
-                              {hasDeliveryPoint
-                                ? normalizedDeliveryAddress || 'Punto listo'
-                                : 'Marca en el mapa dónde te llevamos el pedido'}
-                            </span>
-                            <span className="mt-1 block text-[12px] font-semibold text-[var(--menu-text-muted)]">
-                              {hasDeliveryPoint ? 'Toca para cambiar el punto' : 'Sin este punto no podemos enviar el pedido.'}
-                            </span>
-                          </span>
+                              className="relative h-7 w-12 shrink-0 rounded-full transition-colors"
+                              style={{
+                                backgroundColor: prefersSelfPickup
+                                  ? 'var(--menu-primary)'
+                                  : 'color-mix(in srgb, var(--menu-text) 22%, var(--menu-surface-alt))',
+                              }}
+                            >
+                              <span
+                                className="absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform"
+                                style={{
+                                  transform: prefersSelfPickup
+                                    ? 'translateX(1.25rem)'
+                                    : 'translateX(0)',
+                                }}
+                              />
+                            </button>
+                          </div>
                         </div>
-                        {deliveryLineLabel ? (
-                          <span className="mt-3 inline-flex rounded-full bg-[var(--menu-surface-alt)] px-2.5 py-1 text-[11px] font-black text-[var(--menu-text)]">
-                            {deliveryQuote.free
-                              ? ['Delivery gratis 🎉', deliveryDistanceLabel].filter(Boolean).join(' · ')
-                              : `${deliveryLineLabel} ${deliveryPriceWithDistance}`}
-                          </span>
-                        ) : null}
-                      </button>
-                      {deliveryQuote.blocked ? (
-                        <p className="text-sm font-semibold text-rose-500">{deliveryQuote.blockReason}</p>
-                      ) : deliveryOutOfZoneAllowed ? (
-                        <div className="rounded-2xl border border-amber-200/80 bg-amber-50 px-3 py-2.5 text-[12px] font-medium leading-snug text-amber-950">
-                          {deliveryOutOfZoneNotice}
-                        </div>
-                      ) : deliveryEngineNote ? (
-                        <p className="text-[12px] font-semibold text-[var(--menu-text-muted)]">{deliveryEngineNote}</p>
                       ) : null}
-                      <DeliveryNoteField
-                        id="delivery-reference"
-                        label="Punto de referencia"
-                        value={deliveryReference}
-                        placeholder="Al frente de la panadería, torre, piso"
-                        suggestions={deliveryNoteSuggestions(deliveryNoteMemory.references, DEFAULT_REFERENCE_SUGGESTIONS)}
-                        prefixes={DEFAULT_REFERENCE_SUGGESTIONS}
-                        required
-                        onChange={setDeliveryReference}
-                        onRemember={(value) => persistDeliveryNote('reference', value)}
-                      />
-                      <DeliveryNoteField
-                        id="delivery-instructions"
-                        label="Indicaciones"
-                        value={deliveryInstructions}
-                        placeholder="Tocar timbre, llamar al llegar..."
-                        suggestions={deliveryNoteSuggestions(
-                          deliveryNoteMemory.instructionsHistory,
-                          DEFAULT_INSTRUCTION_SUGGESTIONS,
-                        )}
-                        multiline
-                        onChange={setDeliveryInstructions}
-                        onRemember={(value) => persistDeliveryNote('instructions', value)}
-                      />
+
+                      {prefersSelfPickup ? (
+                        <div className="checkout-item-enter rounded-[22px] bg-[var(--menu-surface)] px-4 py-4 shadow-[var(--menu-shadow)]">
+                          <div className="flex items-start gap-2.5">
+                            <Store
+                              className="mt-0.5 h-5 w-5 shrink-0"
+                              style={{ color: 'var(--menu-primary)' }}
+                              strokeWidth={2.2}
+                            />
+                            <div className="min-w-0">
+                              <p className="text-[15px] font-black text-[var(--menu-text)]">
+                                Retiro en el local
+                              </p>
+                              <p className="mt-1 text-[13px] font-medium leading-snug text-[var(--menu-text-muted)]">
+                                Te avisamos por WhatsApp. Pasa a buscar tu pedido cuando esté listo.
+                              </p>
+                              {comercioAddress ? (
+                                <p className="mt-2 text-[12px] font-semibold text-[var(--menu-text)]">
+                                  {comercioAddress}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div
+                            className="checkout-item-enter overflow-hidden rounded-[22px] border-2 p-4"
+                            style={{
+                              borderColor: hasDeliveryPoint
+                                ? 'var(--menu-border)'
+                                : 'var(--menu-primary)',
+                              backgroundColor: hasDeliveryPoint
+                                ? 'var(--menu-surface)'
+                                : 'color-mix(in srgb, var(--menu-primary) 8%, var(--menu-surface))',
+                              boxShadow: hasDeliveryPoint ? 'var(--menu-shadow)' : undefined,
+                            }}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 items-start gap-2">
+                                <MapPin
+                                  className="mt-0.5 h-5 w-5 shrink-0"
+                                  style={{ color: 'var(--menu-primary)' }}
+                                  strokeWidth={2.4}
+                                />
+                                <div className="min-w-0">
+                                  <p className="text-[15px] font-black leading-tight text-[var(--menu-text)]">
+                                    Ubicación de entrega
+                                  </p>
+                                  <p className="mt-1 text-[12px] font-medium leading-snug text-[var(--menu-text-muted)]">
+                                    {hasDeliveryPoint
+                                      ? normalizedDeliveryAddress ||
+                                        'Punto listo. Puedes cambiarlo si hace falta.'
+                                      : 'Confirma el punto exacto para calcular el envío'}
+                                  </p>
+                                </div>
+                              </div>
+                              {!hasDeliveryPoint ? (
+                                <span
+                                  className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.06em]"
+                                  style={{
+                                    backgroundColor:
+                                      'color-mix(in srgb, var(--menu-primary) 16%, var(--menu-surface))',
+                                    color: 'var(--menu-primary)',
+                                  }}
+                                >
+                                  Obligatorio
+                                </span>
+                              ) : null}
+                            </div>
+
+                            {deliveryPoint ? (
+                              <DeliveryMapPreview
+                                className="mt-3"
+                                lat={deliveryPoint.lat}
+                                lng={deliveryPoint.lng}
+                                locating={deliveryPreviewLocating}
+                                onOpenMap={openDeliveryMapPicker}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={openDeliveryMapPicker}
+                                className="relative mt-3 w-full overflow-hidden rounded-2xl text-left"
+                                style={{
+                                  height: 148,
+                                  backgroundColor: 'var(--menu-surface-alt)',
+                                  border: '1px solid var(--menu-border)',
+                                }}
+                                aria-label="Marcar ubicación en el mapa"
+                              >
+                                <div className="absolute inset-0 grid place-items-center">
+                                  <p className="rounded-full bg-[var(--menu-surface)] px-3 py-1.5 text-[11px] font-bold text-[var(--menu-text)] shadow-sm">
+                                    {deliveryPreviewLocating
+                                      ? 'Obteniendo tu ubicación…'
+                                      : 'Marca tu punto en el mapa'}
+                                  </p>
+                                </div>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={openDeliveryMapPicker}
+                              className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl px-4 text-sm font-black"
+                              style={{
+                                backgroundColor: 'var(--menu-primary)',
+                                color: 'var(--menu-on-primary)',
+                              }}
+                            >
+                              <MapPin className="h-4 w-4" strokeWidth={2.6} />
+                              {hasDeliveryPoint
+                                ? 'Cambiar ubicación en el mapa'
+                                : 'Marcar ubicación en el mapa'}
+                            </button>
+
+                            {deliveryLineLabel && deliveryPriceWithDistance ? (
+                              <div className="mt-3 flex justify-center">
+                                <span
+                                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-black"
+                                  style={{
+                                    backgroundColor: 'var(--menu-surface)',
+                                    color: 'var(--menu-text)',
+                                    boxShadow: 'var(--menu-shadow)',
+                                  }}
+                                >
+                                  <Bike
+                                    className="h-3.5 w-3.5"
+                                    style={{ color: 'var(--menu-primary)' }}
+                                    strokeWidth={2.4}
+                                  />
+                                  {deliveryQuote.free
+                                    ? ['Delivery gratis 🎉', deliveryDistanceLabel]
+                                        .filter(Boolean)
+                                        .join(' · ')
+                                    : `${deliveryLineLabel} ${deliveryPriceWithDistance}`}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {deliveryQuote.blocked ? (
+                            <p className="text-sm font-semibold text-rose-500">
+                              {deliveryQuote.blockReason}
+                            </p>
+                          ) : deliveryOutOfZoneAllowed ? (
+                            <div className="rounded-2xl border border-amber-200/80 bg-amber-50 px-3 py-2.5 text-[12px] font-medium leading-snug text-amber-950">
+                              {deliveryOutOfZoneNotice}
+                            </div>
+                          ) : deliveryEngineNote ? (
+                            <p className="text-[12px] font-semibold text-[var(--menu-text-muted)]">
+                              {deliveryEngineNote}
+                            </p>
+                          ) : null}
+
+                          <div className="overflow-hidden rounded-[22px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]">
+                            <div className="p-4">
+                              <DeliveryNoteField
+                                id="delivery-reference"
+                                label="Punto de referencia"
+                                value={deliveryReference}
+                                placeholder="Al frente de la panadería, torre, piso"
+                                suggestions={deliveryNoteSuggestions(
+                                  deliveryNoteMemory.references,
+                                  DEFAULT_REFERENCE_SUGGESTIONS,
+                                )}
+                                prefixes={DEFAULT_REFERENCE_SUGGESTIONS}
+                                required
+                                framed={false}
+                                onChange={setDeliveryReference}
+                                onRemember={(value) => persistDeliveryNote('reference', value)}
+                              />
+                            </div>
+                            <div
+                              className="mx-4 border-t"
+                              style={{ borderColor: 'var(--menu-border)' }}
+                            />
+                            <div className="p-4">
+                              <DeliveryNoteField
+                                id="delivery-instructions"
+                                label="Indicaciones"
+                                value={deliveryInstructions}
+                                placeholder="Tocar timbre, llamar al llegar..."
+                                suggestions={deliveryNoteSuggestions(
+                                  deliveryNoteMemory.instructionsHistory,
+                                  DEFAULT_INSTRUCTION_SUGGESTIONS,
+                                )}
+                                multiline
+                                framed={false}
+                                onChange={setDeliveryInstructions}
+                                onRemember={(value) => persistDeliveryNote('instructions', value)}
+                              />
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   ) : null}
 
@@ -8385,7 +9160,7 @@ export default function PublicMenuPage() {
                                   }
                             }
                           >
-                            {FULFILLMENT_LABEL[option]}
+                            {CHECKOUT_FULFILLMENT_SHORT_LABEL[option]}
                           </button>
                         );
                       })}
@@ -8407,8 +9182,8 @@ export default function PublicMenuPage() {
                     {isAssistedMode
                       ? `Comer aquí${normalizedClientTable ? ` · Mesa ${normalizedClientTable}` : ''}`
                       : kioskFulfillment
-                        ? FULFILLMENT_LABEL[kioskFulfillment]
-                        : 'Pedido en local'}
+                        ? CHECKOUT_FULFILLMENT_CHOICE_LABEL[kioskFulfillment]
+                        : 'Pedido'}
                   </p>
                 )}
               </div>

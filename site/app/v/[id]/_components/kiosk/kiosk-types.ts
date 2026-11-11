@@ -42,3 +42,17 @@ export const FULFILLMENT_LABEL: Record<KioskFulfillment, string> = {
   takeaway: 'Para llevar',
   delivery: 'Delivery',
 };
+
+/** Customer-facing labels in public checkout (order notes still use FULFILLMENT_LABEL). */
+export const CHECKOUT_FULFILLMENT_CHOICE_LABEL: Record<KioskFulfillment, string> = {
+  dine_in: 'Comer aqui',
+  takeaway: 'Yo paso a buscarlo',
+  delivery: 'Delivery a domicilio',
+};
+
+/** Compact labels for the order-review segmented control. */
+export const CHECKOUT_FULFILLMENT_SHORT_LABEL: Record<KioskFulfillment, string> = {
+  dine_in: 'Comer aqui',
+  takeaway: 'Paso a buscarlo',
+  delivery: 'Delivery',
+};

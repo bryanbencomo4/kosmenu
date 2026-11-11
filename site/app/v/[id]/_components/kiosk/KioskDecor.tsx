@@ -143,6 +143,91 @@ export function KioskMotionStyles() {
         opacity: 1 !important;
         transform: none !important;
       }
+
+      /*
+       * Short phones: keep the hero readable, trim only extra gaps, and pin
+       * Ver menú above the footer so empty space does not sit under the CTAs.
+       */
+      @media (max-height: 780px) and (max-width: 480px) {
+        .kiosk-home-shell .kiosk-home-hero {
+          min-height: min(32vh, 260px) !important;
+          padding-top: 0.75rem !important;
+          padding-bottom: 3.75rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-headline {
+          margin-top: 0.85rem !important;
+          margin-bottom: 0.15rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-brush {
+          min-height: 4.85rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-logo-media {
+          height: min(34cqw, 128px) !important;
+          width: min(34cqw, 128px) !important;
+        }
+        .kiosk-home-shell .kiosk-home-panel {
+          padding-top: 4.5rem !important;
+          padding-bottom: 0.75rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-stack {
+          justify-content: flex-start !important;
+        }
+        .kiosk-home-shell .kiosk-home-title {
+          margin-top: 0.45rem !important;
+          font-size: clamp(28px, 7.4cqw, 40px) !important;
+        }
+        .kiosk-home-shell .kiosk-home-rating {
+          margin-top: 0.4rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-badge {
+          margin-top: 0.55rem !important;
+        }
+        /* Absorb leftover height between badge and CTAs — not under the buttons. */
+        .kiosk-home-shell .kiosk-home-cta-wrap {
+          margin-top: auto !important;
+          padding-top: 0.85rem !important;
+          padding-bottom: 0.15rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-cta {
+          height: 3.45rem !important;
+          font-size: 17px !important;
+        }
+        .kiosk-home-shell .kiosk-home-actions-wrap {
+          margin-top: 0.65rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-action-pill {
+          height: 2.85rem !important;
+        }
+        .kiosk-home-shell .kiosk-footer-enter svg {
+          height: 2.5rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-footer-body {
+          padding-bottom: max(0.55rem, env(safe-area-inset-bottom)) !important;
+        }
+        .kiosk-home-shell .kiosk-home-footer-body a {
+          margin-top: 0.4rem !important;
+        }
+      }
+
+      @media (max-height: 680px) and (max-width: 480px) {
+        .kiosk-home-shell .kiosk-home-hero {
+          min-height: min(30vh, 230px) !important;
+          padding-bottom: 3.35rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-logo-media {
+          height: min(32cqw, 116px) !important;
+          width: min(32cqw, 116px) !important;
+        }
+        .kiosk-home-shell .kiosk-home-panel {
+          padding-top: 4.1rem !important;
+        }
+        .kiosk-home-shell .kiosk-home-title {
+          font-size: clamp(26px, 7cqw, 36px) !important;
+        }
+        .kiosk-home-shell .kiosk-home-cta-wrap {
+          padding-top: 0.65rem !important;
+        }
+      }
     `}</style>
   );
 }

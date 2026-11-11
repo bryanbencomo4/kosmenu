@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, ArrowRight, Plus, Search, ShoppingBag, SlidersHorizontal, Star, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Package, Plus, Search, ShoppingBag, SlidersHorizontal, Star, X } from 'lucide-react';
 import {
   forwardRef,
   useEffect,
@@ -17,8 +17,10 @@ import { KioskTopBar } from './KioskTopBar';
 import { KioskVoucher } from './KioskVoucher';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
 import { foldSearchText } from '../../../../_lib/search-text';
+import { handleWhatsAppLinkClick } from '../../../../_lib/whatsapp-href';
 import { useKioskPageChrome } from './useKioskPageChrome';
 import {
+  CHECKOUT_FULFILLMENT_SHORT_LABEL,
   FULFILLMENT_LABEL,
   type KioskCategory,
   type KioskFulfillment,
@@ -75,7 +77,7 @@ type KioskMenuExperienceProps = {
   locationLabel: string | null;
   operatingStateLabels?: string[];
   socialLinks?: Array<{ network: string; href: string }>;
-  /** Digits-only WhatsApp for wa.me (e.g. 58412...). */
+  /** Digits-only WhatsApp for chat links (e.g. 58412...). */
   whatsappNumber?: string | null;
   tagline?: string | null;
   isOpen: boolean;
@@ -332,7 +334,9 @@ export const KioskMenuExperience = forwardRef<
       } catch {
         // The voucher remains available even when storage is unavailable.
       }
-      window.location.assign(whatsappUrl);
+      if (!handleWhatsAppLinkClick(whatsappUrl)) {
+        window.location.assign(whatsappUrl);
+      }
     }, 500);
 
     return () => window.clearTimeout(timer);
@@ -480,7 +484,15 @@ export const KioskMenuExperience = forwardRef<
           )}
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--menu-text-muted)]">
-              {catalogMode ? 'Catálogo' : fulfillment ? FULFILLMENT_LABEL[fulfillment] : isOpen ? 'Menú' : 'Solo consulta'}
+              {catalogMode
+                ? 'Catálogo'
+                : fulfillment
+                  ? assistedMode
+                    ? FULFILLMENT_LABEL[fulfillment]
+                    : CHECKOUT_FULFILLMENT_SHORT_LABEL[fulfillment]
+                  : isOpen
+                    ? 'Menú'
+                    : 'Solo consulta'}
             </p>
             <h2 className={`truncate text-lg font-extrabold tracking-[-0.03em] text-[var(--menu-text)]`}>
               {screen === 'products' ? activeCategory?.name || 'Productos' : 'Categorías'}
@@ -660,16 +672,34 @@ export const KioskMenuExperience = forwardRef<
                         </div>
                       )}
                     </div>
-                    <span className="absolute left-2 top-2 z-10 rounded-full bg-[color-mix(in_srgb,var(--menu-surface)_92%,transparent)] px-2 py-1 text-[11px] font-semibold text-[var(--menu-text-muted)]">
-                      {category.productCount}
-                    </span>
                   </div>
-                  <div className="flex h-11 shrink-0 items-center px-3 py-2">
-                    <p
-                      className={`truncate text-sm font-extrabold text-[var(--menu-text)]`}
+                  <div className="flex shrink-0 items-end justify-between gap-2 px-3 pb-3 pt-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-extrabold uppercase tracking-wide text-[var(--menu-text)]">
+                        {category.name}
+                      </p>
+                      <p className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-[var(--menu-text-muted)]">
+                        <Package
+                          className="h-3.5 w-3.5 shrink-0"
+                          style={{ color: 'color-mix(in srgb, var(--menu-primary) 78%, #8a6a3a)' }}
+                          aria-hidden
+                        />
+                        <span className="truncate">
+                          {category.productCount}{' '}
+                          {category.productCount === 1 ? 'producto' : 'productos'}
+                        </span>
+                      </p>
+                    </div>
+                    <span
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-full"
+                      style={{
+                        background: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface-alt))',
+                        color: 'color-mix(in srgb, var(--menu-primary) 78%, #8a6a3a)',
+                      }}
+                      aria-hidden
                     >
-                      {category.name}
-                    </p>
+                      <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    </span>
                   </div>
                 </button>
               ))}

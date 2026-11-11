@@ -12,6 +12,8 @@ type DeliveryNoteFieldProps = {
   prefixes?: string[];
   required?: boolean;
   multiline?: boolean;
+  /** When false, renders without its own card so several fields can share one shell. */
+  framed?: boolean;
   onChange: (value: string) => void;
   onRemember: (value: string) => void;
 };
@@ -36,6 +38,7 @@ export function DeliveryNoteField({
   prefixes = [],
   required = false,
   multiline = false,
+  framed = true,
   onChange,
   onRemember,
 }: DeliveryNoteFieldProps) {
@@ -59,13 +62,13 @@ export function DeliveryNoteField({
     onRemember(next);
   }
 
-  return (
-    <div className="rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
-      <label htmlFor={id} className="mb-2 flex items-baseline justify-between gap-3">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+  const body = (
+    <>
+      <label htmlFor={id} className="mb-2.5 flex items-center justify-between gap-3">
+        <span className="text-[15px] font-black tracking-[-0.01em] text-[var(--menu-text)]">
           {label}
         </span>
-        <span className="text-[11px] font-semibold text-[var(--menu-text-muted)]">
+        <span className="text-[12px] font-medium text-[var(--menu-text-muted)]">
           {required ? 'Requerido' : 'Opcional'}
         </span>
       </label>
@@ -93,7 +96,7 @@ export function DeliveryNoteField({
         />
       )}
       {suggestions.length > 0 ? (
-        <div className="mt-2 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mt-2.5 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {suggestions.map((suggestion) => {
             const isPrefix = prefixes.some(
               (prefix) => prefix.toLocaleLowerCase('es') === suggestion.toLocaleLowerCase('es'),
@@ -108,7 +111,7 @@ export function DeliveryNoteField({
                 key={suggestion}
                 type="button"
                 onClick={() => applySuggestion(suggestion)}
-                className="shrink-0 rounded-full px-3 py-1.5 text-[12px] font-semibold"
+                className="shrink-0 rounded-full px-3.5 py-2 text-[12px] font-bold"
                 style={
                   selected
                     ? { backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }
@@ -121,6 +124,14 @@ export function DeliveryNoteField({
           })}
         </div>
       ) : null}
+    </>
+  );
+
+  if (!framed) return <div>{body}</div>;
+
+  return (
+    <div className="rounded-[22px] bg-[var(--menu-surface)] p-4 shadow-[var(--menu-shadow)]">
+      {body}
     </div>
   );
 }

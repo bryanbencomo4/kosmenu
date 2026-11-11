@@ -43,7 +43,7 @@ type KioskCatalogReadyProps = {
   paymentGroups?: CatalogPaymentGroup[];
   selectedPaymentCurrency?: string;
   onSelectPaymentCurrency?: (currency: string) => void;
-  /** Digits-only WhatsApp for wa.me (e.g. 58412...). */
+  /** Digits-only WhatsApp for chat links (e.g. 58412...). */
   whatsappNumber?: string | null;
   onBackToMenu: () => void;
   onSubmitWhatsapp: (input: CatalogWhatsappSubmitInput) => Promise<void>;

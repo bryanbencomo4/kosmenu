@@ -46,6 +46,7 @@ import { OperatingCoverage } from './OperatingCoverage';
 import type { KioskFulfillment } from './kiosk-types';
 import type { MenuThemeMode } from '../../_lib/menu-theme';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
+import { buildWhatsAppHref, handleWhatsAppLinkClick } from '../../../../_lib/whatsapp-href';
 
 type KioskHomeProps = {
   businessName: string;
@@ -62,7 +63,7 @@ type KioskHomeProps = {
   /** Resolved Venezuela state labels for virtual businesses (e.g. "Miranda"). */
   operatingStateLabels?: string[];
   socialLinks?: Array<{ network: string; href: string }>;
-  /** Digits-only WhatsApp for wa.me (e.g. 58412...). */
+  /** Digits-only WhatsApp for chat links (e.g. 58412...). */
   whatsappNumber?: string | null;
   tagline?: string | null;
   supportsDelivery: boolean;
@@ -330,11 +331,9 @@ export function KioskHome({
   const showSocials = homeConfig.redes && socialLinks.length > 0;
   const waDigits = (whatsappNumber ?? '').replace(/\D/g, '');
   const canOpenWhatsapp = waDigits.length >= 10;
-  const whatsappChatUrl = canOpenWhatsapp ? `https://wa.me/${waDigits}` : null;
+  const whatsappChatUrl = canOpenWhatsapp ? buildWhatsAppHref(waDigits) : null;
   const whatsappProofUrl = canOpenWhatsapp
-    ? `https://wa.me/${waDigits}?text=${encodeURIComponent(
-        'Hola, quiero enviar el comprobante de pago.',
-      )}`
+    ? buildWhatsAppHref(waDigits, 'Hola, quiero enviar el comprobante de pago.')
     : null;
 
   useEffect(() => {
@@ -394,7 +393,7 @@ export function KioskHome({
             {/* Dark hero: photo fills under the N-seam (reference composition) */}
             <div className="relative shrink-0">
               <div
-                className="relative min-h-[min(36vh,300px)] overflow-hidden px-5 pb-16 pt-3.5 sm:min-h-[300px] sm:px-6 sm:pb-[4.5rem] sm:pt-5 lg:min-h-[280px]"
+                className="kiosk-home-hero relative min-h-[min(36vh,300px)] overflow-hidden px-5 pb-16 pt-3.5 sm:min-h-[300px] sm:px-6 sm:pb-[4.5rem] sm:pt-5 lg:min-h-[280px]"
                 style={{
                   background:
                     'linear-gradient(165deg, #050607 0%, #101218 42%, color-mix(in srgb, var(--menu-primary) 24%, #0a0b0e) 100%)',
@@ -421,7 +420,7 @@ export function KioskHome({
                 <div className="relative z-30 flex items-center justify-start">
                   <HomeMenuButton onOpen={() => setHomeMenuOpen(true)} />
                 </div>
-                <div className="relative z-10 mt-5 mb-2 flex items-center justify-center px-2 sm:mt-6">
+                <div className="kiosk-home-headline relative z-10 mt-5 mb-2 flex items-center justify-center px-2 sm:mt-6">
                   <HeroHeadline />
                 </div>
                 {/* Seam inside hero — crest cuts the photo, no white gap */}
@@ -440,10 +439,10 @@ export function KioskHome({
 
             {/* Light commercial panel — compact stack like the reference */}
             <div
-              className="relative z-10 flex min-h-0 flex-1 flex-col px-5 pb-5 pt-[5.25rem] sm:px-6 sm:pb-6 sm:pt-[5.75rem]"
+              className="kiosk-home-panel relative z-10 flex min-h-0 flex-1 flex-col px-5 pb-5 pt-[5.25rem] sm:px-6 sm:pb-6 sm:pt-[5.75rem]"
               style={{ backgroundColor: 'var(--menu-background)' }}
             >
-              <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col items-center justify-center gap-0">
+              <div className="kiosk-home-stack mx-auto flex w-full max-w-[420px] flex-1 flex-col items-center justify-center gap-0">
                 <RestaurantMeta
                   businessName={businessName}
                   nameFontClassName=""
@@ -451,7 +450,7 @@ export function KioskHome({
                   ratingAverage={ratingAverage}
                   ratingCount={ratingCount}
                 />
-                <div className="mt-2.5">
+                <div className="kiosk-home-badge mt-2.5">
                   <StatusBadge
                     isOpen={isOpen}
                     openCaption={openCaption}
@@ -466,14 +465,14 @@ export function KioskHome({
                 ) : null}
 
                 {/* Slightly inset so AccentRays sit in the side gutters, not glued to the pill. */}
-                <div className="relative mx-auto mt-6 w-[calc(100%-1.75rem)] max-w-[22.5rem] overflow-visible pt-4 sm:mt-7 sm:w-[calc(100%-2.25rem)] sm:pt-4">
+                <div className="kiosk-home-cta-wrap relative mx-auto mt-6 w-[calc(100%-1.75rem)] max-w-[22.5rem] overflow-visible pt-4 sm:mt-7 sm:w-[calc(100%-2.25rem)] sm:pt-4">
                   <PrimaryCTA
                     onClick={() => {
                       if (catalogOnlySession) onOpenCatalog();
                       else onBrowseMenu();
                     }}
                   />
-                  <div className="mt-3 w-full">
+                  <div className="kiosk-home-actions-wrap mt-3 w-full">
                     <ActionCards
                       mapsHref={mapsHref}
                       locationFallback={locationLabel?.trim() || 'Sin ubicación'}
@@ -598,7 +597,10 @@ function HomeOptionsSheet({
               href={whatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={onClose}
+              onClick={(event) => {
+                handleWhatsAppLinkClick(whatsappUrl, event);
+                onClose();
+              }}
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl text-[15px] font-bold text-white transition active:scale-[0.99]"
               style={{ backgroundColor: '#25D366' }}
             >
@@ -823,6 +825,7 @@ function PaymentMethodsSheet({
               href={whatsappProofUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(event) => handleWhatsAppLinkClick(whatsappProofUrl, event)}
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[16px] text-sm font-bold text-white"
               style={{ backgroundColor: '#25D366' }}
             >
