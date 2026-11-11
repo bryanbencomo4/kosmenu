@@ -28,7 +28,6 @@ type GoogleMapsApi = {
 
 type WindowWithGoogle = Window & {
   google?: GoogleMapsApi;
-  [key: string]: unknown;
 };
 
 const googleMapsJsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ?? '';
@@ -78,14 +77,15 @@ function loadGoogleMapsApi() {
     }
 
     const callbackName = '__kosmenuGoogleMapsReady';
-    win[callbackName] = () => {
+    const winBag = window as unknown as Record<string, unknown>;
+    winBag[callbackName] = () => {
       waitForGoogleMaps()
         .then((google) => {
-          delete win[callbackName];
+          delete winBag[callbackName];
           resolve(google);
         })
         .catch((error) => {
-          delete win[callbackName];
+          delete winBag[callbackName];
           reject(error);
         });
     };
@@ -96,7 +96,7 @@ function loadGoogleMapsApi() {
     script.defer = true;
     script.dataset.kosmenuGoogleMaps = '1';
     script.onerror = (error) => {
-      delete win[callbackName];
+      delete winBag[callbackName];
       reject(error);
     };
     document.head.appendChild(script);
