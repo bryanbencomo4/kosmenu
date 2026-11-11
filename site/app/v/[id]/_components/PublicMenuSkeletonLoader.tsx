@@ -67,7 +67,7 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
 
       <div className="relative z-10 mx-auto flex min-h-0 w-full flex-1 flex-col lg:items-center lg:justify-center lg:px-8 lg:py-6">
         <div
-          className="relative mx-auto flex min-h-0 w-full max-w-[430px] flex-1 flex-col overflow-hidden lg:max-h-[min(52rem,calc(100dvh-3rem))] lg:flex-none lg:rounded-[2rem] lg:shadow-[0_32px_90px_rgba(0,0,0,0.22)]"
+          className="relative mx-auto flex min-h-0 w-full max-w-[430px] flex-1 flex-col overflow-hidden @container lg:max-h-[min(52rem,calc(100dvh-3rem))] lg:flex-none lg:rounded-[2rem] lg:shadow-[0_32px_90px_rgba(0,0,0,0.22)]"
           style={{ backgroundColor: 'var(--menu-background)' }}
         >
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -88,8 +88,9 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
                 </div>
 
                 <div className="relative z-10 mt-5 mb-2 flex items-center justify-center px-2 sm:mt-6">
+                  {/* Brush placeholder — matches HeroHeadline width/height (≤3 lines). */}
                   <Pulse
-                    className="h-[4.6rem] w-[min(88vw,21.5rem)] -rotate-[3deg] rounded-[1.6rem] sm:h-[5rem] sm:w-[23rem]"
+                    className="h-[5.4rem] w-[min(90cqw,23rem)] -rotate-[3deg] rounded-[1.6rem]"
                     style={{ backgroundColor: '#D1D5DB' }}
                   />
                 </div>
@@ -103,7 +104,7 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
               {/* Opaque square logo — covers the seam midsection (pulse opacity would show the wave through). */}
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex translate-y-[42%] justify-center">
                 <div
-                  className="relative grid h-[min(38vw,148px)] w-[min(38vw,148px)] place-items-center rounded-[30px] p-[5px] sm:h-[156px] sm:w-[156px] sm:rounded-[32px]"
+                  className="relative grid h-[min(38cqw,148px)] w-[min(38cqw,148px)] place-items-center rounded-[30px] p-[5px]"
                   style={{
                     backgroundColor: '#ffffff',
                     boxShadow: '0 22px 48px rgba(15, 23, 42, 0.14)',
@@ -112,7 +113,7 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
                 >
                   <Pulse
                     rounded="none"
-                    className="h-full w-full rounded-[25px] sm:rounded-[27px]"
+                    className="h-full w-full rounded-[25px]"
                     style={{ backgroundColor: '#E5E7EB' }}
                   />
                 </div>
@@ -123,33 +124,36 @@ export function PublicMenuSkeletonLoader({ businessName }: PublicMenuSkeletonLoa
               className="relative z-10 flex min-h-0 flex-1 flex-col px-5 pb-5 pt-[5.25rem] sm:px-6 sm:pb-6 sm:pt-[5.75rem]"
               style={{ backgroundColor: 'var(--menu-background)' }}
             >
-              <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col items-center justify-center">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--menu-text-muted)]">
+              <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col items-center justify-center gap-0">
+                <p className="text-[12px] font-bold uppercase tracking-[0.3em] text-[var(--menu-text-muted)]">
                   — Menú inteligente —
                 </p>
 
                 {knownName ? (
-                  <h1 className="mt-2 max-w-[min(94vw,16ch)] break-words text-center text-[clamp(30px,8vw,44px)] font-extrabold leading-[1.02] tracking-[-0.045em] text-[var(--menu-text)]">
+                  <h1 className="mt-2 max-w-[min(94cqw,16ch)] break-words text-center text-[clamp(34px,8.5cqw,48px)] font-extrabold leading-[1.02] tracking-[-0.05em] text-[var(--menu-text)]">
                     {businessName}
                   </h1>
                 ) : (
-                  <Pulse className="mt-2 h-10 w-48 rounded-xl sm:h-12 sm:w-56" />
+                  <Pulse className="mt-2 h-10 w-48 rounded-xl" />
                 )}
 
-                <Pulse className="mt-3 h-4 w-40 rounded-lg" />
-                <Pulse className="mt-2.5 h-8 w-44" />
+                <Pulse className="mt-2 h-4 w-40 rounded-lg" />
+                <Pulse className="mt-2.5 h-8 w-52" />
 
-                <Pulse
-                  className="mt-5 h-[3.65rem] w-full sm:mt-6 sm:h-[3.8rem]"
-                  style={{
-                    backgroundColor: '#9CA3AF',
-                    boxShadow: '0 10px 24px rgba(148, 163, 184, 0.28)',
-                  }}
-                />
+                {/* Inset gutters match PrimaryCTA + AccentRays spacing. */}
+                <div className="relative mx-auto mt-6 w-[calc(100%-1.75rem)] max-w-[22.5rem] overflow-visible pt-4 sm:mt-7 sm:w-[calc(100%-2.25rem)]">
+                  <Pulse
+                    className="h-[3.85rem] w-full"
+                    style={{
+                      backgroundColor: '#9CA3AF',
+                      boxShadow: '0 10px 24px rgba(148, 163, 184, 0.28)',
+                    }}
+                  />
 
-                <div className="mt-3 grid w-full grid-cols-2 gap-[0.85rem]">
-                  <Pulse className="h-[3.15rem] sm:h-[3.25rem]" style={{ backgroundColor: '#ffffff' }} />
-                  <Pulse className="h-[3.15rem] sm:h-[3.25rem]" style={{ backgroundColor: '#ffffff' }} />
+                  <div className="mt-3 grid w-full grid-cols-2 gap-[0.85rem]">
+                    <Pulse className="h-[3.15rem]" style={{ backgroundColor: '#ffffff' }} />
+                    <Pulse className="h-[3.15rem]" style={{ backgroundColor: '#ffffff' }} />
+                  </div>
                 </div>
               </div>
             </div>

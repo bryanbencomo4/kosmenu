@@ -6451,6 +6451,7 @@ export default function PublicMenuPage() {
           locationLabel={heroLocation || null}
           operatingStateLabels={operatingStateLabels}
           socialLinks={socialLinks}
+          whatsappNumber={whatsappNumber || null}
           tagline={menuData?.comercio.descripcion?.trim() || null}
           isOpen={!scheduleClosed}
           openCaption={kioskOpenCaption}

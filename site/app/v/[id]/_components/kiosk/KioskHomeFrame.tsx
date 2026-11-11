@@ -58,7 +58,7 @@ export function AccentRays({
   );
 }
 
-/** Split greeting for brush layout: white lead + secondary accent line. */
+/** Split greeting for brush layout: white lead + secondary accent line (≤3 lines total). */
 function splitGreetingLines(greeting: string): { lead: string; accent: string } {
   const text = greeting.trim();
   const classic = text.match(/^(.*?)\s+(algo rico\??)$/i);
@@ -69,7 +69,8 @@ function splitGreetingLines(greeting: string): { lead: string; accent: string } 
   if (words.length <= 3) {
     return { lead: text, accent: '' };
   }
-  const accentCount = words.length >= 7 ? 3 : 2;
+  // Keep accent short (1–2 words) so lead+accent stay within 3 visual lines.
+  const accentCount = words.length >= 8 ? 2 : words.length >= 5 ? 2 : 1;
   return {
     lead: words.slice(0, -accentCount).join(' '),
     accent: words.slice(-accentCount).join(' '),
@@ -205,11 +206,11 @@ export function HeroHeadline({ fontClassName = '' }: { fontClassName?: string } 
 
   return (
     <div
-      className="kiosk-enter relative mx-auto w-[min(90vw,23rem)] -rotate-[3deg] sm:w-[24.5rem]"
+      className="kiosk-enter relative mx-auto w-[min(90cqw,23rem)] -rotate-[3deg]"
       style={{ animationDelay: '40ms' }}
     >
       {/* Stack: masked brush + greeting + AccentRays (left of title, like Flutter banner). */}
-      <div className="relative flex min-h-[5.4rem] items-center justify-center overflow-visible sm:min-h-[5.9rem]">
+      <div className="relative flex min-h-[5.4rem] items-center justify-center overflow-visible">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-x-0 top-1/2 w-full -translate-y-1/2 drop-shadow-[0_10px_18px_rgba(0,0,0,0.35)]"
@@ -224,21 +225,23 @@ export function HeroHeadline({ fontClassName = '' }: { fontClassName?: string } 
         </div>
         {/* Rays sit on the brush, left of the centered title — not Unicode dashes. */}
         <div
-          className="pointer-events-none absolute left-[2%] top-[8%] z-[2] sm:left-[1%] sm:top-[6%]"
+          className="pointer-events-none absolute left-[2%] top-[8%] z-[2]"
           aria-hidden
         >
-          <AccentRays size={42} className="sm:hidden" />
-          <AccentRays size={48} className="hidden sm:block" />
+          <AccentRays size={42} />
         </div>
         <p
-          className={`${fontClassName} relative z-[1] max-w-[86%] px-5 text-center text-[clamp(24px,6.6vw,34px)] font-extrabold italic leading-[1.02] tracking-[-0.015em]`.trim()}
+          className={`${fontClassName} relative z-[1] max-w-[86%] px-5 text-center text-[clamp(24px,6.6cqw,34px)] font-extrabold italic leading-[1.02] tracking-[-0.015em]`.trim()}
           style={{
             textShadow: '0 2px 0 rgba(0,0,0,0.45), 0 4px 12px rgba(0,0,0,0.5)',
           }}
         >
-          <span className="block text-white">{lead}</span>
+          {/* Cap at 3 lines total so the greeting never slips behind the logo. */}
+          <span className={`block text-white ${accent ? 'line-clamp-2' : 'line-clamp-3'}`}>
+            {lead}
+          </span>
           {accent ? (
-            <span className="block" style={{ color: secondary }}>
+            <span className="block line-clamp-1" style={{ color: secondary }}>
               {accent}
             </span>
           ) : null}
@@ -260,7 +263,7 @@ export function RestaurantLogo({
   return (
     <div className="kiosk-enter relative grid place-items-center" style={{ animationDelay: '90ms' }}>
       <div
-        className="relative rounded-[30px] p-[5px] sm:rounded-[32px]"
+        className="relative rounded-[30px] p-[5px]"
         style={{
           backgroundColor: '#ffffff',
           boxShadow:
@@ -276,11 +279,11 @@ export function RestaurantLogo({
             priority
             fit="contain"
             showBlurFill={false}
-            className="relative h-[min(38vw,148px)] w-[min(38vw,148px)] rounded-[25px] bg-[var(--menu-surface)] sm:h-[156px] sm:w-[156px] sm:rounded-[27px]"
+            className="relative h-[min(38cqw,148px)] w-[min(38cqw,148px)] rounded-[25px] bg-[var(--menu-surface)]"
           />
         ) : (
           <div
-            className="relative grid h-[min(38vw,148px)] w-[min(38vw,148px)] place-items-center rounded-[25px] text-5xl font-black sm:h-[156px] sm:w-[156px] sm:rounded-[27px]"
+            className="relative grid h-[min(38cqw,148px)] w-[min(38cqw,148px)] place-items-center rounded-[25px] text-5xl font-black"
             style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
           >
             {initialLetter}
@@ -310,7 +313,7 @@ export function RestaurantMeta({
         — Menú inteligente —
       </p>
       <h1
-        className={`${nameFontClassName} mt-2 max-w-[min(94vw,16ch)] break-words text-[clamp(34px,8.5vw,48px)] font-extrabold leading-[1.02] tracking-[-0.05em] text-[var(--menu-text)]`.trim()}
+        className={`${nameFontClassName} mt-2 max-w-[min(94cqw,16ch)] break-words text-[clamp(34px,8.5cqw,48px)] font-extrabold leading-[1.02] tracking-[-0.05em] text-[var(--menu-text)]`.trim()}
       >
         {businessName}
       </h1>
@@ -402,7 +405,7 @@ export function PrimaryCTA({ onClick, children }: { onClick: () => void; childre
       <button
         type="button"
         onClick={onClick}
-        className="relative z-0 flex h-[3.85rem] w-full items-center rounded-full px-5 text-[18px] font-extrabold tracking-[-0.01em] transition active:scale-[0.985] sm:h-[4rem] sm:text-[19px]"
+        className="relative z-0 flex h-[3.85rem] w-full items-center rounded-full px-5 text-[18px] font-extrabold tracking-[-0.01em] transition active:scale-[0.985]"
         style={{
           background:
             'linear-gradient(180deg, color-mix(in srgb, var(--menu-primary) 72%, white) 0%, var(--menu-primary) 48%, color-mix(in srgb, var(--menu-primary) 92%, #0a0a0a) 100%)',
@@ -445,7 +448,7 @@ export function ActionCards({
   } as const;
 
   const pillClass =
-    'flex h-[3.15rem] items-center justify-center gap-2 rounded-full border px-3 text-[13px] font-bold tracking-[-0.01em] transition active:scale-[0.985] sm:h-[3.25rem] sm:px-3.5 sm:text-[14px]';
+    'flex h-[3.15rem] items-center justify-center gap-2 rounded-full border px-3 text-[13px] font-bold tracking-[-0.01em] transition active:scale-[0.985]';
 
   const iconStyle = { color: 'var(--menu-primary)' } as const;
 

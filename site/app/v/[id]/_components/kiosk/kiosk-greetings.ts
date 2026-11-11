@@ -1,32 +1,32 @@
 export type DayPart = 'morning' | 'afternoon' | 'evening';
 
 const GENERIC_GREETINGS = [
-  '¡Bienvenido! 👋 ¿Qué te gustaría pedir hoy?',
+  '¡Bienvenido! 👋 ¿Qué te gustaría pedir?',
   'Hola 👋 ¿Qué se te antoja hoy?',
-  '¡Qué gusto tenerte por aquí! 😊 ¿Qué vamos a pedir?',
-  'Bienvenido 🙌 tómate tu tiempo para elegir.',
+  '¡Qué gusto tenerte aquí! 😊 ¿Qué pedimos?',
+  'Bienvenido 🙌 toma tu tiempo.',
   '¿Listo para pedir algo rico? 😋',
-  'Pide a tu ritmo 🍽️ nosotros nos encargamos del resto.',
+  'Pide a tu ritmo 🍽️ nosotros nos encargamos.',
   '¿Qué te provoca comer hoy? 🤤',
-  '¡Hola! 👋 Mira el menú y elige tu favorito.',
+  '¡Hola! 👋 Elige tu favorito.',
   '¡Bienvenido! ✨ Tu mesa digital está lista.',
 ];
 
 const MORNING_GREETINGS = [
   'Buenos días ☀️ ¿Qué te gustaría pedir?',
-  'Buenos días 🌅 tómate tu tiempo para elegir.',
-  'Buenos días ☕ ¿qué se te antoja hoy?',
+  'Buenos días 🌅 toma tu tiempo.',
+  'Buenos días ☕ ¿qué se te antoja?',
 ];
 
 const AFTERNOON_GREETINGS = [
-  'Buenas tardes 🌤️ ¿qué se te antoja hoy?',
+  'Buenas tardes 🌤️ ¿qué se te antoja?',
   'Buenas tardes 👋 ¿Qué vamos a pedir?',
-  'Buenas tardes 😊 estamos listos para atenderte.',
+  'Buenas tardes 😊 listos para atenderte.',
 ];
 
 const EVENING_GREETINGS = [
-  'Buenas noches 🌙 estamos listos para atenderte.',
-  'Buenas noches ✨ ¿Qué te provoca comer?',
+  'Buenas noches 🌙 listos para atenderte.',
+  'Buenas noches ✨ ¿Qué te provoca?',
   'Buenas noches 🍽️ pide a tu ritmo.',
 ];
 

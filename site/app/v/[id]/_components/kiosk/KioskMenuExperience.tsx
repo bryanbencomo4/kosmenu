@@ -75,6 +75,8 @@ type KioskMenuExperienceProps = {
   locationLabel: string | null;
   operatingStateLabels?: string[];
   socialLinks?: Array<{ network: string; href: string }>;
+  /** Digits-only WhatsApp for wa.me (e.g. 58412...). */
+  whatsappNumber?: string | null;
   tagline?: string | null;
   isOpen: boolean;
   openCaption: string;
@@ -158,6 +160,7 @@ export const KioskMenuExperience = forwardRef<
     locationLabel,
     operatingStateLabels = [],
     socialLinks,
+    whatsappNumber = null,
     tagline,
     isOpen,
     openCaption,
@@ -416,6 +419,7 @@ export const KioskMenuExperience = forwardRef<
           locationLabel={locationLabel}
           operatingStateLabels={operatingStateLabels}
           socialLinks={socialLinks}
+          whatsappNumber={whatsappNumber}
           tagline={tagline}
           supportsDelivery={supportsDelivery}
           homeConfig={homeConfig}
