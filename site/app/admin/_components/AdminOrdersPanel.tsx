@@ -82,6 +82,7 @@ type AdminOrdersPanelProps = {
   initialFrom?: string | null;
   initialTo?: string | null;
   initialQuery?: string | null;
+  initialOrderId?: string | null;
   initialStatus?: string;
   initialArchived?: 'active' | 'archived' | 'all';
 };
@@ -169,6 +170,7 @@ export function AdminOrdersPanel({
   initialFrom = null,
   initialTo = null,
   initialQuery = null,
+  initialOrderId = null,
   initialStatus = 'all',
   initialArchived = 'active',
 }: AdminOrdersPanelProps) {
@@ -193,7 +195,7 @@ export function AdminOrdersPanel({
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialOrderId);
   const [detail, setDetail] = useState<OrderDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [archiving, setArchiving] = useState(false);

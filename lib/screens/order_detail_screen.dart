@@ -20,6 +20,7 @@ import 'package:kosmenu_app/services/order_manager_service.dart';
 import 'package:kosmenu_app/services/order_rating_service.dart';
 import 'package:kosmenu_app/services/comprobante_signed_url_session.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
+import 'package:kosmenu_app/utils/whatsapp_href.dart';
 import 'package:kosmenu_app/widgets/assign_courier_sheet.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
@@ -1290,12 +1291,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
       );
       return;
     }
-    final text = Uri.encodeComponent(
-      message ??
-          'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.',
-    );
-    final uri = Uri.parse('https://wa.me/$digits?text=$text');
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final text =
+        message ??
+        'Hola, te escribimos desde $comercioNombre por tu pedido ${widget.orderId}.';
+    final launched = await openWhatsAppChat(digits, text: text);
 
     if (!launched && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1571,12 +1570,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
             courierAlias: selection.alias,
           );
       final whatsappUrl =
-          directWhatsappUrl ??
-          'https://wa.me/$waDigits?text=${Uri.encodeComponent(invite.url)}';
-      final opened = await launchUrl(
-        Uri.parse(whatsappUrl),
-        mode: LaunchMode.externalApplication,
-      );
+          directWhatsappUrl ?? buildWhatsAppHref(waDigits, text: invite.url);
+      final opened = await openWhatsAppHref(whatsappUrl);
       if (!opened) {
         throw Exception('No se pudo abrir WhatsApp.');
       }
@@ -4095,16 +4090,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                                                         context,
                                                       );
                                                   final message =
-                                                      Uri.encodeComponent(
-                                                        'Hola ${deliveryDelegateAlias.isEmpty ? 'repartidor' : deliveryDelegateAlias}, te escribimos desde ${data.comercioNombre} por el pedido ${widget.orderId}.',
-                                                      );
-                                                  final waUri = Uri.parse(
-                                                    'https://wa.me/$deliveryDelegatePhoneDigits?text=$message',
-                                                  );
-                                                  final opened = await launchUrl(
-                                                    waUri,
-                                                    mode: LaunchMode
-                                                        .externalApplication,
+                                                      'Hola ${deliveryDelegateAlias.isEmpty ? 'repartidor' : deliveryDelegateAlias}, te escribimos desde ${data.comercioNombre} por el pedido ${widget.orderId}.';
+                                                  final opened =
+                                                      await openWhatsAppChat(
+                                                    deliveryDelegatePhoneDigits,
+                                                    text: message,
                                                   );
                                                   if (!opened) {
                                                     messenger.showSnackBar(

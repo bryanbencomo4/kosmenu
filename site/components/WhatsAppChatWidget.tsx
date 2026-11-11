@@ -12,6 +12,7 @@ import {
   consumerChatWhatsappHref,
   developmentBusinessHosts,
 } from '../app/_lib/public-site-config';
+import { handleWhatsAppLinkClick } from '../app/_lib/whatsapp-href';
 
 const BUSINESS_CHAT_MESSAGES = [
   '¿Listo para transformar tu restaurante?\u00A0🚀',
@@ -240,6 +241,7 @@ export function WhatsAppChatWidget() {
                 href={whatsappHref}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(event) => handleWhatsAppLinkClick(whatsappHref, event)}
                 className="inline-flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 text-[0.92rem] font-bold text-white shadow-[0_16px_30px_-18px_rgba(37,211,102,0.95)] transition hover:bg-[#20bd5a]"
               >
                 Escribir por WhatsApp

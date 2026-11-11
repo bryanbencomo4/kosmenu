@@ -190,7 +190,27 @@ describe('merchant comanda from stored snapshots', () => {
     expect(buildDetailedMerchantWhatsappText({
       ...order,
       details: { ...order.details, order_notes: 'Tipo: Comer aqui' },
-    })).toContain('NUEVO PEDIDO #EMXFA-000156 (Comer aqui)');
+    })).toContain('NUEVO PEDIDO #EMXFA-000156 (Comer aquí)');
+    expect(buildDetailedMerchantWhatsappText({
+      ...order,
+      details: { ...order.details, order_notes: 'Tipo: Comer aquí' },
+    })).toContain('NUEVO PEDIDO #EMXFA-000156 (Comer aquí)');
+    expect(buildDetailedMerchantWhatsappText({
+      ...order,
+      details: { ...order.details, order_notes: 'Tipo: Comer aquí' },
+    })).toContain('COMER AQUÍ');
+    expect(buildDetailedMerchantWhatsappText({
+      ...order,
+      details: { ...order.details, order_notes: 'Tipo: Comer aquí' },
+    })).not.toContain('RETIRO EN TIENDA');
+    expect(buildDetailedMerchantWhatsappText({
+      ...order,
+      details: { ...order.details, order_notes: 'Tipo: Comer aquí' },
+    })).not.toContain('OBSERVACIONES');
+    expect(buildDetailedMerchantWhatsappText({
+      ...order,
+      details: { ...order.details, order_source: 'catalog' },
+    })).toContain('NUEVO PEDIDO #EMXFA-000156 (Comer aquí)');
     expect(buildDetailedMerchantWhatsappText({
       ...order,
       details: { ...order.details, order_notes: 'Tipo: Para llevar. Sin cebolla' },

@@ -642,6 +642,7 @@ class _MerchantOrdersWorkspaceState extends State<MerchantOrdersWorkspace> {
 
     final applied = await showModalBottomSheet<bool>(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(

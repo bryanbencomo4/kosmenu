@@ -1,10 +1,12 @@
 /**
- * Operational sales day for Elmenuxfa: ends at 20:00 America/Caracas.
- * Caracas is UTC−4 year-round (no DST). Business day labeled calendar date D
- * covers [D−1 20:00, D 20:00) Caracas wall time.
+ * Sales day for Elmenuxfa: America/Caracas calendar day (midnight → midnight).
+ * Caracas is UTC−4 year-round (no DST). Day labeled D covers
+ * [D 00:00, D+1 00:00) Caracas wall time.
+ *
+ * Night orders stay on the same day. The next day only starts at midnight
+ * Caracas — it is not opened early (e.g. at 20:00).
  */
 
-export const ADMIN_BUSINESS_DAY_END_HOUR_CARACAS = 20;
 const CARACAS_OFFSET_MS = -4 * 60 * 60 * 1000;
 
 /** Caracas wall-clock components derived from an absolute instant. */
@@ -32,60 +34,41 @@ export function adminCaracasWallToDate(
   return new Date(Date.UTC(year, monthIndex, day, hour) - CARACAS_OFFSET_MS);
 }
 
-export function adminBusinessDayEndExclusive(instant: Date): Date {
-  const wall = adminCaracasParts(instant);
-  if (wall.hour >= ADMIN_BUSINESS_DAY_END_HOUR_CARACAS) {
-    const next = new Date(Date.UTC(wall.year, wall.month, wall.day));
-    next.setUTCDate(next.getUTCDate() + 1);
-    return adminCaracasWallToDate(
-      next.getUTCFullYear(),
-      next.getUTCMonth(),
-      next.getUTCDate(),
-      ADMIN_BUSINESS_DAY_END_HOUR_CARACAS,
-    );
-  }
-  return adminCaracasWallToDate(
-    wall.year,
-    wall.month,
-    wall.day,
-    ADMIN_BUSINESS_DAY_END_HOUR_CARACAS,
-  );
-}
-
 export function adminBusinessDayStart(instant: Date): Date {
-  return new Date(adminBusinessDayEndExclusive(instant).getTime() - 24 * 60 * 60 * 1000);
+  const wall = adminCaracasParts(instant);
+  return adminCaracasWallToDate(wall.year, wall.month, wall.day, 0);
 }
 
-/** Caracas calendar date that labels the business day containing [instant]. */
+export function adminBusinessDayEndExclusive(instant: Date): Date {
+  return new Date(adminBusinessDayStart(instant).getTime() + 24 * 60 * 60 * 1000);
+}
+
+/** Caracas calendar date that labels the day containing [instant]. */
 export function adminBusinessDayLabelDate(instant: Date): Date {
-  const end = adminBusinessDayEndExclusive(instant);
-  const wall = adminCaracasParts(new Date(end.getTime() - 1));
+  const wall = adminCaracasParts(instant);
   return new Date(Date.UTC(wall.year, wall.month, wall.day));
 }
 
 export function adminBusinessDayStartForLabel(label: Date): Date {
-  const end = adminCaracasWallToDate(
-    label.getUTCFullYear(),
-    label.getUTCMonth(),
-    label.getUTCDate(),
-    ADMIN_BUSINESS_DAY_END_HOUR_CARACAS,
-  );
-  return new Date(end.getTime() - 24 * 60 * 60 * 1000);
-}
-
-export function adminBusinessDayEndForLabel(label: Date): Date {
   return adminCaracasWallToDate(
     label.getUTCFullYear(),
     label.getUTCMonth(),
     label.getUTCDate(),
-    ADMIN_BUSINESS_DAY_END_HOUR_CARACAS,
+    0,
   );
 }
 
+export function adminBusinessDayEndForLabel(label: Date): Date {
+  return new Date(adminBusinessDayStartForLabel(label).getTime() + 24 * 60 * 60 * 1000);
+}
+
 export function adminTodayBusinessWindow(now = new Date()) {
-  const endExclusive = adminBusinessDayEndExclusive(now);
+  const startInclusive = adminBusinessDayStart(now);
   return {
-    startInclusive: new Date(endExclusive.getTime() - 24 * 60 * 60 * 1000),
-    endExclusive,
+    startInclusive,
+    endExclusive: new Date(startInclusive.getTime() + 24 * 60 * 60 * 1000),
   };
 }
+
+/** @deprecated Kept for imports that still reference the old 20:00 constant. */
+export const ADMIN_BUSINESS_DAY_END_HOUR_CARACAS = 0;

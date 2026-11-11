@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { ArrowLeft, Check, CheckCircle2, Clock3, MapPin, Package, RotateCcw, Star, Truck } from 'lucide-react';
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 
+import { handleWhatsAppLinkClick } from '../../../_lib/whatsapp-href';
+
 type TimelineItem = {
   key: string;
   label: string;
@@ -753,6 +755,7 @@ export function OrderReceipt(props: OrderReceiptProps) {
                     target="_blank"
                     rel="noopener noreferrer nofollow"
                     referrerPolicy="no-referrer"
+                    onClick={(event) => handleWhatsAppLinkClick(props.whatsappHref, event)}
                     className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1 rounded-xl px-2 text-[11px] font-bold text-white md:min-h-12 md:gap-2 md:rounded-[16px] md:text-sm"
                     style={{ backgroundColor: WHATSAPP_GREEN }}
                   >

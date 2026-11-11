@@ -68,16 +68,17 @@ void main() {
   });
 
   test('greeting changes by time of day', () {
+    // Instants are absolute UTC; greeting uses America/Caracas (UTC−4).
     expect(
-      MerchantHomeHeader.greetingFor(DateTime(2026, 9, 17, 8)),
+      MerchantHomeHeader.greetingFor(DateTime.utc(2026, 9, 17, 12)), // 08:00 Caracas
       'Buenos días',
     );
     expect(
-      MerchantHomeHeader.greetingFor(DateTime(2026, 9, 17, 15)),
+      MerchantHomeHeader.greetingFor(DateTime.utc(2026, 9, 17, 19)), // 15:00 Caracas
       'Buenas tardes',
     );
     expect(
-      MerchantHomeHeader.greetingFor(DateTime(2026, 9, 17, 21)),
+      MerchantHomeHeader.greetingFor(DateTime.utc(2026, 9, 18, 1)), // 21:00 Caracas
       'Buenas noches',
     );
   });
@@ -89,8 +90,9 @@ void main() {
   });
 
   test('formats a long Spanish date', () {
+    // 12:00 UTC = 08:00 Caracas on Thu 17 Sep 2026.
     expect(
-      MerchantHomeHeader.longDateEs(DateTime(2026, 9, 17)),
+      MerchantHomeHeader.longDateEs(DateTime.utc(2026, 9, 17, 12)),
       'Jueves, 17 de septiembre de 2026',
     );
   });

@@ -162,7 +162,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _contentNavObserver = _DashboardContentNavObserver(_onContentStackChanged);
-    MerchantShellHistory.attach(onBrowserBack: _onBrowserHistoryBack);
+    MerchantShellHistory.attach(onLocation: _onBrowserLocation);
+    _restoreNavFromBrowserRoute();
     _snapshotFuture = _fetchSnapshot();
     _ordersStream = _buildOrdersStream();
     _bindAuthStateRecovery();
@@ -175,7 +176,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       unawaited(_openPendingMerchantOrder());
       unawaited(_loadMetricsOrders());
       unawaited(_loadTotalOrdersCount());
-      _syncBrowserHistory();
+      // Normalize `/` → `/panel` (or keep deep link) without creating a Back trap.
+      _syncBrowserHistory(push: false);
     });
   }
 
@@ -819,12 +821,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     var productViews = 0;
     var addToCart = 0;
     var checkouts = 0;
+    final now = DateTime.now().toUtc();
+    final todayEnd = merchantBusinessDayEndExclusive(now);
     final dayKeys = List<String>.generate(7, (index) {
-      final day = DateTime.now().subtract(Duration(days: 6 - index));
-      final local = DateTime(day.year, day.month, day.day);
-      return '${local.year.toString().padLeft(4, '0')}-'
-          '${local.month.toString().padLeft(2, '0')}-'
-          '${local.day.toString().padLeft(2, '0')}';
+      final start = todayEnd.subtract(Duration(days: 7 - index));
+      final label = merchantBusinessDayLabelDate(start);
+      return '${label.year.toString().padLeft(4, '0')}-'
+          '${label.month.toString().padLeft(2, '0')}-'
+          '${label.day.toString().padLeft(2, '0')}';
     });
     final visitsByDay = List<int>.filled(7, 0);
 
@@ -851,11 +855,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       if (type != 'menu_view') continue;
       final created = DateTime.tryParse('${row['created_at'] ?? ''}');
       if (created == null) continue;
-      final local = created.toLocal();
+      final label = merchantBusinessDayLabelDate(created);
       final key =
-          '${local.year.toString().padLeft(4, '0')}-'
-          '${local.month.toString().padLeft(2, '0')}-'
-          '${local.day.toString().padLeft(2, '0')}';
+          '${label.year.toString().padLeft(4, '0')}-'
+          '${label.month.toString().padLeft(2, '0')}-'
+          '${label.day.toString().padLeft(2, '0')}';
       final index = dayKeys.indexOf(key);
       if (index >= 0) visitsByDay[index] += 1;
     }
@@ -1596,7 +1600,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     _selectNav(MerchantNavDestination.plan);
   }
 
-  /// Sales "day" boundary: 20:00 America/Caracas (not local midnight).
+  /// Sales "day" boundary: midnight America/Caracas (not device-local).
   DateTime _startOfDay(DateTime date) => merchantBusinessDayStart(date);
 
   DateTime _endOfDayExclusive(DateTime date) =>
@@ -1644,9 +1648,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     return '$day ${_monthShortEs(date.month)}';
   }
 
+  /// Week-scale axis: Caracas weekday (Lun..Dom), never device-local weekday.
+  String _weekChartDateLabel(DateTime caracasLabelDate) {
+    return caracasWeekdayShort(caracasLabelDate);
+  }
+
   String _fullChartDateLabel(DateTime date) {
     final day = date.day.toString().padLeft(2, '0');
-    return '$day ${_monthShortEs(date.month)}';
+    return '${caracasWeekdayShort(date)} $day ${_monthShortEs(date.month)}';
   }
 
   String _hourAxisLabel(int hour) => hour.toString().padLeft(2, '0');
@@ -1786,9 +1795,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         final knownEarliest = _earliestOrderAt;
         DateTime? earliest = knownEarliest == null
             ? null
-            : _startOfDay(knownEarliest.toLocal());
+            : _startOfDay(knownEarliest.toUtc());
         for (final order in orders) {
-          final created = order.createdAt?.toLocal();
+          final created = order.createdAt?.toUtc();
           if (created == null) continue;
           final day = _startOfDay(created);
           if (earliest == null || day.isBefore(earliest)) {
@@ -1919,16 +1928,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
       if (spanDays <= 31) {
         points = <_SalesHistoryPoint>[];
-        var cursor = window.startInclusive;
+        var cursor = window.startInclusive.toUtc();
+        final endExclusive = window.endExclusive.toUtc();
         DateTime? previousLabelDate;
-        while (cursor.isBefore(window.endExclusive)) {
+        final useWeekdayLabels = spanDays <= 7;
+        while (cursor.isBefore(endExclusive)) {
           final bucketEnd = cursor.add(const Duration(days: 1));
           final labelDate = merchantBusinessDayLabelDate(cursor);
           final byCurrency = <String, double>{};
           var usd = 0.0;
           var orderCount = 0;
           for (final pedido in filtered) {
-            final created = pedido.createdAt;
+            final created = pedido.createdAt?.toUtc();
             if (created == null) continue;
             if (created.isBefore(cursor) || !created.isBefore(bucketEnd)) {
               continue;
@@ -1942,10 +1953,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           }
           points.add(
             _SalesHistoryPoint(
-              label: _compactChartDateLabel(
-                labelDate,
-                previous: previousLabelDate,
-              ),
+              label: useWeekdayLabels
+                  ? _weekChartDateLabel(labelDate)
+                  : _compactChartDateLabel(
+                      labelDate,
+                      previous: previousLabelDate,
+                    ),
               tooltipLabel: _fullChartDateLabel(labelDate),
               orderCount: orderCount,
               byCurrency: byCurrency,
@@ -1958,18 +1971,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           cursor = bucketEnd;
         }
       } else {
+        final startUtc = window.startInclusive.toUtc();
+        final endUtc = window.endExclusive.toUtc();
+        final startWall = caracasWall(startUtc);
+        final endWall = caracasWall(
+          endUtc.subtract(const Duration(milliseconds: 1)),
+        );
         final monthStarts = <DateTime>[];
-        var monthCursor = DateTime(
-          window.startInclusive.year,
-          window.startInclusive.month,
-        );
-        final monthEnd = DateTime(
-          window.endExclusive.year,
-          window.endExclusive.month,
-        );
+        var monthCursor = DateTime.utc(startWall.year, startWall.month, 1);
+        final monthEnd = DateTime.utc(endWall.year, endWall.month, 1);
         while (!monthCursor.isAfter(monthEnd)) {
           monthStarts.add(monthCursor);
-          monthCursor = DateTime(monthCursor.year, monthCursor.month + 1);
+          monthCursor = DateTime.utc(monthCursor.year, monthCursor.month + 1);
         }
 
         final desiredBuckets =
@@ -1978,19 +1991,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         points = <_SalesHistoryPoint>[];
 
         for (var i = 0; i < monthStarts.length; i += groupSize) {
-          final bucketStart = monthStarts[i];
+          final labelMonth = monthStarts[i];
+          final bucketStart = merchantBusinessDayStartForLabel(labelMonth);
           final nextIndex = (i + groupSize) < monthStarts.length
               ? i + groupSize
               : monthStarts.length;
           final bucketEnd = nextIndex < monthStarts.length
-              ? monthStarts[nextIndex]
-              : window.endExclusive;
+              ? merchantBusinessDayStartForLabel(monthStarts[nextIndex])
+              : endUtc;
 
           final byCurrency = <String, double>{};
           var usd = 0.0;
           var orderCount = 0;
           for (final pedido in filtered) {
-            final created = pedido.createdAt?.toLocal();
+            final created = pedido.createdAt?.toUtc();
             if (created == null) continue;
             if (created.isBefore(bucketStart) ||
                 !created.isBefore(bucketEnd)) {
@@ -2005,8 +2019,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           }
           points.add(
             _SalesHistoryPoint(
-              label: _monthShortEs(bucketStart.month),
-              tooltipLabel: _fullChartDateLabel(bucketStart),
+              label: _monthShortEs(labelMonth.month),
+              tooltipLabel: _fullChartDateLabel(labelMonth),
               orderCount: orderCount,
               byCurrency: byCurrency,
               usdEstimate: usd,
@@ -2271,28 +2285,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           : (overlayDepth < 1 ? 1 : overlayDepth);
       if (pushed == _shellHasPushedRoute &&
           resolvedDepth == _contentOverlayDepth) {
-        _syncBrowserHistory();
+        // replaceState only — never history.go after a save/pop.
+        _syncBrowserHistory(push: false);
         return;
       }
+      final grew = resolvedDepth > _contentOverlayDepth;
       setState(() {
         _shellHasPushedRoute = pushed;
         _contentOverlayDepth = resolvedDepth;
       });
-      _syncBrowserHistory();
+      // Opening a real page (not a sheet) pushes a URL entry; closing/saving
+      // rewrites the current entry so it cannot fake a Back-to-Inicio.
+      _syncBrowserHistory(push: grew);
     });
   }
 
-  int _shellHistoryDepth() {
-    var depth = 0;
-    if (_selectedNav != MerchantNavDestination.home) {
-      depth += 1;
-    }
-    if (_contentOverlayDepth > 0) {
-      depth += _contentOverlayDepth;
-    } else if (_shellHasPushedRoute) {
-      depth += 1;
-    }
-    return depth;
+  MerchantShellRoute _currentShellRoute() {
+    return MerchantShellRoute.fromDestination(
+      _selectedNav.name,
+      stack: _contentOverlayDepth,
+    );
   }
 
   bool get _shellCanExit {
@@ -2300,6 +2312,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     if (_contentNavKey.currentState?.canPop() == true) return false;
     if (_selectedNav != MerchantNavDestination.home) return false;
     return true;
+  }
+
+  void _restoreNavFromBrowserRoute() {
+    if (!kIsWeb) return;
+    final route = MerchantShellHistory.current;
+    final dest = _destinationFromSection(route.section);
+    if (dest == null || dest == _selectedNav) return;
+    if (!MerchantSession.canOpen(dest)) return;
+    _selectedNav = dest;
+  }
+
+  MerchantNavDestination? _destinationFromSection(String section) {
+    for (final dest in MerchantNavDestination.values) {
+      if (dest.name == section) return dest;
+    }
+    return null;
   }
 
   bool _handleShellSystemBack() {
@@ -2310,26 +2338,73 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final nav = _contentNavKey.currentState;
     if (nav != null && nav.canPop()) {
       nav.pop();
+      if (_contentOverlayDepth > 0) {
+        _contentOverlayDepth -= 1;
+      }
+      if (!(nav.canPop())) {
+        _contentOverlayDepth = 0;
+        _shellHasPushedRoute = false;
+      }
       return true;
     }
     if (_selectedNav != MerchantNavDestination.home) {
-      _selectNav(MerchantNavDestination.home);
+      _applyNavFromBrowser(MerchantNavDestination.home);
       return true;
     }
     return false;
   }
 
-  void _onBrowserHistoryBack() {
+  /// Browser Back/Forward landed on a `/panel/...` URL — mirror it in the UI.
+  void _onBrowserLocation(MerchantShellRoute route) {
     if (!mounted) return;
-    _handleShellSystemBack();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _syncBrowserHistory();
-    });
+
+    final nav = _contentNavKey.currentState;
+    var guard = 0;
+    while (nav != null &&
+        nav.canPop() &&
+        _contentOverlayDepth > route.stack &&
+        guard < 8) {
+      guard += 1;
+      nav.pop();
+      if (_contentOverlayDepth > 0) {
+        _contentOverlayDepth -= 1;
+      }
+    }
+    if (!(nav?.canPop() ?? false)) {
+      _contentOverlayDepth = 0;
+      _shellHasPushedRoute = false;
+    }
+
+    final dest = _destinationFromSection(route.section);
+    if (dest != null && dest != _selectedNav) {
+      if (!MerchantSession.canOpen(dest)) {
+        _syncBrowserHistory(push: false);
+        return;
+      }
+      _applyNavFromBrowser(dest);
+      return;
+    }
+
+    if (mounted) {
+      setState(() {});
+      _bumpShell();
+    }
   }
 
-  void _syncBrowserHistory() {
+  /// Apply a section change that already happened in the address bar.
+  void _applyNavFromBrowser(MerchantNavDestination destination) {
+    _contentNavKey.currentState?.popUntil((route) => route.isFirst);
+    _contentOverlayDepth = 0;
+    _shellHasPushedRoute = false;
+    setState(() {
+      _selectedNav = destination;
+    });
+    _bumpShell();
+  }
+
+  void _syncBrowserHistory({required bool push}) {
     if (!kIsWeb || !mounted) return;
-    MerchantShellHistory.setDepth(_shellHistoryDepth());
+    MerchantShellHistory.setRoute(_currentShellRoute(), push: push);
   }
 
   void _selectNav(MerchantNavDestination destination) {
@@ -2342,17 +2417,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     }
     _contentNavKey.currentState?.popUntil((route) => route.isFirst);
     _contentOverlayDepth = 0;
+    _shellHasPushedRoute = false;
     if (_selectedNav == destination) {
       _bumpShell();
-      _syncBrowserHistory();
+      _syncBrowserHistory(push: false);
       return;
     }
     setState(() {
       _selectedNav = destination;
-      _shellHasPushedRoute = false;
     });
     _bumpShell();
-    _syncBrowserHistory();
+    // Real section navigation → real history entry (like a normal website).
+    _syncBrowserHistory(push: true);
   }
 
   void _resetContentNavigator() {
@@ -2364,7 +2440,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       _contentNavObserver = _DashboardContentNavObserver(_onContentStackChanged);
     });
     _bumpShell();
-    _syncBrowserHistory();
+    _syncBrowserHistory(push: false);
   }
 
   Future<T?> _pushInShell<T>(Widget page, {bool standalone = false}) {
@@ -2522,10 +2598,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             canPop: _shellCanExit,
             onPopInvokedWithResult: (didPop, result) {
               if (didPop) return;
+              // Web Back/Forward is owned by real `/panel/...` URLs.
+              if (kIsWeb) return;
               _handleShellSystemBack();
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _syncBrowserHistory();
-              });
             },
             child: SafeArea(
             // Header paints its own top inset so the bar background reaches the
@@ -4991,6 +5066,7 @@ class _CompactSalesSummaryCard extends StatelessWidget {
           onTap: () async {
             final selected = await showModalBottomSheet<_SalesRange>(
               context: context,
+              useRootNavigator: true,
               showDragHandle: true,
               builder: (sheetContext) => SafeArea(
                 child: ListView(
@@ -7085,8 +7161,10 @@ class _SalesRangeWindow {
 
   bool contains(DateTime? date) {
     if (date == null) return false;
-    final local = date.toLocal();
-    return !local.isBefore(startInclusive) && local.isBefore(endExclusive);
+    // Compare absolute instants (Caracas business windows are UTC-based).
+    final instant = date.toUtc();
+    return !instant.isBefore(startInclusive.toUtc()) &&
+        instant.isBefore(endExclusive.toUtc());
   }
 }
 
@@ -7466,8 +7544,13 @@ class _DashboardContentNavObserver extends NavigatorObserver {
   final void Function(int overlayDepth) onStackChanged;
   int _overlayDepth = 0;
 
+  /// Bottom sheets / dialogs must never affect `/panel` history — that was
+  /// the bug that sent users back to Inicio after picking a date range.
+  bool _countsForShell(Route<dynamic> route) => route is! PopupRoute;
+
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (!_countsForShell(route)) return;
     if (previousRoute != null) {
       _overlayDepth += 1;
     }
@@ -7476,6 +7559,7 @@ class _DashboardContentNavObserver extends NavigatorObserver {
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (!_countsForShell(route)) return;
     if (_overlayDepth > 0) {
       _overlayDepth -= 1;
     }
@@ -7484,6 +7568,7 @@ class _DashboardContentNavObserver extends NavigatorObserver {
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (!_countsForShell(route)) return;
     if (_overlayDepth > 0) {
       _overlayDepth -= 1;
     }

@@ -15,6 +15,7 @@ import 'package:kosmenu_app/core/search_text.dart';
 import 'package:kosmenu_app/services/checkout_attempt_state.dart';
 import 'package:kosmenu_app/services/public_menu_api_service.dart';
 import 'package:kosmenu_app/services/public_order_api_service.dart';
+import 'package:kosmenu_app/utils/whatsapp_href.dart';
 import 'package:kosmenu_app/widgets/branded_loading_screen.dart';
 import 'package:kosmenu_app/widgets/google_maps_sdk_gate.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1887,10 +1888,10 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                             orderNotes: normalizedOrderNotes,
                                           );
                                       if (clientWhatsapp.length >= 10) {
-                                        final uri = Uri.parse(
-                                          'https://wa.me/$clientWhatsapp?text=${Uri.encodeComponent(clientSummary)}',
+                                        await openWhatsAppChat(
+                                          clientWhatsapp,
+                                          text: clientSummary,
                                         );
-                                        await launchUrl(uri);
                                       }
                                       localScaffoldMessenger.showSnackBar(
                                         SnackBar(
@@ -1928,11 +1929,10 @@ class _PublicMenuViewState extends State<PublicMenuView> {
                                               : '',
                                           orderNotes: normalizedOrderNotes,
                                         );
-                                    final uri = Uri.parse(
-                                      'https://wa.me/$whatsappNumber?text=${Uri.encodeComponent(message)}',
+                                    final launched = await openWhatsAppChat(
+                                      whatsappNumber,
+                                      text: message,
                                     );
-
-                                    final launched = await launchUrl(uri);
                                     if (!mounted) return;
 
                                     if (launched) {

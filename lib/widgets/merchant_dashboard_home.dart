@@ -464,7 +464,8 @@ class MerchantHomeHeader extends StatelessWidget {
   static const _muted = Color(0xFF6B6F92);
 
   static String greetingFor(DateTime now) {
-    final hour = now.hour;
+    // America/Caracas wall clock (UTC−4, no DST).
+    final hour = now.toUtc().add(const Duration(hours: -4)).hour;
     if (hour < 12) return 'Buenos días';
     if (hour < 19) return 'Buenas tardes';
     return 'Buenas noches';
@@ -494,9 +495,10 @@ class MerchantHomeHeader extends StatelessWidget {
       'noviembre',
       'diciembre',
     ];
-    final weekday = weekdays[(now.weekday - 1).clamp(0, 6)];
-    final month = months[(now.month - 1).clamp(0, 11)];
-    return '$weekday, ${now.day} de $month de ${now.year}';
+    final caracas = now.toUtc().add(const Duration(hours: -4));
+    final weekday = weekdays[(caracas.weekday - 1).clamp(0, 6)];
+    final month = months[(caracas.month - 1).clamp(0, 11)];
+    return '$weekday, ${caracas.day} de $month de ${caracas.year}';
   }
 
   @override

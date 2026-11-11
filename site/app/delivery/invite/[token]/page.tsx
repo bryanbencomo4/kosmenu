@@ -18,6 +18,10 @@ import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { nextPollDelayMs } from '../../../_lib/poll-backoff';
+import {
+  buildWhatsAppHref as buildWhatsAppHrefShared,
+  handleWhatsAppLinkClick,
+} from '../../../_lib/whatsapp-href';
 
 type InvitePayload = {
   invitation?: {
@@ -160,16 +164,13 @@ function buildPhoneHref(value?: string | null) {
 }
 
 function buildWhatsappHref(value?: string | null, message?: string) {
-  const digits = digitsOnly(value);
-  if (!digits) return '';
-  const text = (message ?? '').trim();
-  if (!text) return `https://wa.me/${digits}`;
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+  return buildWhatsAppHrefShared(value, message);
 }
 
 function openWhatsappSameTab(href?: string | null) {
   const url = (href ?? '').trim();
   if (!url) return false;
+  if (handleWhatsAppLinkClick(url)) return true;
   window.location.assign(url);
   return true;
 }

@@ -3477,23 +3477,36 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
               b.fullCountryCode.length.compareTo(a.fullCountryCode.length),
         );
 
-    String digitsToMatch = normalizedDigits;
-    if (normalized.startsWith('+')) {
-      digitsToMatch = normalized.substring(1).replaceAll(RegExp(r'\D'), '');
-    }
+    // Only peel a dial code when the merchant typed an international form.
+    // National numbers like CO mobiles (300…) must NOT match Greece (30), etc.
+    final hasExplicitIntlPrefix =
+        normalized.startsWith('+') || normalized.startsWith('00');
+    if (hasExplicitIntlPrefix) {
+      var digitsToMatch = normalizedDigits;
+      if (normalized.startsWith('+')) {
+        digitsToMatch = normalized.substring(1).replaceAll(RegExp(r'\D'), '');
+      } else if (normalized.startsWith('00')) {
+        digitsToMatch = normalizedDigits.startsWith('00')
+            ? normalizedDigits.substring(2)
+            : normalizedDigits;
+      }
 
-    for (final country in candidates) {
-      final dialDigits = country.fullCountryCode;
-      if (digitsToMatch.startsWith(dialDigits) &&
-          digitsToMatch.length > dialDigits.length) {
-        final national = normalizeNationalPhoneDigits(
-          digitsToMatch.substring(dialDigits.length),
-          iso: country.code,
-        );
-        return _ParsedPhoneNumber(
-          countryIso: country.code,
-          nationalNumber: national,
-        );
+      for (final country in candidates) {
+        final dialDigits = country.fullCountryCode;
+        if (dialDigits.isEmpty) {
+          continue;
+        }
+        if (digitsToMatch.startsWith(dialDigits) &&
+            digitsToMatch.length > dialDigits.length) {
+          final national = normalizeNationalPhoneDigits(
+            digitsToMatch.substring(dialDigits.length),
+            iso: country.code,
+          );
+          return _ParsedPhoneNumber(
+            countryIso: country.code,
+            nationalNumber: national,
+          );
+        }
       }
     }
 
@@ -6059,14 +6072,20 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
       if (local.isEmpty) {
         return 'Ingresa un numero de telefono.';
       }
-      final country = _countryByIso(parsed.countryIso);
-      final phone = intl_phone_number.PhoneNumber(
-        countryISOCode: parsed.countryIso,
-        countryCode: '+${country.fullCountryCode}',
-        number: local,
+      // Merchants often mix VE/CO account phones under one WhatsApp country.
+      // Never call intl_phone_field.isValidNumber() here: it throws bare
+      // Exception subclasses (no message) → "Instance of 'minified:…'" in
+      // release, and this path runs during Cobros build via configured-count.
+      final candidateIsos = <String>{
+        parsed.countryIso.trim().toUpperCase(),
+        _selectedPhoneCountryIso.trim().toUpperCase(),
+        'VE',
+        'CO',
+      }.where((iso) => iso.isNotEmpty);
+      final accepted = candidateIsos.any(
+        (iso) => isPlausibleNationalForCountry(local, iso: iso),
       );
-      final isValid = phone.isValidNumber();
-      if (!isValid) {
+      if (!accepted) {
         return 'Numero invalido para ese pais.';
       }
     }
@@ -9242,6 +9261,9 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
     } catch (error, stack) {
       final message = Error.safeToString(error);
       debugPrint('Checkout step build error: $message\n$stack');
+      final showTechnical = message.isNotEmpty &&
+          !message.startsWith("Instance of ") &&
+          !message.contains('minified:');
       return Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -9255,11 +9277,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen> {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              style: const TextStyle(color: Color(0xFFFFD1DC), fontSize: 12),
-            ),
+            if (showTechnical) ...[
+              const SizedBox(height: 8),
+              Text(
+                message,
+                style: const TextStyle(color: Color(0xFFFFD1DC), fontSize: 12),
+              ),
+            ],
             const SizedBox(height: 12),
             const Text(
               'Vuelve al inicio e intenta de nuevo. Si sigue fallando, recarga la pagina.',

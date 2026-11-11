@@ -66,6 +66,8 @@ export type KioskMenuShellHandle = {
   handleBack: () => boolean;
   /** Synthetic history depth for this shell (0 at session root). */
   historyDepth: () => number;
+  /** Jump to categories so the guest can keep building the cart. */
+  openCategories: () => void;
 };
 
 type KioskMenuExperienceProps = {
@@ -129,10 +131,11 @@ type KioskMenuExperienceProps = {
 
 function kioskSessionLocksHome(options: {
   assistedMode: boolean;
-  catalogOnlySession: boolean;
-  catalogMode: boolean;
+  catalogOnlySession?: boolean;
+  catalogMode?: boolean;
 }) {
-  return options.assistedMode || (options.catalogOnlySession && options.catalogMode);
+  // Mesa QR still shows the branded home first; only waiter mode skips it.
+  return options.assistedMode;
 }
 
 function kioskScreenHistoryDepth(
@@ -237,9 +240,6 @@ export const KioskMenuExperience = forwardRef<
     if (assistedMode) {
       return false;
     }
-    if (catalogOnlySession && catalogMode) {
-      return false;
-    }
     setScreen('home');
     setActiveCategoryId(null);
     if (fulfillment) onResetFulfillment();
@@ -252,6 +252,11 @@ export const KioskMenuExperience = forwardRef<
     () => ({
       handleBack: goBackInShell,
       historyDepth: () => kioskScreenHistoryDepth(screen, sessionOpts),
+      openCategories: () => {
+        onSearchChange('');
+        setActiveCategoryId(null);
+        setScreen('categories');
+      },
     }),
     // screen/sessionOpts drive depth; handlers close over latest values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -311,11 +316,12 @@ export const KioskMenuExperience = forwardRef<
     }, 8000);
   }
 
-  // Catalog from home button or ?catalogo=1 should open categories, not stay on home.
+  // Catalog entered from the home CTA jumps to categories. Mesa QR (?catalogo=1)
+  // stays on the branded home until the guest taps the primary CTA.
   useEffect(() => {
-    if (!catalogMode || assistedMode || fulfillment) return;
+    if (!catalogMode || assistedMode || fulfillment || catalogOnlySession) return;
     setScreen((current) => (current === 'home' ? 'categories' : current));
-  }, [catalogMode, assistedMode, fulfillment]);
+  }, [catalogMode, assistedMode, fulfillment, catalogOnlySession]);
 
   useEffect(() => {
     const whatsappUrl = voucher?.whatsappUrl?.trim();
@@ -380,6 +386,32 @@ export const KioskMenuExperience = forwardRef<
   }, [catalogProducts, categories, searchQueryFolded]);
 
   useKioskPageChrome({ themeMode });
+  const [chromeCompact, setChromeCompact] = useState(false);
+  const chromeSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (screen === 'home' || voucher) {
+      setChromeCompact(false);
+      return;
+    }
+    const sentinel = chromeSentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setChromeCompact(!entry.isIntersecting);
+      },
+      {
+        // Collapse as soon as the sentinel leaves the sticky chrome band.
+        root: null,
+        threshold: 0,
+        rootMargin: stickyOffsetClass === 'top-12' ? '-48px 0px 0px 0px' : '0px 0px 0px 0px',
+      },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [screen, stickyOffsetClass, voucher]);
+
   const topBar = (
     <KioskTopBar
       tickerEntries={tickerEntries}
@@ -463,91 +495,144 @@ export const KioskMenuExperience = forwardRef<
   }
 
   return (
-    <section className="relative flex min-h-[100dvh] flex-col overflow-x-hidden bg-[var(--menu-background)] text-[var(--menu-text)]">
+    <section className="relative flex min-h-[100dvh] flex-col overflow-x-clip bg-[var(--menu-background)] text-[var(--menu-text)]">
       <KioskDecor density="lite" />
       <KioskMotionStyles />
-      <div className={stickyChromeClass}>
+      {/* Tall sentinel (collapsed via -mb) delays compact mode a few scroll pixels. */}
+      <div
+        ref={chromeSentinelRef}
+        className="pointer-events-none -mb-10 h-10 w-full shrink-0"
+        aria-hidden
+      />
+      <div
+        className={`${stickyChromeClass} isolate`}
+        data-chrome-compact={chromeCompact ? '1' : '0'}
+      >
         {topBar}
-        <header className="bg-[color-mix(in_srgb,var(--menu-background)_88%,var(--menu-surface))] px-5 py-3 backdrop-blur-[6px]">
-        <div className="mx-auto flex w-full max-w-5xl items-center gap-3">
-          {catalogOnlySession && catalogMode && screen === 'categories' ? null : (
-          <button
-            type="button"
-            onClick={() => {
-              goBackInShell();
-            }}
-            className="grid h-11 w-11 place-items-center rounded-[14px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)]"
-            aria-label="Volver"
+        <header
+          className={`border-b px-5 backdrop-blur-xl transition-[padding,background-color,box-shadow,border-color] duration-200 ease-out ${
+            chromeCompact
+              ? 'border-[color-mix(in_srgb,var(--menu-border)_70%,transparent)] bg-[color-mix(in_srgb,var(--menu-background)_94%,var(--menu-surface))] py-2 shadow-[0_10px_28px_rgba(15,23,42,0.08)]'
+              : 'border-transparent bg-[color-mix(in_srgb,var(--menu-background)_88%,var(--menu-surface))] py-3 shadow-none'
+          }`}
+        >
+          <div
+            className={`mx-auto flex w-full max-w-5xl items-center gap-3 transition-[gap] duration-200 ${
+              chromeCompact ? 'gap-2.5' : 'gap-3'
+            }`}
           >
-            <ArrowLeft className="h-5 w-5" strokeWidth={2.2} />
-          </button>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--menu-text-muted)]">
-              {catalogMode
-                ? 'Catálogo'
-                : fulfillment
-                  ? assistedMode
-                    ? FULFILLMENT_LABEL[fulfillment]
-                    : CHECKOUT_FULFILLMENT_SHORT_LABEL[fulfillment]
-                  : isOpen
-                    ? 'Menú'
-                    : 'Solo consulta'}
-            </p>
-            <h2 className={`truncate text-lg font-extrabold tracking-[-0.03em] text-[var(--menu-text)]`}>
-              {screen === 'products' ? activeCategory?.name || 'Productos' : 'Categorías'}
-            </h2>
-            <p className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-[var(--menu-text-muted)]" aria-label={
-              ratingCount > 0
-                ? `Calificación ${ratingAverage.toFixed(1)} de 5, ${ratingCount} calificaciones`
-                : 'Este comercio aún no tiene calificaciones'
-            }>
-              <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
-              {ratingCount > 0
-                ? <><span className="text-[var(--menu-text)]">{ratingAverage.toFixed(1)}</span><span aria-hidden="true">·</span>{ratingCount} {ratingCount === 1 ? 'calificación' : 'calificaciones'}</>
-                : 'Aún sin calificaciones'}
-            </p>
-          </div>
-          {logoUrl ? (
-            <KioskImage
-              src={logoUrl}
-              sourceUrl={logoUrl}
-              displayWidth={240}
-              alt=""
-              fit="cover"
-              className="h-11 w-11 rounded-[14px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)]"
-            />
-          ) : (
-            <div
-              className="grid h-11 w-11 place-items-center rounded-[14px] text-sm font-extrabold"
-              style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
-            >
-              {initialLetter}
+            {assistedMode && screen === 'categories' ? null : (
+              <button
+                type="button"
+                onClick={() => {
+                  goBackInShell();
+                }}
+                className={`grid shrink-0 place-items-center rounded-[14px] bg-[var(--menu-surface)] text-[var(--menu-text)] shadow-[var(--menu-shadow)] transition-[width,height] duration-200 ${
+                  chromeCompact ? 'h-9 w-9' : 'h-11 w-11'
+                }`}
+                aria-label="Volver"
+              >
+                <ArrowLeft className={chromeCompact ? 'h-4 w-4' : 'h-5 w-5'} strokeWidth={2.2} />
+              </button>
+            )}
+            <div className="min-w-0 flex-1">
+              <p
+                className={`font-semibold uppercase tracking-[0.22em] text-[var(--menu-text-muted)] transition-[font-size,opacity,max-height,margin] duration-200 ${
+                  chromeCompact
+                    ? 'max-h-0 overflow-hidden text-[9px] opacity-0'
+                    : 'max-h-5 text-[10px] opacity-100'
+                }`}
+              >
+                {catalogMode
+                  ? 'Catálogo'
+                  : fulfillment
+                    ? assistedMode
+                      ? FULFILLMENT_LABEL[fulfillment]
+                      : CHECKOUT_FULFILLMENT_SHORT_LABEL[fulfillment]
+                    : isOpen
+                      ? 'Menú'
+                      : 'Solo consulta'}
+              </p>
+              <h2
+                className={`truncate font-extrabold tracking-[-0.03em] text-[var(--menu-text)] transition-[font-size,line-height] duration-200 ${
+                  chromeCompact ? 'text-[15px] leading-tight' : 'text-lg leading-snug'
+                }`}
+              >
+                {screen === 'products' ? activeCategory?.name || 'Productos' : 'Categorías'}
+              </h2>
+              <p
+                className={`flex items-center gap-1 font-semibold text-[var(--menu-text-muted)] transition-[opacity,max-height,margin] duration-200 ${
+                  chromeCompact
+                    ? 'mt-0 max-h-0 overflow-hidden opacity-0'
+                    : 'mt-0.5 max-h-5 text-[11px] opacity-100'
+                }`}
+                aria-hidden={chromeCompact}
+                aria-label={
+                  ratingCount > 0
+                    ? `Calificación ${ratingAverage.toFixed(1)} de 5, ${ratingCount} calificaciones`
+                    : 'Este comercio aún no tiene calificaciones'
+                }
+              >
+                <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                {ratingCount > 0 ? (
+                  <>
+                    <span className="text-[var(--menu-text)]">{ratingAverage.toFixed(1)}</span>
+                    <span aria-hidden="true">·</span>
+                    {ratingCount} {ratingCount === 1 ? 'calificación' : 'calificaciones'}
+                  </>
+                ) : (
+                  'Aún sin calificaciones'
+                )}
+              </p>
             </div>
-          )}
-        </div>
-        <label className="mx-auto mt-3 flex h-12 w-full max-w-5xl items-center gap-2 rounded-[18px] bg-[var(--menu-surface)] px-3.5 text-[var(--menu-text)] shadow-[var(--menu-shadow)]">
-          <Search className="h-4 w-4 text-[var(--menu-text-muted)]" />
-          <input
-            id="kiosk-menu-search"
-            name="kiosk-menu-search"
-            type="search"
-            value={searchQuery}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Buscar en el menú"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            className="h-full min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-[var(--menu-text-muted)]"
-          />
-          {searchQuery ? (
-            <button type="button" onClick={() => onSearchChange('')} aria-label="Limpiar busqueda">
-              <X className="h-4 w-4 text-[var(--menu-text-muted)]" />
-            </button>
-          ) : null}
-        </label>
-      </header>
+            {logoUrl ? (
+              <KioskImage
+                src={logoUrl}
+                sourceUrl={logoUrl}
+                displayWidth={240}
+                alt=""
+                fit="cover"
+                className={`rounded-[14px] bg-[var(--menu-surface)] shadow-[var(--menu-shadow)] transition-[width,height] duration-200 ${
+                  chromeCompact ? 'h-9 w-9' : 'h-11 w-11'
+                }`}
+              />
+            ) : (
+              <div
+                className={`grid place-items-center rounded-[14px] font-extrabold transition-[width,height,font-size] duration-200 ${
+                  chromeCompact ? 'h-9 w-9 text-xs' : 'h-11 w-11 text-sm'
+                }`}
+                style={{ backgroundColor: 'var(--menu-primary)', color: 'var(--menu-on-primary)' }}
+              >
+                {initialLetter}
+              </div>
+            )}
+          </div>
+          <label
+            className={`mx-auto flex w-full max-w-5xl items-center gap-2 rounded-[18px] bg-[var(--menu-surface)] px-3.5 text-[var(--menu-text)] shadow-[var(--menu-shadow)] transition-[margin,height] duration-200 ${
+              chromeCompact ? 'mt-2 h-11' : 'mt-3 h-12'
+            }`}
+          >
+            <Search className="h-4 w-4 shrink-0 text-[var(--menu-text-muted)]" />
+            <input
+              id="kiosk-menu-search"
+              name="kiosk-menu-search"
+              type="search"
+              value={searchQuery}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder="Buscar en el menú"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              className="h-full min-w-0 flex-1 appearance-none bg-transparent text-sm font-medium outline-none placeholder:text-[var(--menu-text-muted)] [-webkit-appearance:none] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden [&::-webkit-search-results-button]:hidden [&::-webkit-search-results-decoration]:hidden"
+            />
+            {searchQuery ? (
+              <button type="button" onClick={() => onSearchChange('')} aria-label="Limpiar busqueda">
+                <X className="h-4 w-4 text-[var(--menu-text-muted)]" />
+              </button>
+            ) : null}
+          </label>
+        </header>
       </div>
 
       <div className="relative z-10 mx-auto w-full max-w-5xl flex-1 px-5 py-4 pb-36">

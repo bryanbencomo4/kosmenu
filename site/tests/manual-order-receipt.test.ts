@@ -25,7 +25,7 @@ const props: ComponentProps<typeof OrderReceipt> = {
   deliveryDelegateLabel: 'Repartidor reportó llegada', deliveryDelegateAcceptedAt: '',
   deliveryDelegateArrivedAt: '', deliveryDelegateCompletedAt: '',
   contactName: '', contactPhone: '', contactEmail: '',
-  whatsappHref: 'https://wa.me/123', showWhatsapp: true, whatsappReady: true,
+  whatsappHref: 'https://api.whatsapp.com/send?phone=123', showWhatsapp: true, whatsappReady: true,
   canRepeatOrder: true, repeatClosedReason: null, onRepeatOrder: () => {},
   canCustomerConfirmDelegatedDelivery: true, deliveryConfirmationLoading: false,
   deliveryConfirmationMessage: '', onConfirmDelivery: () => {},

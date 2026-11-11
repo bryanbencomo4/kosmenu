@@ -1,3 +1,5 @@
+import { buildWhatsAppHref } from './whatsapp-href';
+
 const DEFAULT_PUBLIC_SITE_URL = 'https://elmenuxfa.com';
 const DEFAULT_BUSINESS_SITE_URL = 'https://business.elmenuxfa.com';
 const DEFAULT_ADMIN_SITE_URL = 'https://admin.elmenuxfa.com';
@@ -97,7 +99,7 @@ export const marketingWhatsappMessage = resolveText(
 );
 
 export const marketingWhatsappHref = marketingWhatsappDigits
-  ? `https://wa.me/${marketingWhatsappDigits}?text=${encodeURIComponent(marketingWhatsappMessage)}`
+  ? buildWhatsAppHref(marketingWhatsappDigits, marketingWhatsappMessage)
   : supportEmailHref;
 
 export const chatWhatsappDigits = resolveDigits(
@@ -110,7 +112,7 @@ export const chatWhatsappMessage = resolveText(
   DEFAULT_CHAT_WHATSAPP_MESSAGE,
 );
 
-export const chatWhatsappHref = `https://wa.me/${chatWhatsappDigits}?text=${encodeURIComponent(chatWhatsappMessage)}`;
+export const chatWhatsappHref = buildWhatsAppHref(chatWhatsappDigits, chatWhatsappMessage);
 
 export const consumerChatWhatsappDigits = resolveDigits(
   process.env.NEXT_PUBLIC_CONSUMER_CHAT_WHATSAPP_DIGITS,
@@ -122,7 +124,10 @@ export const consumerChatWhatsappMessage = resolveText(
   DEFAULT_CONSUMER_CHAT_WHATSAPP_MESSAGE,
 );
 
-export const consumerChatWhatsappHref = `https://wa.me/${consumerChatWhatsappDigits}?text=${encodeURIComponent(consumerChatWhatsappMessage)}`;
+export const consumerChatWhatsappHref = buildWhatsAppHref(
+  consumerChatWhatsappDigits,
+  consumerChatWhatsappMessage,
+);
 
 export const socialLinks = [
   { label: 'Instagram', href: 'https://www.instagram.com/elmenuxfa' },
@@ -144,6 +149,41 @@ export function merchantPanelOrderHref(orderId: string) {
     return origin;
   }
   return `${origin}/orders/view/${encodeURIComponent(id)}`;
+}
+
+/**
+ * Dual-purpose WhatsApp / share URL for an order.
+ * Logged-in merchants open the panel; guests fall through to `/o/{code}` via shortCode.
+ */
+export function merchantOrderShareHref(orderId: string, trackingUrl?: string | null) {
+  const base = merchantPanelOrderHref(orderId);
+  if (!orderId.trim()) return base;
+
+  const raw = (trackingUrl ?? '').trim();
+  if (!raw) return base;
+
+  try {
+    const parsed = new URL(raw);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const oIndex = segments.lastIndexOf('o');
+    if (oIndex >= 0 && oIndex + 1 < segments.length) {
+      const code = segments[oIndex + 1] ?? '';
+      if (/^[A-Za-z0-9_-]{10}$/.test(code)) {
+        return `${base}?shortCode=${encodeURIComponent(code)}`;
+      }
+    }
+    const existingShort = (parsed.searchParams.get('shortCode') ?? '').trim();
+    if (/^[A-Za-z0-9_-]{10}$/.test(existingShort)) {
+      return `${base}?shortCode=${encodeURIComponent(existingShort)}`;
+    }
+    if (parsed.searchParams.has('t') || parsed.searchParams.has('token')) {
+      return base;
+    }
+  } catch {
+    // Malformed tracking URL — still attach it as a fallback query.
+  }
+
+  return `${base}?fallback=${encodeURIComponent(raw)}`;
 }
 
 export const termsPagePath = '/terminos';

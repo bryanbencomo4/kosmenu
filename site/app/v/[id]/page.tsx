@@ -735,6 +735,18 @@ async function reverseGeocodeWithNominatim(point: DeliveryPoint) {
   }
 }
 
+/** Street text is nice-to-have; coordinates already pin the drop-off. */
+function formatDeliveryPointFallbackAddress(point: DeliveryPoint) {
+  return `Punto en el mapa (${point.lat.toFixed(5)}, ${point.lng.toFixed(5)})`;
+}
+
+function resolveDeliveryAddressText(address: string, point: DeliveryPoint | null) {
+  const trimmed = address.trim();
+  if (trimmed.length >= 6) return trimmed;
+  if (point) return formatDeliveryPointFallbackAddress(point);
+  return trimmed;
+}
+
 function parseLatLngPair(raw: string): DeliveryPoint | null {
   const cleaned = raw.trim().replace(/[()]/g, '');
   const match = cleaned.match(
@@ -3103,6 +3115,8 @@ export default function PublicMenuPage() {
     .filter((item) => item.href);
   const kioskHomeConfig = parseKioskHomeConfig(menuData?.comercio.inicio_menu);
   const catalogUrlLocked = catalogFromUrl && !isAssistedMode;
+  // Prefer a single flag: URL lock can briefly lead catalogMode during hydration.
+  const inCatalogSession = catalogMode || catalogUrlLocked;
   const supportsDelivery = menuData?.comercio.permite_delivery === true;
   const normalizedDeliveryAddress = deliveryAddress.trim();
   const normalizedDeliveryReference = deliveryReference.trim();
@@ -3857,11 +3871,14 @@ export default function PublicMenuPage() {
       checkoutFulfillmentOptions.includes(kioskFulfillment as KioskFulfillment));
   // After removing the fulfillment card, Continuar must not wait on a null state
   // while delivery/pickup is already known from context.
+  // Mesa QR / catalog has no public picker — treat it as dine-in so Continuar works.
   const effectiveCheckoutFulfillment: KioskFulfillment | null = isAssistedMode
     ? 'dine_in'
-    : publicFulfillmentIsValid
-      ? kioskFulfillment
-      : preferredCheckoutFulfillment;
+    : inCatalogSession
+      ? 'dine_in'
+      : publicFulfillmentIsValid
+        ? kioskFulfillment
+        : preferredCheckoutFulfillment;
   const prefersSelfPickup =
     offersDeliveryAddressStep &&
     (kioskFulfillment === 'takeaway' ||
@@ -3882,7 +3899,11 @@ export default function PublicMenuPage() {
     ? suggestCashTenders(orderGrandTotalConverted, selectedCurrencyCode)
     : [];
   const hasDeliveryPoint = !isDeliveryOrder || (deliveryPoint !== null && deliveryPointSource === 'user');
-  const isDeliveryAddressValid = !isDeliveryOrder || normalizedDeliveryAddress.length >= 6;
+  // Coords are enough to continue; street text may be missing when reverse-geocode fails.
+  const isDeliveryAddressValid =
+    !isDeliveryOrder ||
+    normalizedDeliveryAddress.length >= 6 ||
+    (deliveryPoint !== null && deliveryPointSource === 'user');
   const isDeliveryReferenceValid = !isDeliveryOrder || normalizedDeliveryReference.length >= 3;
   const isDeliveryReady = isDeliveryAddressValid && hasDeliveryPoint && isDeliveryReferenceValid;
   const checkoutStepDescriptions = ['Edita tu pedido', 'Tus datos', 'Entrega', 'Pago'];
@@ -4033,7 +4054,8 @@ export default function PublicMenuPage() {
       selectKioskFulfillment('dine_in');
       return 'dine_in';
     }
-    if (catalogUrlLocked) return null;
+    // QR/catalog checkout is always “Comer aquí”; do not require delivery/pickup seed.
+    if (inCatalogSession) return 'dine_in';
     if (publicFulfillmentIsValid) return kioskFulfillment;
     if (!preferredCheckoutFulfillment) return null;
     return selectKioskFulfillment(preferredCheckoutFulfillment);
@@ -4106,15 +4128,25 @@ export default function PublicMenuPage() {
     setKioskAddedPrompt(null);
   }
 
-  function openCatalogSummary() {
-    if (!catalogMode || cartCount <= 0) return;
+  function openCatalogSummary(options?: { knownCartCount?: number }) {
+    const count = options?.knownCartCount ?? cartCount;
+    if (!inCatalogSession || count <= 0) return;
+    if (!catalogMode) setCatalogMode(true);
     setKioskAddedPrompt(null);
+    setIsConfirmOpen(false);
+    setIsOrderReviewOpen(false);
+    // Already on the suggested-sales sheet → advance to the WhatsApp summary.
+    if (isPreCheckoutUpsellOpen) {
+      finishCatalogOrder();
+      return;
+    }
     setCatalogReady(null);
     setIsPreCheckoutUpsellOpen(true);
   }
 
   function finishCatalogOrder() {
-    if (!catalogMode || cartCount <= 0) return;
+    if (!inCatalogSession || cartCount <= 0) return;
+    if (!catalogMode) setCatalogMode(true);
     setCatalogReady({
       items: cartItems.map((item) => ({
         name: menuLineLabel(item.product, item.selection, item.category, productById),
@@ -4125,6 +4157,8 @@ export default function PublicMenuPage() {
       totalLabel: formatUpsellPrice(cartTotal),
     });
     setIsPreCheckoutUpsellOpen(false);
+    setIsConfirmOpen(false);
+    setIsOrderReviewOpen(false);
     setKioskAddedPrompt(null);
   }
 
@@ -4136,9 +4170,10 @@ export default function PublicMenuPage() {
   }
 
   async function submitCatalogWhatsappOrder(input: CatalogWhatsappSubmitInput) {
-    if (!catalogMode || cartCount <= 0) {
+    if (!inCatalogSession || cartCount <= 0) {
       throw new Error('No hay productos en el pedido.');
     }
+    if (!catalogMode) setCatalogMode(true);
     if (!whatsappNumber) {
       throw new Error('Este comercio no tiene WhatsApp configurado.');
     }
@@ -4176,6 +4211,8 @@ export default function PublicMenuPage() {
       businessExchangeSource,
     });
 
+    // Same WhatsApp payload as “Comer aquí” checkout: merchant summary / comanda
+    // from persistOrderRequired (not the short customer intro).
     const persisted = await persistOrderRequired(
       '',
       input.customerName.trim(),
@@ -4197,34 +4234,34 @@ export default function PublicMenuPage() {
       },
     );
 
-    let proofPublicUrl = '';
-    try {
-      const parsed = new URL(persisted.orderUrl);
-      const shortCodeMatch = parsed.pathname.match(/^\/o\/([A-Za-z0-9_-]{10})$/);
-      if (shortCodeMatch && input.proofFiles.length > 0) {
-        proofPublicUrl = `${parsed.origin}/p/${shortCodeMatch[1]}`;
+    if (typeof window === 'undefined') return;
+
+    // Prevent double-submit if the guest returns to the menu after sending.
+    setCart({});
+    clearCachedCheckoutCart(commerceIdentifier);
+
+    if (persisted.waUrl) {
+      if (!handleWhatsAppLinkClick(persisted.waUrl)) {
+        window.location.assign(persisted.waUrl);
       }
-    } catch {
-      // Keep message without proof link if tracking URL is unexpected.
+      return;
     }
 
-    const name = input.customerName.trim();
-    const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : '';
-    const payingCash = paymentLabel.toLowerCase().includes('efectivo');
-    // Panel URL so a logged-in merchant opens the order in app.elmenuxfa.com;
-    // guests still fall through to the public /o/{code} tracker via shortCode.
+    // Fallback if WhatsApp number was missing when the order URL was built.
     const orderLink = merchantOrderShareHref(persisted.orderId, persisted.orderUrl);
-    const orderLinkBlock = orderLink ? `\n\n🔗 Ver pedido:\n${orderLink}` : '';
-    const message = proofPublicUrl
-      ? `👋 Hola, mi nombre es *${name}*.\n\n🧾 Aquí está mi comprobante del pedido *${persisted.orderId}*:\n${proofPublicUrl}${orderLinkBlock}`
-      : payingCash
-        ? `👋 Hola, mi nombre es *${name}*.\n\n💵 Voy a pagar en efectivo el pedido *${persisted.orderId}*.${orderLinkBlock}`
-        : `👋 Hola, mi nombre es *${name}*.\n\n🧾 Pedido *${persisted.orderId}*.${orderLinkBlock}`;
-
-    const waUrl = buildWhatsAppHref(whatsappNumber, message);
-    if (typeof window !== 'undefined' && waUrl) {
-      openWhatsAppChat(whatsappNumber, message);
-    }
+    const paymentLabel = paymentMethod ? paymentMethodLabel(paymentMethod) : '';
+    const message = buildClientOrderSummary({
+      orderId: persisted.orderId,
+      customerName: input.customerName.trim(),
+      customerWhatsapp: input.customerWhatsapp.replace(/\D/g, ''),
+      deliveryMode: 'dine_in',
+      orderTypeLabel: 'Comer aquí',
+      paymentLabel,
+      totalLabel: formatUpsellPrice(cartTotal),
+      appOrderUrl: orderLink,
+      managementMode: persisted.managementMode,
+    });
+    openWhatsAppChat(whatsappNumber, message);
   }
 
   function handleKioskAddProduct(productId: string) {
@@ -4706,21 +4743,22 @@ export default function PublicMenuPage() {
   }, [supportsDelivery, kioskFulfillment]);
 
   // Checkout sheet open without the old mode card: always seed delivery/pickup.
+  // Mesa QR keeps dine-in (no address step) via effectiveCheckoutFulfillment.
   useEffect(() => {
-    if (!isConfirmOpen || catalogMode || scheduleClosed) return;
+    if (!isConfirmOpen || scheduleClosed) return;
     if (isAssistedMode) {
       if (kioskFulfillment !== 'dine_in') selectKioskFulfillment('dine_in');
       return;
     }
-    if (catalogUrlLocked) return;
+    if (catalogUrlLocked || inCatalogSession) return;
     if (publicFulfillmentIsValid) return;
     if (!preferredCheckoutFulfillment) return;
     selectKioskFulfillment(preferredCheckoutFulfillment);
     // selectKioskFulfillment is stable enough for this seed; avoid listing it to prevent loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    catalogMode,
     catalogUrlLocked,
+    inCatalogSession,
     isAssistedMode,
     isConfirmOpen,
     kioskFulfillment,
@@ -4758,10 +4796,9 @@ export default function PublicMenuPage() {
         setDeliveryPointSource('user');
         const address = await reverseGeocodeWithNominatim(gpsPoint);
         if (cancelled) return;
-        if (address) {
-          setDeliveryAddress(address);
-          setMapPickerAddress(address);
-        }
+        const resolved = resolveDeliveryAddressText(address, gpsPoint);
+        setDeliveryAddress(resolved);
+        setMapPickerAddress(resolved);
       } else if (hasBusinessCoords && businessLat != null && businessLng != null) {
         setDeliveryPoint({ lat: businessLat, lng: businessLng });
         setDeliveryPointSource('business-default');
@@ -4792,6 +4829,18 @@ export default function PublicMenuPage() {
     if (isConfirmOpen) return;
     deliveryAutoLocateKeyRef.current = null;
   }, [isConfirmOpen]);
+
+  // If GPS/map pin exists but reverse-geocode left address empty, keep a usable label.
+  useEffect(() => {
+    if (!isDeliveryOrder || deliveryPointSource !== 'user' || !deliveryPoint) return;
+    if (normalizedDeliveryAddress.length >= 6) return;
+    setDeliveryAddress(formatDeliveryPointFallbackAddress(deliveryPoint));
+  }, [
+    deliveryPoint,
+    deliveryPointSource,
+    isDeliveryOrder,
+    normalizedDeliveryAddress.length,
+  ]);
 
   useEffect(() => {
     if (!isMapPickerOpen) return;
@@ -5558,8 +5607,9 @@ export default function PublicMenuPage() {
       };
     });
 
+    const isCatalogOrder = inCatalogSession;
     const assistedOrderNotes = [
-      catalogMode
+      isCatalogOrder
         ? 'Tipo: Comer aquí'
         : kioskFulfillment
           ? `Tipo: ${FULFILLMENT_LABEL[kioskFulfillment]}`
@@ -5576,7 +5626,7 @@ export default function PublicMenuPage() {
       cliente_email: email || null,
       telefono_cliente: customerWhatsapp,
       mesa: isAssistedMode ? normalizedClientTable || null : null,
-      order_source: isAssistedMode ? 'assisted_waiter' : catalogMode ? 'catalog' : null,
+      order_source: isAssistedMode ? 'assisted_waiter' : isCatalogOrder ? 'catalog' : null,
       moneda_checkout: normalizeCurrencyCode(paymentMeta.currency),
       tasa_cambio_snapshot: paymentMeta.exchangeRate,
       exchange_rate_source: paymentMeta.exchangeRateSource,
@@ -5747,12 +5797,15 @@ export default function PublicMenuPage() {
   }
 
   function proceedToCheckoutSheet() {
-    if (catalogMode || cartCount <= 0) return;
+    if (cartCount <= 0) return;
+    // Mesa QR uses the same checkout as “Comer aquí” (Pedido → Datos → Pago, no address).
     ensurePublicCheckoutFulfillment();
+    if (!catalogMode && inCatalogSession) setCatalogMode(true);
     const comercioKey = String(menuData?.comercio?.slug || menuData?.comercio?.id || '');
     void trackMenuFunnelEvent(comercioKey, 'checkout_started', {}, 'checkout');
     setCheckoutError(null);
     setCheckoutStep(0);
+    setCatalogReady(null);
     setIsPreCheckoutUpsellOpen(false);
     setIsConfirmOpen(true);
   }
@@ -5774,12 +5827,6 @@ export default function PublicMenuPage() {
 
   function tryOpenPreCheckoutUpsellAfterAdd(productId: string) {
     if (scheduleClosed || kioskVoucher) return false;
-    // Catalog: always open suggested-sales sheet after adding a product.
-    if (catalogMode) {
-      setKioskAddedPrompt(null);
-      setIsPreCheckoutUpsellOpen(true);
-      return true;
-    }
     if (!preCheckoutUpsellActive) return false;
     const product = productById.get(productId);
     const shouldShow = shouldShowPreCheckoutUpsell({
@@ -5798,7 +5845,6 @@ export default function PublicMenuPage() {
   }
 
   function openCheckoutSheet() {
-    if (catalogMode) return;
     if (kioskVoucher) return;
     if (isOwnerPreview) {
       window.alert(
@@ -5878,7 +5924,6 @@ export default function PublicMenuPage() {
     const addressReady =
       deliveryPoint !== null &&
       deliveryPointSource === 'user' &&
-      normalizedDeliveryAddress.length >= 6 &&
       normalizedDeliveryReference.length >= 3;
     const hadPaidCoverage =
       paymentProofFiles.length > 0 ||
@@ -5917,7 +5962,6 @@ export default function PublicMenuPage() {
   }
 
   async function confirmOrder() {
-    if (catalogMode) return;
     if (isOwnerPreview) {
       setCheckoutError(
         'Vista previa. Los pedidos no se pueden confirmar aqui.',
@@ -5963,7 +6007,9 @@ export default function PublicMenuPage() {
       : '';
     const deliveryPayload = {
       mode: isDeliveryOrder ? 'delivery' : 'pickup',
-      address: isDeliveryOrder ? normalizedDeliveryAddress : '',
+      address: isDeliveryOrder
+        ? resolveDeliveryAddressText(normalizedDeliveryAddress, deliveryPoint)
+        : '',
       reference: isDeliveryOrder ? normalizedDeliveryReference : '',
       instructions: deliveryInstructionsForOrder,
       ...(isDeliveryOrder && deliveryOutOfZoneAllowed ? { fee_pending: true as const } : {}),
@@ -6048,7 +6094,7 @@ export default function PublicMenuPage() {
         orderId: persisted.orderId,
         orderUrl: persisted.orderUrl,
         whatsappUrl: persisted.waUrl,
-        fulfillment: kioskFulfillment ?? 'takeaway',
+        fulfillment: kioskFulfillment ?? (inCatalogSession ? 'dine_in' : 'takeaway'),
         totalLabel: formatAmountByCurrency(persisted.customizationTotalCheckout ?? orderGrandTotalConverted, selectedCurrencyCode),
         items: voucherItems,
       };
@@ -6169,6 +6215,16 @@ export default function PublicMenuPage() {
       clearCachedCheckoutCart(commerceIdentifier);
       return;
     }
+    if (inCatalogSession) {
+      setCatalogMode(true);
+      setKioskFulfillment(null);
+      setDeliveryMode('pickup');
+      setIsPreCheckoutUpsellOpen(false);
+      setCatalogReady(null);
+      setKioskAddedPrompt(null);
+      kioskShellRef.current?.openCategories();
+    }
+    // Same checkout resume as the public link (Pedido → Datos → Pago for mesa QR).
     setCheckoutStep(0);
     setIsConfirmOpen(true);
   }
@@ -6281,7 +6337,6 @@ export default function PublicMenuPage() {
     const addressReady =
       deliveryPoint !== null &&
       deliveryPointSource === 'user' &&
-      normalizedDeliveryAddress.length >= 6 &&
       normalizedDeliveryReference.length >= 3;
     selectKioskFulfillment(next);
     setCheckoutError(null);
@@ -6956,7 +7011,7 @@ export default function PublicMenuPage() {
           homeConfig={kioskHomeConfig}
           paymentGroups={publicPaymentGroups}
           fulfillment={kioskFulfillment}
-          catalogMode={catalogMode}
+          catalogMode={inCatalogSession}
           catalogOnlySession={catalogUrlLocked}
           assistedMode={isAssistedMode}
           onSelectFulfillment={selectKioskFulfillment}
@@ -6971,23 +7026,15 @@ export default function PublicMenuPage() {
           cartCount={cartCount}
           cartTotalLabel={formatAmountByCurrency(cartTotalConverted, selectedCurrencyCode)}
           onAddProduct={handleKioskAddProduct}
-          payCtaLabel={catalogMode ? 'Ver pedido' : preCheckoutUpsellActive ? 'Siguiente' : 'Ir a pagar'}
+          payCtaLabel={preCheckoutUpsellActive ? 'Siguiente' : 'Ir a pagar'}
           onPay={() => {
             setKioskAddedPrompt(null);
-            if (catalogMode) {
-              openCatalogSummary();
-              return;
-            }
             openCheckoutSheet();
           }}
-          addedPrompt={scheduleClosed || preCheckoutUpsellActive || catalogMode ? null : kioskAddedPrompt}
+          addedPrompt={scheduleClosed || preCheckoutUpsellActive ? null : kioskAddedPrompt}
           onContinueAdding={() => setKioskAddedPrompt(null)}
           onPayFromPrompt={() => {
             setKioskAddedPrompt(null);
-            if (catalogMode) {
-              openCatalogSummary();
-              return;
-            }
             openCheckoutSheet();
           }}
           voucher={kioskVoucher}
@@ -7039,15 +7086,13 @@ export default function PublicMenuPage() {
           onRemove={removeProductFromCart}
           onKeepShopping={() => setIsPreCheckoutUpsellOpen(false)}
           onContinue={() => {
-            if (catalogMode) {
-              finishCatalogOrder();
-              return;
-            }
             proceedToCheckoutSheet();
           }}
-          onCatalogReady={finishCatalogOrder}
-          canConfigure={catalogMode || !scheduleClosed}
-          catalogMode={catalogMode}
+          onCatalogReady={() => {
+            proceedToCheckoutSheet();
+          }}
+          canConfigure={inCatalogSession || !scheduleClosed}
+          catalogMode={false}
           paymentGroups={publicPaymentGroups}
           selectedPaymentCurrency={selectedCurrencyCode}
           onSelectPaymentCurrency={selectMenuCurrency}
@@ -7090,7 +7135,7 @@ export default function PublicMenuPage() {
           open={productOptionsSheet.open && !kioskVoucher}
           canAdd={
             !scheduleClosed &&
-            (catalogMode || isAssistedMode || checkoutFulfillmentOptions.length > 0) &&
+            (inCatalogSession || isAssistedMode || checkoutFulfillmentOptions.length > 0) &&
             productById.get(productOptionsSheet.productId ?? '')?.disponible !== false
           }
           product={
@@ -7764,8 +7809,10 @@ export default function PublicMenuPage() {
                     onClick={() => {
                       if (deliveryPoint) {
                         setDeliveryPointSource('user');
-                      }
-                      if (mapPickerAddress.trim().length > 0) {
+                        setDeliveryAddress(
+                          resolveDeliveryAddressText(mapPickerAddress, deliveryPoint),
+                        );
+                      } else if (mapPickerAddress.trim().length > 0) {
                         setDeliveryAddress(mapPickerAddress.trim());
                       }
                       setIsMapPickerOpen(false);

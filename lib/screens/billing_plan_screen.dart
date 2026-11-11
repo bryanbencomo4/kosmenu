@@ -15,6 +15,7 @@ import 'package:kosmenu_app/screens/qr_generator_screen.dart';
 import 'package:kosmenu_app/services/billing_service.dart';
 import 'package:kosmenu_app/services/payment_catalog.dart';
 import 'package:kosmenu_app/utils/phone_national_normalize.dart';
+import 'package:kosmenu_app/utils/whatsapp_href.dart';
 import 'package:kosmenu_app/widgets/billing_plan_checkout.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_home.dart';
 import 'package:kosmenu_app/widgets/merchant_dashboard_shell.dart';
@@ -273,10 +274,10 @@ class _BillingPlanScreenState extends State<BillingPlanScreen> {
   }
 
   Future<void> _openHelp() async {
-    final uri = Uri.parse(
-      'https://wa.me/584220451906?text=${Uri.encodeComponent('Hola, necesito ayuda con Plan y facturación en elmenuxfa.com.')}',
+    await openWhatsAppChat(
+      '584220451906',
+      text: 'Hola, necesito ayuda con Plan y facturación en elmenuxfa.com.',
     );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   void _goToDashboard() {

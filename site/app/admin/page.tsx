@@ -158,38 +158,40 @@ export default async function AdminDashboardPage() {
 
           <div className="mt-4 max-h-[420px] space-y-2.5 overflow-y-auto overscroll-contain sm:mt-5 sm:max-h-none sm:space-y-3">
             {dashboard.recentOrders.slice(0, 6).map((order) => (
-              <div
-                key={`${order.code}-${order.businessId ?? 'x'}-${order.createdLabel}`}
-                className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 sm:rounded-[1.35rem] sm:px-4 sm:py-4"
+              <Link
+                key={order.id}
+                href={`/admin/pedidos?orderId=${encodeURIComponent(order.id)}`}
+                className="block rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 transition hover:border-violet-200 hover:bg-violet-50/60 active:bg-violet-50 sm:rounded-[1.35rem] sm:px-4 sm:py-4"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold text-slate-950">{order.code}</p>
-                    <p className="truncate text-xs text-slate-500">
-                      {order.businessId ? (
-                        <Link
-                          href={`/admin/negocios/${order.businessId}`}
-                          className="font-semibold text-violet-700 hover:underline"
-                        >
-                          {order.business}
-                        </Link>
-                      ) : (
-                        order.business
-                      )}{' '}
-                      · {order.createdLabel}
+                    <p className="mt-0.5 truncate text-xs font-semibold text-violet-700">
+                      {order.business}
+                    </p>
+                    <p className="mt-1 text-[11px] font-medium text-slate-500">
+                      {order.createdLabel}
                     </p>
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold shadow-sm sm:px-3 sm:text-xs ${orderStatusClasses[order.statusTone]}`}
-                  >
-                    {order.status}
-                  </span>
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    <span
+                      className={`max-w-[9.5rem] rounded-full px-2.5 py-1 text-center text-[10px] font-bold leading-tight shadow-sm sm:max-w-none sm:px-3 sm:text-xs ${orderStatusClasses[order.statusTone]}`}
+                    >
+                      {order.status}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className="text-slate-400 sm:text-slate-500"
+                    >
+                      ›
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-sm">
+                <div className="mt-2.5 flex items-center justify-between gap-2 text-sm">
                   <span className="text-slate-500">{order.currency}</span>
                   <span className="font-semibold text-slate-950">{order.amountLabel}</span>
                 </div>
-              </div>
+              </Link>
             ))}
             {dashboard.recentOrders.length === 0 ? (
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-4 text-sm text-slate-500">

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:kosmenu_app/core/constants.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/screens/auth_screen.dart';
@@ -112,6 +113,8 @@ Widget _buildRecoverableErrorScreen(FlutterErrorDetails details) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Real `/panel/...` paths (not `/#/panel`). Required for merchant shell URLs.
+  usePathUrlStrategy();
   passwordRecoveryPending.value =
       kIsWeb && Uri.base.queryParameters['flow'] == 'password-recovery';
   ErrorWidget.builder = _buildRecoverableErrorScreen;
@@ -400,7 +403,10 @@ class _KosmenuAppState extends State<KosmenuApp> {
     final routeName = settings.name ?? '/';
     final uri = Uri.parse(routeName.isEmpty ? '/' : routeName);
 
-    if (uri.path == '/' || uri.path.isEmpty) {
+    if (uri.path == '/' ||
+        uri.path.isEmpty ||
+        uri.path == '/panel' ||
+        uri.path.startsWith('/panel/')) {
       return MaterialPageRoute(
         settings: settings,
         builder: (_) => const AuthGate(),

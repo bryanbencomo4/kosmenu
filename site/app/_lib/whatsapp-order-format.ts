@@ -13,14 +13,23 @@ export function buildClientOrderSummary(input: {
   totalLabel: string;
   appOrderUrl: string;
   managementMode?: 'platform' | 'whatsapp_manual';
+  /** Overrides deliveryMode wording (e.g. mesa QR → “Comer aquí”). */
+  orderTypeLabel?: string;
 }) {
+  const fulfillmentLabel =
+    input.orderTypeLabel?.trim() ||
+    (input.deliveryMode === 'delivery'
+      ? 'Delivery'
+      : input.deliveryMode === 'dine_in'
+        ? 'Comer aquí'
+        : 'Retiro en tienda');
   return [
     `🆕 *NUEVO PEDIDO #${input.orderId}*`,
     '',
     `👤 Cliente: ${input.customerName}`,
     `📞 ${input.customerWhatsapp}`,
     '',
-    `📦 Entrega: ${input.deliveryMode === 'delivery' ? 'Delivery' : 'Retiro en tienda'}`,
+    `📦 Entrega: ${fulfillmentLabel}`,
     `💳 Pago: ${input.paymentLabel}`,
     '',
     `💰 Total: ${input.totalLabel}`,
@@ -69,20 +78,35 @@ function amount(value: unknown, currency: string) {
   }).format(numeric);
 }
 
+// Avoid \\b after “aquí”: accented letters are non-word in JS regex, so \\b fails.
+const TIPO_NOTE_PATTERN =
+  /^Tipo:\s*(Comer aqu[ií]|Para llevar|Delivery)(?:\.\s*|$)/i;
+
 function cleanNotes(value: unknown) {
-  return text(value).replace(/^Tipo:\s*(?:Comer aqui|Para llevar|Delivery)(?:\.\s*|$)/i, '').trim();
+  return text(value).replace(TIPO_NOTE_PATTERN, '').trim();
 }
 
 type OrderTypeLabel = 'Delivery' | 'Retiro' | 'Para llevar' | 'Comer aqui';
 
+function foldTipoLabel(value: string) {
+  return value
+    .toLocaleLowerCase('es')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
 function resolveOrderTypeLabel(details: Record<string, unknown>, delivery: Record<string, unknown>): OrderTypeLabel {
-  const tipoMatch = text(details.order_notes).match(/^Tipo:\s*(Comer aqui|Para llevar|Delivery)\b/i);
+  const tipoMatch = text(details.order_notes).match(
+    /^Tipo:\s*(Comer aqu[ií]|Para llevar|Delivery)(?=\s|$|\.)/i,
+  );
   if (tipoMatch) {
-    const raw = tipoMatch[1].toLowerCase();
+    const raw = foldTipoLabel(tipoMatch[1]);
     if (raw === 'delivery') return 'Delivery';
     if (raw === 'para llevar') return 'Para llevar';
     if (raw === 'comer aqui') return 'Comer aqui';
   }
+  // Mesa / catalog QR orders are dine-in even when delivery.mode is pickup.
+  if (text(details.order_source) === 'catalog') return 'Comer aqui';
   if (delivery.mode === 'delivery') return 'Delivery';
   return 'Retiro';
 }
@@ -127,7 +151,11 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
     details.costo_delivery_moneda_checkout ?? convert(details.costo_delivery);
   const orderType = resolveOrderTypeLabel(details, delivery);
   const headingType =
-    feePending && orderType === 'Delivery' ? 'Delivery a Acordar' : orderType;
+    feePending && orderType === 'Delivery'
+      ? 'Delivery a Acordar'
+      : orderType === 'Comer aqui'
+        ? 'Comer aquí'
+        : orderType;
   const heading = `🧾 *NUEVO PEDIDO #${input.orderId} (${headingType})*`;
   const separator = '━━━━━━━━━━━━━━━━━━━━';
   const items = Array.isArray(details.items) ? details.items : [];
@@ -253,7 +281,7 @@ export function buildDetailedMerchantWhatsappText(input: MerchantComandaInput): 
       );
     }
   } else if (orderType === 'Comer aqui') {
-    lines.push('🍽️ *COMER AQUI*');
+    lines.push('🍽️ *COMER AQUÍ*');
   } else if (orderType === 'Para llevar') {
     lines.push('📦 *PARA LLEVAR*');
   } else {

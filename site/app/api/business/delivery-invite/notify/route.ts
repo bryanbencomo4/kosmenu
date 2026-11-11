@@ -7,6 +7,7 @@ import { createDeliveryInviteShortLink } from '../../../_lib/delivery-invite-sho
 import { getServiceSupabaseClient } from '../../../_lib/supabase-server';
 import { getUserFromBearerRequest } from '../../../_lib/supabase-user-auth';
 import { appSiteUrl } from '../../../../_lib/public-site-config';
+import { buildWhatsAppHref } from '../../../../_lib/whatsapp-href';
 
 const GENERIC_ERROR = { error: 'No disponible.' } as const;
 
@@ -95,21 +96,17 @@ export async function POST(request: Request) {
     const inviteUrl = new URL(`/d/${encodeURIComponent(shortCode)}`, request.url).toString();
 
     const recipient = (invitation.invited_phone ?? '').toString().replace(/\D/g, '');
-    const message = encodeURIComponent(
-      [
-        `🛵 *INVITACIÓN DE DELIVERY*`,
-        '',
-        `🍽️ Comercio: ${comercio.nombre?.toString().trim() || 'el negocio'}`,
-        `📦 Pedido: ${orderId}`,
-        `👤 Repartidor: ${courierAlias || 'por confirmar'}`,
-        '',
-        '🔗 Aceptar delivery:',
-        inviteUrl,
-      ].join('\n'),
-    );
-    const directWhatsappUrl = recipient
-      ? `https://wa.me/${recipient}?text=${message}`
-      : '';
+    const message = [
+      `🛵 *INVITACIÓN DE DELIVERY*`,
+      '',
+      `🍽️ Comercio: ${comercio.nombre?.toString().trim() || 'el negocio'}`,
+      `📦 Pedido: ${orderId}`,
+      `👤 Repartidor: ${courierAlias || 'por confirmar'}`,
+      '',
+      '🔗 Aceptar delivery:',
+      inviteUrl,
+    ].join('\n');
+    const directWhatsappUrl = recipient ? buildWhatsAppHref(recipient, message) : '';
 
     await supabase.from('delivery_invitation_events').insert({
       invitation_id: invitation.id,

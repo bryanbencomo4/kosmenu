@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
   Camera,
@@ -9,15 +9,22 @@ import {
   ImageIcon,
   Loader2,
   MessageCircle,
+  User,
   X,
 } from 'lucide-react';
-import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input';
+import PhoneInput, { isValidPhoneNumber, parsePhoneNumber } from 'react-phone-number-input';
 import type { Country } from 'react-phone-number-input';
 
+import {
+  readCachedCheckoutCustomer,
+  writeCachedCheckoutCustomer,
+} from '../../../../_lib/checkout-customer-cache';
 import { prepareComprobanteFile } from '../../../../_lib/prepare-comprobante-file';
 import { useLockBodyScroll } from '../../../../_lib/use-lock-body-scroll';
+import { PaymentCopyFields } from '../PaymentCopyFields';
 import type { CatalogPaymentGroup } from '../upsell/PreCheckoutUpsellSheet';
 import { KioskImage } from './KioskImage';
+import { WhatsAppLogo } from './WhatsAppLogo';
 
 export type CatalogReadyItem = {
   name: string;
@@ -102,10 +109,14 @@ export function KioskCatalogReady({
   const [proofPreviewUrls, setProofPreviewUrls] = useState<string[]>([]);
   const [proofBusy, setProofBusy] = useState(false);
   const [proofError, setProofError] = useState('');
+  const [proofLightboxUrl, setProofLightboxUrl] = useState<string | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const sheetScrollRef = useRef<HTMLDivElement | null>(null);
+  const personalSectionRef = useRef<HTMLDivElement | null>(null);
+  const customerHydratedRef = useRef(false);
 
-  useLockBodyScroll(waSheetOpen);
+  useLockBodyScroll(waSheetOpen || Boolean(proofLightboxUrl));
 
   const payableGroups = useMemo(
     () => paymentGroups.filter((group) => group.methods.length > 0),
@@ -147,16 +158,56 @@ export function KioskCatalogReady({
     setProofError('');
   }, [selectedIsCash]);
 
+  useEffect(() => {
+    if (customerHydratedRef.current) return;
+    customerHydratedRef.current = true;
+    const cached = readCachedCheckoutCustomer();
+    if (!cached) return;
+    if (cached.clientName.length >= 3) setCustomerName(cached.clientName);
+    if (cached.clientWhatsapp) {
+      const raw = cached.clientWhatsapp.startsWith('+')
+        ? cached.clientWhatsapp
+        : `+${cached.clientWhatsapp.replace(/\D/g, '')}`;
+      const parsed = parsePhoneNumber(raw);
+      if (parsed?.country) setCustomerWhatsappCountry(parsed.country as Country);
+      setCustomerWhatsapp(parsed?.number ?? raw);
+    }
+  }, []);
+
+  function persistCustomerDraft(nextName = customerName, nextWhatsapp = customerWhatsapp) {
+    const name = nextName.trim();
+    const phone = nextWhatsapp.trim();
+    if (name.length < 3 && !phone) return;
+    const previous = readCachedCheckoutCustomer();
+    writeCachedCheckoutCustomer({
+      clientName: name || previous?.clientName || '',
+      clientWhatsapp: phone || previous?.clientWhatsapp || '',
+      clientEmail: previous?.clientEmail || '',
+      wantOrderEmail: previous?.wantOrderEmail ?? true,
+      selectedCurrency: activePaymentCurrency || previous?.selectedCurrency || undefined,
+    });
+  }
+
   function resetWaSheet() {
     setWaSheetOpen(false);
     setSubmitError('');
     setProofError('');
     setSubmitBusy(false);
+    setProofLightboxUrl(null);
   }
 
   function openWaSheet() {
     setSubmitError('');
     setWaSheetOpen(true);
+  }
+
+  function showValidationError(message: string, focusPersonal = false) {
+    setSubmitError(message);
+    if (focusPersonal) {
+      personalSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      sheetScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }
 
   async function copyLocalWhatsapp() {
@@ -198,21 +249,24 @@ export function KioskCatalogReady({
     const name = customerName.trim();
     const phone = customerWhatsapp.trim();
     if (name.length < 3) {
-      setSubmitError('Escribe tu nombre completo.');
+      showValidationError('Escribe tu nombre completo.', true);
       return;
     }
     if (!phone || !isValidPhoneNumber(phone)) {
-      setSubmitError('Escribe un WhatsApp válido.');
+      showValidationError('Escribe un WhatsApp válido.', true);
       return;
     }
     if (payableGroups.length > 0 && !selectedMethodId) {
-      setSubmitError('Selecciona un método de pago.');
+      showValidationError('Selecciona un método de pago.');
       return;
     }
-    if (!selectedIsCash && proofFiles.length === 0) {
-      setSubmitError('Adjunta el comprobante de pago para enviarlo por WhatsApp.');
+    // No published methods → allow aviso without proof (same as public checkout).
+    const requiresProof = payableGroups.length > 0 && !selectedIsCash;
+    if (requiresProof && proofFiles.length === 0) {
+      showValidationError('Adjunta el comprobante de pago para enviarlo por WhatsApp.');
       return;
     }
+    persistCustomerDraft(name, phone);
     setSubmitBusy(true);
     try {
       await onSubmitWhatsapp({
@@ -220,7 +274,7 @@ export function KioskCatalogReady({
         customerWhatsapp: phone.replace(/\D/g, ''),
         paymentMethodId: selectedMethodId,
         currency: activePaymentCurrency,
-        proofFiles: selectedIsCash ? [] : proofFiles,
+        proofFiles: requiresProof ? proofFiles : [],
       });
       setWhatsappSent(true);
       resetWaSheet();
@@ -511,58 +565,91 @@ export function KioskCatalogReady({
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
-              <div className="grid gap-2.5">
-                <label className="block">
-                  <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                    Tu nombre
-                  </span>
-                  <input
-                    type="text"
-                    value={customerName}
-                    onChange={(event) => setCustomerName(event.target.value)}
-                    autoComplete="name"
-                    placeholder="Nombre y apellido"
-                    className="min-h-11 w-full rounded-[14px] px-3 text-sm font-medium outline-none"
+            <div
+              ref={sheetScrollRef}
+              className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4"
+            >
+              <div
+                ref={personalSectionRef}
+                className="overflow-hidden rounded-[20px] border"
+                style={{
+                  borderColor: 'var(--menu-border)',
+                  backgroundColor: 'var(--menu-surface-alt)',
+                }}
+              >
+                <div className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: 'var(--menu-border)' }}>
+                  <span
+                    className="grid h-8 w-8 place-items-center rounded-xl"
                     style={{
-                      backgroundColor: 'var(--menu-surface-alt)',
-                      color: 'var(--menu-text)',
-                      boxShadow: 'inset 0 0 0 1px var(--menu-border)',
-                    }}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1.5 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
-                    <MessageCircle className="h-3.5 w-3.5" strokeWidth={2.4} />
-                    WhatsApp
-                  </span>
-                  <div
-                    className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface-alt)]"
-                    style={{
-                      borderColor:
-                        !customerWhatsapp.trim() || isValidPhoneNumber(customerWhatsapp)
-                          ? 'var(--menu-border)'
-                          : '#F43F5E',
+                      backgroundColor: 'color-mix(in srgb, var(--menu-primary) 14%, var(--menu-surface))',
+                      color: 'var(--menu-primary)',
                     }}
                   >
-                    <PhoneInput
-                      international
-                      countryCallingCodeEditable={false}
-                      defaultCountry={customerWhatsappCountry}
-                      country={customerWhatsappCountry}
-                      value={customerWhatsapp || undefined}
-                      onChange={(value) => setCustomerWhatsapp(value ?? '')}
-                      onCountryChange={(country) => {
-                        if (country) setCustomerWhatsappCountry(country as Country);
-                      }}
-                      placeholder="Ingresa tu numero"
-                      numberInputProps={{
-                        required: true,
-                        autoComplete: 'tel',
+                    <User className="h-4 w-4" strokeWidth={2.4} aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                      Tus datos
+                    </p>
+                    <p className="text-[13px] font-semibold text-[var(--menu-text)]">
+                      Para avisarte cuando el pedido esté listo
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-3 px-4 py-3.5">
+                  <label className="block">
+                    <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                      Nombre completo
+                    </span>
+                    <input
+                      type="text"
+                      value={customerName}
+                      onChange={(event) => setCustomerName(event.target.value)}
+                      onBlur={() => persistCustomerDraft()}
+                      autoComplete="name"
+                      placeholder="Nombre y apellido"
+                      className="min-h-11 w-full rounded-[14px] px-3 text-sm font-medium outline-none"
+                      style={{
+                        backgroundColor: 'var(--menu-surface)',
+                        color: 'var(--menu-text)',
+                        boxShadow: 'inset 0 0 0 1px var(--menu-border)',
                       }}
                     />
-                  </div>
-                </label>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                      <WhatsAppLogo className="h-3.5 w-3.5" />
+                      WhatsApp
+                    </span>
+                    <div
+                      className="checkout-phone-field rounded-2xl border bg-[var(--menu-surface)]"
+                      style={{
+                        borderColor:
+                          !customerWhatsapp.trim() || isValidPhoneNumber(customerWhatsapp)
+                            ? 'var(--menu-border)'
+                            : '#F43F5E',
+                      }}
+                    >
+                      <PhoneInput
+                        international
+                        countryCallingCodeEditable={false}
+                        defaultCountry={customerWhatsappCountry}
+                        country={customerWhatsappCountry}
+                        value={customerWhatsapp || undefined}
+                        onChange={(value) => setCustomerWhatsapp(value ?? '')}
+                        onCountryChange={(country) => {
+                          if (country) setCustomerWhatsappCountry(country as Country);
+                        }}
+                        placeholder="Ingresa tu numero"
+                        numberInputProps={{
+                          required: true,
+                          autoComplete: 'tel',
+                          onBlur: () => persistCustomerDraft(),
+                        }}
+                      />
+                    </div>
+                  </label>
+                </div>
               </div>
 
               {payableGroups.length === 0 ? (
@@ -571,6 +658,14 @@ export function KioskCatalogReady({
                 </p>
               ) : (
                 <div className="space-y-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--menu-text-muted)]">
+                      Pago
+                    </p>
+                    <p className="mt-0.5 text-[13px] font-semibold text-[var(--menu-text)]">
+                      Elige el método y copia los datos
+                    </p>
+                  </div>
                   {payableGroups.length > 1 ? (
                     <div
                       className="rounded-[16px] p-3"
@@ -613,38 +708,72 @@ export function KioskCatalogReady({
                     {activePaymentMethods.map((method) => {
                       const isSelected = method.id === selectedMethodId;
                       const cash = isCashLabel(method.label);
+                      const fields = method.fields ?? [];
                       return (
-                        <button
+                        <div
                           key={method.id}
-                          type="button"
                           role="radio"
+                          tabIndex={0}
                           aria-checked={isSelected}
                           onClick={() => setSelectedMethodId(method.id)}
-                          className="w-full rounded-[18px] px-4 py-3.5 text-left transition"
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setSelectedMethodId(method.id);
+                            }
+                          }}
+                          className="w-full cursor-pointer rounded-[18px] px-4 py-3.5 text-left transition"
                           style={
                             isSelected
                               ? {
                                   backgroundColor:
-                                    'color-mix(in srgb, var(--menu-primary) 12%, var(--menu-surface-alt))',
-                                  boxShadow: 'inset 0 0 0 1.5px var(--menu-primary)',
+                                    'color-mix(in srgb, var(--menu-primary) 12%, var(--menu-surface))',
+                                  boxShadow: '0 0 0 1.5px var(--menu-primary), var(--menu-shadow)',
                                 }
                               : {
-                                  backgroundColor: 'var(--menu-surface-alt)',
+                                  backgroundColor: 'var(--menu-surface)',
+                                  boxShadow: 'var(--menu-shadow)',
                                 }
                           }
                         >
-                          <p className="flex items-center gap-2 text-sm font-bold">
-                            {cash ? <Banknote className="h-4 w-4 shrink-0" aria-hidden /> : null}
-                            {method.label}
-                          </p>
-                          {method.details ? (
-                            <p className="mt-1 text-xs text-[var(--menu-text-muted)]">{method.details}</p>
-                          ) : cash ? (
-                            <p className="mt-1 text-xs text-[var(--menu-text-muted)]">
-                              Pagas en el local. No necesitas comprobante.
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="flex min-w-0 items-center gap-2 text-sm font-bold">
+                              {cash ? <Banknote className="h-4 w-4 shrink-0" aria-hidden /> : null}
+                              <span className="truncate">{method.label}</span>
                             </p>
+                            <span
+                              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-black ${
+                                isSelected
+                                  ? 'bg-emerald-500 text-white'
+                                  : 'bg-[var(--menu-surface-alt)] text-[var(--menu-text-muted)]'
+                              }`}
+                            >
+                              {isSelected ? '✓' : ''}
+                            </span>
+                          </div>
+                          {isSelected ? (
+                            <div
+                              className="mt-1"
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              {fields.length > 0 || method.note ? (
+                                <PaymentCopyFields
+                                  fields={fields}
+                                  note={method.note}
+                                  dense
+                                  mode={cash ? 'info' : 'copy'}
+                                />
+                              ) : method.details ? (
+                                <p className="mt-2 text-xs text-[var(--menu-text-muted)]">{method.details}</p>
+                              ) : cash ? (
+                                <p className="mt-2 text-xs text-[var(--menu-text-muted)]">
+                                  Pagas en el local. No necesitas comprobante.
+                                </p>
+                              ) : null}
+                            </div>
                           ) : null}
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -743,16 +872,27 @@ export function KioskCatalogReady({
                             }
                           >
                             {previewUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={previewUrl}
-                                alt=""
-                                className="h-9 w-9 shrink-0 rounded-lg object-cover"
-                              />
+                              <button
+                                type="button"
+                                onClick={() => setProofLightboxUrl(previewUrl)}
+                                className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg"
+                                aria-label={`Ampliar comprobante ${proofFiles.length > 1 ? index + 1 : ''}`}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={previewUrl}
+                                  alt=""
+                                  className="h-full w-full object-cover"
+                                />
+                              </button>
                             ) : null}
-                            <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--menu-text-muted)]">
-                              Comprobante {proofFiles.length > 1 ? index + 1 : ''} listo
-                            </p>
+                            <button
+                              type="button"
+                              onClick={() => previewUrl && setProofLightboxUrl(previewUrl)}
+                              className="min-w-0 flex-1 truncate text-left text-[12px] font-medium text-[var(--menu-text-muted)]"
+                            >
+                              Comprobante {proofFiles.length > 1 ? index + 1 : ''} listo · ver
+                            </button>
                             <button
                               type="button"
                               disabled={submitBusy}
@@ -833,21 +973,21 @@ export function KioskCatalogReady({
                   ) : null}
                 </div>
               )}
+            </div>
 
+            <div
+              className="shrink-0 space-y-2 border-t px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3"
+              style={{ borderColor: 'var(--menu-border)' }}
+            >
               {submitError ? (
                 <p
+                  role="alert"
                   className="rounded-[14px] px-3 py-2 text-[12px] font-semibold text-rose-600"
                   style={{ backgroundColor: 'color-mix(in srgb, #f43f5e 10%, var(--menu-surface))' }}
                 >
                   {submitError}
                 </p>
               ) : null}
-            </div>
-
-            <div
-              className="shrink-0 border-t px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3"
-              style={{ borderColor: 'var(--menu-border)' }}
-            >
               <button
                 type="button"
                 disabled={submitBusy || proofBusy}
@@ -869,6 +1009,32 @@ export function KioskCatalogReady({
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {proofLightboxUrl ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/88 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Comprobante ampliado"
+          onClick={() => setProofLightboxUrl(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setProofLightboxUrl(null)}
+            className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white"
+            aria-label="Cerrar"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={proofLightboxUrl}
+            alt="Comprobante de pago"
+            className="max-h-[min(88dvh,900px)] max-w-full rounded-2xl object-contain shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          />
         </div>
       ) : null}
     </section>

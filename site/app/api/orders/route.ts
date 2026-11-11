@@ -38,6 +38,7 @@ import {
 } from '../_lib/order-item-snapshots';
 import { sanitizeCartLineSelection } from '../../_lib/menu-product-options';
 import { optionalMerchantComanda } from '../../_lib/whatsapp-order-format';
+import { merchantOrderShareHref } from '../../_lib/public-site-config';
 import { resolveCommerceManagementMode } from '../../_lib/order-management-mode';
 import { extractDeliveryConfigSource, parseDeliveryConfig, quoteDeliveryFee } from '../../_lib/delivery-config';
 import {
@@ -743,7 +744,12 @@ async function postOrder(request: Request): Promise<NextResponse> {
       cliente_email: clientEmail || null,
       telefono_cliente: clientWhatsapp,
       mesa: rawMesa || null,
-      order_source: staffAssisted || assistedDineIn ? 'assisted_waiter' : null,
+      order_source:
+        staffAssisted || assistedDineIn
+          ? 'assisted_waiter'
+          : incomingDetalles.order_source === 'catalog'
+            ? 'catalog'
+            : null,
       moneda_base: baseCurrency,
       moneda_checkout: currency,
       tasa_cambio_snapshot: exchangeRate,
@@ -864,9 +870,9 @@ async function postOrder(request: Request): Promise<NextResponse> {
 
     if (clientEmail && canSendOrderEmail()) {
       emailStatus = 'queued';
-      const tipoMatch = orderNotes.match(/^Tipo:\s*(Comer aqui|Para llevar|Delivery)\b/i);
+      const tipoMatch = orderNotes.match(/^Tipo:\s*(Comer aqu[ií]|Para llevar|Delivery)(?=\s|$|\.)/i);
       const fulfillmentLabel =
-        tipoMatch?.[1] ||
+        tipoMatch?.[1]?.replace(/aqui$/i, 'aquí') ||
         (delivery.mode === 'delivery' ? 'Delivery' : 'Retiro / para llevar');
       void sendOrderEmail({
         clientEmail,
@@ -902,10 +908,7 @@ async function postOrder(request: Request): Promise<NextResponse> {
       });
     }
 
-    const appSiteUrl = (process.env.NEXT_PUBLIC_APP_SITE_URL ?? 'https://app.elmenuxfa.com').replace(/\/$/, '');
-    const appOrderUrl = publicShortCode
-      ? `${appSiteUrl}/orders/view/${encodeURIComponent(orderId)}?shortCode=${encodeURIComponent(publicShortCode)}`
-      : `${appSiteUrl}/orders/view/${encodeURIComponent(orderId)}?fallback=${encodeURIComponent(publicOrderUrl)}`;
+    const appOrderUrl = merchantOrderShareHref(orderId, publicOrderUrl);
     const merchantWhatsappText = optionalMerchantComanda(comercioRow, {
       orderId,
       appOrderUrl,

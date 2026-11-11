@@ -116,7 +116,7 @@ export function UpsellMenuExperience({
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Buscar pizza, combo, bebida..."
-              className="h-11 w-full rounded-2xl border pl-10 pr-10 text-sm font-semibold outline-none"
+              className="h-11 w-full appearance-none rounded-2xl border pl-10 pr-10 text-sm font-semibold outline-none [-webkit-appearance:none] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden [&::-webkit-search-results-button]:hidden [&::-webkit-search-results-decoration]:hidden"
               style={{
                 backgroundColor: 'var(--menu-surface)',
                 borderColor: 'var(--menu-border)',

@@ -24,7 +24,6 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { Caveat, Manrope } from 'next/font/google';
 import {
   startTransition,
   useCallback,
@@ -68,16 +67,6 @@ const socialIconByLabel = {
   TikTok: TikTokIcon,
   Facebook,
 } as const;
-
-const body = Manrope({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
-});
-
-const script = Caveat({
-  subsets: ['latin'],
-  weight: ['600', '700'],
-});
 
 const FAVORITES_KEY = 'elmenuxfa_clientes_favorites_v1';
 const AUDIENCE_GATE_KEY = 'elmenuxfa_clientes_audience_gate_v1';
@@ -1874,13 +1863,13 @@ export function ClientesDiscoveryPage() {
           : 'Sin resultados';
 
   return (
-    <div className={`${body.className} min-h-screen bg-[#FAFAFC] text-slate-900`}>
+    <div className={`min-h-screen bg-[#FAFAFC] text-slate-900`}>
       <div className="sticky top-0 z-40">
         {!searchMode && !merchantBannerHidden ? (
           <div className="border-b border-violet-200/70 bg-[linear-gradient(90deg,#F7F3FF_0%,#EDE9FE_48%,#FBF9FF_100%)]">
             <div className="mx-auto flex max-w-6xl items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5">
               <p
-                className={`${script.className} min-w-0 flex-1 text-[1.2rem] leading-snug tracking-wide text-[#4C1D95] sm:text-[1.65rem] sm:leading-tight`}
+                className={`italic font-extrabold min-w-0 flex-1 text-[1.2rem] leading-snug tracking-wide text-[#4C1D95] sm:text-[1.65rem] sm:leading-tight`}
               >
                 {merchantBannerMessage}
               </p>
@@ -2538,7 +2527,7 @@ export function ClientesDiscoveryPage() {
               ) : directorySettled ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-[linear-gradient(165deg,#1e1b4b_0%,#312e81_45%,#0f172a_100%)] px-5 text-center sm:px-8">
                   <p
-                    className={`${script.className} text-2xl text-white/90 sm:text-3xl`}
+                    className={`italic font-extrabold text-2xl text-white/90 sm:text-3xl`}
                   >
                     Apoyemos el talento local ♥
                   </p>
@@ -2553,7 +2542,7 @@ export function ClientesDiscoveryPage() {
               )}
               {!areaEmpty && hero ? (
               <p
-                className={`${script.className} pointer-events-none absolute right-3 top-3 z-10 hidden text-2xl text-white/90 sm:right-6 sm:top-6 sm:block sm:text-3xl`}
+                className={`italic font-extrabold pointer-events-none absolute right-3 top-3 z-10 hidden text-2xl text-white/90 sm:right-6 sm:top-6 sm:block sm:text-3xl`}
               >
                 Apoyemos el talento local ♥
               </p>

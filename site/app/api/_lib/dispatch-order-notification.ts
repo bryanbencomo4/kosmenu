@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { isValidWhatsAppHttpsUrl } from '../../_lib/whatsapp-href';
+
 const ORDER_NOTIFICATION_TIMEOUT_MS = 20_000;
 
 export type OrderNotificationEventType = 'INSERT' | 'UPDATE';
@@ -120,11 +122,10 @@ export function customerWhatsappFallbackUrl(result: DispatchOrderNotificationRes
 
   const rawUrl = (whatsapp.fallbackUrl ?? '').toString().trim();
   try {
-    const url = new URL(rawUrl);
-    if (url.protocol !== 'https:' || url.hostname !== 'wa.me' || !/^\/\d{10,15}$/.test(url.pathname)) {
+    if (!isValidWhatsAppHttpsUrl(rawUrl)) {
       return null;
     }
-    return url.toString();
+    return new URL(rawUrl).toString();
   } catch {
     return null;
   }

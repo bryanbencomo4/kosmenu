@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:kosmenu_app/core/theme/app_theme.dart';
 import 'package:kosmenu_app/models/kit_shipping_draft.dart';
 import 'package:kosmenu_app/services/zoom_offices_service.dart';
+import 'package:kosmenu_app/utils/whatsapp_href.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 const String kElmenuxfaSupportWhatsappDigits = '584220451906';
@@ -328,15 +329,11 @@ class _BillingKitShippingScreenState extends State<BillingKitShippingScreen> {
 
   Future<void> _openSupportWhatsapp() async {
     final name = _draft.recipientName.trim();
-    final msg = Uri.encodeComponent(
-      'Hola, quiero acordar el envío del kit Portamenú'
-      '${name.isEmpty ? '' : ' ($name)'}. '
-      'Negocio en elmenuxfa.com.',
-    );
-    final uri = Uri.parse(
-      'https://wa.me/$kElmenuxfaSupportWhatsappDigits?text=$msg',
-    );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final msg =
+        'Hola, quiero acordar el envío del kit Portamenú'
+        '${name.isEmpty ? '' : ' ($name)'}. '
+        'Negocio en elmenuxfa.com.';
+    await openWhatsAppChat(kElmenuxfaSupportWhatsappDigits, text: msg);
   }
 
   void _submit() {

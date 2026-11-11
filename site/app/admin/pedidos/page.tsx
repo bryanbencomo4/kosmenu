@@ -67,6 +67,9 @@ export default async function AdminOrdersPage({
   const from = parseIsoOrDate(asTrimmed(params.from).slice(0, 40));
   const to = parseIsoOrDate(asTrimmed(params.to).slice(0, 40));
   const query = asTrimmed(params.q).slice(0, 80);
+  const orderIdRaw = asTrimmed(params.orderId);
+  const orderId =
+    orderIdRaw && /^[0-9a-f-]{36}$/i.test(orderIdRaw) ? orderIdRaw : null;
   const statusRaw = asTrimmed(params.status).toLowerCase() || 'all';
   const status = [
     'all',
@@ -100,6 +103,7 @@ export default async function AdminOrdersPage({
       initialFrom={from}
       initialTo={to}
       initialQuery={query || null}
+      initialOrderId={orderId}
       initialStatus={status}
       initialArchived={archived}
     />

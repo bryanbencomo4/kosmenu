@@ -129,6 +129,18 @@ describe('customerWhatsappFallbackUrl', () => {
           whatsapp: {
             ok: false,
             skipped: false,
+            fallbackUrl: 'https://api.whatsapp.com/send?phone=584121234567&text=Pedido',
+          },
+        },
+      }),
+    ).toBe('https://api.whatsapp.com/send?phone=584121234567&text=Pedido');
+    expect(
+      customerWhatsappFallbackUrl({
+        ok: true,
+        body: {
+          whatsapp: {
+            ok: false,
+            skipped: false,
             fallbackUrl: 'https://wa.me/584121234567?text=Pedido',
           },
         },

@@ -132,6 +132,7 @@ export type AdminDashboardData = {
   }>;
   businessesUpdatedLabel: string;
   recentOrders: Array<{
+    id: string;
     code: string;
     business: string;
     businessId: string | null;
@@ -161,7 +162,7 @@ export type AdminDashboardData = {
 };
 
 function startOfDay(date: Date) {
-  // Sales day ends at 20:00 America/Caracas (not local midnight).
+  // Sales day is Caracas calendar midnight → midnight (not device-local).
   return adminBusinessDayStart(date);
 }
 
@@ -740,6 +741,7 @@ export async function getAdminDashboardData(
     });
 
     return {
+      id: row.id,
       code: formatOrderCode(row),
       business: businessName,
       businessId: row.comercio_id?.toString().trim() || null,

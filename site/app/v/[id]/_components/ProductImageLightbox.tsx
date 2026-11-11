@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+
+import { resolveMenuImageSources } from '../../../_lib/optimize-storage-image';
+import { MENU_IMAGE_WIDTH } from '../_lib/product-image';
 
 type ProductImageLightboxProps = {
   src: string;
+  /** Original Storage URL — enables cold → hot → original fallback. */
+  sourceUrl?: string | null;
   /** Already-cached smaller variant shown blurred while hi-res loads. */
   previewSrc?: string | null;
   alt: string;
@@ -15,6 +20,7 @@ type ProductImageLightboxProps = {
 
 export function ProductImageLightbox({
   src,
+  sourceUrl,
   previewSrc,
   alt,
   title,
@@ -23,10 +29,32 @@ export function ProductImageLightbox({
   onClose,
 }: ProductImageLightboxProps) {
   const [hiResReady, setHiResReady] = useState(false);
+  const candidates = useMemo(() => {
+    const list: string[] = [];
+    const push = (value: string | null | undefined) => {
+      const trimmed = (value ?? '').trim();
+      if (trimmed && !list.includes(trimmed)) list.push(trimmed);
+    };
+    const sources = resolveMenuImageSources(
+      sourceUrl || src,
+      MENU_IMAGE_WIDTH.lightbox,
+      82,
+    );
+    // Prefer hot/original for the lightbox: cold variants may not exist yet
+    // right after a fresh upload, and this dialog has no image cascade.
+    push(sources?.hot);
+    push(sources?.original);
+    push(src);
+    push(sources?.coldWebp);
+    return list;
+  }, [src, sourceUrl]);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const activeSrc = candidates[Math.min(candidateIndex, candidates.length - 1)] ?? src;
 
   useEffect(() => {
     setHiResReady(false);
-  }, [src]);
+    setCandidateIndex(0);
+  }, [src, sourceUrl]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -59,7 +87,7 @@ export function ProductImageLightbox({
           className="flex max-h-full w-full flex-col items-center"
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="relative flex w-full max-h-[min(72vh,720px)] min-h-[min(42vh,360px)] items-center justify-center overflow-hidden rounded-2xl bg-black/35">
+          <div className="relative flex w-full max-h-[min(72vh,720px)] min-h-[min(42vh,360px)] items-center justify-center overflow-hidden rounded-2xl bg-zinc-100">
             {preview ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -74,13 +102,14 @@ export function ProductImageLightbox({
 
             {!hiResReady ? (
               <div className="absolute inset-0 z-[1] grid place-items-center" aria-hidden>
-                <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/25 border-t-white" />
+                <div className="h-9 w-9 animate-spin rounded-full border-2 border-black/15 border-t-black/70" />
               </div>
             ) : null}
 
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={src}
+              key={activeSrc}
+              src={activeSrc}
               alt={alt}
               loading="eager"
               decoding="async"
@@ -89,7 +118,14 @@ export function ProductImageLightbox({
                 hiResReady ? 'opacity-100' : 'opacity-0'
               }`}
               onLoad={() => setHiResReady(true)}
-              onError={() => setHiResReady(true)}
+              onError={() => {
+                if (candidateIndex < candidates.length - 1) {
+                  setCandidateIndex((index) => index + 1);
+                  setHiResReady(false);
+                  return;
+                }
+                setHiResReady(true);
+              }}
             />
           </div>
           <div className="mt-3 w-full max-w-2xl rounded-2xl bg-black/55 px-4 py-3 text-white">

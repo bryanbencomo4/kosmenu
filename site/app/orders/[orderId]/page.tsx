@@ -10,6 +10,7 @@ import { writeRepeatOrder, type RepeatOrderLine } from '../../_lib/repeat-order'
 import { nextPollDelayMs } from '../../_lib/poll-backoff';
 import { formatRelativeOrderTime } from '../../_lib/relative-order-time';
 import { normalizeOrderManagementMode, resolveOrderManagementMode, type OrderManagementMode } from '../../_lib/order-management-mode';
+import { buildWhatsAppHref } from '../../_lib/whatsapp-href';
 
 type OrderStatus =
   | 'pendiente'
@@ -381,7 +382,7 @@ function buildWhatsAppLink(
     (managementMode === 'whatsapp_manual'
       ? 'Gestión: Por WhatsApp.'
       : `Estado actual: ${statusLabel(status)}.`);
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  return buildWhatsAppHref(phone, message);
 }
 
 function OrderTrackingPageInner() {

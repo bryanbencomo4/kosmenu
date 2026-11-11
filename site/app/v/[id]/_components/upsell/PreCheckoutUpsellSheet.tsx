@@ -41,6 +41,9 @@ export type CatalogPaymentMethod = {
   id: string;
   label: string;
   details: string;
+  /** Structured copy rows (same model as public checkout). */
+  fields?: Array<{ label: string; value: string; type?: string; kind?: 'phone' | 'document' | 'text' }>;
+  note?: string | null;
 };
 
 export type CatalogPaymentGroup = {

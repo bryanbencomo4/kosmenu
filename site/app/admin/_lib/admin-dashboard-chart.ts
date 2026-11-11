@@ -20,7 +20,9 @@ import {
   adminBusinessDayEndExclusive,
   adminBusinessDayLabelDate,
   adminBusinessDayStart,
+  adminBusinessDayStartForLabel,
   adminCaracasParts,
+  adminCaracasWallToDate,
 } from './admin-business-day';
 
 export const DASHBOARD_CHART_RANGES = ['24h', '7d', '30d', '90d'] as const;
@@ -70,7 +72,7 @@ function toIso(date: Date) {
 }
 
 function startOfLocalDay(date: Date) {
-  // Align chart day buckets to 20:00 America/Caracas close.
+  // Align chart day buckets to Caracas calendar midnight.
   return adminBusinessDayStart(date);
 }
 
@@ -82,46 +84,46 @@ function labelDayKey(instant: Date) {
   return `${y}-${m}-${d}`;
 }
 
-function startOfLocalHour(date: Date) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    date.getHours(),
-    0,
-    0,
-    0,
-  );
+function startOfCaracasHour(date: Date) {
+  const parts = adminCaracasParts(date);
+  return adminCaracasWallToDate(parts.year, parts.month, parts.day, parts.hour);
 }
 
 function dayKey(date: Date) {
-  // Prefer business-day label (ends 20:00 Caracas) for daily aggregation.
+  // Prefer Caracas calendar-day label for daily aggregation.
   return labelDayKey(date);
 }
 
 function hourKey(date: Date) {
-  return `${dayKey(date)}T${String(date.getHours()).padStart(2, '0')}`;
+  const parts = adminCaracasParts(date);
+  return `${dayKey(date)}T${String(parts.hour).padStart(2, '0')}`;
 }
 
 function weekKey(date: Date) {
   const start = startOfLocalDay(date);
-  const day = (start.getDay() + 6) % 7; // Monday=0
-  start.setDate(start.getDate() - day);
-  return dayKey(start);
+  const label = adminBusinessDayLabelDate(start);
+  // Monday=0 using Caracas calendar weekday of the business-day label.
+  const weekday = label.getUTCDay(); // 0=Sun..6=Sat
+  const mondayOffset = (weekday + 6) % 7;
+  const monday = new Date(label.getTime() - mondayOffset * DAY_MS);
+  return labelDayKey(adminBusinessDayStartForLabel(monday));
 }
 
 function formatDayLabel(date: Date) {
-  return `${WEEKDAY_LABELS[date.getDay()]} ${date.getDate()}/${date.getMonth() + 1}`;
+  const parts = adminCaracasParts(date);
+  return `${WEEKDAY_LABELS[new Date(Date.UTC(parts.year, parts.month, parts.day)).getUTCDay()]} ${parts.day}/${parts.month + 1}`;
 }
 
 function formatHourLabel(date: Date) {
-  return `${String(date.getHours()).padStart(2, '0')}:00`;
+  const parts = adminCaracasParts(date);
+  return `${String(parts.hour).padStart(2, '0')}:00`;
 }
 
 function formatWeekLabel(weekStart: Date) {
-  const end = new Date(weekStart);
-  end.setDate(end.getDate() + 6);
-  return `${weekStart.getDate()}/${weekStart.getMonth() + 1}–${end.getDate()}/${end.getMonth() + 1}`;
+  const startParts = adminCaracasParts(weekStart);
+  const end = new Date(weekStart.getTime() + 6 * DAY_MS);
+  const endParts = adminCaracasParts(end);
+  return `${startParts.day}/${startParts.month + 1}–${endParts.day}/${endParts.month + 1}`;
 }
 
 export function isDashboardChartRange(value: string): value is DashboardChartRange {
@@ -172,7 +174,7 @@ function buildBuckets(range: DashboardChartRange, now: Date): {
   buckets: BucketSpec[];
 } {
   if (range === '24h') {
-    const endHour = startOfLocalHour(now);
+    const endHour = startOfCaracasHour(now);
     const windowStart = new Date(endHour.getTime() - 23 * HOUR_MS);
     const buckets = Array.from({ length: 24 }, (_, index) => {
       const start = new Date(windowStart.getTime() + index * HOUR_MS);
@@ -206,15 +208,16 @@ function buildBuckets(range: DashboardChartRange, now: Date): {
   if (range === '90d') {
     const today = startOfLocalDay(now);
     const windowStart = new Date(today.getTime() - 89 * DAY_MS);
-    // Align first bucket to week start (Mon).
-    const first = startOfLocalDay(windowStart);
-    const offset = (first.getDay() + 6) % 7;
-    first.setDate(first.getDate() - offset);
+    // Align first bucket to Monday in Caracas business-day labels.
+    const firstLabel = adminBusinessDayLabelDate(windowStart);
+    const weekday = firstLabel.getUTCDay();
+    const mondayOffset = (weekday + 6) % 7;
+    const firstLabelMonday = new Date(firstLabel.getTime() - mondayOffset * DAY_MS);
+    const first = adminBusinessDayStartForLabel(firstLabelMonday);
     const buckets: BucketSpec[] = [];
     for (let cursor = new Date(first); cursor.getTime() <= today.getTime(); ) {
       const start = new Date(cursor);
-      const end = new Date(cursor);
-      end.setDate(end.getDate() + 7);
+      const end = new Date(cursor.getTime() + 7 * DAY_MS);
       buckets.push({
         key: weekKey(start),
         label: formatWeekLabel(start),
@@ -226,7 +229,7 @@ function buildBuckets(range: DashboardChartRange, now: Date): {
     return { windowStart: first, buckets };
   }
 
-  // 7d default — 7 business days ending at the current Caracas close window.
+  // 7d default — 7 Caracas calendar days ending at the current day window.
   const todayEnd = adminBusinessDayEndExclusive(now);
   const windowStart = new Date(todayEnd.getTime() - 7 * DAY_MS);
   const buckets = Array.from({ length: 7 }, (_, index) => {
